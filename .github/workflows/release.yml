@@ -31,7 +31,7 @@ jobs:
       # .npmrc auth-token line, which makes npm use (empty) token auth and skip
       # OIDC entirely. Omitting it lets npm detect the OIDC trusted publisher.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
