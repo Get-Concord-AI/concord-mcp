@@ -2,7 +2,11 @@
 import { Command } from '@commander-js/extra-typings';
 
 import { VERSION } from '../version.js';
+import { registerDoctorCommand } from './commands/doctor.js';
+import { registerExportCommand } from './commands/export.js';
+import { registerHandoffCommand } from './commands/handoff.js';
 import { registerInit } from './commands/init.js';
+import { registerReviewPacketCommand } from './commands/review-packet.js';
 import { registerStatus } from './commands/status.js';
 import { registerTasks } from './commands/tasks.js';
 
@@ -12,5 +16,9 @@ program.name('concord').description('Shared work-state for coding agents').versi
 registerInit(program);
 registerStatus(program);
 registerTasks(program);
+registerHandoffCommand(program);
+registerReviewPacketCommand(program);
+registerExportCommand(program);
+registerDoctorCommand(program);
 
 program.parse();
