@@ -4,8 +4,8 @@
 no long-lived `NPM_TOKEN` secret, and no 2FA one-time code in CI. Provenance is
 generated automatically.
 
-Publishing runs inside the `release` GitHub Actions environment, so npm only
-accepts the publish from an approved, environment-scoped workflow run.
+By default the release workflow uses no GitHub environment (see the optional
+gating section below to add maintainer approval).
 
 ## One-time setup
 
@@ -23,16 +23,26 @@ rights.
    You'll be prompted for your npm 2FA code. This creates
    `@concord-ai/concord-mcp` under the org.
 
-2. **Create the `release` GitHub environment** (repo → Settings → Environments):
-   optionally add protection rules (required reviewers, restrict to `v*` tags) so
-   a publish must be approved.
-
-3. **Configure the trusted publisher** on npmjs.com:
+2. **Configure the trusted publisher** on npmjs.com:
    package → **Settings → Trusted Publisher → GitHub Actions** with:
    - Organization/user: `Get-Concord-AI`
    - Repository: `concord-mcp`
    - Workflow filename: `release.yml`
-   - Environment name: `release`
+   - Environment: **leave blank** (the workflow sets no environment)
+
+   The Environment field must match the workflow exactly. Since `release.yml`
+   sets no `environment:`, this field must be empty or npm will reject the OIDC
+   token and the publish falls back to (missing) token auth — a `404` on publish.
+
+### Optional: gate publishing behind approval
+
+To require a maintainer to approve each publish (so people with repo access still
+can't publish unilaterally), add it on **both** sides with the same name:
+
+1. Create the environment (repo → Settings → Environments, e.g. `Release`) with
+   required reviewers.
+2. Add `environment: Release` to the `publish` job in `release.yml`.
+3. Set the same **Environment** name on the npm trusted publisher.
 
 ## Every release after that
 
