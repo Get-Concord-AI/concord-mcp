@@ -34,7 +34,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "demo": "pnpm build && node examples/two-agent-overlap/demo.mjs"
   },
   "dependencies": {
     "@commander-js/extra-typings": "^14.0.0",
@@ -49,6 +50,7 @@
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^9.19.0",
+    "globals": "^17.7.0",
     "prettier": "^3.4.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.64.0",

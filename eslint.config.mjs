@@ -1,5 +1,6 @@
 // @ts-check
 import eslint from '@eslint/js';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -45,8 +46,11 @@ export default tseslint.config(
     },
   },
   {
-    // Config files: no type-aware linting required.
+    // Config files and example scripts: no type-aware linting; Node globals.
     files: ['**/*.js', '**/*.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: globals.node,
+    },
   },
 );
