@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1]
+
+### Changed
+
+- First release published via the automated GitHub Actions pipeline (npm trusted
+  publishing / OIDC). No functional changes from 0.1.0.
+
+## [0.1.0]
+
 ### Added
 
 - MCP server with the three v0 tools: `claim_work` (with overlap detection),
@@ -18,4 +27,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/commits/main
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/Get-Concord-AI/concord-mcp/releases/tag/v0.1.0
