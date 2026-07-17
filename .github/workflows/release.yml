@@ -53,10 +53,16 @@ jobs:
           pnpm test
           pnpm build
 
+      - name: OIDC diagnostics
+        run: |
+          echo "id-token request URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
+          echo "id-token request token present: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+yes}"
+          echo "npm: $(npm --version)"
+
       # Provenance is generated automatically under OIDC; no --provenance flag,
       # no NODE_AUTH_TOKEN.
       - name: Publish
-        run: npm publish --access public
+        run: npm publish --access public --loglevel verbose
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
