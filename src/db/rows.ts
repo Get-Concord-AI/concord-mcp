@@ -32,6 +32,25 @@ export function serializeStringArray(values: readonly string[]): string {
   return JSON.stringify(values);
 }
 
+/** A single provenance entry: which field came from which source. */
+export interface ProvenanceEntry {
+  field: string;
+  source: string;
+}
+
+const provenanceSchema = z.array(z.object({ field: z.string(), source: z.string() }));
+
+/** Parse a JSON-encoded TEXT column into validated provenance entries. */
+export function parseProvenance(json: string): ProvenanceEntry[] {
+  const parsed: unknown = JSON.parse(json);
+  return provenanceSchema.parse(parsed);
+}
+
+/** Serialize provenance entries for storage in a TEXT column. */
+export function serializeProvenance(entries: readonly ProvenanceEntry[]): string {
+  return JSON.stringify(entries);
+}
+
 // --- tasks -----------------------------------------------------------------
 
 export interface TaskRecord {
@@ -137,6 +156,50 @@ export function parseHandoffRow(raw: unknown): HandoffRecord {
     guardrailsChecked: parseStringArray(row.guardrails_checked),
     needsReviewFrom: parseStringArray(row.needs_review_from),
     nextSteps: parseStringArray(row.next_steps),
+    createdAt: row.created_at,
+  };
+}
+
+// --- reviews ---------------------------------------------------------------
+
+export interface ReviewRecord {
+  id: number;
+  taskId: string;
+  planSummary: string;
+  testsRun: string[];
+  diffSize: string | null;
+  guardrailsChecked: string[];
+  assumptions: string[];
+  openQuestions: string[];
+  provenance: ProvenanceEntry[];
+  createdAt: string;
+}
+
+const reviewDbRowSchema = z.object({
+  id: z.number().int(),
+  task_id: z.string(),
+  plan_summary: z.string(),
+  tests_run: z.string(),
+  diff_size: z.string().nullable(),
+  guardrails_checked: z.string(),
+  assumptions: z.string(),
+  open_questions: z.string(),
+  provenance: z.string(),
+  created_at: z.string(),
+});
+
+export function parseReviewRow(raw: unknown): ReviewRecord {
+  const row = reviewDbRowSchema.parse(raw);
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    planSummary: row.plan_summary,
+    testsRun: parseStringArray(row.tests_run),
+    diffSize: row.diff_size,
+    guardrailsChecked: parseStringArray(row.guardrails_checked),
+    assumptions: parseStringArray(row.assumptions),
+    openQuestions: parseStringArray(row.open_questions),
+    provenance: parseProvenance(row.provenance),
     createdAt: row.created_at,
   };
 }
