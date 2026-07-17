@@ -1,5 +1,8 @@
 # Concord MCP
 
+[![CI](https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 **Shared work-state for coding agents.** Concord MCP gives Claude Code, Codex,
 Cursor, and other MCP-capable coding assistants a shared work log. Agents can
 claim work, leave handoffs, and generate review-ready packets before opening PRs.
@@ -21,16 +24,26 @@ npm install -g concord-mcp
 concord install
 ```
 
-Then, in a supported assistant:
+`concord install` writes Concord's tool instructions into your client configs
+(`CLAUDE.md`, `AGENTS.md`, `.codex/`, `.cursor/rules/`). Then register the MCP
+server with your client and let your agent use the tools through MCP. Per-client
+setup:
 
-```text
-/concord start TASK-12
-```
+- [Claude Code](./docs/claude-code.md)
+- [Codex](./docs/codex.md)
+- [Cursor](./docs/cursor.md)
 
-> **Client note:** `/concord` is available only where `concord install` can
-> register a slash command or equivalent. On other MCP-capable clients, agents use
-> the same Concord tools through MCP plus the installed assistant instructions.
-> There is no universal slash command across every client.
+> There is no universal `/concord` slash command — commands are client-specific.
+> Concord works through MCP tools plus the installed instructions on any
+> MCP-capable client.
+
+## The three tools
+
+| Tool           | When                 | What it does                                                                     |
+| -------------- | -------------------- | -------------------------------------------------------------------------------- |
+| `claim_work`   | before editing       | records the task + expected files/modules; flags overlaps with other active work |
+| `handoff`      | when done or blocked | captures what changed, tests run, assumptions, decisions, guardrails             |
+| `review_ready` | before a PR          | records plan, tests, open questions, and provenance                              |
 
 ## What you get
 
@@ -45,24 +58,42 @@ artifacts you can commit so they show up in PRs:
 └── WORK_STATE.json     generated export (optional)
 ```
 
-## What this is
+## CLI
 
-Shared work-state and guardrails for the coding agents you already use.
+Agents use the MCP tools; humans use the CLI.
 
-## What this is not
+```bash
+concord init                 # create the .concord/ workspace
+concord status               # active work, overlaps, review-ready, open questions
+concord tasks                # list all tracked tasks
+concord handoff <task-id>    # print the latest handoff
+concord review-packet <id>   # print the latest review packet
+concord export markdown      # regenerate .concord/ artifacts
+concord doctor               # workspace checks + per-task tool adoption
+```
 
-Not an orchestrator, code reviewer, memory vector DB, or autonomous coding agent.
+## Try the demo
 
-## Why not just use markdown?
+```bash
+pnpm demo
+```
 
-Markdown handoff files are a good start. Concord makes them structured, queryable
-by agents, visible to humans, and harder to skip.
+Runs the [two-agent overlap demo](./examples/two-agent-overlap/): two agents claim
+overlapping work (Concord flags it), then one hands off and marks the task
+review-ready — printing the generated artifacts.
 
-## Development
+## What this is / is not
+
+Shared work-state and guardrails for the coding agents you already use. **Not** an
+orchestrator, code reviewer, memory vector DB, or autonomous coding agent.
+
+See also: [Why not just use markdown?](./docs/why-not-markdown.md)
+
+## Contributing
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`CLAUDE.md`](./CLAUDE.md). This
 repo is strictly typed (no `any`, no typecasts), modular, and every PR stays under
-600 LOC.
+600 LOC. Good first issues are labelled [`good first issue`](https://github.com/Get-Concord-AI/concord-mcp/labels/good%20first%20issue).
 
 ## License
 
