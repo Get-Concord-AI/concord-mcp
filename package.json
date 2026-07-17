@@ -1,5 +1,5 @@
 {
-  "name": "concord-mcp",
+  "name": "get-concord-mcp",
   "version": "0.1.0",
   "description": "Shared work-state for coding agents: claim work, leave handoffs, and generate review packets before PRs, over MCP.",
   "keywords": [
@@ -14,13 +14,22 @@
     "agentic-coding"
   ],
   "license": "MIT",
+  "author": "Concord AI",
+  "homepage": "https://github.com/Get-Concord-AI/concord-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Get-Concord-AI/concord-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Get-Concord-AI/concord-mcp/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "packageManager": "pnpm@10.33.0",
   "bin": {
-    "concord-mcp": "dist/index.js",
+    "get-concord-mcp": "dist/index.js",
     "concord": "dist/cli/index.js"
   },
   "files": [
@@ -35,7 +44,8 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "demo": "pnpm build && node examples/two-agent-overlap/demo.mjs"
+    "demo": "pnpm build && node examples/two-agent-overlap/demo.mjs",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@commander-js/extra-typings": "^14.0.0",
