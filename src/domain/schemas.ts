@@ -22,3 +22,20 @@ export const claimWorkInputShape = {
 
 export const claimWorkInputSchema = z.object(claimWorkInputShape);
 export type ClaimWorkInput = z.infer<typeof claimWorkInputSchema>;
+
+export const handoffInputShape = {
+  task_id: z.string().min(1).describe('The task being handed off, e.g. TASK-12'),
+  status: z.string().min(1).describe('Handoff status, e.g. done, blocked, in_progress'),
+  what_changed: z.string().min(1).describe('Concise summary of what changed'),
+  changed_files: z.array(z.string()).optional().describe('Files that changed'),
+  tests_run: z.array(z.string()).optional().describe('Test commands run'),
+  known_risks: z.array(z.string()).optional().describe('Known risks introduced'),
+  assumptions: z.array(z.string()).optional().describe('Assumptions the agent made'),
+  decisions: z.array(z.string()).optional().describe('Notable decisions and why'),
+  guardrails_checked: z.array(z.string()).optional().describe('Guardrails manually checked'),
+  needs_review_from: z.array(z.string()).optional().describe('Who should review'),
+  next_steps: z.array(z.string()).optional().describe('Remaining work or follow-ups'),
+} as const;
+
+export const handoffInputSchema = z.object(handoffInputShape);
+export type HandoffInput = z.infer<typeof handoffInputSchema>;
