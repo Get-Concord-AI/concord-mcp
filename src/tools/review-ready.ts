@@ -69,7 +69,11 @@ export function formatReviewReadyText(result: ReviewReadyResult): string {
   return lines.join('\n');
 }
 
-export function registerReviewReady(server: McpServer, repos: Repositories): void {
+export function registerReviewReady(
+  server: McpServer,
+  repos: Repositories,
+  onWrite?: () => void,
+): void {
   server.registerTool(
     'review_ready',
     {
@@ -81,6 +85,7 @@ export function registerReviewReady(server: McpServer, repos: Repositories): voi
     },
     (args) => {
       const result = handleReviewReady(repos, args);
+      onWrite?.();
       return {
         content: [{ type: 'text', text: formatReviewReadyText(result) }],
         structuredContent: {
