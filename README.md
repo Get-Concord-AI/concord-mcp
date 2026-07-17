@@ -1,6 +1,9 @@
 # Concord MCP
 
+[![npm version](https://img.shields.io/npm/v/get-concord-mcp.svg)](https://www.npmjs.com/package/get-concord-mcp)
+[![npm downloads](https://img.shields.io/npm/dm/get-concord-mcp.svg)](https://www.npmjs.com/package/get-concord-mcp)
 [![CI](https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml)
+[![Node.js](https://img.shields.io/node/v/get-concord-mcp.svg)](https://www.npmjs.com/package/get-concord-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 **Shared work-state for coding agents.** Concord MCP gives Claude Code, Codex,
@@ -20,7 +23,7 @@ of that: a local place for agents to record what they are doing while they do it
 ## Install
 
 ```bash
-npm install -g concord-mcp
+npm install -g get-concord-mcp
 concord install
 ```
 
