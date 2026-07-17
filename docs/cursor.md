@@ -3,7 +3,7 @@
 ## 1. Install
 
 ```bash
-npm install -g get-concord-mcp
+npm install -g @concord-ai/concord-mcp
 ```
 
 ## 2. Register the MCP server
@@ -14,7 +14,7 @@ Add Concord to `.cursor/mcp.json`:
 {
   "mcpServers": {
     "concord": {
-      "command": "get-concord-mcp"
+      "command": "concord-mcp"
     }
   }
 }
