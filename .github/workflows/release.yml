@@ -27,12 +27,14 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
 
+      # NOTE: no registry-url here. actions/setup-node's registry-url writes an
+      # .npmrc auth-token line, which makes npm use (empty) token auth and skip
+      # OIDC entirely. Omitting it lets npm detect the OIDC trusted publisher.
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: pnpm
-          registry-url: 'https://registry.npmjs.org'
 
       # Trusted publishing needs npm >= 11.5.1.
       - name: Update npm
