@@ -5,9 +5,13 @@ on:
     tags:
       - 'v*'
 
+# Tokenless publishing via npm Trusted Publishing (OIDC). No NPM_TOKEN secret is
+# used; npm authenticates the workflow through GitHub's OIDC provider. Requires a
+# trusted publisher to be configured for the package on npmjs.com first (which in
+# turn requires one manual first publish — see RELEASING.md).
 permissions:
-  contents: write # required to create the GitHub Release
-  id-token: write # required for npm provenance
+  contents: write # create the GitHub Release
+  id-token: write # OIDC token for npm trusted publishing + provenance
 
 jobs:
   publish:
@@ -22,9 +26,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: '24.x'
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing needs npm >= 11.5.1.
+      - name: Update npm
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -37,10 +45,10 @@ jobs:
           pnpm test
           pnpm build
 
+      # Provenance is generated automatically under OIDC; no --provenance flag,
+      # no NODE_AUTH_TOKEN.
       - name: Publish
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
