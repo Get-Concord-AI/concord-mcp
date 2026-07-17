@@ -1,13 +1,19 @@
 #!/usr/bin/env node
-/**
- * Entry point for the Concord MCP server (stdio transport).
- *
- * This is a scaffold placeholder. The MCP server and tool wiring land in a
- * later change (see the buildout plan, PR 3+).
- */
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
-function main(): void {
-  process.stdout.write('concord-mcp: server not yet implemented\n');
+import { databasePath, findRepoRoot } from './config/paths.js';
+import { openRepositories } from './db/index.js';
+import { createServer } from './server.js';
+
+async function main(): Promise<void> {
+  const repoRoot = findRepoRoot(process.cwd());
+  const repos = openRepositories(databasePath(repoRoot));
+  const server = createServer(repos);
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
 }
 
-main();
+main().catch((error: unknown) => {
+  process.stderr.write(`concord-mcp failed to start: ${String(error)}\n`);
+  process.exitCode = 1;
+});
