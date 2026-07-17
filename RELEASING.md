@@ -1,28 +1,38 @@
 # Releasing
 
-`get-concord-mcp` is published to npm with **trusted publishing (OIDC)** — no
-long-lived `NPM_TOKEN` secret, and no 2FA one-time code in CI. Provenance is
+`@concord-ai/concord-mcp` is published to npm with **trusted publishing (OIDC)** —
+no long-lived `NPM_TOKEN` secret, and no 2FA one-time code in CI. Provenance is
 generated automatically.
+
+Publishing runs inside the `release` GitHub Actions environment, so npm only
+accepts the publish from an approved, environment-scoped workflow run.
 
 ## One-time setup
 
 Trusted publishing can only be configured after a package exists, so the very
-first publish is done manually.
+first publish of the scoped package is done manually by an org member with publish
+rights.
 
-1. **First publish (local, once):**
+1. **First publish (local, once)** — from an account in the `concord-ai` npm org:
 
    ```bash
    pnpm lint && pnpm typecheck && pnpm test && pnpm build
    npm publish --access public
    ```
 
-   You'll be prompted for your npm 2FA code. This creates the package.
+   You'll be prompted for your npm 2FA code. This creates
+   `@concord-ai/concord-mcp` under the org.
 
-2. **Configure the trusted publisher** on npmjs.com:
+2. **Create the `release` GitHub environment** (repo → Settings → Environments):
+   optionally add protection rules (required reviewers, restrict to `v*` tags) so
+   a publish must be approved.
+
+3. **Configure the trusted publisher** on npmjs.com:
    package → **Settings → Trusted Publisher → GitHub Actions** with:
    - Organization/user: `Get-Concord-AI`
    - Repository: `concord-mcp`
    - Workflow filename: `release.yml`
+   - Environment name: `release`
 
 ## Every release after that
 
@@ -36,7 +46,8 @@ git push --follow-tags
 
 Pushing the `v*` tag triggers [`.github/workflows/release.yml`](./.github/workflows/release.yml),
 which runs the full verification gate, publishes to npm via OIDC (with automatic
-provenance), and creates a GitHub Release with generated notes.
+provenance), and creates a GitHub Release with generated notes. If the `release`
+environment has required reviewers, the run pauses for approval first.
 
 ## Notes
 

@@ -17,6 +17,9 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
+    # Scopes the OIDC token to this environment; add protection rules (required
+    # reviewers, tag restrictions) on the `release` environment to gate publishes.
+    environment: release
     steps:
       - uses: actions/checkout@v4
 

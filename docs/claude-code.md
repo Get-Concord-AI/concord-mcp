@@ -3,7 +3,7 @@
 ## 1. Install
 
 ```bash
-npm install -g get-concord-mcp
+npm install -g @concord-ai/concord-mcp
 ```
 
 ## 2. Register the MCP server
@@ -14,7 +14,7 @@ Add Concord to your project's `.mcp.json`:
 {
   "mcpServers": {
     "concord": {
-      "command": "get-concord-mcp"
+      "command": "concord-mcp"
     }
   }
 }
@@ -23,7 +23,7 @@ Add Concord to your project's `.mcp.json`:
 Or use the Claude Code CLI:
 
 ```bash
-claude mcp add concord -- get-concord-mcp
+claude mcp add concord -- concord-mcp
 ```
 
 ## 3. Install the agent instructions

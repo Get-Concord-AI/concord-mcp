@@ -3,7 +3,7 @@
 ## 1. Install
 
 ```bash
-npm install -g get-concord-mcp
+npm install -g @concord-ai/concord-mcp
 ```
 
 ## 2. Register the MCP server
@@ -12,7 +12,7 @@ Add Concord to your Codex config (`~/.codex/config.toml`):
 
 ```toml
 [mcp_servers.concord]
-command = "get-concord-mcp"
+command = "concord-mcp"
 ```
 
 Refer to the current Codex MCP documentation if the config format has changed.
