@@ -39,3 +39,20 @@ export const handoffInputShape = {
 
 export const handoffInputSchema = z.object(handoffInputShape);
 export type HandoffInput = z.infer<typeof handoffInputSchema>;
+
+export const reviewReadyInputShape = {
+  task_id: z.string().min(1).describe('The task being marked review-ready'),
+  plan_summary: z.string().min(1).describe('What the change intended to do'),
+  tests_run: z.array(z.string()).optional().describe('Test commands run'),
+  diff_size: z.string().optional().describe('Rough diff size, e.g. "+120 / -30"'),
+  guardrails_checked: z.array(z.string()).optional().describe('Guardrails checked'),
+  assumptions: z.array(z.string()).optional().describe('Assumptions made'),
+  open_questions: z.array(z.string()).optional().describe('Unresolved questions for review'),
+  provenance: z
+    .array(z.object({ field: z.string(), source: z.string() }))
+    .optional()
+    .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
+} as const;
+
+export const reviewReadyInputSchema = z.object(reviewReadyInputShape);
+export type ReviewReadyInput = z.infer<typeof reviewReadyInputSchema>;

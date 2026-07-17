@@ -52,4 +52,21 @@ export const migrations: readonly string[] = [
 
   CREATE INDEX idx_events_task_id ON events(task_id);
   `,
+  // 002 — review packets produced by review_ready.
+  `
+  CREATE TABLE reviews (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id            TEXT NOT NULL REFERENCES tasks(task_id),
+    plan_summary       TEXT NOT NULL,
+    tests_run          TEXT NOT NULL DEFAULT '[]',
+    diff_size          TEXT,
+    guardrails_checked TEXT NOT NULL DEFAULT '[]',
+    assumptions        TEXT NOT NULL DEFAULT '[]',
+    open_questions     TEXT NOT NULL DEFAULT '[]',
+    provenance         TEXT NOT NULL DEFAULT '[]',
+    created_at         TEXT NOT NULL
+  );
+
+  CREATE INDEX idx_reviews_task_id ON reviews(task_id);
+  `,
 ];
