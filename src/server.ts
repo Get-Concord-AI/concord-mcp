@@ -4,9 +4,10 @@ import type { Repositories } from './db/index.js';
 import { registerClaimWork } from './tools/claim-work.js';
 import { registerHandoff } from './tools/handoff.js';
 import { registerReviewReady } from './tools/review-ready.js';
+import { VERSION } from './version.js';
 
 /** Concord's advertised MCP server version. */
-export const SERVER_VERSION = '0.1.0';
+export const SERVER_VERSION = VERSION;
 
 export interface ServerOptions {
   /** Called after any tool writes to the database (used to regenerate artifacts). */
