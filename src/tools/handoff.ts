@@ -70,7 +70,11 @@ export function formatHandoffText(result: HandoffResult): string {
   return lines.join('\n');
 }
 
-export function registerHandoff(server: McpServer, repos: Repositories): void {
+export function registerHandoff(
+  server: McpServer,
+  repos: Repositories,
+  onWrite?: () => void,
+): void {
   server.registerTool(
     'handoff',
     {
@@ -82,6 +86,7 @@ export function registerHandoff(server: McpServer, repos: Repositories): void {
     },
     (args) => {
       const result = handleHandoff(repos, args);
+      onWrite?.();
       return {
         content: [{ type: 'text', text: formatHandoffText(result) }],
         structuredContent: {

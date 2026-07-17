@@ -8,14 +8,19 @@ import { registerReviewReady } from './tools/review-ready.js';
 /** Concord's advertised MCP server version. */
 export const SERVER_VERSION = '0.1.0';
 
+export interface ServerOptions {
+  /** Called after any tool writes to the database (used to regenerate artifacts). */
+  onToolWrite?: () => void;
+}
+
 /**
  * Build the Concord MCP server and register the v0 tools against the given
  * repositories. Transport wiring lives in the entry points.
  */
-export function createServer(repos: Repositories): McpServer {
+export function createServer(repos: Repositories, options: ServerOptions = {}): McpServer {
   const server = new McpServer({ name: 'concord-mcp', version: SERVER_VERSION });
-  registerClaimWork(server, repos);
-  registerHandoff(server, repos);
-  registerReviewReady(server, repos);
+  registerClaimWork(server, repos, options.onToolWrite);
+  registerHandoff(server, repos, options.onToolWrite);
+  registerReviewReady(server, repos, options.onToolWrite);
   return server;
 }
