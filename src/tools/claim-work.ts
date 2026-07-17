@@ -73,7 +73,11 @@ export function formatClaimWorkText(result: ClaimWorkResult): string {
   return lines.join('\n');
 }
 
-export function registerClaimWork(server: McpServer, repos: Repositories): void {
+export function registerClaimWork(
+  server: McpServer,
+  repos: Repositories,
+  onWrite?: () => void,
+): void {
   server.registerTool(
     'claim_work',
     {
@@ -85,6 +89,7 @@ export function registerClaimWork(server: McpServer, repos: Repositories): void 
     },
     (args) => {
       const result = handleClaimWork(repos, args);
+      onWrite?.();
       return {
         content: [{ type: 'text', text: formatClaimWorkText(result) }],
         structuredContent: {
