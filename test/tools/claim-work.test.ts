@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
-import { formatClaimWorkText, handleClaimWork } from '../../src/tools/claim-work.js';
+import {
+  formatClaimWorkText,
+  handleClaimWork,
+  toClaimWorkStructured,
+} from '../../src/tools/claim-work.js';
 
 describe('handleClaimWork', () => {
   let repos: Repositories;
@@ -123,5 +127,57 @@ describe('handleClaimWork', () => {
     const text = formatClaimWorkText(result);
     expect(text).toContain('Potential overlaps');
     expect(text).toContain('Heads-up: this claim looks broad');
+  });
+
+  it('extends scope on re-claim, persists the union, and reports what was added', () => {
+    handleClaimWork(repos, {
+      task_id: 'T',
+      title: 'FE',
+      modules: ['app-shell'],
+      expected_files: ['app/page.tsx'],
+    });
+    const again = handleClaimWork(repos, {
+      task_id: 'T',
+      title: 'FE',
+      modules: ['app-shell', 'api-client'],
+      expected_files: ['lib/api.ts'],
+    });
+    expect(again.alreadyClaimed).toBe(true);
+    expect(again.scopeAdded).toContain('module: api-client');
+    expect(again.scopeAdded).toContain('file: lib/api.ts');
+    // Persisted as a union, not a replacement or a duplicate.
+    const stored = repos.tasks.get('T');
+    expect(stored?.modules).toEqual(['app-shell', 'api-client']);
+    expect(stored?.expectedFiles).toEqual(['app/page.tsx', 'lib/api.ts']);
+    expect(repos.tasks.list()).toHaveLength(1);
+    expect(formatClaimWorkText(again)).toContain('Extended claim scope');
+  });
+
+  it('re-claiming with no new scope adds nothing', () => {
+    handleClaimWork(repos, { task_id: 'T', title: 'FE', modules: ['app-shell'] });
+    const again = handleClaimWork(repos, { task_id: 'T', title: 'FE', modules: ['app-shell'] });
+    expect(again.scopeAdded).toEqual([]);
+    expect(formatClaimWorkText(again)).not.toContain('Extended claim scope');
+  });
+
+  it('recomputes overlaps against the merged scope on re-claim', () => {
+    handleClaimWork(repos, { task_id: 'OTHER', title: 'Owns api', modules: ['api-client'] });
+    const first = handleClaimWork(repos, { task_id: 'MINE', title: 'FE', modules: ['app-shell'] });
+    expect(first.overlaps).toEqual([]);
+    // Re-claim adds the module OTHER owns — the overlap must now surface.
+    const again = handleClaimWork(repos, { task_id: 'MINE', title: 'FE', modules: ['api-client'] });
+    expect(again.overlaps.some((overlap) => overlap.taskId === 'OTHER')).toBe(true);
+  });
+
+  it('emits internally-consistent snake_case structured output', () => {
+    handleClaimWork(repos, { task_id: 'OTHER', title: 'Owns', modules: ['billing'] });
+    const result = handleClaimWork(repos, { task_id: 'MINE', title: 'Mine', modules: ['billing'] });
+    const structured = toClaimWorkStructured(result);
+    expect(structured.overlaps[0]?.task_id).toBe('OTHER');
+    expect(Object.keys(structured)).toEqual(
+      expect.arrayContaining(['task_id', 'already_claimed', 'checked_against', 'scope_added']),
+    );
+    // No camelCase leak inside the overlap entries.
+    expect(JSON.stringify(structured)).not.toContain('taskId');
   });
 });
