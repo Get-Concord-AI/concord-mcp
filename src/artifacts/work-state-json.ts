@@ -7,6 +7,7 @@ interface WorkStateTask {
   agent: string | null;
   owner: string | null;
   branch: string | null;
+  parent_task_id: string | null;
   modules: string[];
   domains: string[];
   expected_files: string[];
@@ -25,6 +26,7 @@ function toWorkStateTask(task: TaskRecord): WorkStateTask {
     agent: task.agent,
     owner: task.owner,
     branch: task.branch,
+    parent_task_id: task.parentTaskId,
     modules: task.modules,
     domains: task.domains,
     expected_files: task.expectedFiles,

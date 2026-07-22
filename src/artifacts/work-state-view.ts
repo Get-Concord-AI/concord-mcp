@@ -8,6 +8,7 @@ interface ActiveEntry {
   agent: string;
   branch: string;
   touches: string;
+  parentTaskId: string | null;
 }
 
 interface OverlapPair {
@@ -59,6 +60,7 @@ export function buildStatus(repos: Repositories): StatusView {
         modules: task.modules,
         domains: task.domains,
         riskTags: task.riskTags,
+        parentTaskId: task.parentTaskId,
       },
       active,
     )) {
@@ -94,6 +96,7 @@ export function buildStatus(repos: Repositories): StatusView {
       agent: task.agent ?? '-',
       branch: task.branch ?? '-',
       touches: touchesOf(task),
+      parentTaskId: task.parentTaskId,
     })),
     overlaps,
     reviewReady,
@@ -107,8 +110,9 @@ export function renderStatusText(view: StatusView): string {
     lines.push('  none');
   } else {
     for (const entry of view.active) {
+      const parent = entry.parentTaskId === null ? '' : `  (child of ${entry.parentTaskId})`;
       lines.push(
-        `  ${entry.taskId.padEnd(10)} ${entry.agent.padEnd(12)} ${entry.branch.padEnd(20)} touches: ${entry.touches}`,
+        `  ${entry.taskId.padEnd(10)} ${entry.agent.padEnd(12)} ${entry.branch.padEnd(20)} touches: ${entry.touches}${parent}`,
       );
     }
   }

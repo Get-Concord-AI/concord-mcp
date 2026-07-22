@@ -29,6 +29,7 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
       domains: [],
       riskTags: [],
       notes: null,
+      parentTaskId: null,
     });
   }
 
