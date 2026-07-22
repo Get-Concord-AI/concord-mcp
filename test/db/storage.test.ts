@@ -75,6 +75,19 @@ describe('task repository', () => {
     const updated = repos.tasks.updateStatus('TASK-12', 'review_ready');
     expect(updated?.status).toBe('review_ready');
   });
+
+  it('updates scope (files/modules/domains/risk tags)', () => {
+    repos.tasks.create(baseTask);
+    const updated = repos.tasks.updateScope('TASK-12', {
+      expectedFiles: ['src/a.ts', 'src/b.ts'],
+      modules: ['billing', 'stripe'],
+      domains: ['payments'],
+      riskTags: ['payment-flow'],
+    });
+    expect(updated?.expectedFiles).toEqual(['src/a.ts', 'src/b.ts']);
+    expect(updated?.modules).toEqual(['billing', 'stripe']);
+    expect(repos.tasks.get('TASK-12')?.domains).toEqual(['payments']);
+  });
 });
 
 describe('handoff repository', () => {

@@ -18,11 +18,21 @@ export interface NewTask {
   notes: string | null;
 }
 
+/** The declared surface of a claim, updated when an agent re-claims with an
+ * expanded scope. */
+export interface TaskScope {
+  expectedFiles: readonly string[];
+  modules: readonly string[];
+  domains: readonly string[];
+  riskTags: readonly string[];
+}
+
 export interface TaskRepository {
   create(task: NewTask): TaskRecord;
   get(taskId: string): TaskRecord | undefined;
   list(): TaskRecord[];
   updateStatus(taskId: string, status: TaskStatus): TaskRecord | undefined;
+  updateScope(taskId: string, scope: TaskScope): TaskRecord | undefined;
 }
 
 const rawListSchema = z.array(z.unknown());
@@ -43,6 +53,11 @@ export function createTaskRepository(db: ConcordDatabase): TaskRepository {
   const listStmt = db.prepare('SELECT * FROM tasks ORDER BY created_at ASC, task_id ASC');
   const updateStatusStmt = db.prepare(
     'UPDATE tasks SET status = @status, updated_at = @updated_at WHERE task_id = @task_id',
+  );
+  const updateScopeStmt = db.prepare(
+    `UPDATE tasks SET expected_files = @expected_files, modules = @modules,
+       domains = @domains, risk_tags = @risk_tags, updated_at = @updated_at
+     WHERE task_id = @task_id`,
   );
 
   function get(taskId: string): TaskRecord | undefined {
@@ -85,6 +100,17 @@ export function createTaskRepository(db: ConcordDatabase): TaskRepository {
     },
     updateStatus(taskId, status) {
       updateStatusStmt.run({ task_id: taskId, status, updated_at: new Date().toISOString() });
+      return get(taskId);
+    },
+    updateScope(taskId, scope) {
+      updateScopeStmt.run({
+        task_id: taskId,
+        expected_files: serializeStringArray(scope.expectedFiles),
+        modules: serializeStringArray(scope.modules),
+        domains: serializeStringArray(scope.domains),
+        risk_tags: serializeStringArray(scope.riskTags),
+        updated_at: new Date().toISOString(),
+      });
       return get(taskId);
     },
   };

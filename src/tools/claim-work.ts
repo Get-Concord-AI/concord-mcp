@@ -22,44 +22,80 @@ export interface ClaimWorkResult {
    * independently-handoffable tasks — never a rejection.
    */
   breadthReasons: string[];
+  /**
+   * On a re-claim, the scope entries this call added to the existing claim
+   * (e.g. `module: api-client`, `file: lib/todo-api.ts`). Empty on a first
+   * claim or when nothing new was declared.
+   */
+  scopeAdded: string[];
+}
+
+/** Union of two label lists, de-duplicated, existing entries first. */
+function mergeUnique(existing: readonly string[], incoming: readonly string[]): string[] {
+  return [...new Set([...existing, ...incoming])];
+}
+
+/** Entries in `incoming` not already present in `existing`. */
+function addedEntries(existing: readonly string[], incoming: readonly string[]): string[] {
+  const have = new Set(existing);
+  return [...new Set(incoming.filter((value) => !have.has(value)))];
 }
 
 /**
- * Record that an agent is working on a task and flag any overlaps with other
- * active tasks. Idempotent: re-claiming an existing task returns it unchanged.
+ * Record that an agent is working on a task and flag overlaps with other active
+ * tasks. Re-claiming an existing task is idempotent for its identity (title,
+ * owner, agent) but *extends* its declared scope: the new files/modules/domains/
+ * risk tags are merged in and persisted, overlaps are recomputed against the
+ * merged scope, and the additions are reported back.
  */
 export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): ClaimWorkResult {
+  const inputFiles = input.expected_files ?? [];
+  const inputModules = input.modules ?? [];
+  const inputDomains = input.domains ?? [];
+  const inputRiskTags = input.risk_tags ?? [];
+
+  const existing = repos.tasks.get(input.task_id);
+
+  // Effective scope: the merged surface for an existing claim, else the input.
+  const scope = {
+    expectedFiles: existing ? mergeUnique(existing.expectedFiles, inputFiles) : inputFiles,
+    modules: existing ? mergeUnique(existing.modules, inputModules) : inputModules,
+    domains: existing ? mergeUnique(existing.domains, inputDomains) : inputDomains,
+    riskTags: existing ? mergeUnique(existing.riskTags, inputRiskTags) : inputRiskTags,
+  };
+
   const activeOthers = repos.tasks
     .list()
     .filter((task) => task.taskId !== input.task_id && task.status === 'active');
 
-  const overlaps = detectOverlaps(
-    {
-      taskId: input.task_id,
-      expectedFiles: input.expected_files ?? [],
-      modules: input.modules ?? [],
-      domains: input.domains ?? [],
-      riskTags: input.risk_tags ?? [],
-    },
-    activeOthers,
-  );
+  const overlaps = detectOverlaps({ taskId: input.task_id, ...scope }, activeOthers);
 
-  const existing = repos.tasks.get(input.task_id);
-  const task =
-    existing ??
-    repos.tasks.create({
+  const scopeAdded = existing
+    ? [
+        ...addedEntries(existing.expectedFiles, inputFiles).map((value) => `file: ${value}`),
+        ...addedEntries(existing.modules, inputModules).map((value) => `module: ${value}`),
+        ...addedEntries(existing.domains, inputDomains).map((value) => `domain: ${value}`),
+        ...addedEntries(existing.riskTags, inputRiskTags).map((value) => `risk tag: ${value}`),
+      ]
+    : [];
+
+  let task: TaskRecord;
+  if (existing === undefined) {
+    task = repos.tasks.create({
       taskId: input.task_id,
       title: input.title,
       owner: input.owner ?? null,
       agent: input.agent ?? null,
       branch: input.branch ?? null,
       worktree: input.worktree ?? null,
-      expectedFiles: input.expected_files ?? [],
-      modules: input.modules ?? [],
-      domains: input.domains ?? [],
-      riskTags: input.risk_tags ?? [],
+      ...scope,
       notes: input.notes ?? null,
     });
+  } else if (scopeAdded.length > 0) {
+    task = repos.tasks.updateScope(input.task_id, scope) ?? existing;
+  } else {
+    task = existing;
+  }
 
   repos.events.record({
     taskId: input.task_id,
@@ -73,17 +109,18 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     alreadyClaimed: existing !== undefined,
     overlaps,
     checkedAgainst: activeOthers.length,
-    breadthReasons: assessClaimBreadth({
-      expectedFiles: input.expected_files ?? [],
-      modules: input.modules ?? [],
-      domains: input.domains ?? [],
-    }),
+    breadthReasons: assessClaimBreadth(scope),
+    scopeAdded,
   };
 }
 
 export function formatClaimWorkText(result: ClaimWorkResult): string {
   const verb = result.alreadyClaimed ? 'Already claimed' : 'Claimed';
   const lines = [`${verb} ${result.task.taskId} (${result.task.title}).`];
+
+  if (result.alreadyClaimed && result.scopeAdded.length > 0) {
+    lines.push(`Extended claim scope (added ${result.scopeAdded.join(', ')}).`);
+  }
 
   if (result.overlaps.length === 0) {
     if (result.checkedAgainst === 0) {
@@ -117,6 +154,30 @@ export function formatClaimWorkText(result: ClaimWorkResult): string {
   return lines.join('\n');
 }
 
+/** The `claim_work` MCP structured output. All keys are snake_case, including
+ * overlap entries, so the payload is internally consistent. */
+export function toClaimWorkStructured(result: ClaimWorkResult): {
+  task_id: string;
+  already_claimed: boolean;
+  overlaps: { task_id: string; title: string; reasons: string[] }[];
+  checked_against: number;
+  breadth_reasons: string[];
+  scope_added: string[];
+} {
+  return {
+    task_id: result.task.taskId,
+    already_claimed: result.alreadyClaimed,
+    overlaps: result.overlaps.map((overlap) => ({
+      task_id: overlap.taskId,
+      title: overlap.title,
+      reasons: overlap.reasons,
+    })),
+    checked_against: result.checkedAgainst,
+    breadth_reasons: result.breadthReasons,
+    scope_added: result.scopeAdded,
+  };
+}
+
 export function registerClaimWork(
   server: McpServer,
   repos: Repositories,
@@ -137,18 +198,7 @@ export function registerClaimWork(
       onWrite?.();
       return {
         content: [{ type: 'text', text: formatClaimWorkText(result) }],
-        structuredContent: {
-          task_id: result.task.taskId,
-          already_claimed: result.alreadyClaimed,
-          overlaps: result.overlaps,
-          // Number of other active tasks compared against. With an empty
-          // `overlaps`, this disambiguates "nobody else was active" (0) from
-          // "compared against N, none conflict" — the check is point-in-time.
-          checked_against: result.checkedAgainst,
-          // Advisory reasons the claim looks too broad; empty when well-scoped.
-          // A non-empty list suggests splitting into smaller tasks (non-blocking).
-          breadth_reasons: result.breadthReasons,
-        },
+        structuredContent: toClaimWorkStructured(result),
       };
     },
   );
