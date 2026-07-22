@@ -1,6 +1,6 @@
 {
   "name": "@concord-ai/concord-mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Shared work-state for coding agents: claim work, leave handoffs, and generate review packets before PRs, over MCP.",
   "keywords": [
     "mcp",
@@ -45,6 +45,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "version": "node scripts/sync-version.mjs && git add src/version.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "demo": "pnpm build && node examples/two-agent-overlap/demo.mjs",
