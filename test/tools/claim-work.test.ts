@@ -83,4 +83,45 @@ describe('handleClaimWork', () => {
     expect(secondText).toContain('point-in-time');
     expect(secondText).toContain('concord status');
   });
+
+  it('does not nudge a well-scoped claim', () => {
+    const result = handleClaimWork(repos, {
+      task_id: 'TASK-1',
+      title: 'Small',
+      modules: ['billing'],
+      expected_files: ['src/billing/retry.ts'],
+    });
+    expect(result.breadthReasons).toEqual([]);
+    expect(formatClaimWorkText(result)).not.toContain('Heads-up');
+  });
+
+  it('nudges an oversized claim to split, without blocking it', () => {
+    const result = handleClaimWork(repos, {
+      task_id: 'TODO-FRONTEND-001',
+      title: 'Build the whole frontend',
+      modules: ['app-shell', 'todo-ui', 'client-state', 'api-client'],
+      domains: ['frontend', 'todo', 'auth'],
+      expected_files: ['a.tsx', 'b.tsx', 'c.tsx', 'd.tsx', 'e.tsx', 'f.tsx'],
+    });
+    // The claim still succeeds (non-blocking) ...
+    expect(result.alreadyClaimed).toBe(false);
+    expect(repos.tasks.get('TODO-FRONTEND-001')).toBeDefined();
+    // ... but it surfaces a decomposition suggestion.
+    expect(result.breadthReasons.length).toBeGreaterThan(0);
+    const text = formatClaimWorkText(result);
+    expect(text).toContain('Heads-up: this claim looks broad');
+    expect(text).toContain('independently-handoffable');
+  });
+
+  it('shows the breadth nudge alongside overlaps', () => {
+    handleClaimWork(repos, { task_id: 'OTHER', title: 'Other', modules: ['app-shell'] });
+    const result = handleClaimWork(repos, {
+      task_id: 'BIG',
+      title: 'Big overlapping claim',
+      modules: ['app-shell', 'todo-ui', 'client-state', 'api-client'],
+    });
+    const text = formatClaimWorkText(result);
+    expect(text).toContain('Potential overlaps');
+    expect(text).toContain('Heads-up: this claim looks broad');
+  });
 });
