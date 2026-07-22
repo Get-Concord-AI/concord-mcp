@@ -9,6 +9,9 @@ export interface OverlapSurface {
   modules: readonly string[];
   domains: readonly string[];
   riskTags: readonly string[];
+  /** Parent task, if this is a subtask. A task never overlaps its own parent or
+   * child (their shared surface is expected). */
+  parentTaskId?: string | null;
 }
 
 /** A flagged overlap between a candidate task and one existing task. */
@@ -73,7 +76,13 @@ function surfaceOf(task: TaskRecord): OverlapSurface {
     modules: task.modules,
     domains: task.domains,
     riskTags: task.riskTags,
+    parentTaskId: task.parentTaskId,
   };
+}
+
+/** True when the two tasks are in a direct parent/child relationship. */
+function isParentChild(candidate: OverlapSurface, task: TaskRecord): boolean {
+  return candidate.parentTaskId === task.taskId || task.parentTaskId === candidate.taskId;
 }
 
 function reasonsFor(candidate: OverlapSurface, existing: OverlapSurface): string[] {
@@ -129,7 +138,7 @@ export function detectOverlaps(
 ): OverlapWarning[] {
   const warnings: OverlapWarning[] = [];
   for (const task of existing) {
-    if (task.taskId === candidate.taskId) {
+    if (task.taskId === candidate.taskId || isParentChild(candidate, task)) {
       continue;
     }
     const reasons = reasonsFor(candidate, surfaceOf(task));

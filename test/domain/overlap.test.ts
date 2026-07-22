@@ -17,6 +17,7 @@ function task(partial: Partial<TaskRecord> & { taskId: string }): TaskRecord {
     riskTags: partial.riskTags ?? [],
     notes: null,
     status: partial.status ?? 'active',
+    parentTaskId: partial.parentTaskId ?? null,
     createdAt: '2026-07-17T00:00:00.000Z',
     updatedAt: '2026-07-17T00:00:00.000Z',
   };
@@ -124,6 +125,36 @@ describe('detectOverlaps', () => {
   it('never flags a task against itself', () => {
     expect(detectOverlaps(candidate, [task({ taskId: 'TASK-A', modules: ['billing'] })])).toEqual(
       [],
+    );
+  });
+
+  it('does not flag a task against its own parent or child (but still flags others)', () => {
+    const child: OverlapSurface = {
+      taskId: 'FE-1.1',
+      parentTaskId: 'FE-1',
+      expectedFiles: [],
+      modules: ['app-shell'],
+      domains: [],
+      riskTags: [],
+    };
+    // Shares a module with its parent — expected, so not flagged.
+    expect(detectOverlaps(child, [task({ taskId: 'FE-1', modules: ['app-shell'] })])).toEqual([]);
+    // The reverse direction (parent candidate vs child) is also excluded.
+    const parent: OverlapSurface = {
+      taskId: 'FE-1',
+      expectedFiles: [],
+      modules: ['app-shell'],
+      domains: [],
+      riskTags: [],
+    };
+    expect(
+      detectOverlaps(parent, [
+        task({ taskId: 'FE-1.1', modules: ['app-shell'], parentTaskId: 'FE-1' }),
+      ]),
+    ).toEqual([]);
+    // An unrelated task sharing the module is still flagged.
+    expect(detectOverlaps(child, [task({ taskId: 'OTHER', modules: ['app-shell'] })])).toHaveLength(
+      1,
     );
   });
 });

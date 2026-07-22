@@ -180,4 +180,29 @@ describe('handleClaimWork', () => {
     // No camelCase leak inside the overlap entries.
     expect(JSON.stringify(structured)).not.toContain('taskId');
   });
+
+  it('records a parent task id and does not flag overlaps with its own parent', () => {
+    handleClaimWork(repos, { task_id: 'FE-1', title: 'Frontend', modules: ['app-shell'] });
+    const child = handleClaimWork(repos, {
+      task_id: 'FE-1.1',
+      title: 'App shell subtask',
+      parent_task_id: 'FE-1',
+      modules: ['app-shell'],
+    });
+    expect(child.task.parentTaskId).toBe('FE-1');
+    expect(toClaimWorkStructured(child).parent_task_id).toBe('FE-1');
+    // Shares a module with its parent, but that is expected — not flagged.
+    expect(child.overlaps).toEqual([]);
+  });
+
+  it('still flags overlaps between a subtask and unrelated (non-parent) tasks', () => {
+    handleClaimWork(repos, { task_id: 'OTHER', title: 'Other', modules: ['app-shell'] });
+    const child = handleClaimWork(repos, {
+      task_id: 'FE-1.1',
+      title: 'Sub',
+      parent_task_id: 'FE-1',
+      modules: ['app-shell'],
+    });
+    expect(child.overlaps.some((overlap) => overlap.taskId === 'OTHER')).toBe(true);
+  });
 });

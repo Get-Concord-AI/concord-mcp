@@ -69,4 +69,9 @@ export const migrations: readonly string[] = [
 
   CREATE INDEX idx_reviews_task_id ON reviews(task_id);
   `,
+  // 003 — parent/child task decomposition. A soft reference (no FK): a subtask
+  // may be claimed before or without its parent existing.
+  `
+  ALTER TABLE tasks ADD COLUMN parent_task_id TEXT;
+  `,
 ];

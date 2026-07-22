@@ -80,6 +80,24 @@ describe('buildStatus / renderStatusText', () => {
     expect(text).toContain('TASK-12 <-> TASK-14');
   });
 
+  it('annotates a subtask with its parent in the active list', () => {
+    handleClaimWork(repos, {
+      task_id: 'FE-1',
+      title: 'Frontend',
+      modules: ['app-shell'],
+      agent: 'codex',
+    });
+    handleClaimWork(repos, {
+      task_id: 'FE-1.1',
+      title: 'Sub',
+      parent_task_id: 'FE-1',
+      modules: ['todo-ui'],
+      agent: 'codex',
+    });
+    const text = renderStatusText(buildStatus(repos));
+    expect(text).toContain('(child of FE-1)');
+  });
+
   it('surfaces a later overlap to the earlier claimant on read (closes the point-in-time gap)', () => {
     // The first claim sees no overlaps — nobody else was active yet (#29).
     const first = handleClaimWork(repos, {
