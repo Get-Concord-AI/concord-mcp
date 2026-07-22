@@ -3,6 +3,9 @@ export const CONCORD_INSTRUCTIONS = `## Concord — shared work-state for coding
 
 This project uses Concord MCP. Use its tools so your work is visible before PRs:
 
+- **Keep each claim small.** Break work into the smallest independently
+  handoff-able unit and \`claim_work\` each piece separately, rather than
+  claiming one broad task. Concord flags claims that look too broad.
 - **Before editing code**, call \`claim_work\` with the task id, title, and the
   files/modules you expect to touch. Concord warns about overlaps with other
   active work.
