@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { Repositories, TaskRecord } from '../db/index.js';
+import { assessClaimBreadth } from '../domain/decomposition.js';
 import { detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
 import { claimWorkInputShape, type ClaimWorkInput } from '../domain/schemas.js';
 
@@ -15,6 +16,12 @@ export interface ClaimWorkResult {
    * read (e.g. `concord status`), which recomputes overlaps live.
    */
   checkedAgainst: number;
+  /**
+   * Advisory reasons the claim looks too broad (empty when appropriately
+   * scoped). A non-empty list is a suggestion to split the work into smaller,
+   * independently-handoffable tasks — never a rejection.
+   */
+  breadthReasons: string[];
 }
 
 /**
@@ -66,6 +73,11 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     alreadyClaimed: existing !== undefined,
     overlaps,
     checkedAgainst: activeOthers.length,
+    breadthReasons: assessClaimBreadth({
+      expectedFiles: input.expected_files ?? [],
+      modules: input.modules ?? [],
+      domains: input.domains ?? [],
+    }),
   };
 }
 
@@ -86,15 +98,22 @@ export function formatClaimWorkText(result: ClaimWorkResult): string {
           'This is a point-in-time check — run `concord status` to re-check as new work is claimed.',
       );
     }
-    return lines.join('\n');
+  } else {
+    lines.push(
+      `Potential overlaps (${String(result.overlaps.length)} of ${String(result.checkedAgainst)} active task(s)):`,
+    );
+    for (const overlap of result.overlaps) {
+      lines.push(`  - ${overlap.taskId} (${overlap.title}): ${overlap.reasons.join('; ')}`);
+    }
   }
 
-  lines.push(
-    `Potential overlaps (${String(result.overlaps.length)} of ${String(result.checkedAgainst)} active task(s)):`,
-  );
-  for (const overlap of result.overlaps) {
-    lines.push(`  - ${overlap.taskId} (${overlap.title}): ${overlap.reasons.join('; ')}`);
+  if (result.breadthReasons.length > 0) {
+    lines.push(
+      `Heads-up: this claim looks broad (${result.breadthReasons.join('; ')}). ` +
+        'Consider splitting it into smaller, independently-handoffable tasks and claiming each separately.',
+    );
   }
+
   return lines.join('\n');
 }
 
@@ -126,6 +145,9 @@ export function registerClaimWork(
           // `overlaps`, this disambiguates "nobody else was active" (0) from
           // "compared against N, none conflict" — the check is point-in-time.
           checked_against: result.checkedAgainst,
+          // Advisory reasons the claim looks too broad; empty when well-scoped.
+          // A non-empty list suggests splitting into smaller tasks (non-blocking).
+          breadth_reasons: result.breadthReasons,
         },
       };
     },
