@@ -20,6 +20,7 @@ const baseTask = {
   domains: ['payments'],
   riskTags: ['payment-flow'],
   notes: null,
+  parentTaskId: null,
 } as const;
 
 describe('migrations', () => {
@@ -38,7 +39,7 @@ describe('migrations', () => {
   it('is idempotent when reopening (user_version already at head)', () => {
     const { db } = newRepos();
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(2);
+    expect(version).toBe(3);
   });
 });
 
@@ -87,6 +88,13 @@ describe('task repository', () => {
     expect(updated?.expectedFiles).toEqual(['src/a.ts', 'src/b.ts']);
     expect(updated?.modules).toEqual(['billing', 'stripe']);
     expect(repos.tasks.get('TASK-12')?.domains).toEqual(['payments']);
+  });
+
+  it('persists a parent task id (null for top-level tasks)', () => {
+    repos.tasks.create({ ...baseTask, taskId: 'PARENT' });
+    repos.tasks.create({ ...baseTask, taskId: 'CHILD', parentTaskId: 'PARENT' });
+    expect(repos.tasks.get('CHILD')?.parentTaskId).toBe('PARENT');
+    expect(repos.tasks.get('PARENT')?.parentTaskId).toBeNull();
   });
 });
 

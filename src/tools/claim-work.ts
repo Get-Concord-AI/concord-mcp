@@ -56,6 +56,9 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
 
   const existing = repos.tasks.get(input.task_id);
 
+  // Parent is set at first claim and preserved thereafter (identity is idempotent).
+  const parentTaskId = existing ? existing.parentTaskId : (input.parent_task_id ?? null);
+
   // Effective scope: the merged surface for an existing claim, else the input.
   const scope = {
     expectedFiles: existing ? mergeUnique(existing.expectedFiles, inputFiles) : inputFiles,
@@ -68,7 +71,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     .list()
     .filter((task) => task.taskId !== input.task_id && task.status === 'active');
 
-  const overlaps = detectOverlaps({ taskId: input.task_id, ...scope }, activeOthers);
+  const overlaps = detectOverlaps({ taskId: input.task_id, parentTaskId, ...scope }, activeOthers);
 
   const scopeAdded = existing
     ? [
@@ -90,6 +93,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
       worktree: input.worktree ?? null,
       ...scope,
       notes: input.notes ?? null,
+      parentTaskId,
     });
   } else if (scopeAdded.length > 0) {
     task = repos.tasks.updateScope(input.task_id, scope) ?? existing;
@@ -158,6 +162,7 @@ export function formatClaimWorkText(result: ClaimWorkResult): string {
  * overlap entries, so the payload is internally consistent. */
 export function toClaimWorkStructured(result: ClaimWorkResult): {
   task_id: string;
+  parent_task_id: string | null;
   already_claimed: boolean;
   overlaps: { task_id: string; title: string; reasons: string[] }[];
   checked_against: number;
@@ -166,6 +171,7 @@ export function toClaimWorkStructured(result: ClaimWorkResult): {
 } {
   return {
     task_id: result.task.taskId,
+    parent_task_id: result.task.parentTaskId,
     already_claimed: result.alreadyClaimed,
     overlaps: result.overlaps.map((overlap) => ({
       task_id: overlap.taskId,

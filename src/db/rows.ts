@@ -66,6 +66,8 @@ export interface TaskRecord {
   riskTags: string[];
   notes: string | null;
   status: TaskStatus;
+  /** The parent task this is a subtask of, or null for a top-level task. */
+  parentTaskId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,6 +85,7 @@ const taskDbRowSchema = z.object({
   risk_tags: z.string(),
   notes: z.string().nullable(),
   status: taskStatusSchema,
+  parent_task_id: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -102,6 +105,7 @@ export function parseTaskRow(raw: unknown): TaskRecord {
     riskTags: parseStringArray(row.risk_tags),
     notes: row.notes,
     status: row.status,
+    parentTaskId: row.parent_task_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
