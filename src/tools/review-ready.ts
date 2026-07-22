@@ -1,7 +1,5 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
 import type { ProvenanceEntry, Repositories, ReviewRecord } from '../db/index.js';
-import { reviewReadyInputShape, type ReviewReadyInput } from '../domain/schemas.js';
+import { type ReviewReadyInput } from '../domain/schemas.js';
 
 export interface ReviewReadyResult {
   review: ReviewRecord;
@@ -13,8 +11,9 @@ function toProvenance(entries: ReviewReadyInput['provenance']): ProvenanceEntry[
 }
 
 /**
- * Record a review packet for a task and mark the task review-ready. Like
- * handoff, this auto-creates a stub task if the work was never claimed.
+ * Record a review packet for a task and mark the task review-ready. Invoked by
+ * `handoff` when `ready_for_review` is set (review_ready is no longer a separate
+ * tool). Auto-creates a stub task if the work was never claimed.
  */
 export function handleReviewReady(repos: Repositories, input: ReviewReadyInput): ReviewReadyResult {
   const existing = repos.tasks.get(input.task_id);
@@ -68,34 +67,4 @@ export function formatReviewReadyText(result: ReviewReadyResult): string {
   lines.push(`Guardrails checked: ${String(review.guardrailsChecked.length)}`);
   lines.push(`Open questions: ${String(review.openQuestions.length)}`);
   return lines.join('\n');
-}
-
-export function registerReviewReady(
-  server: McpServer,
-  repos: Repositories,
-  onWrite?: () => void,
-): void {
-  server.registerTool(
-    'review_ready',
-    {
-      title: 'Mark review-ready',
-      description:
-        'Record review evidence before a PR: plan summary, tests run, diff size, guardrails ' +
-        'checked, assumptions, open questions, and provenance. Call this before opening a PR.',
-      inputSchema: reviewReadyInputShape,
-    },
-    (args) => {
-      const result = handleReviewReady(repos, args);
-      onWrite?.();
-      return {
-        content: [{ type: 'text', text: formatReviewReadyText(result) }],
-        structuredContent: {
-          task_id: result.review.taskId,
-          review_id: result.review.id,
-          open_questions: result.review.openQuestions.length,
-          task_auto_created: result.taskAutoCreated,
-        },
-      };
-    },
-  );
 }

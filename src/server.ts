@@ -4,7 +4,6 @@ import type { Repositories } from './db/index.js';
 import { registerClaimWork } from './tools/claim-work.js';
 import { registerWorkState } from './tools/get-work-state.js';
 import { registerHandoff } from './tools/handoff.js';
-import { registerReviewReady } from './tools/review-ready.js';
 import { VERSION } from './version.js';
 
 /** Concord's advertised MCP server version. */
@@ -30,6 +29,5 @@ export function createServer(repos: Repositories, options: ServerOptions = {}): 
   };
   registerClaimWork(server, repos, onWrite);
   registerHandoff(server, repos, onWrite);
-  registerReviewReady(server, repos, onWrite);
   return server;
 }

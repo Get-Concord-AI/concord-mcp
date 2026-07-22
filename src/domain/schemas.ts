@@ -49,6 +49,22 @@ export const handoffInputShape = {
   guardrails_checked: z.array(z.string()).optional().describe('Guardrails manually checked'),
   needs_review_from: z.array(z.string()).optional().describe('Who should review'),
   next_steps: z.array(z.string()).optional().describe('Remaining work or follow-ups'),
+  ready_for_review: z
+    .boolean()
+    .optional()
+    .describe(
+      'Set true when this handoff also marks the task ready for review (before a PR). ' +
+        'This renders REVIEW_PACKET.md from the handoff.',
+    ),
+  diff_size: z
+    .string()
+    .optional()
+    .describe('Rough diff size for the review packet, e.g. "+120 / -30"'),
+  open_questions: z.array(z.string()).optional().describe('Unresolved questions for the reviewer'),
+  provenance: z
+    .array(z.object({ field: z.string(), source: z.string() }))
+    .optional()
+    .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
 } as const;
 
 export const handoffInputSchema = z.object(handoffInputShape);
