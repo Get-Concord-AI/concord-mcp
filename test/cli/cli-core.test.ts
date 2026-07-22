@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
-import { buildStatus, renderStatusText } from '../../src/cli/commands/status.js';
+import { buildStatus, renderStatusText } from '../../src/artifacts/work-state-view.js';
 import { renderTasks } from '../../src/cli/commands/tasks.js';
 import { runInit } from '../../src/cli/commands/init.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
