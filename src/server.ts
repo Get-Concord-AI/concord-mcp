@@ -21,9 +21,15 @@ export interface ServerOptions {
  */
 export function createServer(repos: Repositories, options: ServerOptions = {}): McpServer {
   const server = new McpServer({ name: 'concord-mcp', version: SERVER_VERSION });
-  registerClaimWork(server, repos, options.onToolWrite);
-  registerHandoff(server, repos, options.onToolWrite);
-  registerReviewReady(server, repos, options.onToolWrite);
-  registerWorkState(server, repos);
+  // Register the read surface first so we get the change-notifier, then run it
+  // (plus the caller's hook) after every write.
+  const notifyWorkStateChanged = registerWorkState(server, repos);
+  const onWrite = (): void => {
+    options.onToolWrite?.();
+    notifyWorkStateChanged();
+  };
+  registerClaimWork(server, repos, onWrite);
+  registerHandoff(server, repos, onWrite);
+  registerReviewReady(server, repos, onWrite);
   return server;
 }
