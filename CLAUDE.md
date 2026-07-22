@@ -11,8 +11,10 @@ shared work-state: agents **claim work**, leave **handoffs**, and generate
 **review packets** before opening PRs. SQLite is the source of truth; human-
 readable markdown artifacts are rendered from it for PR visibility.
 
-The v0 surface is intentionally three MCP tools: `claim_work`, `handoff`,
-`review_ready`. Do not add more tools without explicit product pull.
+The surface is intentionally two MCP tools: `claim_work` and `handoff` (plus the
+read-only `get_work_state`). Review packets are produced by `handoff` with
+`ready_for_review` set, not a separate tool. Do not add more tools without
+explicit product pull.
 
 ## Coding rules (non-negotiable)
 
@@ -65,7 +67,8 @@ src/
   config/paths.ts     .concord/ resolution, repo-root discovery
   db/                 SQLite: connection, schema, row parsers, repositories
   domain/             types, Zod input schemas, overlap detection (pure logic)
-  tools/              the 3 MCP tools (thin adapters over domain + db)
+  tools/              MCP tools: claim_work, handoff (+ get_work_state read);
+                      review-ready.ts is a handoff-invoked helper, not a tool
   artifacts/          render HANDOFF.md / REVIEW_PACKET.md / WORK_STATE.json
   install/            per-client instruction writers
   cli/                commander CLI                     [bin: concord]

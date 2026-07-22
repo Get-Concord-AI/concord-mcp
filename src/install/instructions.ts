@@ -10,9 +10,9 @@ This project uses Concord MCP. Use its tools so your work is visible before PRs:
   files/modules you expect to touch. Concord warns about overlaps with other
   active work.
 - **Before finishing or when blocked**, call \`handoff\` with what changed, tests
-  run, assumptions, decisions, and guardrails you checked.
-- **Before opening a PR**, call \`review_ready\` with a plan summary, tests, open
-  questions, and provenance.
+  run, assumptions, decisions, and guardrails you checked. **Before a PR**, set
+  \`ready_for_review\` (with open questions and provenance) to also produce a
+  review packet.
 
 Concord regenerates human-readable \`HANDOFF.md\` and \`REVIEW_PACKET.md\` in
 \`.concord/\` so humans can review your work.
