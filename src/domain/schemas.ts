@@ -9,8 +9,14 @@ import { z } from 'zod';
 export const claimWorkInputShape = {
   task_id: z.string().min(1).describe('Stable identifier for the task, e.g. TASK-12'),
   title: z.string().min(1).describe('Short human-readable title'),
-  owner: z.string().optional().describe('Person accountable for the task'),
-  agent: z.string().optional().describe('Agent doing the work, e.g. claude-code'),
+  owner: z.string().optional().describe('Person or team accountable for the task (optional)'),
+  agent: z
+    .string()
+    .optional()
+    .describe(
+      'Stable identifier for the agent doing the work, e.g. claude-code or codex. Keep it ' +
+        'consistent across a session so the same agent is not recorded under different names.',
+    ),
   branch: z.string().optional().describe('Git branch, if known'),
   worktree: z.string().optional().describe('Git worktree path, if used'),
   expected_files: z.array(z.string()).optional().describe('Files the task expects to touch'),
