@@ -76,5 +76,8 @@ describe('CLI read/export commands', () => {
     expect(report).toContain('schema v2, expected v2');
     expect(report).toContain('TASK-12');
     expect(report).toContain('claim_work: yes');
+    // The resolved workspace path is surfaced so agents don't have to hunt for it.
+    expect(report).toContain('repo root');
+    expect(report).toContain(join(dir, '.concord'));
   });
 });
