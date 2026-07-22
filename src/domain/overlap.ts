@@ -52,7 +52,7 @@ function tokensOf(values: readonly string[]): string[] {
 /** Normalize a declared file path: drop a leading `./`, collapse `//`, resolve
  * `.`/`..` segments, and strip a trailing slash, so `./app/page.tsx` and
  * `app/page.tsx` compare equal. Paths stay case-sensitive. */
-function normalizePath(file: string): string {
+export function normalizePath(file: string): string {
   const trimmed = file.trim().replace(/^\.\//, '');
   const normalized = posix.normalize(trimmed).replace(/\/$/, '');
   return normalized === '.' ? '' : normalized;
