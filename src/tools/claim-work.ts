@@ -8,6 +8,13 @@ export interface ClaimWorkResult {
   task: TaskRecord;
   alreadyClaimed: boolean;
   overlaps: OverlapWarning[];
+  /**
+   * How many other active tasks the overlap check compared against. Overlap
+   * detection is point-in-time: an empty `overlaps` only means nothing conflicts
+   * *right now*. A later overlapping claim will not appear here — it surfaces on
+   * read (e.g. `concord status`), which recomputes overlaps live.
+   */
+  checkedAgainst: number;
 }
 
 /**
@@ -54,7 +61,12 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     detail: overlaps.length > 0 ? `${String(overlaps.length)} overlap(s)` : null,
   });
 
-  return { task, alreadyClaimed: existing !== undefined, overlaps };
+  return {
+    task,
+    alreadyClaimed: existing !== undefined,
+    overlaps,
+    checkedAgainst: activeOthers.length,
+  };
 }
 
 export function formatClaimWorkText(result: ClaimWorkResult): string {
@@ -62,11 +74,24 @@ export function formatClaimWorkText(result: ClaimWorkResult): string {
   const lines = [`${verb} ${result.task.taskId} (${result.task.title}).`];
 
   if (result.overlaps.length === 0) {
-    lines.push('No potential overlaps with active tasks.');
+    if (result.checkedAgainst === 0) {
+      lines.push(
+        'No other active claims to check against yet. Overlaps are only checked at ' +
+          'claim time, so a later overlapping claim will not appear here — run ' +
+          '`concord status` to re-check as others claim work.',
+      );
+    } else {
+      lines.push(
+        `No overlaps with the ${String(result.checkedAgainst)} other active task(s) at claim time. ` +
+          'This is a point-in-time check — run `concord status` to re-check as new work is claimed.',
+      );
+    }
     return lines.join('\n');
   }
 
-  lines.push(`Potential overlaps (${String(result.overlaps.length)}):`);
+  lines.push(
+    `Potential overlaps (${String(result.overlaps.length)} of ${String(result.checkedAgainst)} active task(s)):`,
+  );
   for (const overlap of result.overlaps) {
     lines.push(`  - ${overlap.taskId} (${overlap.title}): ${overlap.reasons.join('; ')}`);
   }
@@ -84,7 +109,8 @@ export function registerClaimWork(
       title: 'Claim work',
       description:
         'Record that an agent is starting a task and flag overlaps with other active tasks. ' +
-        'Call this before editing code.',
+        'Call this before editing code. Overlap detection is point-in-time (only against tasks ' +
+        'already active at claim time); run `concord status` to re-check as others claim.',
       inputSchema: claimWorkInputShape,
     },
     (args) => {
@@ -96,6 +122,10 @@ export function registerClaimWork(
           task_id: result.task.taskId,
           already_claimed: result.alreadyClaimed,
           overlaps: result.overlaps,
+          // Number of other active tasks compared against. With an empty
+          // `overlaps`, this disambiguates "nobody else was active" (0) from
+          // "compared against N, none conflict" — the check is point-in-time.
+          checked_against: result.checkedAgainst,
         },
       };
     },
