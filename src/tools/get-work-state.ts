@@ -1,4 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import { buildStatus, renderStatusText, type StatusView } from '../artifacts/work-state-view.js';
 import type { Repositories } from '../db/index.js';
@@ -20,8 +24,12 @@ export function handleGetWorkState(repos: Repositories): StatusView {
  * (which agents can call directly) and the `concord://work-state` resource (the
  * MCP-native read). Both return the same snapshot. This is read-only and does
  * not change the three-tool *write* surface.
+ *
+ * Returns a `notifyChanged` callback: call it after any write so subscribed
+ * clients are pushed a `resources/updated` for `concord://work-state`. MCP
+ * cannot wake an idle client — this is push while a session is connected.
  */
-export function registerWorkState(server: McpServer, repos: Repositories): void {
+export function registerWorkState(server: McpServer, repos: Repositories): () => void {
   server.registerTool(
     'get_work_state',
     {
@@ -63,4 +71,23 @@ export function registerWorkState(server: McpServer, repos: Repositories): void 
       ],
     }),
   );
+
+  // Advertise resource subscriptions and track which URIs clients care about,
+  // so writes push a targeted `resources/updated` rather than a broadcast.
+  server.server.registerCapabilities({ resources: { subscribe: true } });
+  const subscribers = new Set<string>();
+  server.server.setRequestHandler(SubscribeRequestSchema, (request) => {
+    subscribers.add(request.params.uri);
+    return {};
+  });
+  server.server.setRequestHandler(UnsubscribeRequestSchema, (request) => {
+    subscribers.delete(request.params.uri);
+    return {};
+  });
+
+  return () => {
+    if (subscribers.has(WORK_STATE_URI)) {
+      void server.server.sendResourceUpdated({ uri: WORK_STATE_URI });
+    }
+  };
 }
