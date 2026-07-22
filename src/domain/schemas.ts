@@ -19,6 +19,14 @@ export const claimWorkInputShape = {
     ),
   branch: z.string().optional().describe('Git branch, if known'),
   worktree: z.string().optional().describe('Git worktree path, if used'),
+  parent_task_id: z
+    .string()
+    .optional()
+    .describe(
+      'Parent task id when this is a subtask of a larger effort, e.g. TODO-FRONTEND-001.1 ' +
+        'is a subtask of TODO-FRONTEND-001. Overlaps between a parent and its own child are ' +
+        'not flagged.',
+    ),
   expected_files: z.array(z.string()).optional().describe('Files the task expects to touch'),
   modules: z.array(z.string()).optional().describe('Logical modules touched, e.g. billing'),
   domains: z.array(z.string()).optional().describe('Product domains touched, e.g. payments'),

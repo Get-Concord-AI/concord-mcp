@@ -32,6 +32,7 @@ export function handleReviewReady(repos: Repositories, input: ReviewReadyInput):
       domains: [],
       riskTags: [],
       notes: null,
+      parentTaskId: null,
     });
   }
 

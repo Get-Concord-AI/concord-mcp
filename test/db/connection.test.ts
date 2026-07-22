@@ -8,7 +8,7 @@ describe('openDatabase', () => {
   it('applies all migrations (user_version at head) and creates tables', () => {
     const db = openDatabase(':memory:');
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(2);
+    expect(version).toBe(3);
 
     const raw: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     const names = new Set(
@@ -44,6 +44,7 @@ describe('row parsing', () => {
       risk_tags: '[]',
       notes: null,
       status: 'active',
+      parent_task_id: null,
       created_at: '2026-07-17T00:00:00.000Z',
       updated_at: '2026-07-17T00:00:00.000Z',
     });
