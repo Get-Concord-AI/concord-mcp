@@ -80,6 +80,26 @@ describe('buildStatus / renderStatusText', () => {
     expect(text).toContain('TASK-12 <-> TASK-14');
   });
 
+  it('surfaces a later overlap to the earlier claimant on read (closes the point-in-time gap)', () => {
+    // The first claim sees no overlaps — nobody else was active yet (#29).
+    const first = handleClaimWork(repos, {
+      task_id: 'TASK-1',
+      title: 'Frontend',
+      domains: ['todo'],
+    });
+    expect(first.overlaps).toEqual([]);
+    expect(first.checkedAgainst).toBe(0);
+
+    // A second, overlapping claim lands after. The earlier claimant was never
+    // told at claim time — but status recomputes overlaps live, so the pair is
+    // now visible to both sides.
+    handleClaimWork(repos, { task_id: 'TASK-2', title: 'Backend', domains: ['todo'] });
+
+    const view = buildStatus(repos);
+    expect(view.overlaps).toHaveLength(1);
+    expect(renderStatusText(view)).toContain('TASK-1 <-> TASK-2');
+  });
+
   it('lists review-ready tasks and their open questions', () => {
     handleClaimWork(repos, { task_id: 'TASK-9', title: 'Retry', modules: ['billing'] });
     handleReviewReady(repos, {
