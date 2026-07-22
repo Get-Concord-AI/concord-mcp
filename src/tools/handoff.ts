@@ -2,10 +2,13 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { HandoffRecord, Repositories } from '../db/index.js';
 import { handoffInputShape, type HandoffInput } from '../domain/schemas.js';
+import { handleReviewReady } from './review-ready.js';
 
 export interface HandoffResult {
   handoff: HandoffRecord;
   taskAutoCreated: boolean;
+  /** True when `ready_for_review` was set, so a review packet was also produced. */
+  reviewReady: boolean;
 }
 
 /**
@@ -47,7 +50,6 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
     nextSteps: input.next_steps ?? [],
   });
 
-  repos.tasks.updateStatus(input.task_id, 'handed_off');
   repos.events.record({
     taskId: input.task_id,
     tool: 'handoff',
@@ -55,7 +57,26 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
     detail: input.status,
   });
 
-  return { handoff, taskAutoCreated };
+  // Folding review_ready into handoff: when flagged, produce the review packet
+  // (and set status review_ready) via the shared review handler. Otherwise the
+  // task is simply handed off.
+  const reviewReady = input.ready_for_review === true;
+  if (reviewReady) {
+    handleReviewReady(repos, {
+      task_id: input.task_id,
+      plan_summary: input.what_changed,
+      tests_run: input.tests_run,
+      diff_size: input.diff_size,
+      guardrails_checked: input.guardrails_checked,
+      assumptions: input.assumptions,
+      open_questions: input.open_questions,
+      provenance: input.provenance,
+    });
+  } else {
+    repos.tasks.updateStatus(input.task_id, 'handed_off');
+  }
+
+  return { handoff, taskAutoCreated, reviewReady };
 }
 
 export function formatHandoffText(result: HandoffResult): string {
@@ -67,6 +88,9 @@ export function formatHandoffText(result: HandoffResult): string {
   lines.push(`Changed files: ${String(handoff.changedFiles.length)}`);
   if (handoff.needsReviewFrom.length > 0) {
     lines.push(`Needs review from: ${handoff.needsReviewFrom.join(', ')}`);
+  }
+  if (result.reviewReady) {
+    lines.push('Marked review-ready; REVIEW_PACKET.md regenerated.');
   }
   return lines.join('\n');
 }
@@ -82,7 +106,8 @@ export function registerHandoff(
       title: 'Hand off work',
       description:
         'Record a concise handoff when an agent finishes or is blocked: what changed, ' +
-        'tests run, assumptions, decisions, and guardrails checked. Call this before finishing.',
+        'tests run, assumptions, decisions, and guardrails checked. Call this before finishing. ' +
+        'Set ready_for_review before a PR to also produce a review packet.',
       inputSchema: handoffInputShape,
     },
     (args) => {
@@ -94,6 +119,7 @@ export function registerHandoff(
           task_id: result.handoff.taskId,
           handoff_id: result.handoff.id,
           task_auto_created: result.taskAutoCreated,
+          review_ready: result.reviewReady,
         },
       };
     },
