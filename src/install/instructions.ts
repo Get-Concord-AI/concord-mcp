@@ -19,7 +19,9 @@ Concord regenerates human-readable \`HANDOFF.md\` and \`REVIEW_PACKET.md\` in
 
 Enforcement note: on clients with hooks/command registration this can be
 enforced; elsewhere it is instruction-based and may be skipped. \`concord doctor\`
-shows per-task adoption either way.`;
+shows per-task adoption either way. For edit-time enforcement, wire a PreToolUse
+(or git pre-commit) hook to \`concord check <files> --task <your-task-id>\`; it
+exits non-zero when your edits collide with another agent's active claim.`;
 
 /** MDC frontmatter used when creating a fresh Cursor rules file. */
 export const CURSOR_MDC_HEADER = `---
