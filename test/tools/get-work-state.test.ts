@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../../src/db/connection.js';
@@ -75,6 +76,34 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
 
       const read = await client.readResource({ uri: WORK_STATE_URI });
       expect(JSON.stringify(read)).toContain('TASK-1');
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it('pushes a resources/updated notification to subscribers when work-state changes', async () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    const server = createServer(repos);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+
+    try {
+      const updated: string[] = [];
+      const received = new Promise<void>((resolve) => {
+        client.setNotificationHandler(ResourceUpdatedNotificationSchema, (notification) => {
+          updated.push(notification.params.uri);
+          resolve();
+        });
+      });
+
+      await client.subscribeResource({ uri: WORK_STATE_URI });
+      // A write via claim_work should push an update to the subscriber.
+      await client.callTool({ name: 'claim_work', arguments: { task_id: 'T1', title: 'X' } });
+      await received;
+
+      expect(updated).toContain(WORK_STATE_URI);
     } finally {
       await client.close();
       await server.close();
