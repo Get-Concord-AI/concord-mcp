@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { Repositories } from './db/index.js';
 import { registerClaimWork } from './tools/claim-work.js';
+import { registerWorkState } from './tools/get-work-state.js';
 import { registerHandoff } from './tools/handoff.js';
 import { registerReviewReady } from './tools/review-ready.js';
 import { VERSION } from './version.js';
@@ -23,5 +24,6 @@ export function createServer(repos: Repositories, options: ServerOptions = {}): 
   registerClaimWork(server, repos, options.onToolWrite);
   registerHandoff(server, repos, options.onToolWrite);
   registerReviewReady(server, repos, options.onToolWrite);
+  registerWorkState(server, repos);
   return server;
 }
