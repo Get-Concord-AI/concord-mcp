@@ -8,7 +8,7 @@ describe('openDatabase', () => {
   it('applies all migrations (user_version at head) and creates tables', () => {
     const db = openDatabase(':memory:');
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(3);
+    expect(version).toBe(4);
 
     const raw: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     const names = new Set(
@@ -21,6 +21,7 @@ describe('openDatabase', () => {
     expect(names.has('handoffs')).toBe(true);
     expect(names.has('events')).toBe(true);
     expect(names.has('reviews')).toBe(true);
+    expect(names.has('task_updates')).toBe(true);
   });
 });
 

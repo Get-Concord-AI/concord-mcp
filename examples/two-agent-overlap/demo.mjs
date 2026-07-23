@@ -49,6 +49,23 @@ console.log(
   '\n',
 );
 
+console.log('$ claude-code records task context as it works');
+console.log(
+  await call('update_task', {
+    task_id: 'TASK-12',
+    kind: 'intent',
+    content: 'Keep checkout responsive when Stripe retries are needed',
+  }),
+);
+console.log(
+  await call('update_task', {
+    task_id: 'TASK-12',
+    kind: 'decision',
+    content: 'Use a queued retry so user-path calls never block checkout',
+  }),
+  '\n',
+);
+
 console.log('$ codex claims TASK-14 (also touches billing)');
 console.log(
   await call('claim_work', {
@@ -61,7 +78,10 @@ console.log(
   '\n',
 );
 
-console.log('$ claude-code hands off TASK-12');
+console.log('$ codex reads TASK-12 context before coordinating');
+console.log(await call('get_task_context', { task_id: 'TASK-12' }), '\n');
+
+console.log('$ claude-code hands off TASK-12 and marks it review-ready');
 console.log(
   await call('handoff', {
     task_id: 'TASK-12',
@@ -71,16 +91,7 @@ console.log(
     tests_run: ['pnpm test billing'],
     decisions: ['Use a queued retry so user-path calls never block checkout'],
     needs_review_from: ['payments-team'],
-  }),
-  '\n',
-);
-
-console.log('$ claude-code marks TASK-12 review-ready');
-console.log(
-  await call('review_ready', {
-    task_id: 'TASK-12',
-    plan_summary: 'Queue Stripe retries instead of blocking checkout',
-    tests_run: ['pnpm test billing'],
+    ready_for_review: true,
     diff_size: '+120 / -30',
     guardrails_checked: ['Stripe changes covered by an artificial payment test'],
     open_questions: ['Notify the account owner immediately or only after the final retry?'],

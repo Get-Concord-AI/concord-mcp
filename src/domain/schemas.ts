@@ -37,6 +37,34 @@ export const claimWorkInputShape = {
 export const claimWorkInputSchema = z.object(claimWorkInputShape);
 export type ClaimWorkInput = z.infer<typeof claimWorkInputSchema>;
 
+export const updateTaskInputShape = {
+  task_id: z.string().min(1).describe('Claimed task receiving this memory entry'),
+  kind: z
+    .enum([
+      'intent',
+      'progress',
+      'assumption',
+      'decision',
+      'question',
+      'answer',
+      'blocker',
+      'finding',
+    ])
+    .describe('The kind of task-scoped update'),
+  content: z.string().min(1).describe('Concise context another agent needs'),
+  agent: z.string().optional().describe('Agent recording the update; defaults to the claimant'),
+} as const;
+
+export const updateTaskInputSchema = z.object(updateTaskInputShape);
+export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;
+
+export const getTaskContextInputShape = {
+  task_id: z.string().min(1).describe('Task whose shared context should be read'),
+} as const;
+
+export const getTaskContextInputSchema = z.object(getTaskContextInputShape);
+export type GetTaskContextInput = z.infer<typeof getTaskContextInputSchema>;
+
 export const handoffInputShape = {
   task_id: z.string().min(1).describe('The task being handed off, e.g. TASK-12'),
   status: z.string().min(1).describe('Handoff status, e.g. done, blocked, in_progress'),

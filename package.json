@@ -1,7 +1,7 @@
 {
   "name": "@concord-ai/concord-mcp",
   "version": "0.2.0",
-  "description": "Shared work-state for coding agents: claim work, leave handoffs, and generate review packets before PRs, over MCP.",
+  "description": "Shared work-state and task memory for coding agents: coordinate work, preserve decisions, and hand off through MCP.",
   "keywords": [
     "mcp",
     "model-context-protocol",

@@ -12,7 +12,7 @@ export function runReviewPacket(cwd: string, taskId: string): string {
   }
   const review = ctx.repos.reviews.latestForTask(taskId);
   if (review === undefined) {
-    return `No review packet for ${taskId}. Ask the agent to call the review_ready tool.`;
+    return `No review packet for ${taskId}. Ask the agent to call handoff with ready_for_review.`;
   }
   return renderReviewPacketMarkdown(task, review, ctx.repos.handoffs.latestForTask(taskId));
 }
