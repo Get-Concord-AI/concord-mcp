@@ -15,8 +15,9 @@ Markdown handoff files are:
 
 Concord keeps the good parts and fixes those gaps:
 
-- **Structured** — agents record work through `claim_work`, `handoff`, and
-  `review_ready`, so the data is consistent and queryable.
+- **Structured** — agents record work through validated lifecycle tools,
+  including `claim_work`, `update_task`, and `handoff`, so the data is
+  consistent and queryable.
 - **Shared early** — `claim_work` flags overlaps between active tasks before
   either PR exists.
 - **Visible to humans** — Concord still produces `HANDOFF.md` and

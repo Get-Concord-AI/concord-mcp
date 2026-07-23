@@ -8,10 +8,12 @@
 
 **Shared work-state for coding agents.** Concord MCP gives Claude Code, Codex,
 Cursor, and other MCP-capable coding assistants a shared work log. Agents can
-claim work, leave handoffs, and generate review-ready packets before opening PRs.
+claim work, share task context, leave handoffs, and generate review-ready
+packets before opening PRs.
 
-> ⚠️ Early and under active development. The v0 surface is three MCP tools:
-> `claim_work`, `handoff`, and `review_ready`.
+> ⚠️ Early and under active development. The surface is five focused MCP tools:
+> `get_work_state`, `claim_work`, `update_task`, `get_task_context`, and
+> `handoff`.
 
 ## Why
 
@@ -40,13 +42,15 @@ setup:
 > Concord works through MCP tools plus the installed instructions on any
 > MCP-capable client.
 
-## The three tools
+## The five tools
 
-| Tool           | When                 | What it does                                                                     |
-| -------------- | -------------------- | -------------------------------------------------------------------------------- |
-| `claim_work`   | before editing       | records the task + expected files/modules; flags overlaps with other active work |
-| `handoff`      | when done or blocked | captures what changed, tests run, assumptions, decisions, guardrails             |
-| `review_ready` | before a PR          | records plan, tests, open questions, and provenance                              |
+| Tool               | When                     | What it does                                                                     |
+| ------------------ | ------------------------ | -------------------------------------------------------------------------------- |
+| `get_work_state`   | before choosing work     | shows active tasks, overlaps, review-ready work, and open questions              |
+| `claim_work`       | before editing           | records the task + expected files/modules; flags overlaps with other active work |
+| `update_task`      | while working            | appends typed intent, progress, decisions, questions, blockers, and findings     |
+| `get_task_context` | resuming or coordinating | returns the task, ordered updates, handoff, review evidence, and live overlaps   |
+| `handoff`          | done, blocked, or pre-PR | captures evidence; `ready_for_review` also produces the review packet            |
 
 ## What you get
 
@@ -83,14 +87,15 @@ concord doctor               # workspace checks + per-task tool adoption
 pnpm demo
 ```
 
-Runs the [two-agent overlap demo](./examples/two-agent-overlap/): two agents claim
-overlapping work (Concord flags it), then one hands off and marks the task
-review-ready — printing the generated artifacts.
+Runs the [two-agent overlap demo](./examples/two-agent-overlap/): two agents
+claim overlapping work, share and read task context, then one hands off and
+marks the task review-ready.
 
 ## What this is / is not
 
-Shared work-state and guardrails for the coding agents you already use. **Not** an
-orchestrator, code reviewer, memory vector DB, or autonomous coding agent.
+Shared work-state and task memory for coding agents using the same local
+checkout. **Not** an orchestrator, code reviewer, hosted sync service, memory
+vector DB, or autonomous coding agent.
 
 See also: [Why not just use markdown?](./docs/why-not-markdown.md)
 

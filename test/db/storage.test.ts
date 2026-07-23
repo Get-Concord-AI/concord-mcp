@@ -34,12 +34,13 @@ describe('migrations', () => {
     expect(names.has('tasks')).toBe(true);
     expect(names.has('handoffs')).toBe(true);
     expect(names.has('events')).toBe(true);
+    expect(names.has('task_updates')).toBe(true);
   });
 
   it('is idempotent when reopening (user_version already at head)', () => {
     const { db } = newRepos();
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(3);
+    expect(version).toBe(4);
   });
 });
 

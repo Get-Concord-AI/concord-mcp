@@ -74,4 +74,17 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE tasks ADD COLUMN parent_task_id TEXT;
   `,
+  // 004 — append-only, task-scoped memory shared between agent sessions.
+  `
+  CREATE TABLE task_updates (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id    TEXT NOT NULL REFERENCES tasks(task_id),
+    kind       TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    agent      TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE INDEX idx_task_updates_task_id ON task_updates(task_id);
+  `,
 ];

@@ -27,7 +27,7 @@ concord install
 ```
 
 This writes `.cursor/rules/concord.mdc` (with `alwaysApply: true`) so the agent
-knows when to call `claim_work`, `handoff`, and `review_ready`. It is idempotent.
+knows when to claim work, share task context, and hand off. It is idempotent.
 
 ## 4. Use it
 

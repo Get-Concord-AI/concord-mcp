@@ -32,14 +32,16 @@ claude mcp add concord -- concord-mcp
 concord install
 ```
 
-This writes a Concord block into `CLAUDE.md` telling the agent when to call
-`claim_work`, `handoff`, and `review_ready`. It preserves any existing content
-and is safe to re-run.
+This writes a Concord block into `CLAUDE.md` telling the agent when to claim
+work, share task context, and hand off. It preserves any existing content and is
+safe to re-run.
 
 ## 4. Use it
 
-Ask Claude to start a task. It should call `claim_work` before editing, then
-`handoff` and `review_ready` before opening a PR. Check progress with:
+Ask Claude to start a task. It should call `claim_work` before editing,
+`update_task` while working, and `get_task_context` when resuming or
+coordinating. Before a PR it calls `handoff` with `ready_for_review`. Check
+progress with:
 
 ```bash
 concord status
