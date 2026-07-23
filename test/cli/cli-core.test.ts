@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -25,6 +25,18 @@ describe('runInit', () => {
     expect(concordPath).toBe(join(dir, '.concord'));
     expect(existsSync(join(concordPath, 'concord.db'))).toBe(true);
     expect(existsSync(join(concordPath, 'WORK_STATE.json'))).toBe(true);
+    expect(readFileSync(join(dir, '.gitignore'), 'utf8')).toBe('.concord/\n');
+  });
+
+  it('preserves existing gitignore rules and adds the Concord entry once', () => {
+    const dir = repoDir();
+    const gitignorePath = join(dir, '.gitignore');
+    writeFileSync(gitignorePath, 'node_modules/');
+
+    runInit(dir);
+    runInit(dir);
+
+    expect(readFileSync(gitignorePath, 'utf8')).toBe('node_modules/\n.concord/\n');
   });
 });
 

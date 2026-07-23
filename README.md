@@ -50,12 +50,14 @@ setup:
 
 ## What you get
 
-SQLite is the local source of truth (gitignored). Concord renders human-readable
-artifacts you can commit so they show up in PRs:
+SQLite is the local source of truth. `concord init` adds `.concord/` to the
+repository's `.gitignore`, so the generated workspace stays local by default.
+Teams that want selected artifacts in PRs can remove that rule or force-add the
+human-readable files:
 
 ```text
 .concord/
-├── concord.db          local source of truth (gitignored)
+├── concord.db          local source of truth
 ├── HANDOFF.md          human-readable handoff
 ├── REVIEW_PACKET.md    review-ready evidence
 └── WORK_STATE.json     generated export (optional)
