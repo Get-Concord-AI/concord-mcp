@@ -67,6 +67,8 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
     try {
       const tools = await client.listTools();
       expect(tools.tools.map((t) => t.name)).toContain('get_work_state');
+      expect(tools.tools.map((t) => t.name)).toContain('update_task');
+      expect(tools.tools.map((t) => t.name)).toContain('get_task_context');
 
       const resources = await client.listResources();
       expect(resources.resources.map((r) => r.uri)).toContain(WORK_STATE_URI);

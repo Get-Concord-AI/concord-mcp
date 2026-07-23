@@ -9,6 +9,9 @@ This project uses Concord MCP. Use its tools so your work is visible before PRs:
 - **Before editing code**, call \`claim_work\` with the task id, title, and the
   files/modules you expect to touch. Concord warns about overlaps with other
   active work.
+- **While working**, call \`update_task\` for durable intent, progress,
+  assumptions, decisions, questions, answers, blockers, and findings. When
+  resuming or coordinating on a task, call \`get_task_context\` first.
 - **Before finishing or when blocked**, call \`handoff\` with what changed, tests
   run, assumptions, decisions, and guardrails you checked. **Before a PR**, set
   \`ready_for_review\` (with open questions and provenance) to also produce a

@@ -2,8 +2,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { Repositories } from './db/index.js';
 import { registerClaimWork } from './tools/claim-work.js';
+import { registerGetTaskContext } from './tools/get-task-context.js';
 import { registerWorkState } from './tools/get-work-state.js';
 import { registerHandoff } from './tools/handoff.js';
+import { registerUpdateTask } from './tools/update-task.js';
 import { VERSION } from './version.js';
 
 /** Concord's advertised MCP server version. */
@@ -27,7 +29,9 @@ export function createServer(repos: Repositories, options: ServerOptions = {}): 
     options.onToolWrite?.();
     notifyWorkStateChanged();
   };
+  registerGetTaskContext(server, repos);
   registerClaimWork(server, repos, onWrite);
+  registerUpdateTask(server, repos, onWrite);
   registerHandoff(server, repos, onWrite);
   return server;
 }

@@ -12,7 +12,7 @@ export type TaskStatus = (typeof taskStatusValues)[number];
 const taskStatusSchema = z.enum(taskStatusValues);
 
 /** Tools that can be recorded as events (used for adoption tracking). */
-export const toolNameValues = ['claim_work', 'handoff', 'review_ready'] as const;
+export const toolNameValues = ['claim_work', 'update_task', 'handoff', 'review_ready'] as const;
 export type ToolName = (typeof toolNameValues)[number];
 const toolNameSchema = z.enum(toolNameValues);
 
@@ -108,6 +108,51 @@ export function parseTaskRow(raw: unknown): TaskRecord {
     parentTaskId: row.parent_task_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+// --- task updates -----------------------------------------------------------
+
+export const taskUpdateKindValues = [
+  'intent',
+  'progress',
+  'assumption',
+  'decision',
+  'question',
+  'answer',
+  'blocker',
+  'finding',
+] as const;
+export type TaskUpdateKind = (typeof taskUpdateKindValues)[number];
+const taskUpdateKindSchema = z.enum(taskUpdateKindValues);
+
+export interface TaskUpdateRecord {
+  id: number;
+  taskId: string;
+  kind: TaskUpdateKind;
+  content: string;
+  agent: string | null;
+  createdAt: string;
+}
+
+const taskUpdateDbRowSchema = z.object({
+  id: z.number().int(),
+  task_id: z.string(),
+  kind: taskUpdateKindSchema,
+  content: z.string(),
+  agent: z.string().nullable(),
+  created_at: z.string(),
+});
+
+export function parseTaskUpdateRow(raw: unknown): TaskUpdateRecord {
+  const row = taskUpdateDbRowSchema.parse(raw);
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    kind: row.kind,
+    content: row.content,
+    agent: row.agent,
+    createdAt: row.created_at,
   };
 }
 
