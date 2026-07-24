@@ -94,6 +94,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
       ...scope,
       notes: input.notes ?? null,
       parentTaskId,
+      agentId: input.agent_id ?? null,
     });
   } else if (scopeAdded.length > 0) {
     task = repos.tasks.updateScope(input.task_id, scope) ?? existing;
