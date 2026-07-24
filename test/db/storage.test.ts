@@ -23,6 +23,19 @@ const baseTask = {
   parentTaskId: null,
 } as const;
 
+const baseAgent = {
+  agentId: 'claude-code:7p8v',
+  kind: 'claude-code',
+  owner: 'alex',
+  model: 'opus-4.8',
+  pid: 4242,
+  cwd: '/repo',
+  worktree: null,
+  branch: 'feat/x',
+  summary: 'building the todo frontend',
+  status: 'active',
+} as const;
+
 describe('migrations', () => {
   it('applies migrations and creates the core tables', () => {
     const { db } = newRepos();
@@ -35,12 +48,13 @@ describe('migrations', () => {
     expect(names.has('handoffs')).toBe(true);
     expect(names.has('events')).toBe(true);
     expect(names.has('task_updates')).toBe(true);
+    expect(names.has('agents')).toBe(true);
   });
 
   it('is idempotent when reopening (user_version already at head)', () => {
     const { db } = newRepos();
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(4);
+    expect(version).toBe(5);
   });
 });
 
@@ -176,5 +190,59 @@ describe('event repository', () => {
     expect(repos.events.list()).toHaveLength(3);
     const forTask = repos.events.listByTask('TASK-12');
     expect(forTask.map((e) => e.tool)).toEqual(['claim_work', 'handoff']);
+  });
+});
+
+describe('agent repository', () => {
+  let repos: Repositories;
+  beforeEach(() => {
+    repos = newRepos();
+  });
+
+  it('registers an agent and reads it back with fields intact', () => {
+    const created = repos.agents.upsert(baseAgent);
+    expect(created.agentId).toBe('claude-code:7p8v');
+    expect(created.kind).toBe('claude-code');
+    expect(created.pid).toBe(4242);
+    expect(created.worktree).toBeNull();
+    expect(created.status).toBe('active');
+    expect(created.firstSeen).toBe(created.lastSeen);
+
+    const fetched = repos.agents.get('claude-code:7p8v');
+    expect(fetched?.summary).toBe('building the todo frontend');
+  });
+
+  it('returns undefined for an unknown agent', () => {
+    expect(repos.agents.get('nope')).toBeUndefined();
+    expect(repos.agents.touch('nope')).toBeUndefined();
+  });
+
+  it('re-registration preserves first_seen but refreshes mutable fields', () => {
+    const first = repos.agents.upsert(baseAgent);
+    const updated = repos.agents.upsert({
+      ...baseAgent,
+      summary: 'now reviewing the PR',
+      status: 'waiting_review',
+    });
+    expect(updated.firstSeen).toBe(first.firstSeen);
+    expect(updated.summary).toBe('now reviewing the PR');
+    expect(updated.status).toBe('waiting_review');
+    expect(repos.agents.list()).toHaveLength(1);
+  });
+
+  it('touch bumps last_seen without changing first_seen', () => {
+    const first = repos.agents.upsert(baseAgent);
+    const touched = repos.agents.touch('claude-code:7p8v');
+    expect(touched?.firstSeen).toBe(first.firstSeen);
+    expect(Date.parse(touched?.lastSeen ?? '')).toBeGreaterThanOrEqual(Date.parse(first.lastSeen));
+  });
+
+  it('lists multiple registered agents', () => {
+    repos.agents.upsert(baseAgent);
+    repos.agents.upsert({ ...baseAgent, agentId: 'codex:9q2r', kind: 'codex' });
+    expect(repos.agents.list().map((a) => a.agentId)).toEqual([
+      'claude-code:7p8v',
+      'codex:9q2r',
+    ]);
   });
 });
