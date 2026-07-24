@@ -33,7 +33,10 @@ shows per-task adoption either way. For edit-time enforcement, wire a PreToolUse
 (or git pre-commit) hook to \`concord check <files> --task <your-task-id>\`; it
 exits non-zero when your edits collide with another agent's active claim. On
 Claude Code, \`concord install --claude-hooks\` installs this automatically — set
-\`CONCORD_TASK=<your task id>\` so the hook excludes your own claim.`;
+\`CONCORD_TASK=<your task id>\` so the hook excludes your own claim. It also
+installs a SessionStart hook that auto-registers your presence and tells you the
+\`agent_id\` to reuse, so you are visible in the roster even before your first
+tool call.`;
 
 /** MDC frontmatter used when creating a fresh Cursor rules file. */
 export const CURSOR_MDC_HEADER = `---
