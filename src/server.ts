@@ -5,6 +5,7 @@ import { registerClaimWork } from './tools/claim-work.js';
 import { registerGetTaskContext } from './tools/get-task-context.js';
 import { registerWorkState } from './tools/get-work-state.js';
 import { registerHandoff } from './tools/handoff.js';
+import { registerRegisterAgent } from './tools/register-agent.js';
 import { registerUpdateTask } from './tools/update-task.js';
 import { VERSION } from './version.js';
 
@@ -30,6 +31,7 @@ export function createServer(repos: Repositories, options: ServerOptions = {}): 
     notifyWorkStateChanged();
   };
   registerGetTaskContext(server, repos);
+  registerRegisterAgent(server, repos, onWrite);
   registerClaimWork(server, repos, onWrite);
   registerUpdateTask(server, repos, onWrite);
   registerHandoff(server, repos, onWrite);

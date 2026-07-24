@@ -56,6 +56,9 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
     status: 'success',
     detail: input.status,
   });
+  if (input.agent_id !== undefined) {
+    repos.agents.touch(input.agent_id);
+  }
 
   // Folding review_ready into handoff: when flagged, produce the review packet
   // (and set status review_ready) via the shared review handler. Otherwise the

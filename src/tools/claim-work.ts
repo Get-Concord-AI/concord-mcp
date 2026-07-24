@@ -108,6 +108,11 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     detail: overlaps.length > 0 ? `${String(overlaps.length)} overlap(s)` : null,
   });
 
+  // Working refreshes presence: a registered agent stays live just by claiming.
+  if (input.agent_id !== undefined) {
+    repos.agents.touch(input.agent_id);
+  }
+
   return {
     task,
     alreadyClaimed: existing !== undefined,
