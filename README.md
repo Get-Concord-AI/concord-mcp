@@ -60,7 +60,14 @@ gone away without handing off.
 
 ## What you get
 
-SQLite is the local source of truth. `concord init` adds `.concord/` to the
+SQLite is the local source of truth, kept in the `.concord/` at the **root of
+the repo** the work is happening in. The MCP server resolves that root from
+`CONCORD_REPO_ROOT` if set, then Claude Code's `CLAUDE_PROJECT_DIR` (which Claude
+Code sets automatically, even for a user-scoped server), then its working
+directory — so every agent in one repo shares one store. Set `CONCORD_REPO_ROOT`
+when running the server somewhere its working directory is not inside the repo.
+
+`concord init` adds `.concord/` to the
 repository's `.gitignore`, so the generated workspace stays local by default.
 Teams that want selected artifacts in PRs can remove that rule or force-add the
 human-readable files:
