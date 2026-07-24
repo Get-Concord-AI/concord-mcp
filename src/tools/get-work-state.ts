@@ -35,15 +35,17 @@ export function registerWorkState(server: McpServer, repos: Repositories): () =>
     {
       title: 'Get work state',
       description:
-        'Read the current shared work-state: active claims, overlaps (recomputed live across ' +
-        'all active tasks), and review-ready tasks. Read-only — call this before claiming to ' +
-        'see what other agents are already working on.',
+        'Read the current shared work-state: who is present (the agent roster with liveness), ' +
+        'active claims, overlaps (recomputed live across all active tasks), and review-ready ' +
+        'tasks. Read-only — call this before claiming to see who else is here and what they are ' +
+        'already working on.',
     },
     () => {
       const view = handleGetWorkState(repos);
       return {
         content: [{ type: 'text', text: renderStatusText(view) }],
         structuredContent: {
+          presence: view.presence,
           active: view.active,
           overlaps: view.overlaps,
           review_ready: view.reviewReady,

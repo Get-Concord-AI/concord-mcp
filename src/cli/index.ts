@@ -13,6 +13,7 @@ import { registerReviewPacketCommand } from './commands/review-packet.js';
 import { registerStatus } from './commands/status.js';
 import { registerTasks } from './commands/tasks.js';
 import { registerWatchCommand } from './commands/watch.js';
+import { registerWhoCommand } from './commands/who.js';
 
 const program = new Command();
 program.name('concord').description('Shared work-state for coding agents').version(VERSION);
@@ -20,6 +21,7 @@ program.name('concord').description('Shared work-state for coding agents').versi
 registerInit(program);
 registerInstallCommand(program);
 registerStatus(program);
+registerWhoCommand(program);
 registerTasks(program);
 registerCheckCommand(program);
 registerWatchCommand(program);
