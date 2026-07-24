@@ -26,6 +26,28 @@ export function findRepoRoot(startDir: string): string {
   }
 }
 
+/**
+ * Resolve the repo root for the MCP server, whose own `process.cwd()` is
+ * unreliable: when the server is registered at user scope it is launched from
+ * wherever the client started, not the repo the agent is editing — so a claim
+ * lands in one store while reads hit an empty repo-local `.concord/`. Prefer, in
+ * order, an explicit `CONCORD_REPO_ROOT`, Claude Code's `CLAUDE_PROJECT_DIR`
+ * (set in the server's env to the project root regardless of scope), then the
+ * cwd. Each candidate is normalized through `findRepoRoot`, so the store always
+ * lands at the `.concord/` in the root of the repo.
+ */
+export function resolveRepoRoot(cwd: string, env: NodeJS.ProcessEnv): string {
+  const override = env['CONCORD_REPO_ROOT'];
+  if (override !== undefined && override.trim() !== '') {
+    return findRepoRoot(override);
+  }
+  const projectDir = env['CLAUDE_PROJECT_DIR'];
+  if (projectDir !== undefined && projectDir.trim() !== '') {
+    return findRepoRoot(projectDir);
+  }
+  return findRepoRoot(cwd);
+}
+
 /** Absolute path to the `.concord/` directory for a given repo root. */
 export function concordDir(repoRoot: string): string {
   return join(repoRoot, CONCORD_DIR);

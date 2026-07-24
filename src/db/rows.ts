@@ -68,6 +68,10 @@ export interface TaskRecord {
   status: TaskStatus;
   /** The parent task this is a subtask of, or null for a top-level task. */
   parentTaskId: string | null;
+  /** The agent instance (register_agent identity) that claimed this, or null.
+   * Distinct from `agent` (the kind string): used to check the claimant's
+   * liveness for stale-claim detection. */
+  agentId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -86,6 +90,7 @@ const taskDbRowSchema = z.object({
   notes: z.string().nullable(),
   status: taskStatusSchema,
   parent_task_id: z.string().nullable(),
+  agent_id: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -106,6 +111,7 @@ export function parseTaskRow(raw: unknown): TaskRecord {
     notes: row.notes,
     status: row.status,
     parentTaskId: row.parent_task_id,
+    agentId: row.agent_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -282,5 +288,63 @@ export function parseEventRow(raw: unknown): EventRecord {
     status: row.status,
     detail: row.detail,
     createdAt: row.created_at,
+  };
+}
+
+// --- agents ----------------------------------------------------------------
+
+/** Status an agent reports about its own work. Liveness (live/idle/away) is
+ * derived separately from `last_seen` in `domain/presence.ts`. */
+export const agentStatusValues = ['active', 'blocked', 'waiting_review', 'done'] as const;
+export type AgentStatus = (typeof agentStatusValues)[number];
+const agentStatusSchema = z.enum(agentStatusValues);
+
+/** A registered agent instance. `agentId` is a distinct per-session identity
+ * (e.g. `claude-code:7p8v`), unlike the `agent` *kind* string on a task. */
+export interface AgentRecord {
+  agentId: string;
+  kind: string;
+  owner: string | null;
+  model: string | null;
+  pid: number | null;
+  cwd: string | null;
+  worktree: string | null;
+  branch: string | null;
+  summary: string | null;
+  status: AgentStatus;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+const agentDbRowSchema = z.object({
+  agent_id: z.string(),
+  kind: z.string(),
+  owner: z.string().nullable(),
+  model: z.string().nullable(),
+  pid: z.number().int().nullable(),
+  cwd: z.string().nullable(),
+  worktree: z.string().nullable(),
+  branch: z.string().nullable(),
+  summary: z.string().nullable(),
+  status: agentStatusSchema,
+  first_seen: z.string(),
+  last_seen: z.string(),
+});
+
+export function parseAgentRow(raw: unknown): AgentRecord {
+  const row = agentDbRowSchema.parse(raw);
+  return {
+    agentId: row.agent_id,
+    kind: row.kind,
+    owner: row.owner,
+    model: row.model,
+    pid: row.pid,
+    cwd: row.cwd,
+    worktree: row.worktree,
+    branch: row.branch,
+    summary: row.summary,
+    status: row.status,
+    firstSeen: row.first_seen,
+    lastSeen: row.last_seen,
   };
 }

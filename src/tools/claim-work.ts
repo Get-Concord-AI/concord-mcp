@@ -94,6 +94,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
       ...scope,
       notes: input.notes ?? null,
       parentTaskId,
+      agentId: input.agent_id ?? null,
     });
   } else if (scopeAdded.length > 0) {
     task = repos.tasks.updateScope(input.task_id, scope) ?? existing;
@@ -107,6 +108,11 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     status: 'success',
     detail: overlaps.length > 0 ? `${String(overlaps.length)} overlap(s)` : null,
   });
+
+  // Working refreshes presence: a registered agent stays live just by claiming.
+  if (input.agent_id !== undefined) {
+    repos.agents.touch(input.agent_id);
+  }
 
   return {
     task,

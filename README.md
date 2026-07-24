@@ -8,12 +8,12 @@
 
 **Shared work-state for coding agents.** Concord MCP gives Claude Code, Codex,
 Cursor, and other MCP-capable coding assistants a shared work log. Agents can
-claim work, share task context, leave handoffs, and generate review-ready
-packets before opening PRs.
+register their presence, claim work, share task context, leave handoffs, and
+generate review-ready packets before opening PRs.
 
-> ⚠️ Early and under active development. The surface is five focused MCP tools:
-> `get_work_state`, `claim_work`, `update_task`, `get_task_context`, and
-> `handoff`.
+> ⚠️ Early and under active development. The surface is six focused MCP tools:
+> `register_agent`, `get_work_state`, `claim_work`, `update_task`,
+> `get_task_context`, and `handoff`.
 
 ## Why
 
@@ -42,19 +42,32 @@ setup:
 > Concord works through MCP tools plus the installed instructions on any
 > MCP-capable client.
 
-## The five tools
+## The six tools
 
-| Tool               | When                     | What it does                                                                     |
-| ------------------ | ------------------------ | -------------------------------------------------------------------------------- |
-| `get_work_state`   | before choosing work     | shows active tasks, overlaps, review-ready work, and open questions              |
-| `claim_work`       | before editing           | records the task + expected files/modules; flags overlaps with other active work |
-| `update_task`      | while working            | appends typed intent, progress, decisions, questions, blockers, and findings     |
-| `get_task_context` | resuming or coordinating | returns the task, ordered updates, handoff, review evidence, and live overlaps   |
-| `handoff`          | done, blocked, or pre-PR | captures evidence; `ready_for_review` also produces the review packet            |
+| Tool               | When                     | What it does                                                                      |
+| ------------------ | ------------------------ | --------------------------------------------------------------------------------- |
+| `register_agent`   | at session start         | registers this instance's identity + summary + status; returns the live roster    |
+| `get_work_state`   | before choosing work     | shows the agent roster, active tasks, overlaps, stale claims, and open questions   |
+| `claim_work`       | before editing           | records the task + expected files/modules; flags overlaps with other active work  |
+| `update_task`      | while working            | appends typed intent, progress, decisions, questions, blockers, and findings      |
+| `get_task_context` | resuming or coordinating | returns the task, ordered updates, handoff, review evidence, and live overlaps    |
+| `handoff`          | done, blocked, or pre-PR | captures evidence; `ready_for_review` also produces the review packet             |
+
+Every write tool accepts your `register_agent` `agent_id`, which keeps your
+presence live just by working. `get_work_state` shows **who is here** (with
+liveness), and flags **stale claims** — an active claim whose owning agent has
+gone away without handing off.
 
 ## What you get
 
-SQLite is the local source of truth. `concord init` adds `.concord/` to the
+SQLite is the local source of truth, kept in the `.concord/` at the **root of
+the repo** the work is happening in. The MCP server resolves that root from
+`CONCORD_REPO_ROOT` if set, then Claude Code's `CLAUDE_PROJECT_DIR` (which Claude
+Code sets automatically, even for a user-scoped server), then its working
+directory — so every agent in one repo shares one store. Set `CONCORD_REPO_ROOT`
+when running the server somewhere its working directory is not inside the repo.
+
+`concord init` adds `.concord/` to the
 repository's `.gitignore`, so the generated workspace stays local by default.
 Teams that want selected artifacts in PRs can remove that rule or force-add the
 human-readable files:
@@ -73,7 +86,8 @@ Agents use the MCP tools; humans use the CLI.
 
 ```bash
 concord init                 # create the .concord/ workspace
-concord status               # active work, overlaps, review-ready, open questions
+concord status               # roster, active work, overlaps, stale claims, review-ready
+concord who                  # which agents are present and what they are working on
 concord tasks                # list all tracked tasks
 concord handoff <task-id>    # print the latest handoff
 concord review-packet <id>   # print the latest review packet

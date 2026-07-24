@@ -2,12 +2,12 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import { writeArtifacts } from './artifacts/index.js';
-import { concordDir, databasePath, findRepoRoot } from './config/paths.js';
+import { concordDir, databasePath, resolveRepoRoot } from './config/paths.js';
 import { openRepositories } from './db/index.js';
 import { createServer } from './server.js';
 
 async function main(): Promise<void> {
-  const repoRoot = findRepoRoot(process.cwd());
+  const repoRoot = resolveRepoRoot(process.cwd(), process.env);
   const repos = openRepositories(databasePath(repoRoot));
   const artifactsDir = concordDir(repoRoot);
   const server = createServer(repos, {

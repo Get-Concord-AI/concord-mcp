@@ -2,6 +2,12 @@ import { dirname } from 'node:path';
 
 import type { Repositories, TaskRecord } from '../db/index.js';
 import { detectOverlaps } from '../domain/overlap.js';
+import {
+  buildRoster,
+  detectStaleClaims,
+  type PresenceEntry,
+  type StaleClaim,
+} from '../domain/presence.js';
 
 interface ActiveEntry {
   taskId: string;
@@ -38,6 +44,11 @@ export interface StatusView {
   overlaps: OverlapPair[];
   reviewReady: ReviewEntry[];
   openQuestions: OpenQuestionEntry[];
+  /** Registered agents with derived liveness — "who is here and what they are
+   * doing", most-live first. */
+  presence: PresenceEntry[];
+  /** Active claims whose owning agent has gone away or never registered. */
+  staleClaims: StaleClaim[];
 }
 
 function touchesOf(task: TaskRecord): string {
@@ -46,7 +57,7 @@ function touchesOf(task: TaskRecord): string {
   return unique.length > 0 ? unique.join(', ') : '-';
 }
 
-export function buildStatus(repos: Repositories): StatusView {
+export function buildStatus(repos: Repositories, now: number = Date.now()): StatusView {
   const tasks = repos.tasks.list();
   const active = tasks.filter((task) => task.status === 'active');
 
@@ -101,11 +112,28 @@ export function buildStatus(repos: Repositories): StatusView {
     overlaps,
     reviewReady,
     openQuestions,
+    presence: buildRoster(repos.agents.list(), now),
+    staleClaims: detectStaleClaims(tasks, repos.agents.list(), now),
   };
 }
 
+/** Render the presence roster as indented lines, or a placeholder when empty. */
+export function renderRosterLines(roster: readonly PresenceEntry[]): string[] {
+  if (roster.length === 0) {
+    return ['  none'];
+  }
+  return roster.map((entry) => {
+    const state = `${entry.liveness}/${entry.status}`;
+    const doing = entry.summary ?? '-';
+    return `  ${entry.agentId.padEnd(18)} ${state.padEnd(20)} ${doing}  (${String(entry.ageSeconds)}s ago)`;
+  });
+}
+
 export function renderStatusText(view: StatusView): string {
-  const lines = ['Concord workspace', '', 'Active work'];
+  const lines = ['Concord workspace', '', "Who's here"];
+  lines.push(...renderRosterLines(view.presence));
+
+  lines.push('', 'Active work');
   if (view.active.length === 0) {
     lines.push('  none');
   } else {
@@ -123,6 +151,19 @@ export function renderStatusText(view: StatusView): string {
   } else {
     for (const overlap of view.overlaps) {
       lines.push(`  ${overlap.a} <-> ${overlap.b}: ${overlap.reasons.join('; ')}`);
+    }
+  }
+
+  lines.push('', 'Stale claims');
+  if (view.staleClaims.length === 0) {
+    lines.push('  none');
+  } else {
+    for (const claim of view.staleClaims) {
+      const detail =
+        claim.reason === 'agent-unregistered'
+          ? 'agent never registered'
+          : `agent away ${String(claim.ageSeconds ?? 0)}s`;
+      lines.push(`  ${claim.taskId.padEnd(10)} ${claim.agentId} (${detail})`);
     }
   }
 
