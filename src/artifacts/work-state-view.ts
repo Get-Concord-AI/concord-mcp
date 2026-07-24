@@ -2,7 +2,12 @@ import { dirname } from 'node:path';
 
 import type { Repositories, TaskRecord } from '../db/index.js';
 import { detectOverlaps } from '../domain/overlap.js';
-import { buildRoster, type PresenceEntry } from '../domain/presence.js';
+import {
+  buildRoster,
+  detectStaleClaims,
+  type PresenceEntry,
+  type StaleClaim,
+} from '../domain/presence.js';
 
 interface ActiveEntry {
   taskId: string;
@@ -42,6 +47,8 @@ export interface StatusView {
   /** Registered agents with derived liveness — "who is here and what they are
    * doing", most-live first. */
   presence: PresenceEntry[];
+  /** Active claims whose owning agent has gone away or never registered. */
+  staleClaims: StaleClaim[];
 }
 
 function touchesOf(task: TaskRecord): string {
@@ -106,6 +113,7 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
     reviewReady,
     openQuestions,
     presence: buildRoster(repos.agents.list(), now),
+    staleClaims: detectStaleClaims(tasks, repos.agents.list(), now),
   };
 }
 
@@ -143,6 +151,19 @@ export function renderStatusText(view: StatusView): string {
   } else {
     for (const overlap of view.overlaps) {
       lines.push(`  ${overlap.a} <-> ${overlap.b}: ${overlap.reasons.join('; ')}`);
+    }
+  }
+
+  lines.push('', 'Stale claims');
+  if (view.staleClaims.length === 0) {
+    lines.push('  none');
+  } else {
+    for (const claim of view.staleClaims) {
+      const detail =
+        claim.reason === 'agent-unregistered'
+          ? 'agent never registered'
+          : `agent away ${String(claim.ageSeconds ?? 0)}s`;
+      lines.push(`  ${claim.taskId.padEnd(10)} ${claim.agentId} (${detail})`);
     }
   }
 

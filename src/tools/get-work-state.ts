@@ -48,6 +48,7 @@ export function registerWorkState(server: McpServer, repos: Repositories): () =>
           presence: view.presence,
           active: view.active,
           overlaps: view.overlaps,
+          stale_claims: view.staleClaims,
           review_ready: view.reviewReady,
           open_questions: view.openQuestions,
         },

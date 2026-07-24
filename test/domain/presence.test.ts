@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentRecord } from '../../src/db/index.js';
-import { buildRoster, deriveLiveness } from '../../src/domain/presence.js';
+import type { AgentRecord, TaskRecord } from '../../src/db/index.js';
+import { buildRoster, detectStaleClaims, deriveLiveness } from '../../src/domain/presence.js';
 
 const NOW = Date.parse('2026-07-24T12:00:00.000Z');
 
@@ -86,5 +86,68 @@ describe('buildRoster', () => {
 
   it('returns an empty roster when no agents are registered', () => {
     expect(buildRoster([], NOW)).toEqual([]);
+  });
+});
+
+function task(partial: Partial<TaskRecord> & { taskId: string }): TaskRecord {
+  return {
+    taskId: partial.taskId,
+    title: partial.title ?? partial.taskId,
+    owner: null,
+    agent: null,
+    branch: null,
+    worktree: null,
+    expectedFiles: [],
+    modules: [],
+    domains: [],
+    riskTags: [],
+    notes: null,
+    status: partial.status ?? 'active',
+    parentTaskId: null,
+    agentId: partial.agentId ?? null,
+    createdAt: '2026-07-24T00:00:00.000Z',
+    updatedAt: '2026-07-24T00:00:00.000Z',
+  };
+}
+
+describe('detectStaleClaims', () => {
+  it('flags an active claim whose owning agent is away', () => {
+    const stale = detectStaleClaims(
+      [task({ taskId: 'T-1', agentId: 'claude-code:7p8v' })],
+      [agent({ agentId: 'claude-code:7p8v', lastSeen: ago(60 * 60 * 1000) })],
+      NOW,
+    );
+    expect(stale).toHaveLength(1);
+    expect(stale[0]?.reason).toBe('agent-away');
+    expect(stale[0]?.taskId).toBe('T-1');
+    expect(stale[0]?.ageSeconds).toBe(3600);
+  });
+
+  it('flags a claim whose agent never registered', () => {
+    const stale = detectStaleClaims([task({ taskId: 'T-1', agentId: 'ghost:zzzz' })], [], NOW);
+    expect(stale).toHaveLength(1);
+    expect(stale[0]?.reason).toBe('agent-unregistered');
+    expect(stale[0]?.ageSeconds).toBeNull();
+  });
+
+  it('does not flag a claim whose agent is still live', () => {
+    const stale = detectStaleClaims(
+      [task({ taskId: 'T-1', agentId: 'claude-code:7p8v' })],
+      [agent({ agentId: 'claude-code:7p8v', lastSeen: ago(60 * 1000) })],
+      NOW,
+    );
+    expect(stale).toEqual([]);
+  });
+
+  it('ignores unattributed claims (no agent_id) and non-active tasks', () => {
+    const stale = detectStaleClaims(
+      [
+        task({ taskId: 'T-1', agentId: null }),
+        task({ taskId: 'T-2', agentId: 'ghost:zzzz', status: 'handed_off' }),
+      ],
+      [],
+      NOW,
+    );
+    expect(stale).toEqual([]);
   });
 });

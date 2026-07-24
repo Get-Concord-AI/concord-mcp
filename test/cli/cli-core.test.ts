@@ -167,6 +167,30 @@ describe('buildStatus / renderStatusText', () => {
   it("shows Who's here / none when no agent has registered", () => {
     expect(renderStatusText(buildStatus(repos))).toContain("Who's here\n  none");
   });
+
+  it('flags a stale claim once its owning agent has gone away', () => {
+    handleRegisterAgent(repos, { agent_id: 'claude-code:7p8v', kind: 'claude-code' });
+    handleClaimWork(repos, {
+      task_id: 'TASK-42',
+      title: 'Retry',
+      modules: ['billing'],
+      agent_id: 'claude-code:7p8v',
+    });
+
+    // Fresh: nothing stale yet.
+    expect(buildStatus(repos).staleClaims).toEqual([]);
+
+    // 31 minutes later the agent is past the away threshold.
+    const later = Date.now() + 31 * 60 * 1000;
+    const view = buildStatus(repos, later);
+    expect(view.staleClaims).toHaveLength(1);
+    expect(view.staleClaims[0]?.taskId).toBe('TASK-42');
+
+    const text = renderStatusText(view);
+    expect(text).toContain('Stale claims');
+    expect(text).toContain('TASK-42');
+    expect(text).toContain('claude-code:7p8v');
+  });
 });
 
 describe('runWho', () => {

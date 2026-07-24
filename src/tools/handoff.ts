@@ -33,6 +33,7 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
       riskTags: [],
       notes: null,
       parentTaskId: null,
+      agentId: input.agent_id ?? null,
     });
   }
 

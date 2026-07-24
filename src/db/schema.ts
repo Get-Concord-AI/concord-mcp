@@ -108,4 +108,10 @@ export const migrations: readonly string[] = [
 
   CREATE INDEX idx_agents_last_seen ON agents(last_seen);
   `,
+  // 006 — link a claim to the agent instance that made it, so stale claims
+  // (an active task whose owning agent has gone away) can be detected. A soft
+  // reference (no FK): the agent may register after, or not at all.
+  `
+  ALTER TABLE tasks ADD COLUMN agent_id TEXT;
+  `,
 ];
