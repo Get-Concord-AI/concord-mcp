@@ -11,6 +11,7 @@ import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleHandoff } from '../../src/tools/handoff.js';
+import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 import { handleReviewReady } from '../../src/tools/review-ready.js';
 
 describe('renderReviewPacketMarkdown', () => {
@@ -55,16 +56,23 @@ describe('writeArtifacts', () => {
 
   it('writes WORK_STATE.json and events.jsonl reflecting the DB', () => {
     handleClaimWork(repos, { task_id: 'TASK-12', title: 'Retry', modules: ['billing'] });
+    handleRegisterAgent(repos, {
+      agent_id: 'claude-code:7p8v',
+      kind: 'claude-code',
+      summary: 'building frontend',
+    });
     writeArtifacts(dir, repos, '2026-07-17T00:00:00.000Z');
 
     const workState = z
       .object({
         generated_at: z.string(),
+        presence: z.array(z.object({ agent_id: z.string(), liveness: z.string() })),
         tasks: z.array(z.object({ task_id: z.string(), status: z.string() })),
       })
       .parse(JSON.parse(readFileSync(join(dir, 'WORK_STATE.json'), 'utf8')));
     expect(workState.generated_at).toBe('2026-07-17T00:00:00.000Z');
     expect(workState.tasks[0]?.task_id).toBe('TASK-12');
+    expect(workState.presence[0]?.agent_id).toBe('claude-code:7p8v');
 
     const events = readFileSync(join(dir, 'events.jsonl'), 'utf8').trim().split('\n');
     expect(events).toHaveLength(1);

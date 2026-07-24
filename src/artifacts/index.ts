@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { HandoffRecord, Repositories, ReviewRecord, TaskRecord } from '../db/index.js';
+import { buildRoster } from '../domain/presence.js';
 import { renderEventsJsonl } from './events-jsonl.js';
 import { renderHandoffMarkdown } from './handoff-md.js';
 import { renderReviewPacketMarkdown } from './review-packet-md.js';
@@ -65,8 +66,12 @@ export function writeArtifacts(
 ): void {
   mkdirSync(concordDirPath, { recursive: true });
   const tasks = repos.tasks.list();
+  const roster = buildRoster(repos.agents.list(), Date.parse(generatedAt));
 
-  writeFileSync(join(concordDirPath, 'WORK_STATE.json'), renderWorkStateJson(tasks, generatedAt));
+  writeFileSync(
+    join(concordDirPath, 'WORK_STATE.json'),
+    renderWorkStateJson(tasks, roster, generatedAt),
+  );
   writeFileSync(join(concordDirPath, 'events.jsonl'), renderEventsJsonl(repos.events.list()));
 
   const handoff = latestHandoff(repos, tasks);

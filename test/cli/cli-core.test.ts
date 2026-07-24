@@ -7,9 +7,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { buildStatus, renderStatusText } from '../../src/artifacts/work-state-view.js';
-import { renderTasks } from '../../src/cli/commands/tasks.js';
 import { runInit } from '../../src/cli/commands/init.js';
+import { renderTasks } from '../../src/cli/commands/tasks.js';
+import { runWho } from '../../src/cli/commands/who.js';
+import { openContext } from '../../src/cli/context.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
+import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 import { handleReviewReady } from '../../src/tools/review-ready.js';
 
 function repoDir(): string {
@@ -143,5 +146,47 @@ describe('buildStatus / renderStatusText', () => {
     expect(view.reviewReady[0]?.openQuestionCount).toBe(1);
     expect(view.active).toHaveLength(0);
     expect(renderStatusText(view)).toContain('Sync or queued retries?');
+  });
+
+  it("includes the presence roster and renders a Who's here section", () => {
+    handleRegisterAgent(repos, {
+      agent_id: 'claude-code:7p8v',
+      kind: 'claude-code',
+      summary: 'building frontend',
+    });
+    const view = buildStatus(repos);
+    expect(view.presence).toHaveLength(1);
+    expect(view.presence[0]?.liveness).toBe('live');
+
+    const text = renderStatusText(view);
+    expect(text).toContain("Who's here");
+    expect(text).toContain('claude-code:7p8v');
+    expect(text).toContain('building frontend');
+  });
+
+  it("shows Who's here / none when no agent has registered", () => {
+    expect(renderStatusText(buildStatus(repos))).toContain("Who's here\n  none");
+  });
+});
+
+describe('runWho', () => {
+  it('lists agents registered in the workspace', () => {
+    const dir = repoDir();
+    runInit(dir);
+    handleRegisterAgent(openContext(dir).repos, {
+      agent_id: 'claude-code:7p8v',
+      kind: 'claude-code',
+      summary: 'building frontend',
+    });
+    const out = runWho(dir);
+    expect(out).toContain("Who's here");
+    expect(out).toContain('claude-code:7p8v');
+    expect(out).toContain('building frontend');
+  });
+
+  it('shows none when nobody has registered', () => {
+    const dir = repoDir();
+    runInit(dir);
+    expect(runWho(dir)).toContain('none');
   });
 });
