@@ -1,10 +1,49 @@
 import { z } from 'zod';
 
+import { agentStatusValues } from '../db/rows.js';
+
 /**
  * Zod input schemas for the MCP tools. Each tool exposes its schema as a raw
  * shape (the form `McpServer.registerTool` expects) plus an inferred input type.
  * Fields use snake_case to match the tool's public JSON contract.
  */
+
+/** Optional instance identity carried by every write so it refreshes presence.
+ * Distinct from the `agent` *kind* string — this identifies one running
+ * instance (e.g. `claude-code:7p8v`), obtained from `register_agent`. */
+const agentIdField = z
+  .string()
+  .optional()
+  .describe(
+    'Identity of the registered agent instance doing this work, e.g. claude-code:7p8v. ' +
+      "Supplying it refreshes the agent's presence (liveness) in the roster.",
+  );
+
+export const registerAgentInputShape = {
+  agent_id: z
+    .string()
+    .optional()
+    .describe(
+      'Stable per-session identity for this agent instance, e.g. claude-code:7p8v. Omit on the ' +
+        'first call to have one generated, then reuse the returned id on every later call so ' +
+        'presence stays attributed to the same instance.',
+    ),
+  kind: z.string().min(1).describe('Agent type / provider, e.g. claude-code, codex, cursor'),
+  owner: z.string().optional().describe('Human accountable for this agent'),
+  model: z.string().optional().describe('Model the agent is running, e.g. opus-4.8'),
+  summary: z.string().optional().describe('One line: what this agent is working on right now'),
+  status: z
+    .enum(agentStatusValues)
+    .optional()
+    .describe('Reported status: active, blocked, waiting_review, or done (default active)'),
+  branch: z.string().optional().describe('Git branch, if known'),
+  worktree: z.string().optional().describe('Git worktree path, if used'),
+  cwd: z.string().optional().describe('Working directory, for disambiguating instances'),
+  pid: z.number().int().optional().describe('Process id, for disambiguating instances'),
+} as const;
+
+export const registerAgentInputSchema = z.object(registerAgentInputShape);
+export type RegisterAgentInput = z.infer<typeof registerAgentInputSchema>;
 
 export const claimWorkInputShape = {
   task_id: z.string().min(1).describe('Stable identifier for the task, e.g. TASK-12'),
@@ -32,6 +71,7 @@ export const claimWorkInputShape = {
   domains: z.array(z.string()).optional().describe('Product domains touched, e.g. payments'),
   risk_tags: z.array(z.string()).optional().describe('Risk tags, e.g. payment-flow'),
   notes: z.string().optional().describe('Freeform notes'),
+  agent_id: agentIdField,
 } as const;
 
 export const claimWorkInputSchema = z.object(claimWorkInputShape);
@@ -53,6 +93,7 @@ export const updateTaskInputShape = {
     .describe('The kind of task-scoped update'),
   content: z.string().min(1).describe('Concise context another agent needs'),
   agent: z.string().optional().describe('Agent recording the update; defaults to the claimant'),
+  agent_id: agentIdField,
 } as const;
 
 export const updateTaskInputSchema = z.object(updateTaskInputShape);
@@ -93,6 +134,7 @@ export const handoffInputShape = {
     .array(z.object({ field: z.string(), source: z.string() }))
     .optional()
     .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
+  agent_id: agentIdField,
 } as const;
 
 export const handoffInputSchema = z.object(handoffInputShape);
