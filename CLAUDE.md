@@ -7,15 +7,18 @@ before making changes.
 ## What this project is
 
 `concord-mcp` is a local MCP server plus a `concord` CLI that gives coding agents
-shared work-state: agents **claim work**, share typed **task context**, leave
-**handoffs**, and generate **review packets** before opening PRs. SQLite is the
-source of truth; human-readable markdown artifacts are rendered from it for PR
-visibility.
+shared work-state: agents **register their presence**, **claim work**, share
+typed **task context**, leave **handoffs**, and generate **review packets**
+before opening PRs. SQLite is the source of truth; human-readable markdown
+artifacts are rendered from it for PR visibility.
 
-The surface is intentionally five MCP tools: `get_work_state`, `claim_work`,
-`update_task`, `get_task_context`, and `handoff`. Review packets are produced by
-`handoff` with `ready_for_review` set, not a separate tool. Do not add more tools
-without explicit product pull.
+The surface is intentionally six MCP tools: `register_agent`, `get_work_state`,
+`claim_work`, `update_task`, `get_task_context`, and `handoff`. Review packets
+are produced by `handoff` with `ready_for_review` set, not a separate tool.
+`register_agent` was added with explicit product pull for agent presence (who is
+here and what they are working on); liveness is derived from `last_seen` in
+`domain/presence.ts`, not stored. Do not add more tools without explicit product
+pull.
 
 ## Coding rules (non-negotiable)
 
