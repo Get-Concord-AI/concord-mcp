@@ -82,7 +82,10 @@ const sessionStartPayloadSchema = z
  * via upsert); falls back to a random suffix when no session id is provided.
  */
 export function sessionStartAgentId(sessionId: string | undefined): string {
-  const slug = (sessionId ?? '').replace(/[^0-9a-z]/gi, '').slice(0, 8).toLowerCase();
+  const slug = (sessionId ?? '')
+    .replace(/[^0-9a-z]/gi, '')
+    .slice(0, 8)
+    .toLowerCase();
   return `claude-code:${slug === '' ? randomBytes(4).toString('hex') : slug}`;
 }
 
@@ -133,7 +136,9 @@ export function handleSessionStart(repos: Repositories, rawJson: string): Sessio
   } else {
     lines.push('Who else is here:');
     for (const entry of others) {
-      lines.push(`  - ${entry.agentId} [${entry.liveness}/${entry.status}]: ${entry.summary ?? '-'}`);
+      lines.push(
+        `  - ${entry.agentId} [${entry.liveness}/${entry.status}]: ${entry.summary ?? '-'}`,
+      );
     }
   }
   return { agentId, message: lines.join('\n') };

@@ -24,11 +24,7 @@ const settingsSchema = z
 
 /** Append `entry` to the named hook event unless a hook running `command` is
  * already present. Returns the updated event array. */
-function withHook(
-  existing: readonly unknown[],
-  command: string,
-  entry: unknown,
-): unknown[] {
+function withHook(existing: readonly unknown[], command: string, entry: unknown): unknown[] {
   const present = existing.some((item) => JSON.stringify(item).includes(command));
   return present ? [...existing] : [...existing, entry];
 }
