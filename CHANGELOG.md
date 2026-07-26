@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-26
+
+### Added
+
+- Agent presence registry with the `register_agent` MCP tool, derived
+  live/idle/away states, `concord who`, and stale-claim detection.
+- `concord dashboard`, a live read-only TUI for agents, tasks, coordination
+  alerts, task memory, handoffs, review state, and recent activity.
+- A paced two-terminal demo that shows real MCP activity appearing in the
+  dashboard.
+
+### Changed
+
+- Claude Code sessions can auto-register their presence through the
+  `SessionStart` hook, and normal write-tool activity refreshes agent presence.
+- The MCP server resolves its shared store at the repository root so agents
+  started from different working directories converge on one workspace.
+
 ## [0.3.0] - 2026-07-23
 
 ### Added
@@ -47,7 +65,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.1.0...v0.1.1
