@@ -87,4 +87,25 @@ export const migrations: readonly string[] = [
 
   CREATE INDEX idx_task_updates_task_id ON task_updates(task_id);
   `,
+  // 005 — agent presence registry. Each running agent registers a distinct
+  // instance identity (agent_id) so concurrent agents are distinguishable and
+  // can see who else is active. Liveness is derived from last_seen, not stored.
+  `
+  CREATE TABLE agents (
+    agent_id   TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL,
+    owner      TEXT,
+    model      TEXT,
+    pid        INTEGER,
+    cwd        TEXT,
+    worktree   TEXT,
+    branch     TEXT,
+    summary    TEXT,
+    status     TEXT NOT NULL DEFAULT 'active',
+    first_seen TEXT NOT NULL,
+    last_seen  TEXT NOT NULL
+  );
+
+  CREATE INDEX idx_agents_last_seen ON agents(last_seen);
+  `,
 ];

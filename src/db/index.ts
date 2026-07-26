@@ -1,4 +1,5 @@
 import { openDatabase, type ConcordDatabase } from './connection.js';
+import { createAgentRepository, type AgentRepository } from './repositories/agents.js';
 import { createEventRepository, type EventRepository } from './repositories/events.js';
 import { createHandoffRepository, type HandoffRepository } from './repositories/handoffs.js';
 import { createReviewRepository, type ReviewRepository } from './repositories/reviews.js';
@@ -15,6 +16,7 @@ export type { NewHandoff, HandoffRepository } from './repositories/handoffs.js';
 export type { NewReview, ReviewRepository } from './repositories/reviews.js';
 export type { NewTaskUpdate, TaskUpdateRepository } from './repositories/task-updates.js';
 export type { NewEvent, EventRepository } from './repositories/events.js';
+export type { NewAgent, AgentRepository } from './repositories/agents.js';
 export type {
   TaskRecord,
   TaskStatus,
@@ -26,6 +28,8 @@ export type {
   ToolName,
   TaskUpdateKind,
   TaskUpdateRecord,
+  AgentRecord,
+  AgentStatus,
 } from './rows.js';
 
 /** The full set of Concord repositories bound to one database. */
@@ -36,6 +40,7 @@ export interface Repositories {
   reviews: ReviewRepository;
   taskUpdates: TaskUpdateRepository;
   events: EventRepository;
+  agents: AgentRepository;
 }
 
 /** Bind all repositories to an already-open database. */
@@ -47,6 +52,7 @@ export function createRepositories(db: ConcordDatabase): Repositories {
     reviews: createReviewRepository(db),
     taskUpdates: createTaskUpdateRepository(db),
     events: createEventRepository(db),
+    agents: createAgentRepository(db),
   };
 }
 
