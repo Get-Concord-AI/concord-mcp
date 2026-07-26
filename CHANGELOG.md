@@ -11,6 +11,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Interactive CLI commands now show a cached, best-effort notice when a newer
   stable Concord release is available on npm.
 
+### Fixed
+
+- `concord dashboard` now uses a bounded full-screen viewport and alternate
+  screen buffer, preventing refresh frames from accumulating in terminal
+  scrollback.
+
 ## [0.4.0] - 2026-07-26
 
 ### Added

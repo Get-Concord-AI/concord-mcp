@@ -7,6 +7,8 @@ import { openContext } from '../context.js';
 
 export const DASHBOARD_TTY_ERROR =
   'concord dashboard needs an interactive terminal. Use `concord status` for plain-text output.';
+export const ENTER_ALTERNATE_SCREEN = '\u001B[?1049h\u001B[2J\u001B[H';
+export const EXIT_ALTERNATE_SCREEN = '\u001B[?1049l';
 
 export async function runDashboard(
   cwd: string,
@@ -21,6 +23,7 @@ export async function runDashboard(
   const loadSnapshot = (): ReturnType<typeof buildDashboardSnapshot> =>
     buildDashboardSnapshot(context.repoRoot, context.repos);
 
+  stdout.write(ENTER_ALTERNATE_SCREEN);
   try {
     const app = render(
       <DashboardApp initialSnapshot={loadSnapshot()} loadSnapshot={loadSnapshot} />,
@@ -28,12 +31,13 @@ export async function runDashboard(
         stdin,
         stdout,
         exitOnCtrlC: true,
-        incrementalRendering: true,
+        incrementalRendering: false,
       },
     );
     await app.waitUntilExit();
   } finally {
     context.repos.db.close();
+    stdout.write(EXIT_ALTERNATE_SCREEN);
   }
 }
 

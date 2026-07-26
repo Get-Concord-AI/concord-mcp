@@ -85,6 +85,7 @@ describe('dashboard snapshot', () => {
         loadSnapshot={() => snapshot}
         refreshMs={60_000}
         width={120}
+        height={30}
       />,
     );
     const frame = view.lastFrame();
@@ -109,11 +110,12 @@ describe('dashboard snapshot', () => {
         loadSnapshot={() => snapshot}
         refreshMs={60_000}
         width={60}
+        height={24}
       />,
     );
     const frame = view.lastFrame();
 
-    expect(frame).toContain('Compact view');
+    expect(frame).toContain('widen for agent context');
     expect(frame).toContain('Tasks');
     expect(frame).toContain('Alerts');
     expect(frame).not.toContain('Task context');
@@ -128,6 +130,7 @@ describe('dashboard snapshot', () => {
         loadSnapshot={() => snapshot}
         refreshMs={60_000}
         width={120}
+        height={30}
       />,
     );
 
@@ -151,6 +154,7 @@ describe('dashboard snapshot', () => {
         loadSnapshot={() => buildDashboardSnapshot('/work/concord-demo', repos)}
         refreshMs={60_000}
         width={120}
+        height={30}
       />,
     );
 
@@ -158,5 +162,36 @@ describe('dashboard snapshot', () => {
     expect(view.lastFrame()).not.toContain('TASK-99');
     view.stdin.write('r');
     expect(view.lastFrame()).toContain('TASK-99');
+  });
+
+  it('keeps a fixed viewport as the roster grows', () => {
+    seedDashboard();
+    const initial = buildDashboardSnapshot('/work/concord-demo', repos);
+    const view = render(
+      <DashboardApp
+        initialSnapshot={initial}
+        loadSnapshot={() => buildDashboardSnapshot('/work/concord-demo', repos)}
+        refreshMs={60_000}
+        width={120}
+        height={24}
+      />,
+    );
+    const initialFrame = view.lastFrame();
+    if (initialFrame === undefined) {
+      throw new Error('Dashboard did not render an initial frame');
+    }
+    const initialHeight = initialFrame.split('\n').length;
+
+    for (let index = 0; index < 20; index += 1) {
+      handleRegisterAgent(repos, {
+        agent_id: `codex:${String(index)}`,
+        kind: 'codex',
+        summary: 'Present in the repository',
+      });
+    }
+    view.stdin.write('r');
+
+    expect(view.lastFrame()?.split('\n')).toHaveLength(initialHeight);
+    expect(initialHeight).toBe(24);
   });
 });

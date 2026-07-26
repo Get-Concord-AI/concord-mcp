@@ -12,20 +12,24 @@ export interface DashboardAppProps {
   loadSnapshot: () => DashboardSnapshot;
   refreshMs?: number;
   width?: number;
+  height?: number;
 }
 
 interface PanelProps {
   title: string;
   focused: boolean;
   children: ReactNode;
+  height?: number | string;
 }
 
-function Panel({ title, focused, children }: PanelProps): ReactNode {
+function Panel({ title, focused, children, height }: PanelProps): ReactNode {
   return (
     <Box
       borderStyle="round"
       borderColor={focused ? 'cyan' : 'gray'}
       flexDirection="column"
+      height={height}
+      overflow="hidden"
       paddingX={1}
     >
       <Text bold color={focused ? 'cyan' : 'gray'}>
@@ -244,6 +248,7 @@ function DashboardBody({
   tasks,
   selectedIndex,
   filter,
+  height,
 }: {
   snapshot: DashboardSnapshot;
   layout: Layout;
@@ -251,74 +256,96 @@ function DashboardBody({
   tasks: DashboardTask[];
   selectedIndex: number;
   filter: string;
+  height: number;
 }): ReactNode {
   const selected = tasks[selectedIndex];
   if (layout === 'compact') {
     return (
-      <>
-        <Panel title="Tasks" focused={pane === 'tasks'}>
+      <Box flexDirection="column" height={height} overflow="hidden">
+        <Panel title="Tasks" focused={pane === 'tasks'} height="35%">
           <Tasks tasks={tasks} selectedIndex={selectedIndex} />
         </Panel>
-        <Panel title="Alerts" focused={pane === 'alerts'}>
+        <Panel title="Alerts" focused={pane === 'alerts'} height="25%">
           <Alerts snapshot={snapshot} />
         </Panel>
-        <Panel title="Timeline" focused={pane === 'timeline'}>
+        <Panel title="Timeline" focused={pane === 'timeline'} height="40%">
           <Timeline snapshot={snapshot} filter={filter} />
         </Panel>
-        <Text dimColor>
-          Compact view — widen terminal to 70+ columns for agent and task context.
-        </Text>
-      </>
+      </Box>
     );
   }
 
   const overview = (
-    <>
-      <Panel title="Agents" focused={pane === 'agents'}>
+    <Box flexDirection="column" height="100%" overflow="hidden">
+      <Panel title="Agents" focused={pane === 'agents'} height="65%">
         <Agents snapshot={snapshot} />
       </Panel>
-      <Panel title="Alerts" focused={pane === 'alerts'}>
+      <Panel title="Alerts" focused={pane === 'alerts'} height="35%">
         <Alerts snapshot={snapshot} />
       </Panel>
-    </>
+    </Box>
   );
   const work = (
-    <>
-      <Panel title="Tasks" focused={pane === 'tasks'}>
+    <Box flexDirection="column" height="100%" overflow="hidden">
+      <Panel title="Tasks" focused={pane === 'tasks'} height="40%">
         <Tasks tasks={tasks} selectedIndex={selectedIndex} />
       </Panel>
-      <Panel title="Task context" focused={pane === 'context'}>
+      <Panel title="Task context" focused={pane === 'context'} height="60%">
         <Context item={selected} />
       </Panel>
-    </>
+    </Box>
   );
 
+  if (layout === 'stacked') {
+    return (
+      <Box flexDirection="column" height={height} overflow="hidden">
+        <Panel title="Agents" focused={pane === 'agents'} height="18%">
+          <Agents snapshot={snapshot} />
+        </Panel>
+        <Panel title="Tasks" focused={pane === 'tasks'} height="20%">
+          <Tasks tasks={tasks} selectedIndex={selectedIndex} />
+        </Panel>
+        <Panel title="Alerts" focused={pane === 'alerts'} height="18%">
+          <Alerts snapshot={snapshot} />
+        </Panel>
+        <Panel title="Task context" focused={pane === 'context'} height="24%">
+          <Context item={selected} />
+        </Panel>
+        <Panel title="Timeline" focused={pane === 'timeline'} height="20%">
+          <Timeline snapshot={snapshot} filter={filter} />
+        </Panel>
+      </Box>
+    );
+  }
+
   return (
-    <>
-      <Box flexDirection={layout === 'wide' ? 'row' : 'column'}>
-        <Box flexDirection="column" width={layout === 'wide' ? '35%' : '100%'}>
+    <Box flexDirection="column" height={height} overflow="hidden">
+      <Box flexDirection="row" height="68%" overflow="hidden">
+        <Box flexDirection="column" width="35%" overflow="hidden">
           {overview}
         </Box>
-        <Box flexDirection="column" width={layout === 'wide' ? '65%' : '100%'}>
+        <Box flexDirection="column" width="65%" overflow="hidden">
           {work}
         </Box>
       </Box>
-      <Panel title="Timeline" focused={pane === 'timeline'}>
+      <Panel title="Timeline" focused={pane === 'timeline'} height="32%">
         <Timeline snapshot={snapshot} filter={filter} />
       </Panel>
-    </>
+    </Box>
   );
 }
 
 export function DashboardApp({
   initialSnapshot,
   loadSnapshot,
-  refreshMs = 500,
+  refreshMs = 1_000,
   width,
+  height,
 }: DashboardAppProps): ReactNode {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [terminalWidth, setTerminalWidth] = useState(width ?? stdout.columns);
+  const [terminalHeight, setTerminalHeight] = useState(height ?? Math.max(8, stdout.rows));
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [paneIndex, setPaneIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -328,6 +355,7 @@ export function DashboardApp({
   const [error, setError] = useState<string | undefined>();
 
   const layout = layoutFor(width ?? terminalWidth);
+  const viewportHeight = height ?? terminalHeight;
   const panes = panesFor(layout);
   const pane = panes[paneIndex % panes.length] ?? 'tasks';
   const tasks = useMemo(
@@ -352,17 +380,22 @@ export function DashboardApp({
   }, [refresh, refreshMs]);
 
   useEffect(() => {
-    if (width !== undefined) {
+    if (width !== undefined && height !== undefined) {
       return;
     }
     const resize = (): void => {
-      setTerminalWidth(stdout.columns);
+      if (width === undefined) {
+        setTerminalWidth(stdout.columns);
+      }
+      if (height === undefined) {
+        setTerminalHeight(Math.max(8, stdout.rows));
+      }
     };
     stdout.on('resize', resize);
     return () => {
       stdout.off('resize', resize);
     };
-  }, [stdout, width]);
+  }, [height, stdout, width]);
 
   useEffect(() => {
     setSelectedIndex((current) => Math.min(current, Math.max(0, tasks.length - 1)));
@@ -408,15 +441,17 @@ export function DashboardApp({
   });
 
   return (
-    <Box flexDirection="column">
-      <Box justifyContent="space-between">
+    <Box flexDirection="column" height={viewportHeight} overflow="hidden">
+      <Box justifyContent="space-between" height={1}>
         <Text bold color="cyan">
           Concord · {snapshot.repoName} · LIVE
         </Text>
         <Text dimColor>updated {shortTime(snapshot.generatedAt)}</Text>
       </Box>
       {showHelp ? (
-        <Help />
+        <Box height={Math.max(1, viewportHeight - 2)} overflow="hidden">
+          <Help />
+        </Box>
       ) : (
         <DashboardBody
           snapshot={snapshot}
@@ -425,16 +460,24 @@ export function DashboardApp({
           tasks={tasks}
           selectedIndex={selectedIndex}
           filter={filter}
+          height={Math.max(1, viewportHeight - 2)}
         />
       )}
-      {error === undefined ? null : <Text color="red">Refresh failed: {error}</Text>}
-      <Text color={searching ? 'cyan' : 'gray'}>
-        {searching
-          ? `Filter: ${filter}▌`
-          : filter === ''
-            ? 'q quit · Tab pane · / filter · ? help'
-            : `Filter: ${filter} · Esc clear`}
-      </Text>
+      <Box height={1} overflow="hidden">
+        {error === undefined ? (
+          <Text color={searching ? 'cyan' : 'gray'}>
+            {searching
+              ? `Filter: ${filter}▌`
+              : filter === ''
+                ? layout === 'compact'
+                  ? 'q quit · / filter · ? help · widen for agent context'
+                  : 'q quit · Tab pane · / filter · ? help'
+                : `Filter: ${filter} · Esc clear`}
+          </Text>
+        ) : (
+          <Text color="red">Refresh failed: {error}</Text>
+        )}
+      </Box>
     </Box>
   );
 }
