@@ -15,6 +15,7 @@ import { registerStatus } from './commands/status.js';
 import { registerTasks } from './commands/tasks.js';
 import { registerWatchCommand } from './commands/watch.js';
 import { registerWhoCommand } from './commands/who.js';
+import { notifyIfUpdateAvailable } from './update-notifier.js';
 
 const program = new Command();
 program.name('concord').description('Shared work-state for coding agents').version(VERSION);
@@ -33,4 +34,5 @@ registerReviewPacketCommand(program);
 registerExportCommand(program);
 registerDoctorCommand(program);
 
+await notifyIfUpdateAvailable(VERSION);
 program.parse();

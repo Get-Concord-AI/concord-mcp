@@ -54,7 +54,9 @@ concord --version
 
 Concord does not auto-update. Upgrading preserves each repository's local
 `.concord/` workspace; any required database migrations run automatically when
-the workspace is next opened.
+the workspace is next opened. The interactive `concord` CLI checks npm at most
+once per day and prints an update command when a newer stable release is
+available. Set `CONCORD_NO_UPDATE_CHECK=1` to disable this best-effort check.
 
 ## The six tools
 
