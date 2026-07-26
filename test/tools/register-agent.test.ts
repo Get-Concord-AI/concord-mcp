@@ -52,7 +52,10 @@ describe('handleRegisterAgent', () => {
       kind: 'codex',
       summary: 'building the backend',
     });
-    const result = handleRegisterAgent(repos, { agent_id: 'claude-code:7p8v', kind: 'claude-code' });
+    const result = handleRegisterAgent(repos, {
+      agent_id: 'claude-code:7p8v',
+      kind: 'claude-code',
+    });
     expect(result.roster.map((entry) => entry.agentId).sort()).toEqual([
       'claude-code:7p8v',
       'codex:9q2r',
