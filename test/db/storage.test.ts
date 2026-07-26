@@ -241,9 +241,6 @@ describe('agent repository', () => {
   it('lists multiple registered agents', () => {
     repos.agents.upsert(baseAgent);
     repos.agents.upsert({ ...baseAgent, agentId: 'codex:9q2r', kind: 'codex' });
-    expect(repos.agents.list().map((a) => a.agentId)).toEqual([
-      'claude-code:7p8v',
-      'codex:9q2r',
-    ]);
+    expect(repos.agents.list().map((a) => a.agentId)).toEqual(['claude-code:7p8v', 'codex:9q2r']);
   });
 });
