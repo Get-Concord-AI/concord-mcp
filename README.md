@@ -44,14 +44,14 @@ setup:
 
 ## The six tools
 
-| Tool               | When                     | What it does                                                                      |
-| ------------------ | ------------------------ | --------------------------------------------------------------------------------- |
-| `register_agent`   | at session start         | registers this instance's identity + summary + status; returns the live roster    |
-| `get_work_state`   | before choosing work     | shows the agent roster, active tasks, overlaps, stale claims, and open questions   |
-| `claim_work`       | before editing           | records the task + expected files/modules; flags overlaps with other active work  |
-| `update_task`      | while working            | appends typed intent, progress, decisions, questions, blockers, and findings      |
-| `get_task_context` | resuming or coordinating | returns the task, ordered updates, handoff, review evidence, and live overlaps    |
-| `handoff`          | done, blocked, or pre-PR | captures evidence; `ready_for_review` also produces the review packet             |
+| Tool               | When                     | What it does                                                                     |
+| ------------------ | ------------------------ | -------------------------------------------------------------------------------- |
+| `register_agent`   | at session start         | registers this instance's identity + summary + status; returns the live roster   |
+| `get_work_state`   | before choosing work     | shows the agent roster, active tasks, overlaps, stale claims, and open questions |
+| `claim_work`       | before editing           | records the task + expected files/modules; flags overlaps with other active work |
+| `update_task`      | while working            | appends typed intent, progress, decisions, questions, blockers, and findings     |
+| `get_task_context` | resuming or coordinating | returns the task, ordered updates, handoff, review evidence, and live overlaps   |
+| `handoff`          | done, blocked, or pre-PR | captures evidence; `ready_for_review` also produces the review packet            |
 
 Every write tool accepts your `register_agent` `agent_id`, which keeps your
 presence live just by working. `get_work_state` shows **who is here** (with
@@ -87,6 +87,7 @@ Agents use the MCP tools; humans use the CLI.
 ```bash
 concord init                 # create the .concord/ workspace
 concord status               # roster, active work, overlaps, stale claims, review-ready
+concord dashboard            # live, keyboard-driven view of agents, tasks, alerts, and activity
 concord who                  # which agents are present and what they are working on
 concord tasks                # list all tracked tasks
 concord handoff <task-id>    # print the latest handoff
@@ -94,6 +95,10 @@ concord review-packet <id>   # print the latest review packet
 concord export markdown      # regenerate .concord/ artifacts
 concord doctor               # workspace checks + per-task tool adoption
 ```
+
+`concord dashboard` is a read-only local TUI. It refreshes from the shared
+SQLite workspace every 500ms. Use `Tab` to change panes, `j`/`k` or the arrow
+keys to select work, `/` to filter, `?` for help, and `q` to quit.
 
 ## Try the demo
 
@@ -103,7 +108,8 @@ pnpm demo
 
 Runs the [two-agent overlap demo](./examples/two-agent-overlap/): two agents
 claim overlapping work, share and read task context, then one hands off and
-marks the task review-ready.
+marks the task review-ready. The example also includes a two-terminal flow for
+watching those real MCP calls appear live in `concord dashboard`.
 
 ## What this is / is not
 
