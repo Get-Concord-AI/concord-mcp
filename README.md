@@ -42,6 +42,20 @@ setup:
 > Concord works through MCP tools plus the installed instructions on any
 > MCP-capable client.
 
+## Upgrade
+
+When a new Concord version is available, update the global package and confirm
+the installed version:
+
+```bash
+npm install -g @concord-ai/concord-mcp@latest
+concord --version
+```
+
+Concord does not auto-update. Upgrading preserves each repository's local
+`.concord/` workspace; any required database migrations run automatically when
+the workspace is next opened.
+
 ## The six tools
 
 | Tool               | When                     | What it does                                                                     |
