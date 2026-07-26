@@ -44,14 +44,14 @@ setup:
 
 ## The six tools
 
-| Tool               | When                     | What it does                                                                      |
-| ------------------ | ------------------------ | --------------------------------------------------------------------------------- |
-| `register_agent`   | at session start         | registers this instance's identity + summary + status; returns the live roster    |
-| `get_work_state`   | before choosing work     | shows the agent roster, active tasks, overlaps, stale claims, and open questions   |
-| `claim_work`       | before editing           | records the task + expected files/modules; flags overlaps with other active work  |
-| `update_task`      | while working            | appends typed intent, progress, decisions, questions, blockers, and findings      |
-| `get_task_context` | resuming or coordinating | returns the task, ordered updates, handoff, review evidence, and live overlaps    |
-| `handoff`          | done, blocked, or pre-PR | captures evidence; `ready_for_review` also produces the review packet             |
+| Tool               | When                     | What it does                                                                     |
+| ------------------ | ------------------------ | -------------------------------------------------------------------------------- |
+| `register_agent`   | at session start         | registers this instance's identity + summary + status; returns the live roster   |
+| `get_work_state`   | before choosing work     | shows the agent roster, active tasks, overlaps, stale claims, and open questions |
+| `claim_work`       | before editing           | records the task + expected files/modules; flags overlaps with other active work |
+| `update_task`      | while working            | appends typed intent, progress, decisions, questions, blockers, and findings     |
+| `get_task_context` | resuming or coordinating | returns the task, ordered updates, handoff, review evidence, and live overlaps   |
+| `handoff`          | done, blocked, or pre-PR | captures evidence; `ready_for_review` also produces the review packet            |
 
 Every write tool accepts your `register_agent` `agent_id`, which keeps your
 presence live just by working. `get_work_state` shows **who is here** (with
