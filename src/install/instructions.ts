@@ -3,15 +3,22 @@ export const CONCORD_INSTRUCTIONS = `## Concord — shared work-state for coding
 
 This project uses Concord MCP. Use its tools so your work is visible before PRs:
 
+- **At session start, call \`register_agent\`** with your kind (e.g. claude-code),
+  a one-line summary of what you are working on, and your status. Reuse the
+  returned \`agent_id\` on every later Concord call so your presence stays
+  attributed to one instance, and call \`register_agent\` again when your focus
+  changes. Then call \`get_work_state\` to see who else is active before you
+  start — it shows the agent roster, active claims, overlaps, and stale claims.
 - **Keep each claim small.** Break work into the smallest independently
   handoff-able unit and \`claim_work\` each piece separately, rather than
   claiming one broad task. Concord flags claims that look too broad.
-- **Before editing code**, call \`claim_work\` with the task id, title, and the
-  files/modules you expect to touch. Concord warns about overlaps with other
-  active work.
-- **While working**, call \`update_task\` for durable intent, progress,
-  assumptions, decisions, questions, answers, blockers, and findings. When
-  resuming or coordinating on a task, call \`get_task_context\` first.
+- **Before editing code**, call \`claim_work\` with the task id, title, your
+  \`agent_id\`, and the files/modules you expect to touch. Concord warns about
+  overlaps with other active work.
+- **While working**, call \`update_task\` (with your \`agent_id\`) for durable
+  intent, progress, assumptions, decisions, questions, answers, blockers, and
+  findings. When resuming or coordinating on a task, call \`get_task_context\`
+  first.
 - **Before finishing or when blocked**, call \`handoff\` with what changed, tests
   run, assumptions, decisions, and guardrails you checked. **Before a PR**, set
   \`ready_for_review\` (with open questions and provenance) to also produce a

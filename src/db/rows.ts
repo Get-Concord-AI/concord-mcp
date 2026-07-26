@@ -68,6 +68,10 @@ export interface TaskRecord {
   status: TaskStatus;
   /** The parent task this is a subtask of, or null for a top-level task. */
   parentTaskId: string | null;
+  /** The agent instance (register_agent identity) that claimed this, or null.
+   * Distinct from `agent` (the kind string): used to check the claimant's
+   * liveness for stale-claim detection. */
+  agentId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -86,6 +90,7 @@ const taskDbRowSchema = z.object({
   notes: z.string().nullable(),
   status: taskStatusSchema,
   parent_task_id: z.string().nullable(),
+  agent_id: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -106,6 +111,7 @@ export function parseTaskRow(raw: unknown): TaskRecord {
     notes: row.notes,
     status: row.status,
     parentTaskId: row.parent_task_id,
+    agentId: row.agent_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

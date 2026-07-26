@@ -17,6 +17,7 @@ export interface NewTask {
   riskTags: readonly string[];
   notes: string | null;
   parentTaskId: string | null;
+  agentId: string | null;
 }
 
 /** The declared surface of a claim, updated when an agent re-claims with an
@@ -43,11 +44,11 @@ export function createTaskRepository(db: ConcordDatabase): TaskRepository {
     INSERT INTO tasks (
       task_id, title, owner, agent, branch, worktree,
       expected_files, modules, domains, risk_tags, notes, status,
-      parent_task_id, created_at, updated_at
+      parent_task_id, agent_id, created_at, updated_at
     ) VALUES (
       @task_id, @title, @owner, @agent, @branch, @worktree,
       @expected_files, @modules, @domains, @risk_tags, @notes, @status,
-      @parent_task_id, @created_at, @updated_at
+      @parent_task_id, @agent_id, @created_at, @updated_at
     )
   `);
   const getStmt = db.prepare('SELECT * FROM tasks WHERE task_id = ?');
@@ -86,6 +87,7 @@ export function createTaskRepository(db: ConcordDatabase): TaskRepository {
         notes: task.notes,
         status: 'active',
         parent_task_id: task.parentTaskId,
+        agent_id: task.agentId,
         created_at: now,
         updated_at: now,
       });

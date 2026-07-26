@@ -1,4 +1,4 @@
-import type { AgentRecord, AgentStatus } from '../db/index.js';
+import type { AgentRecord, AgentStatus, TaskRecord } from '../db/index.js';
 
 /**
  * Liveness is *derived* from how long ago an agent was last seen — never stored.
@@ -69,6 +69,58 @@ function ageSecondsOf(lastSeen: string, now: number): number {
  * most-recently-seen. This is the "who is here and what are they doing" view
  * that other agents read before or while working.
  */
+/** An active claim whose owning agent is no longer reliably present. */
+export interface StaleClaim {
+  taskId: string;
+  title: string;
+  agentId: string;
+  /** Why it is stale: the agent is `away`, or was never seen (unregistered). */
+  reason: 'agent-away' | 'agent-unregistered';
+  /** Seconds since the owning agent was last seen, or null when unregistered. */
+  ageSeconds: number | null;
+}
+
+/**
+ * Flag active claims whose owning agent has gone away — the "agent walked off
+ * without handing off" case a durable claim alone cannot surface. Only claims
+ * carrying an `agentId` are assessed; unattributed claims are left alone (they
+ * predate presence and would be noise). A claim is stale when its agent is
+ * `away`, or when the referenced agent never registered.
+ */
+export function detectStaleClaims(
+  tasks: readonly TaskRecord[],
+  agents: readonly AgentRecord[],
+  now: number,
+  thresholds: PresenceThresholds = DEFAULT_PRESENCE_THRESHOLDS,
+): StaleClaim[] {
+  const byId = new Map(agents.map((agent) => [agent.agentId, agent]));
+  const stale: StaleClaim[] = [];
+  for (const task of tasks) {
+    if (task.status !== 'active' || task.agentId === null) {
+      continue;
+    }
+    const agent = byId.get(task.agentId);
+    if (agent === undefined) {
+      stale.push({
+        taskId: task.taskId,
+        title: task.title,
+        agentId: task.agentId,
+        reason: 'agent-unregistered',
+        ageSeconds: null,
+      });
+    } else if (deriveLiveness(agent.lastSeen, now, thresholds) === 'away') {
+      stale.push({
+        taskId: task.taskId,
+        title: task.title,
+        agentId: task.agentId,
+        reason: 'agent-away',
+        ageSeconds: ageSecondsOf(agent.lastSeen, now),
+      });
+    }
+  }
+  return stale;
+}
+
 export function buildRoster(
   agents: readonly AgentRecord[],
   now: number,
