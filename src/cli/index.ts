@@ -3,6 +3,7 @@ import { Command } from '@commander-js/extra-typings';
 
 import { VERSION } from '../version.js';
 import { registerCheckCommand } from './commands/check.js';
+import { registerDashboardCommand } from './commands/dashboard.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerExportCommand } from './commands/export.js';
 import { registerHandoffCommand } from './commands/handoff.js';
@@ -24,6 +25,7 @@ registerStatus(program);
 registerWhoCommand(program);
 registerTasks(program);
 registerCheckCommand(program);
+registerDashboardCommand(program);
 registerWatchCommand(program);
 registerHookCommand(program);
 registerHandoffCommand(program);
