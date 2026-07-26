@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Interactive CLI commands now show a cached, best-effort notice when a newer
+  stable Concord release is available on npm.
+
 ## [0.4.0] - 2026-07-26
 
 ### Added
