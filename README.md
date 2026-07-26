@@ -112,9 +112,11 @@ concord export markdown      # regenerate .concord/ artifacts
 concord doctor               # workspace checks + per-task tool adoption
 ```
 
-`concord dashboard` is a read-only local TUI. It refreshes from the shared
-SQLite workspace every 500ms. Use `Tab` to change panes, `j`/`k` or the arrow
-keys to select work, `/` to filter, `?` for help, and `q` to quit.
+`concord dashboard` is a read-only, full-screen local TUI. It refreshes from the
+shared SQLite workspace every second while keeping agents, tasks, alerts,
+context, and timeline inside a fixed terminal viewport. Use `Tab` to change
+panes, `j`/`k` or the arrow keys to select work, `/` to filter, `?` for help,
+and `q` to quit.
 
 ## Try the demo
 
