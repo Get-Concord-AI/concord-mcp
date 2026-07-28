@@ -62,6 +62,19 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
 
   const existing = repos.tasks.get(input.task_id);
 
+  if (input.agent_id !== undefined && repos.agents.get(input.agent_id) === undefined) {
+    throw new Error(`Agent ${input.agent_id} is not registered. Call register_agent first.`);
+  }
+  if (
+    existing?.agentId !== null &&
+    existing?.agentId !== undefined &&
+    input.agent_id !== existing.agentId
+  ) {
+    throw new Error(
+      `Task ${input.task_id} is owned by ${existing.agentId}; use offer_handoff or reassign_task.`,
+    );
+  }
+
   // Parent is set at first claim and preserved thereafter (identity is idempotent).
   const parentTaskId = existing ? existing.parentTaskId : (input.parent_task_id ?? null);
 
@@ -174,6 +187,10 @@ export function formatClaimWorkText(result: ClaimWorkResult): string {
  * overlap entries, so the payload is internally consistent. */
 export function toClaimWorkStructured(result: ClaimWorkResult): {
   task_id: string;
+  status: string;
+  version: number;
+  agent_id: string | null;
+  assigned_agent_id: string | null;
   parent_task_id: string | null;
   already_claimed: boolean;
   overlaps: { task_id: string; title: string; reasons: string[] }[];
@@ -183,6 +200,10 @@ export function toClaimWorkStructured(result: ClaimWorkResult): {
 } {
   return {
     task_id: result.task.taskId,
+    status: result.task.status,
+    version: result.task.version,
+    agent_id: result.task.agentId,
+    assigned_agent_id: result.task.assignedAgentId,
     parent_task_id: result.task.parentTaskId,
     already_claimed: result.alreadyClaimed,
     overlaps: result.overlaps.map((overlap) => ({

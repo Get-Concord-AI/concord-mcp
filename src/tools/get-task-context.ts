@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type {
   HandoffRecord,
+  OwnershipEventRecord,
   Repositories,
   ReviewRecord,
   TaskRecord,
@@ -22,6 +23,8 @@ export interface TaskContextResult {
   latestHandoff: HandoffRecord | undefined;
   latestReview: ReviewRecord | undefined;
   overlaps: OverlapWarning[];
+  pendingHandoff: HandoffRecord | undefined;
+  ownershipHistory: OwnershipEventRecord[];
 }
 
 export function handleGetTaskContext(
@@ -58,6 +61,8 @@ export function handleGetTaskContext(
     latestHandoff: repos.handoffs.latestForTask(task.taskId),
     latestReview: repos.reviews.latestForTask(task.taskId),
     overlaps,
+    pendingHandoff: repos.handoffs.pendingForTask(task.taskId),
+    ownershipHistory: repos.ownershipEvents.listByTask(task.taskId),
   };
 }
 
@@ -79,14 +84,18 @@ function formatContext(result: TaskContextResult): string {
 
   return [
     `${result.task.taskId} — ${result.task.title}`,
-    `Status: ${result.task.status}`,
-    `Agent: ${result.task.agent ?? 'unassigned'}`,
+    `Status: ${result.task.status} (version ${String(result.task.version)})`,
+    `Owner agent: ${result.task.agentId ?? 'unassigned'}`,
+    `Assigned agent: ${result.task.assignedAgentId ?? 'none'}`,
+    `Lease expires: ${result.task.leaseExpiresAt ?? 'none'}`,
     `Notes: ${result.task.notes ?? 'not recorded'}`,
     'Updates:',
     updates,
     'Live overlaps:',
     overlaps,
     `Latest handoff: ${result.latestHandoff?.whatChanged ?? 'none'}`,
+    `Pending handoff: ${result.pendingHandoff === undefined ? 'none' : `${String(result.pendingHandoff.id)} to ${result.pendingHandoff.toAgentId ?? 'unknown'}`}`,
+    `Ownership transitions: ${String(result.ownershipHistory.length)}`,
     `Review plan: ${result.latestReview?.planSummary ?? 'not submitted'}`,
   ].join('\n');
 }
@@ -121,6 +130,8 @@ export function registerGetTaskContext(
           updates: result.updates,
           latest_handoff: result.latestHandoff ?? null,
           latest_review: result.latestReview ?? null,
+          pending_handoff: result.pendingHandoff ?? null,
+          ownership_history: result.ownershipHistory,
           overlaps: result.overlaps,
         },
       };

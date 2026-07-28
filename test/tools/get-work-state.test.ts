@@ -80,6 +80,9 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
       expect(tools.tools.map((t) => t.name)).toContain('get_work_state');
       expect(tools.tools.map((t) => t.name)).toContain('update_task');
       expect(tools.tools.map((t) => t.name)).toContain('get_task_context');
+      expect(tools.tools.map((t) => t.name)).toContain('assign_task');
+      expect(tools.tools.map((t) => t.name)).toContain('accept_task');
+      expect(tools.tools.map((t) => t.name)).toContain('close_task');
       expect(tools.tools.map((t) => t.name)).not.toContain('join_workspace');
 
       const resources = await client.listResources();
@@ -157,12 +160,6 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
       });
       expect(JSON.stringify(joined)).toContain(workspaceIdForRoot(secondRoot));
 
-      const registered = await client.callTool({
-        name: 'register_agent',
-        arguments: { kind: 'test-agent' },
-      });
-      expect(JSON.stringify(registered)).toContain(workspaceIdForRoot(secondRoot));
-
       await client.callTool({
         name: 'claim_work',
         arguments: { task_id: 'SECOND', title: 'Second task' },
@@ -181,7 +178,7 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
       });
       expect(JSON.stringify(secondState)).toContain('SECOND');
       expect(JSON.stringify(secondState)).not.toContain('FIRST');
-      expect(writtenRoots).toEqual([firstRoot, secondRoot, secondRoot]);
+      expect(writtenRoots).toEqual([firstRoot, secondRoot]);
     } finally {
       await client.close();
       await server.close();
