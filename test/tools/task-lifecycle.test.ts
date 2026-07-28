@@ -7,8 +7,10 @@ import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 import {
   handleAcceptTask,
   handleAssignTask,
+  handleCloseTask,
   handleReassignTask,
   handleReleaseTask,
+  handleReopenTask,
 } from '../../src/tools/task-lifecycle.js';
 
 describe('versioned task lifecycle', () => {
@@ -137,6 +139,15 @@ describe('versioned task lifecycle', () => {
 
   it('requires ownership, or a same-human supervisor for forced reassignment', () => {
     expect(() =>
+      handleCloseTask(repos, {
+        task_id: 'TASK-1',
+        agent_id: 'codex:supervisor',
+        expected_version: 1,
+        reason: 'not the active owner',
+      }),
+    ).toThrow(/current owner/u);
+
+    expect(() =>
       handleReassignTask(repos, {
         task_id: 'TASK-1',
         to_agent_id: 'codex:target',
@@ -175,5 +186,53 @@ describe('versioned task lifecycle', () => {
     });
     expect(declined.task.status).toBe('active');
     expect(declined.task.agentId).toBe('codex:owner');
+  });
+
+  it('releases, closes, and reopens owned work with version checks', () => {
+    const released = handleReleaseTask(repos, {
+      task_id: 'TASK-1',
+      agent_id: 'codex:owner',
+      expected_version: 1,
+      reason: 'capacity',
+    });
+    expect(released.task.status).toBe('proposed');
+    expect(released.task.agentId).toBeNull();
+
+    const assigned = handleAssignTask(repos, {
+      task_id: 'TASK-1',
+      to_agent_id: 'codex:owner',
+      agent_id: 'codex:owner',
+      expected_version: 2,
+    });
+    const accepted = handleAcceptTask(repos, {
+      task_id: 'TASK-1',
+      agent_id: 'codex:owner',
+      expected_version: assigned.task.version,
+    });
+    const closed = handleCloseTask(repos, {
+      task_id: 'TASK-1',
+      agent_id: 'codex:owner',
+      expected_version: accepted.task.version,
+      reason: 'merged',
+    });
+    const reopened = handleReopenTask(repos, {
+      task_id: 'TASK-1',
+      agent_id: 'codex:owner',
+      expected_version: closed.task.version,
+      reason: 'regression',
+    });
+
+    expect(closed.task.status).toBe('closed');
+    expect(reopened.task.status).toBe('active');
+    expect(reopened.task.version).toBe(6);
+
+    const completed = handleCloseTask(repos, {
+      task_id: 'TASK-1',
+      agent_id: 'codex:owner',
+      expected_version: reopened.task.version,
+      reason: 'verified complete',
+      outcome: 'complete',
+    });
+    expect(completed.task.status).toBe('complete');
   });
 });

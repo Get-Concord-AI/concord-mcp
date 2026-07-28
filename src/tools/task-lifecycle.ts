@@ -13,10 +13,14 @@ import {
   type AcceptTaskInput,
   assignTaskInputShape,
   type AssignTaskInput,
+  closeTaskInputShape,
+  type CloseTaskInput,
   reassignTaskInputShape,
   type ReassignTaskInput,
   releaseTaskInputShape,
   type ReleaseTaskInput,
+  reopenTaskInputShape,
+  type ReopenTaskInput,
 } from '../domain/schemas.js';
 import {
   selectToolWorkspace,
@@ -239,6 +243,45 @@ export function handleReassignTask(
   });
 }
 
+export function handleCloseTask(repos: Repositories, input: CloseTaskInput): TaskLifecycleResult {
+  const actor = registeredAgent(repos, input.agent_id);
+  const task = taskAtVersion(repos, input.task_id, input.expected_version);
+  requireOwner(task, actor);
+  return applyTransition(repos, {
+    task,
+    transition: 'close',
+    tool: 'close_task',
+    actorAgentId: actor.agentId,
+    status: input.outcome ?? 'closed',
+    agentId: task.agentId,
+    assignedAgentId: null,
+    leaseExpiresAt: null,
+    reason: input.reason,
+  });
+}
+
+export function handleReopenTask(repos: Repositories, input: ReopenTaskInput): TaskLifecycleResult {
+  const actor = registeredAgent(repos, input.agent_id);
+  const task = taskAtVersion(repos, input.task_id, input.expected_version);
+  if (!['closed', 'complete', 'handed_off', 'review_ready'].includes(task.status)) {
+    throw new Error(`Task ${task.taskId} is ${task.status}, not a terminal/review state.`);
+  }
+  if (task.agentId !== null && task.agentId !== actor.agentId && !isHumanSupervisor(actor, task)) {
+    throw new Error(`Agent ${actor.agentId} cannot reopen ${task.taskId}.`);
+  }
+  return applyTransition(repos, {
+    task,
+    transition: 'reopen',
+    tool: 'reopen_task',
+    actorAgentId: actor.agentId,
+    status: 'active',
+    agentId: actor.agentId,
+    assignedAgentId: null,
+    leaseExpiresAt: null,
+    reason: input.reason,
+  });
+}
+
 function lifecycleText(action: string, result: TaskLifecycleResult): string {
   return `${action} ${result.task.taskId}; status ${result.task.status}, version ${String(result.task.version)}.`;
 }
@@ -339,6 +382,45 @@ export function registerTaskLifecycle(
       return {
         content: [
           { type: 'text', text: withWorkspaceText(lifecycleText('Reassigned', result), workspace) },
+        ],
+        structuredContent: { ...workspaceStructured(workspace), ...lifecycleStructured(result) },
+      };
+    },
+  );
+  server.registerTool(
+    'close_task',
+    {
+      title: 'Close task',
+      description: 'Close owned work with an audited reason and expected task version.',
+      inputSchema: closeTaskInputShape,
+    },
+    (args) => {
+      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
+      const result = handleCloseTask(repos, args);
+      onWrite?.();
+      return {
+        content: [
+          { type: 'text', text: withWorkspaceText(lifecycleText('Closed', result), workspace) },
+        ],
+        structuredContent: { ...workspaceStructured(workspace), ...lifecycleStructured(result) },
+      };
+    },
+  );
+  server.registerTool(
+    'reopen_task',
+    {
+      title: 'Reopen task',
+      description:
+        'Reopen terminal, legacy handed-off, or review-ready work with an audited reason.',
+      inputSchema: reopenTaskInputShape,
+    },
+    (args) => {
+      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
+      const result = handleReopenTask(repos, args);
+      onWrite?.();
+      return {
+        content: [
+          { type: 'text', text: withWorkspaceText(lifecycleText('Reopened', result), workspace) },
         ],
         structuredContent: { ...workspaceStructured(workspace), ...lifecycleStructured(result) },
       };
