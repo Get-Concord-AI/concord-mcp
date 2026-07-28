@@ -1,6 +1,6 @@
 import type { Command } from '@commander-js/extra-typings';
 
-import { findRepoRoot } from '../../config/paths.js';
+import { resolveRepoRoot } from '../../config/paths.js';
 import { installClaudeHook } from '../../install/claude-hooks.js';
 import { installConcord } from '../../install/index.js';
 
@@ -13,7 +13,7 @@ export function registerInstallCommand(program: Command): void {
       'also install an opt-in Claude Code PreToolUse overlap hook into .claude/settings.json',
     )
     .action((options) => {
-      const repoRoot = findRepoRoot(process.cwd());
+      const repoRoot = resolveRepoRoot(process.cwd(), process.env);
       const written = installConcord(repoRoot);
       if (options.claudeHooks === true) {
         written.push(installClaudeHook(repoRoot));

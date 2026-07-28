@@ -2,6 +2,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { Repositories, TaskUpdateRecord } from '../db/index.js';
 import { updateTaskInputShape, type UpdateTaskInput } from '../domain/schemas.js';
+import {
+  selectToolWorkspace,
+  type SelectWorkspace,
+  workspaceStructured,
+  withWorkspaceText,
+} from './workspace-routing.js';
 
 export interface UpdateTaskResult {
   update: TaskUpdateRecord;
@@ -41,6 +47,7 @@ export function registerUpdateTask(
   server: McpServer,
   repos: Repositories,
   onWrite?: () => void,
+  selectWorkspace?: SelectWorkspace,
 ): void {
   server.registerTool(
     'update_task',
@@ -52,11 +59,15 @@ export function registerUpdateTask(
       inputSchema: updateTaskInputShape,
     },
     (args) => {
+      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleUpdateTask(repos, args);
       onWrite?.();
       return {
-        content: [{ type: 'text', text: formatUpdateTaskText(result) }],
+        content: [
+          { type: 'text', text: withWorkspaceText(formatUpdateTaskText(result), workspace) },
+        ],
         structuredContent: {
+          ...workspaceStructured(workspace),
           update_id: result.update.id,
           task_id: result.update.taskId,
           kind: result.update.kind,

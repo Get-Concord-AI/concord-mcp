@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,6 +18,8 @@ import { runInit } from '../../src/cli/commands/init.js';
 import { renderTasks } from '../../src/cli/commands/tasks.js';
 import { runWho } from '../../src/cli/commands/who.js';
 import { openContext } from '../../src/cli/context.js';
+import { configureCliWorkspace } from '../../src/cli/workspace-options.js';
+import { workspaceIdForRoot } from '../../src/config/paths.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 import { handleReviewReady } from '../../src/tools/review-ready.js';
@@ -18,7 +27,7 @@ import { handleReviewReady } from '../../src/tools/review-ready.js';
 function repoDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'concord-cli-'));
   mkdirSync(join(dir, '.git'));
-  return dir;
+  return realpathSync(dir);
 }
 
 describe('runInit', () => {
@@ -212,5 +221,52 @@ describe('runWho', () => {
     const dir = repoDir();
     runInit(dir);
     expect(runWho(dir)).toContain('none');
+  });
+});
+
+describe('CLI workspace selection', () => {
+  it('uses the same CONCORD_REPO_ROOT override as MCP resolution', () => {
+    const selected = repoDir();
+    const elsewhere = repoDir();
+    const context = openContext(elsewhere, { CONCORD_REPO_ROOT: selected });
+
+    expect(context.repoRoot).toBe(selected);
+    expect(context.workspaceId).toBe(workspaceIdForRoot(selected));
+  });
+
+  it('configures an explicit --repo from any launch directory', () => {
+    const selected = repoDir();
+    const elsewhere = repoDir();
+    const env: NodeJS.ProcessEnv = {};
+    const identity = configureCliWorkspace({ repo: selected }, elsewhere, env);
+
+    expect(identity).toEqual({
+      workspaceId: workspaceIdForRoot(selected),
+      repoRoot: selected,
+    });
+    expect(openContext(elsewhere, env).repoRoot).toBe(selected);
+  });
+
+  it('selects the MCP workspace id through --workspace', () => {
+    const selected = repoDir();
+    const elsewhere = repoDir();
+    const env: NodeJS.ProcessEnv = {};
+    const workspaceId = workspaceIdForRoot(selected);
+
+    expect(configureCliWorkspace({ workspace: workspaceId }, elsewhere, env)?.repoRoot).toBe(
+      selected,
+    );
+    expect(openContext(elsewhere, env).workspaceId).toBe(workspaceId);
+  });
+
+  it('rejects conflicting CLI selectors', () => {
+    const selected = repoDir();
+    expect(() =>
+      configureCliWorkspace(
+        { repo: selected, workspace: workspaceIdForRoot(selected) },
+        selected,
+        {},
+      ),
+    ).toThrow(/either --repo or --workspace/u);
   });
 });

@@ -4,7 +4,11 @@ import { buildStatus, renderStatusText } from '../../artifacts/work-state-view.j
 import { openContext } from '../context.js';
 
 export function runStatus(cwd: string): string {
-  return renderStatusText(buildStatus(openContext(cwd).repos));
+  const context = openContext(cwd);
+  return [
+    `Workspace: ${context.workspaceId} (${context.repoRoot})`,
+    renderStatusText(buildStatus(context.repos)),
+  ].join('\n');
 }
 
 export function registerStatus(program: Command): void {

@@ -19,7 +19,11 @@ export function renderTasks(tasks: readonly TaskRecord[]): string {
 }
 
 export function runTasks(cwd: string): string {
-  return renderTasks(openContext(cwd).repos.tasks.list());
+  const context = openContext(cwd);
+  return [
+    `Workspace: ${context.workspaceId} (${context.repoRoot})`,
+    renderTasks(context.repos.tasks.list()),
+  ].join('\n');
 }
 
 export function registerTasks(program: Command): void {

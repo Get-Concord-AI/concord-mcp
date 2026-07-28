@@ -19,6 +19,30 @@ const agentIdField = z
       "Supplying it refreshes the agent's presence (liveness) in the roster.",
   );
 
+/** Optional workspace selector shared by every MCP operation. */
+export const workspaceIdField = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    'Workspace id returned by join_workspace. Omit to use the active/default workspace for this MCP session.',
+  );
+
+export const joinWorkspaceInputShape = {
+  root: z
+    .string()
+    .min(1)
+    .describe('Existing repository or directory to join as a Concord workspace'),
+} as const;
+
+export const joinWorkspaceInputSchema = z.object(joinWorkspaceInputShape);
+export type JoinWorkspaceInput = z.infer<typeof joinWorkspaceInputSchema>;
+
+export const getWorkStateInputShape = {
+  workspace_id: workspaceIdField,
+} as const;
+export const getWorkStateInputSchema = z.object(getWorkStateInputShape).default({});
+
 export const registerAgentInputShape = {
   agent_id: z
     .string()
@@ -40,6 +64,7 @@ export const registerAgentInputShape = {
   worktree: z.string().optional().describe('Git worktree path, if used'),
   cwd: z.string().optional().describe('Working directory, for disambiguating instances'),
   pid: z.number().int().optional().describe('Process id, for disambiguating instances'),
+  workspace_id: workspaceIdField,
 } as const;
 
 export const registerAgentInputSchema = z.object(registerAgentInputShape);
@@ -72,6 +97,7 @@ export const claimWorkInputShape = {
   risk_tags: z.array(z.string()).optional().describe('Risk tags, e.g. payment-flow'),
   notes: z.string().optional().describe('Freeform notes'),
   agent_id: agentIdField,
+  workspace_id: workspaceIdField,
 } as const;
 
 export const claimWorkInputSchema = z.object(claimWorkInputShape);
@@ -94,6 +120,7 @@ export const updateTaskInputShape = {
   content: z.string().min(1).describe('Concise context another agent needs'),
   agent: z.string().optional().describe('Agent recording the update; defaults to the claimant'),
   agent_id: agentIdField,
+  workspace_id: workspaceIdField,
 } as const;
 
 export const updateTaskInputSchema = z.object(updateTaskInputShape);
@@ -101,6 +128,7 @@ export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;
 
 export const getTaskContextInputShape = {
   task_id: z.string().min(1).describe('Task whose shared context should be read'),
+  workspace_id: workspaceIdField,
 } as const;
 
 export const getTaskContextInputSchema = z.object(getTaskContextInputShape);
@@ -135,6 +163,7 @@ export const handoffInputShape = {
     .optional()
     .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
   agent_id: agentIdField,
+  workspace_id: workspaceIdField,
 } as const;
 
 export const handoffInputSchema = z.object(handoffInputShape);
@@ -152,6 +181,7 @@ export const reviewReadyInputShape = {
     .array(z.object({ field: z.string(), source: z.string() }))
     .optional()
     .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
+  workspace_id: workspaceIdField,
 } as const;
 
 export const reviewReadyInputSchema = z.object(reviewReadyInputShape);

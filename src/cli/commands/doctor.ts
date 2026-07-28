@@ -24,6 +24,7 @@ export function buildDoctorReport(ctx: CliContext): string {
     'Concord doctor',
     '',
     'Workspace',
+    `  workspace id ${ctx.workspaceId}`,
     `  .concord/    ${existsSync(ctx.concordPath) ? 'ok' : 'missing'}  ->  ${ctx.concordPath}`,
     `  concord.db   ${existsSync(dbPath) ? 'ok' : 'missing'} (schema v${String(schemaVersion)}, expected v${String(migrations.length)})`,
     `  repo root    ${ctx.repoRoot}`,
