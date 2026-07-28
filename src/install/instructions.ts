@@ -19,10 +19,20 @@ This project uses Concord MCP. Use its tools so your work is visible before PRs:
   intent, progress, assumptions, decisions, questions, answers, blockers, and
   findings. When resuming or coordinating on a task, call \`get_task_context\`
   first.
+- **Treat assignment as an offer.** If \`get_work_state\` shows a task assigned
+  to your \`agent_id\`, call \`accept_task\` with its current \`version\` before
+  editing. Use the latest version as \`expected_version\` for lifecycle changes;
+  Concord rejects stale concurrent transitions.
+- **Transfer work explicitly.** Call \`offer_handoff\` with a registered
+  \`to_agent_id\`, evidence, and the current task version. Ownership stays with
+  you until that exact recipient calls \`accept_handoff\`; they may instead call
+  \`decline_handoff\`, and expired offers return to the sender.
 - **Before finishing or when blocked**, call \`handoff\` with what changed, tests
-  run, assumptions, decisions, and guardrails you checked. **Before a PR**, set
-  \`ready_for_review\` (with open questions and provenance) to also produce a
-  review packet.
+  run, assumptions, decisions, and guardrails you checked. This records evidence
+  but does not transfer ownership. **Before a PR**, set \`ready_for_review\`
+  (with the current \`expected_version\`, open questions, and provenance) to also
+  produce a review packet. Use \`close_task\` for an audited complete/closed
+  outcome and \`reopen_task\` when terminal work becomes active again.
 
 Concord regenerates human-readable \`HANDOFF.md\` and \`REVIEW_PACKET.md\` in
 \`.concord/\` so humans can review your work.

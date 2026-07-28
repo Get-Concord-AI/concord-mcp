@@ -28,9 +28,9 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-> ⚠️ Early and under active development. The surface is seven focused MCP
-> tools: `join_workspace`, `register_agent`, `get_work_state`, `claim_work`,
-> `update_task`, `get_task_context`, and `handoff`.
+> ⚠️ Early and under active development. The surface is 16 focused MCP tools
+> covering workspace selection, presence, task memory, versioned ownership, and
+> acknowledged handoffs.
 
 ## One workspace. Every agent.
 
@@ -100,26 +100,34 @@ the workspace is next opened. The interactive `concord` CLI checks npm at most
 once per day and prints an update command when a newer stable release is
 available. Set `CONCORD_NO_UPDATE_CHECK=1` to disable this best-effort check.
 
-## The seven tools
+## The tools
 
-| Tool               | When                     | What it does                                                                     |
-| ------------------ | ------------------------ | -------------------------------------------------------------------------------- |
-| `join_workspace`   | selecting a repository   | joins an existing repository without restarting MCP and returns its workspace ID |
-| `register_agent`   | at session start         | registers this instance's identity + summary + status; returns the live roster   |
-| `get_work_state`   | before choosing work     | shows the agent roster, active tasks, overlaps, stale claims, and open questions |
-| `claim_work`       | before editing           | records the task + expected files/modules; flags overlaps with other active work |
-| `update_task`      | while working            | appends typed intent, progress, decisions, questions, blockers, and findings     |
-| `get_task_context` | resuming or coordinating | returns the task, ordered updates, handoff, review evidence, and live overlaps   |
-| `handoff`          | done, blocked, or pre-PR | captures evidence; `ready_for_review` also produces the review packet            |
+| Tools                                                         | Purpose                                                                                 |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `join_workspace`                                              | joins/selects a repository without restarting MCP and returns its workspace id          |
+| `register_agent`, `get_work_state`                            | registers presence and reads the roster, task lifecycle, overlaps, and stale claims     |
+| `claim_work`, `update_task`, `get_task_context`               | claims scoped work, records task memory, and reads evidence plus ownership history      |
+| `assign_task`, `accept_task`, `release_task`, `reassign_task` | separates assignment from acceptance and protects transitions with task versions        |
+| `offer_handoff`, `accept_handoff`, `decline_handoff`          | delivers a handoff to a named registered recipient with acceptance, decline, and expiry |
+| `handoff`                                                     | records completion/review evidence without transferring ownership                       |
+| `close_task`, `reopen_task`                                   | records terminal `complete`/`closed` outcomes and audited reopening                     |
 
 Every write tool accepts your `register_agent` `agent_id`, which keeps your
 presence live just by working. `get_work_state` shows **who is here** (with
 liveness), and flags **stale claims** — an active claim whose owning agent has
 gone away without handing off.
 
-Every operation accepts an optional `workspace_id` returned by `join_workspace`.
-Omit it to use the active/default workspace. Responses report the selected
-workspace ID and repository root so clients can detect a misrouted call.
+Every task and presence operation also accepts an optional `workspace_id`
+returned by `join_workspace`. Omit it to use the active/default workspace.
+Responses report both the selected workspace id and repository root, so a
+client can detect a misrouted call.
+
+Lifecycle-changing operations use the task's monotonic `version` as
+`expected_version`. If two agents act on the same version, only the first
+transition succeeds. Assignment leaves work in `assigned` until the named
+agent calls `accept_task`; similarly, `offer_handoff` keeps ownership with the
+sender until the recipient accepts. Every ownership change is retained in an
+append-only audit history.
 
 ## What you get
 
@@ -134,7 +142,7 @@ repository path; no MCP restart is required.
 
 Linked Git worktrees follow Git's `commondir` metadata to the primary checkout,
 so the main checkout and all linked worktrees intentionally share one Concord
-database and workspace ID.
+database and workspace id.
 
 To restrict dynamic joins, set `CONCORD_ALLOWED_ROOTS` to a path-delimited list
 of allowed repository roots. Without an allowlist, explicit roots must still
@@ -172,7 +180,7 @@ concord export markdown      # regenerate .concord/ artifacts
 concord doctor               # workspace checks + per-task tool adoption
 
 concord --repo ../project status        # select by repository path from anywhere
-concord --workspace ws_... status       # select an ID returned by join_workspace
+concord --workspace ws_... status       # select an id returned by join_workspace
 ```
 
 `--repo` and `--workspace` are global, mutually exclusive options. The CLI uses

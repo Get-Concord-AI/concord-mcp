@@ -6,6 +6,10 @@ interface WorkStateTask {
   title: string;
   status: string;
   agent: string | null;
+  agent_id: string | null;
+  assigned_agent_id: string | null;
+  version: number;
+  lease_expires_at: string | null;
   owner: string | null;
   branch: string | null;
   parent_task_id: string | null;
@@ -37,6 +41,10 @@ function toWorkStateTask(task: TaskRecord): WorkStateTask {
     title: task.title,
     status: task.status,
     agent: task.agent,
+    agent_id: task.agentId,
+    assigned_agent_id: task.assignedAgentId,
+    version: task.version,
+    lease_expires_at: task.leaseExpiresAt,
     owner: task.owner,
     branch: task.branch,
     parent_task_id: task.parentTaskId,

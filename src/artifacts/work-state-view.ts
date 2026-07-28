@@ -12,6 +12,10 @@ import {
 interface ActiveEntry {
   taskId: string;
   agent: string;
+  agentId: string | null;
+  assignedAgentId: string | null;
+  status: string;
+  version: number;
   branch: string;
   touches: string;
   parentTaskId: string | null;
@@ -59,7 +63,8 @@ function touchesOf(task: TaskRecord): string {
 
 export function buildStatus(repos: Repositories, now: number = Date.now()): StatusView {
   const tasks = repos.tasks.list();
-  const active = tasks.filter((task) => task.status === 'active');
+  const activeStatuses = new Set(['assigned', 'active', 'blocked', 'handoff_offered']);
+  const active = tasks.filter((task) => activeStatuses.has(task.status));
 
   const overlaps: OverlapPair[] = [];
   const seenPairs = new Set<string>();
@@ -105,6 +110,10 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
     active: active.map((task) => ({
       taskId: task.taskId,
       agent: task.agent ?? '-',
+      agentId: task.agentId,
+      assignedAgentId: task.assignedAgentId,
+      status: task.status,
+      version: task.version,
       branch: task.branch ?? '-',
       touches: touchesOf(task),
       parentTaskId: task.parentTaskId,
@@ -140,7 +149,7 @@ export function renderStatusText(view: StatusView): string {
     for (const entry of view.active) {
       const parent = entry.parentTaskId === null ? '' : `  (child of ${entry.parentTaskId})`;
       lines.push(
-        `  ${entry.taskId.padEnd(10)} ${entry.agent.padEnd(12)} ${entry.branch.padEnd(20)} touches: ${entry.touches}${parent}`,
+        `  ${entry.taskId.padEnd(10)} ${entry.status.padEnd(16)} v${String(entry.version).padEnd(4)} ${(entry.agentId ?? entry.assignedAgentId ?? entry.agent).padEnd(18)} ${entry.branch.padEnd(20)} touches: ${entry.touches}${parent}`,
       );
     }
   }

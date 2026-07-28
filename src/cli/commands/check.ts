@@ -24,8 +24,9 @@ export function checkFileOverlaps(
 ): OverlapWarning[] {
   const wanted = new Set(files.map(normalizePath).filter((file) => file !== ''));
   const warnings: OverlapWarning[] = [];
+  const claimedStatuses = new Set(['assigned', 'active', 'blocked', 'handoff_offered']);
   for (const task of repos.tasks.list()) {
-    if (task.status !== 'active' || task.taskId === selfTaskId) {
+    if (!claimedStatuses.has(task.status) || task.taskId === selfTaskId) {
       continue;
     }
     const shared = task.expectedFiles.map(normalizePath).filter((file) => wanted.has(file));

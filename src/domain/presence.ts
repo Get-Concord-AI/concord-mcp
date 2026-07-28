@@ -96,7 +96,7 @@ export function detectStaleClaims(
   const byId = new Map(agents.map((agent) => [agent.agentId, agent]));
   const stale: StaleClaim[] = [];
   for (const task of tasks) {
-    if (task.status !== 'active' || task.agentId === null) {
+    if (!['active', 'blocked', 'handoff_offered'].includes(task.status) || task.agentId === null) {
       continue;
     }
     const agent = byId.get(task.agentId);

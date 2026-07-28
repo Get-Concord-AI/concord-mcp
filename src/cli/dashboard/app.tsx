@@ -116,7 +116,8 @@ function Tasks({
     return (
       <Text key={item.task.taskId} color={selected ? 'cyan' : 'white'} wrap="truncate-end">
         {selected ? '›' : ' '} {item.task.taskId} · {item.task.status} ·{' '}
-        {item.task.agent ?? 'unassigned'} · {item.task.title}
+        {item.task.agentId ?? item.task.assignedAgentId ?? item.task.agent ?? 'unassigned'} · v
+        {item.task.version} · {item.task.title}
       </Text>
     );
   });
@@ -174,7 +175,9 @@ function Context({ item }: { item: DashboardTask | undefined }): ReactNode {
         {item.task.taskId} — {item.task.title}
       </Text>
       <Text wrap="truncate-end">
-        owner {item.task.owner ?? '-'} · branch {item.task.branch ?? '-'} · touches {item.touches}
+        owner {item.task.owner ?? '-'} · agent{' '}
+        {item.task.agentId ?? item.task.assignedAgentId ?? '-'} · branch {item.task.branch ?? '-'} ·
+        touches {item.touches}
       </Text>
       {item.updates.slice(-5).map((update) => (
         <Text key={`update-${String(update.id)}`} wrap="truncate-end">
