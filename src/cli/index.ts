@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { Command } from '@commander-js/extra-typings';
+import { performance } from 'node:perf_hooks';
 
+import { resolveRepoRoot } from '../config/paths.js';
+import { createTelemetryClient } from '../telemetry/client.js';
 import { VERSION } from '../version.js';
 import { registerCheckCommand } from './commands/check.js';
 import { registerDashboardCommand } from './commands/dashboard.js';
@@ -18,7 +21,27 @@ import { registerWhoCommand } from './commands/who.js';
 import { notifyIfUpdateAvailable } from './update-notifier.js';
 
 const program = new Command();
+let activeCommand: { name: string; startedAt: number } | undefined;
+const telemetry = createTelemetryClient({
+  surface: 'cli',
+  workspaceRoot: () => resolveRepoRoot(process.cwd(), process.env),
+});
 program.name('concord').description('Shared work-state for coding agents').version(VERSION);
+
+program.hook('preAction', (_command, actionCommand) => {
+  activeCommand = { name: actionCommand.name(), startedAt: performance.now() };
+});
+
+program.hook('postAction', (_command, actionCommand) => {
+  if (activeCommand?.name === actionCommand.name()) {
+    telemetry?.recordOperation(
+      activeCommand.name,
+      'success',
+      performance.now() - activeCommand.startedAt,
+    );
+    activeCommand = undefined;
+  }
+});
 
 registerInit(program);
 registerInstallCommand(program);
@@ -34,5 +57,18 @@ registerReviewPacketCommand(program);
 registerExportCommand(program);
 registerDoctorCommand(program);
 
-await notifyIfUpdateAvailable(VERSION);
-program.parse();
+try {
+  await notifyIfUpdateAvailable(VERSION);
+  await program.parseAsync();
+} catch (error) {
+  if (activeCommand !== undefined) {
+    telemetry?.recordOperation(
+      activeCommand.name,
+      'error',
+      performance.now() - activeCommand.startedAt,
+    );
+  }
+  throw error;
+} finally {
+  await telemetry?.close();
+}
