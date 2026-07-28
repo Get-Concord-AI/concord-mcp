@@ -40,7 +40,10 @@ safe to re-run.
 
 Ask Claude to start a task. It should call `claim_work` before editing,
 `update_task` while working, and `get_task_context` when resuming or
-coordinating. Before a PR it calls `handoff` with `ready_for_review`. Check
+coordinating. Assigned work must be accepted with its current version.
+Ownership transfer uses `offer_handoff` and recipient acceptance/decline;
+`handoff` records evidence only. Before a PR it calls `handoff` with
+`ready_for_review` and the current `expected_version`. Check
 progress with:
 
 ```bash
