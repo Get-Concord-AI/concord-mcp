@@ -8,6 +8,7 @@ import { registerHandoff } from './tools/handoff.js';
 import { registerJoinWorkspace } from './tools/join-workspace.js';
 import { registerRegisterAgent } from './tools/register-agent.js';
 import { registerUpdateTask } from './tools/update-task.js';
+import { registerTaskLifecycle } from './tools/task-lifecycle.js';
 import { VERSION } from './version.js';
 import {
   routedRepositories,
@@ -50,5 +51,6 @@ export function createServer(repos: Repositories, options: ServerOptions = {}): 
   registerClaimWork(server, selectedRepos, onWrite, selectWorkspace);
   registerUpdateTask(server, selectedRepos, onWrite, selectWorkspace);
   registerHandoff(server, selectedRepos, onWrite, selectWorkspace);
+  registerTaskLifecycle(server, selectedRepos, onWrite, selectWorkspace);
   return server;
 }

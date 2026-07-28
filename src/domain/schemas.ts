@@ -28,6 +28,12 @@ export const workspaceIdField = z
     'Workspace id returned by join_workspace. Omit to use the active/default workspace for this MCP session.',
   );
 
+const taskVersionField = z
+  .number()
+  .int()
+  .positive()
+  .describe('Task version last read by the caller; stale versions are rejected');
+
 export const joinWorkspaceInputShape = {
   root: z
     .string()
@@ -163,6 +169,7 @@ export const handoffInputShape = {
     .optional()
     .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
   agent_id: agentIdField,
+  expected_version: taskVersionField.optional(),
   workspace_id: workspaceIdField,
 } as const;
 
@@ -181,8 +188,59 @@ export const reviewReadyInputShape = {
     .array(z.object({ field: z.string(), source: z.string() }))
     .optional()
     .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
+  agent_id: agentIdField,
+  expected_version: taskVersionField.optional(),
   workspace_id: workspaceIdField,
 } as const;
 
 export const reviewReadyInputSchema = z.object(reviewReadyInputShape);
 export type ReviewReadyInput = z.infer<typeof reviewReadyInputSchema>;
+
+const lifecycleActorField = z
+  .string()
+  .min(1)
+  .describe('Registered agent_id performing this lifecycle transition');
+
+export const assignTaskInputShape = {
+  task_id: z.string().min(1),
+  to_agent_id: z.string().min(1).describe('Registered agent receiving the assignment'),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  lease_seconds: z.number().int().positive().optional(),
+  reason: z.string().min(1).optional(),
+  workspace_id: workspaceIdField,
+} as const;
+export const assignTaskInputSchema = z.object(assignTaskInputShape);
+export type AssignTaskInput = z.infer<typeof assignTaskInputSchema>;
+
+export const acceptTaskInputShape = {
+  task_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  workspace_id: workspaceIdField,
+} as const;
+export const acceptTaskInputSchema = z.object(acceptTaskInputShape);
+export type AcceptTaskInput = z.infer<typeof acceptTaskInputSchema>;
+
+export const releaseTaskInputShape = {
+  task_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  reason: z.string().min(1).optional(),
+  workspace_id: workspaceIdField,
+} as const;
+export const releaseTaskInputSchema = z.object(releaseTaskInputShape);
+export type ReleaseTaskInput = z.infer<typeof releaseTaskInputSchema>;
+
+export const reassignTaskInputShape = {
+  task_id: z.string().min(1),
+  to_agent_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  lease_seconds: z.number().int().positive().optional(),
+  reason: z.string().min(1),
+  force: z.boolean().optional(),
+  workspace_id: workspaceIdField,
+} as const;
+export const reassignTaskInputSchema = z.object(reassignTaskInputShape);
+export type ReassignTaskInput = z.infer<typeof reassignTaskInputSchema>;
