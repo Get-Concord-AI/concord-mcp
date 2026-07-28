@@ -114,4 +114,40 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE tasks ADD COLUMN agent_id TEXT;
   `,
+  // 007 — versioned ownership lifecycle and acknowledged handoff delivery.
+  // Existing task/handoff rows retain their legacy status and are upgraded with
+  // safe defaults; all ownership changes are recorded append-only.
+  `
+  ALTER TABLE tasks ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE tasks ADD COLUMN assigned_agent_id TEXT;
+  ALTER TABLE tasks ADD COLUMN lease_expires_at TEXT;
+
+  ALTER TABLE handoffs ADD COLUMN from_agent_id TEXT;
+  ALTER TABLE handoffs ADD COLUMN to_agent_id TEXT;
+  ALTER TABLE handoffs ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'recorded';
+  ALTER TABLE handoffs ADD COLUMN expires_at TEXT;
+  ALTER TABLE handoffs ADD COLUMN resolved_at TEXT;
+  ALTER TABLE handoffs ADD COLUMN task_version INTEGER;
+  ALTER TABLE handoffs ADD COLUMN resolution_reason TEXT;
+
+  CREATE TABLE task_ownership_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id         TEXT NOT NULL REFERENCES tasks(task_id),
+    transition      TEXT NOT NULL,
+    actor_agent_id  TEXT NOT NULL,
+    from_agent_id   TEXT,
+    to_agent_id     TEXT,
+    from_status     TEXT NOT NULL,
+    to_status       TEXT NOT NULL,
+    from_version    INTEGER NOT NULL,
+    to_version      INTEGER NOT NULL,
+    reason          TEXT,
+    created_at      TEXT NOT NULL
+  );
+
+  CREATE INDEX idx_ownership_events_task_id
+    ON task_ownership_events(task_id, id);
+  CREATE INDEX idx_handoffs_pending_recipient
+    ON handoffs(to_agent_id, delivery_status);
+  `,
 ];

@@ -154,5 +154,8 @@ export function routedRepositories(manager: WorkspaceManager): Repositories {
     get agents() {
       return manager.current().repos.agents;
     },
+    get ownershipEvents() {
+      return manager.current().repos.ownershipEvents;
+    },
   };
 }

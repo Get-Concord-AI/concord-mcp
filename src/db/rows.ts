@@ -7,12 +7,38 @@ import { z } from 'zod';
  */
 
 /** Lifecycle states a task can be in. */
-export const taskStatusValues = ['active', 'handed_off', 'review_ready'] as const;
+export const taskStatusValues = [
+  'proposed',
+  'assigned',
+  'active',
+  'blocked',
+  'handoff_offered',
+  'handed_off',
+  'review_ready',
+  'complete',
+  'closed',
+] as const;
 export type TaskStatus = (typeof taskStatusValues)[number];
 const taskStatusSchema = z.enum(taskStatusValues);
 
 /** Tools that can be recorded as events (used for adoption tracking). */
-export const toolNameValues = ['claim_work', 'update_task', 'handoff', 'review_ready'] as const;
+export const toolNameValues = [
+  'claim_work',
+  'update_task',
+  'handoff',
+  'review_ready',
+  'assign_task',
+  'accept_task',
+  'release_task',
+  'expire_assignment',
+  'reassign_task',
+  'offer_handoff',
+  'accept_handoff',
+  'decline_handoff',
+  'expire_handoff',
+  'close_task',
+  'reopen_task',
+] as const;
 export type ToolName = (typeof toolNameValues)[number];
 const toolNameSchema = z.enum(toolNameValues);
 
@@ -72,6 +98,12 @@ export interface TaskRecord {
    * Distinct from `agent` (the kind string): used to check the claimant's
    * liveness for stale-claim detection. */
   agentId: string | null;
+  /** Monotonic compare-and-swap version for lifecycle transitions. */
+  version: number;
+  /** Agent offered this task but not yet the active owner. */
+  assignedAgentId: string | null;
+  /** Optional assignment/ownership lease deadline. */
+  leaseExpiresAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -91,6 +123,9 @@ const taskDbRowSchema = z.object({
   status: taskStatusSchema,
   parent_task_id: z.string().nullable(),
   agent_id: z.string().nullable(),
+  version: z.number().int().positive(),
+  assigned_agent_id: z.string().nullable(),
+  lease_expires_at: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -112,6 +147,9 @@ export function parseTaskRow(raw: unknown): TaskRecord {
     status: row.status,
     parentTaskId: row.parent_task_id,
     agentId: row.agent_id,
+    version: row.version,
+    assignedAgentId: row.assigned_agent_id,
+    leaseExpiresAt: row.lease_expires_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -177,8 +215,25 @@ export interface HandoffRecord {
   guardrailsChecked: string[];
   needsReviewFrom: string[];
   nextSteps: string[];
+  fromAgentId: string | null;
+  toAgentId: string | null;
+  deliveryStatus: HandoffDeliveryStatus;
+  expiresAt: string | null;
+  resolvedAt: string | null;
+  taskVersion: number | null;
+  resolutionReason: string | null;
   createdAt: string;
 }
+
+export const handoffDeliveryStatusValues = [
+  'recorded',
+  'pending',
+  'accepted',
+  'declined',
+  'expired',
+] as const;
+export type HandoffDeliveryStatus = (typeof handoffDeliveryStatusValues)[number];
+const handoffDeliveryStatusSchema = z.enum(handoffDeliveryStatusValues);
 
 const handoffDbRowSchema = z.object({
   id: z.number().int(),
@@ -193,6 +248,13 @@ const handoffDbRowSchema = z.object({
   guardrails_checked: z.string(),
   needs_review_from: z.string(),
   next_steps: z.string(),
+  from_agent_id: z.string().nullable(),
+  to_agent_id: z.string().nullable(),
+  delivery_status: handoffDeliveryStatusSchema,
+  expires_at: z.string().nullable(),
+  resolved_at: z.string().nullable(),
+  task_version: z.number().int().nullable(),
+  resolution_reason: z.string().nullable(),
   created_at: z.string(),
 });
 
@@ -211,6 +273,63 @@ export function parseHandoffRow(raw: unknown): HandoffRecord {
     guardrailsChecked: parseStringArray(row.guardrails_checked),
     needsReviewFrom: parseStringArray(row.needs_review_from),
     nextSteps: parseStringArray(row.next_steps),
+    fromAgentId: row.from_agent_id,
+    toAgentId: row.to_agent_id,
+    deliveryStatus: row.delivery_status,
+    expiresAt: row.expires_at,
+    resolvedAt: row.resolved_at,
+    taskVersion: row.task_version,
+    resolutionReason: row.resolution_reason,
+    createdAt: row.created_at,
+  };
+}
+
+// --- ownership events -------------------------------------------------------
+
+export interface OwnershipEventRecord {
+  id: number;
+  taskId: string;
+  transition: string;
+  actorAgentId: string;
+  fromAgentId: string | null;
+  toAgentId: string | null;
+  fromStatus: TaskStatus;
+  toStatus: TaskStatus;
+  fromVersion: number;
+  toVersion: number;
+  reason: string | null;
+  createdAt: string;
+}
+
+const ownershipEventDbRowSchema = z.object({
+  id: z.number().int(),
+  task_id: z.string(),
+  transition: z.string(),
+  actor_agent_id: z.string(),
+  from_agent_id: z.string().nullable(),
+  to_agent_id: z.string().nullable(),
+  from_status: taskStatusSchema,
+  to_status: taskStatusSchema,
+  from_version: z.number().int().positive(),
+  to_version: z.number().int().positive(),
+  reason: z.string().nullable(),
+  created_at: z.string(),
+});
+
+export function parseOwnershipEventRow(raw: unknown): OwnershipEventRecord {
+  const row = ownershipEventDbRowSchema.parse(raw);
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    transition: row.transition,
+    actorAgentId: row.actor_agent_id,
+    fromAgentId: row.from_agent_id,
+    toAgentId: row.to_agent_id,
+    fromStatus: row.from_status,
+    toStatus: row.to_status,
+    fromVersion: row.from_version,
+    toVersion: row.to_version,
+    reason: row.reason,
     createdAt: row.created_at,
   };
 }
