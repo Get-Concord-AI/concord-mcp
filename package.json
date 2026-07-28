@@ -1,6 +1,6 @@
 {
   "name": "@concord-ai/concord-mcp",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Shared work-state and task memory for coding agents: coordinate work, preserve decisions, and hand off through MCP.",
   "keywords": [
     "mcp",
