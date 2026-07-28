@@ -18,6 +18,9 @@ reports within a few business days and will keep you updated on remediation.
 
 ## Scope
 
-Concord is local-first: the open-source server stores data in a local SQLite
-database and does not transmit code, file paths, or task content anywhere. Please
-report anything that contradicts that behavior.
+Concord is local-first: the open-source server stores work data in a local SQLite
+database and never transmits code, raw file paths, repository remotes, tool
+inputs/outputs, task identifiers, or task content. It sends the anonymous,
+metadata-only usage events documented in the README to `getconcord.ai` by
+default; set `CONCORD_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1` to disable them.
+Please report anything that contradicts that behavior.

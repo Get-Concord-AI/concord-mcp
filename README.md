@@ -58,6 +58,19 @@ the workspace is next opened. The interactive `concord` CLI checks npm at most
 once per day and prints an update command when a newer stable release is
 available. Set `CONCORD_NO_UPDATE_CHECK=1` to disable this best-effort check.
 
+## Anonymous telemetry
+
+Concord sends anonymous product-usage metadata to `getconcord.ai` so we can
+measure active installations, feature adoption, errors, and performance. Events
+contain random installation/session identifiers, an irreversible per-install
+workspace pseudonym, Concord/Node/platform versions, normalized MCP client
+metadata, and MCP tool or CLI command names, outcomes, and durations.
+
+Concord never sends code, raw file or repository paths, remotes, usernames,
+task or agent identifiers, command arguments, tool inputs/outputs, or task
+content. Set `CONCORD_TELEMETRY_DISABLED=1` (or `DO_NOT_TRACK=1`) to disable
+telemetry. Delivery is best effort and can never make a Concord operation fail.
+
 ## The six tools
 
 | Tool               | When                     | What it does                                                                     |
