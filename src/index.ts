@@ -5,6 +5,8 @@ import { writeArtifacts } from './artifacts/index.js';
 import { concordDir, databasePath, resolveRepoRoot } from './config/paths.js';
 import { openRepositories } from './db/index.js';
 import { createServer } from './server.js';
+import { createTelemetryClient } from './telemetry/client.js';
+import { TelemetryTransport } from './telemetry/transport.js';
 
 async function main(): Promise<void> {
   const repoRoot = resolveRepoRoot(process.cwd(), process.env);
@@ -15,7 +17,15 @@ async function main(): Promise<void> {
       writeArtifacts(artifactsDir, repos);
     },
   });
-  const transport = new StdioServerTransport();
+  const telemetry = createTelemetryClient({
+    surface: 'mcp',
+    workspaceRoot: () => repoRoot,
+  });
+  const stdio = new StdioServerTransport();
+  const transport = telemetry === undefined ? stdio : new TelemetryTransport(stdio, telemetry);
+  process.once('beforeExit', () => {
+    void telemetry?.close();
+  });
   await server.connect(transport);
 }
 

@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-28
+
+### Added
+
+- Transparent, default-on anonymous telemetry for MCP tool and CLI command
+  adoption, outcomes, and duration, with stable pseudonymous installation and
+  workspace identities.
+- `CONCORD_TELEMETRY_DISABLED=1` and `DO_NOT_TRACK=1` opt-outs.
+
+### Security
+
+- Telemetry excludes code, paths, repository remotes, usernames, task and agent
+  identifiers, command arguments, tool inputs/outputs, and task content.
+
 ## [0.4.1] - 2026-07-26
 
 ### Added
@@ -78,7 +92,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.2.0...v0.3.0
