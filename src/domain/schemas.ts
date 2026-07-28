@@ -268,3 +268,43 @@ export const reopenTaskInputShape = {
 } as const;
 export const reopenTaskInputSchema = z.object(reopenTaskInputShape);
 export type ReopenTaskInput = z.infer<typeof reopenTaskInputSchema>;
+
+export const offerHandoffInputShape = {
+  task_id: z.string().min(1),
+  to_agent_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  what_changed: z.string().min(1),
+  changed_files: z.array(z.string()).optional(),
+  tests_run: z.array(z.string()).optional(),
+  known_risks: z.array(z.string()).optional(),
+  assumptions: z.array(z.string()).optional(),
+  decisions: z.array(z.string()).optional(),
+  guardrails_checked: z.array(z.string()).optional(),
+  next_steps: z.array(z.string()).optional(),
+  expires_seconds: z.number().int().positive().optional(),
+  workspace_id: workspaceIdField,
+} as const;
+export const offerHandoffInputSchema = z.object(offerHandoffInputShape);
+export type OfferHandoffInput = z.infer<typeof offerHandoffInputSchema>;
+
+export const acceptHandoffInputShape = {
+  task_id: z.string().min(1),
+  handoff_id: z.number().int().positive(),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  workspace_id: workspaceIdField,
+} as const;
+export const acceptHandoffInputSchema = z.object(acceptHandoffInputShape);
+export type AcceptHandoffInput = z.infer<typeof acceptHandoffInputSchema>;
+
+export const declineHandoffInputShape = {
+  task_id: z.string().min(1),
+  handoff_id: z.number().int().positive(),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  reason: z.string().min(1),
+  workspace_id: workspaceIdField,
+} as const;
+export const declineHandoffInputSchema = z.object(declineHandoffInputShape);
+export type DeclineHandoffInput = z.infer<typeof declineHandoffInputSchema>;

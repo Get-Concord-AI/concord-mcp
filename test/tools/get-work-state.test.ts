@@ -82,6 +82,8 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
       expect(tools.tools.map((t) => t.name)).toContain('get_task_context');
       expect(tools.tools.map((t) => t.name)).toContain('assign_task');
       expect(tools.tools.map((t) => t.name)).toContain('accept_task');
+      expect(tools.tools.map((t) => t.name)).toContain('offer_handoff');
+      expect(tools.tools.map((t) => t.name)).toContain('accept_handoff');
       expect(tools.tools.map((t) => t.name)).toContain('close_task');
       expect(tools.tools.map((t) => t.name)).not.toContain('join_workspace');
 
