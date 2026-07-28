@@ -6,8 +6,13 @@ import { openContext } from '../context.js';
 
 /** Render the presence roster: who is registered and how live they are. */
 export function runWho(cwd: string, now: number = Date.now()): string {
-  const roster = buildRoster(openContext(cwd).repos.agents.list(), now);
-  return ["Who's here", ...renderRosterLines(roster)].join('\n');
+  const context = openContext(cwd);
+  const roster = buildRoster(context.repos.agents.list(), now);
+  return [
+    `Workspace: ${context.workspaceId} (${context.repoRoot})`,
+    "Who's here",
+    ...renderRosterLines(roster),
+  ].join('\n');
 }
 
 export function registerWhoCommand(program: Command): void {

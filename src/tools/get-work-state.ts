@@ -6,6 +6,13 @@ import {
 
 import { buildStatus, renderStatusText, type StatusView } from '../artifacts/work-state-view.js';
 import type { Repositories } from '../db/index.js';
+import { getWorkStateInputSchema } from '../domain/schemas.js';
+import {
+  selectToolWorkspace,
+  type SelectWorkspace,
+  workspaceStructured,
+  withWorkspaceText,
+} from './workspace-routing.js';
 
 /** Stable URI for the read-only work-state resource. */
 export const WORK_STATE_URI = 'concord://work-state';
@@ -29,7 +36,11 @@ export function handleGetWorkState(repos: Repositories): StatusView {
  * clients are pushed a `resources/updated` for `concord://work-state`. MCP
  * cannot wake an idle client — this is push while a session is connected.
  */
-export function registerWorkState(server: McpServer, repos: Repositories): () => void {
+export function registerWorkState(
+  server: McpServer,
+  repos: Repositories,
+  selectWorkspace?: SelectWorkspace,
+): () => void {
   server.registerTool(
     'get_work_state',
     {
@@ -39,12 +50,15 @@ export function registerWorkState(server: McpServer, repos: Repositories): () =>
         'active claims, overlaps (recomputed live across all active tasks), and review-ready ' +
         'tasks. Read-only — call this before claiming to see who else is here and what they are ' +
         'already working on.',
+      inputSchema: getWorkStateInputSchema,
     },
-    () => {
+    (args) => {
+      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const view = handleGetWorkState(repos);
       return {
-        content: [{ type: 'text', text: renderStatusText(view) }],
+        content: [{ type: 'text', text: withWorkspaceText(renderStatusText(view), workspace) }],
         structuredContent: {
+          ...workspaceStructured(workspace),
           presence: view.presence,
           active: view.active,
           overlaps: view.overlaps,
@@ -64,15 +78,22 @@ export function registerWorkState(server: McpServer, repos: Repositories): () =>
       description: 'Active claims, live overlaps, and review-ready tasks as JSON.',
       mimeType: 'application/json',
     },
-    (uri) => ({
-      contents: [
-        {
-          uri: uri.href,
-          mimeType: 'application/json',
-          text: `${JSON.stringify(handleGetWorkState(repos), null, 2)}\n`,
-        },
-      ],
-    }),
+    (uri) => {
+      const workspace = selectToolWorkspace(selectWorkspace, undefined);
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: 'application/json',
+            text: `${JSON.stringify(
+              { ...workspaceStructured(workspace), ...handleGetWorkState(repos) },
+              null,
+              2,
+            )}\n`,
+          },
+        ],
+      };
+    },
   );
 
   // Advertise resource subscriptions and track which URIs clients care about,

@@ -15,6 +15,18 @@ function repoDir(label: string): string {
 }
 
 describe('WorkspaceManager', () => {
+  it('can start outside a repository and explicitly join one later', () => {
+    const launchRoot = mkdtempSync(join(tmpdir(), 'concord-mcp-launch-root-'));
+    const repoRoot = repoDir('joined-after-launch');
+    const manager = new WorkspaceManager(launchRoot);
+
+    const joined = manager.join(repoRoot);
+
+    expect(joined.repoRoot).toBe(repoRoot);
+    expect(joined.workspaceId).toBe(workspaceIdForRoot(repoRoot));
+    expect(manager.current().repoRoot).toBe(repoRoot);
+  });
+
   it('joins and switches between repositories in one process', () => {
     const first = repoDir('first');
     const second = repoDir('second');

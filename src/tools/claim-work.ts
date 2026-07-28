@@ -4,6 +4,12 @@ import type { Repositories, TaskRecord } from '../db/index.js';
 import { assessClaimBreadth } from '../domain/decomposition.js';
 import { detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
 import { claimWorkInputShape, type ClaimWorkInput } from '../domain/schemas.js';
+import {
+  selectToolWorkspace,
+  type SelectWorkspace,
+  workspaceStructured,
+  withWorkspaceText,
+} from './workspace-routing.js';
 
 export interface ClaimWorkResult {
   task: TaskRecord;
@@ -194,6 +200,7 @@ export function registerClaimWork(
   server: McpServer,
   repos: Repositories,
   onWrite?: () => void,
+  selectWorkspace?: SelectWorkspace,
 ): void {
   server.registerTool(
     'claim_work',
@@ -206,11 +213,17 @@ export function registerClaimWork(
       inputSchema: claimWorkInputShape,
     },
     (args) => {
+      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleClaimWork(repos, args);
       onWrite?.();
       return {
-        content: [{ type: 'text', text: formatClaimWorkText(result) }],
-        structuredContent: toClaimWorkStructured(result),
+        content: [
+          { type: 'text', text: withWorkspaceText(formatClaimWorkText(result), workspace) },
+        ],
+        structuredContent: {
+          ...workspaceStructured(workspace),
+          ...toClaimWorkStructured(result),
+        },
       };
     },
   );

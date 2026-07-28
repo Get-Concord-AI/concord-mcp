@@ -5,6 +5,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AgentRecord, Repositories } from '../db/index.js';
 import { buildRoster, type PresenceEntry } from '../domain/presence.js';
 import { registerAgentInputShape, type RegisterAgentInput } from '../domain/schemas.js';
+import {
+  selectToolWorkspace,
+  type SelectWorkspace,
+  workspaceStructured,
+  withWorkspaceText,
+} from './workspace-routing.js';
 
 export interface RegisterAgentResult {
   agent: AgentRecord;
@@ -94,6 +100,7 @@ export function registerRegisterAgent(
   server: McpServer,
   repos: Repositories,
   onWrite?: () => void,
+  selectWorkspace?: SelectWorkspace,
 ): void {
   server.registerTool(
     'register_agent',
@@ -107,11 +114,15 @@ export function registerRegisterAgent(
       inputSchema: registerAgentInputShape,
     },
     (args) => {
+      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleRegisterAgent(repos, args);
       onWrite?.();
       return {
-        content: [{ type: 'text', text: formatRegisterAgentText(result) }],
+        content: [
+          { type: 'text', text: withWorkspaceText(formatRegisterAgentText(result), workspace) },
+        ],
         structuredContent: {
+          ...workspaceStructured(workspace),
           agent_id: result.agent.agentId,
           first_registration: result.firstRegistration,
           status: result.agent.status,

@@ -3,6 +3,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HandoffRecord, Repositories } from '../db/index.js';
 import { handoffInputShape, type HandoffInput } from '../domain/schemas.js';
 import { handleReviewReady } from './review-ready.js';
+import {
+  selectToolWorkspace,
+  type SelectWorkspace,
+  workspaceStructured,
+  withWorkspaceText,
+} from './workspace-routing.js';
 
 export interface HandoffResult {
   handoff: HandoffRecord;
@@ -103,6 +109,7 @@ export function registerHandoff(
   server: McpServer,
   repos: Repositories,
   onWrite?: () => void,
+  selectWorkspace?: SelectWorkspace,
 ): void {
   server.registerTool(
     'handoff',
@@ -115,11 +122,13 @@ export function registerHandoff(
       inputSchema: handoffInputShape,
     },
     (args) => {
+      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleHandoff(repos, args);
       onWrite?.();
       return {
-        content: [{ type: 'text', text: formatHandoffText(result) }],
+        content: [{ type: 'text', text: withWorkspaceText(formatHandoffText(result), workspace) }],
         structuredContent: {
+          ...workspaceStructured(workspace),
           task_id: result.handoff.taskId,
           handoff_id: result.handoff.id,
           task_auto_created: result.taskAutoCreated,

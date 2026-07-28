@@ -28,9 +28,9 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-> ⚠️ Early and under active development. The surface is six focused MCP tools:
-> `register_agent`, `get_work_state`, `claim_work`, `update_task`,
-> `get_task_context`, and `handoff`.
+> ⚠️ Early and under active development. The surface is seven focused MCP
+> tools: `join_workspace`, `register_agent`, `get_work_state`, `claim_work`,
+> `update_task`, `get_task_context`, and `handoff`.
 
 ## One workspace. Every agent.
 
@@ -100,10 +100,11 @@ the workspace is next opened. The interactive `concord` CLI checks npm at most
 once per day and prints an update command when a newer stable release is
 available. Set `CONCORD_NO_UPDATE_CHECK=1` to disable this best-effort check.
 
-## The six tools
+## The seven tools
 
 | Tool               | When                     | What it does                                                                     |
 | ------------------ | ------------------------ | -------------------------------------------------------------------------------- |
+| `join_workspace`   | selecting a repository   | joins an existing repository without restarting MCP and returns its workspace ID |
 | `register_agent`   | at session start         | registers this instance's identity + summary + status; returns the live roster   |
 | `get_work_state`   | before choosing work     | shows the agent roster, active tasks, overlaps, stale claims, and open questions |
 | `claim_work`       | before editing           | records the task + expected files/modules; flags overlaps with other active work |
@@ -116,6 +117,10 @@ presence live just by working. `get_work_state` shows **who is here** (with
 liveness), and flags **stale claims** — an active claim whose owning agent has
 gone away without handing off.
 
+Every operation accepts an optional `workspace_id` returned by `join_workspace`.
+Omit it to use the active/default workspace. Responses report the selected
+workspace ID and repository root so clients can detect a misrouted call.
+
 ## What you get
 
 SQLite is the local source of truth, kept in the `.concord/` at the **root of
@@ -124,6 +129,17 @@ the repo** the work is happening in. The MCP server resolves that root from
 Code sets automatically, even for a user-scoped server), then its working
 directory — so every agent in one repo shares one store. Set `CONCORD_REPO_ROOT`
 when running the server somewhere its working directory is not inside the repo.
+An already-running server can instead call `join_workspace` with any existing
+repository path; no MCP restart is required.
+
+Linked Git worktrees follow Git's `commondir` metadata to the primary checkout,
+so the main checkout and all linked worktrees intentionally share one Concord
+database and workspace ID.
+
+To restrict dynamic joins, set `CONCORD_ALLOWED_ROOTS` to a path-delimited list
+of allowed repository roots. Without an allowlist, explicit roots must still
+exist and be directories; invalid paths are rejected rather than creating an
+accidental workspace.
 
 `concord init` adds `.concord/` to the
 repository's `.gitignore`, so the generated workspace stays local by default.
@@ -154,7 +170,14 @@ concord handoff <task-id>    # print the latest handoff
 concord review-packet <id>   # print the latest review packet
 concord export markdown      # regenerate .concord/ artifacts
 concord doctor               # workspace checks + per-task tool adoption
+
+concord --repo ../project status        # select by repository path from anywhere
+concord --workspace ws_... status       # select an ID returned by join_workspace
 ```
+
+`--repo` and `--workspace` are global, mutually exclusive options. The CLI uses
+the same `CONCORD_REPO_ROOT` → `CLAUDE_PROJECT_DIR` → working-directory priority
+and the same linked-worktree canonicalization as MCP.
 
 `concord dashboard` is a read-only, full-screen local TUI. It refreshes from the
 shared SQLite workspace every second while keeping agents, tasks, alerts,

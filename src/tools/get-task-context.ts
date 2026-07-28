@@ -9,6 +9,12 @@ import type {
 } from '../db/index.js';
 import { detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
 import { getTaskContextInputShape, type GetTaskContextInput } from '../domain/schemas.js';
+import {
+  selectToolWorkspace,
+  type SelectWorkspace,
+  workspaceStructured,
+  withWorkspaceText,
+} from './workspace-routing.js';
 
 export interface TaskContextResult {
   task: TaskRecord;
@@ -85,7 +91,11 @@ function formatContext(result: TaskContextResult): string {
   ].join('\n');
 }
 
-export function registerGetTaskContext(server: McpServer, repos: Repositories): void {
+export function registerGetTaskContext(
+  server: McpServer,
+  repos: Repositories,
+  selectWorkspace?: SelectWorkspace,
+): void {
   server.registerTool(
     'get_task_context',
     {
@@ -101,10 +111,12 @@ export function registerGetTaskContext(server: McpServer, repos: Repositories): 
       },
     },
     (input) => {
+      const workspace = selectToolWorkspace(selectWorkspace, input.workspace_id);
       const result = handleGetTaskContext(repos, input);
       return {
-        content: [{ type: 'text', text: formatContext(result) }],
+        content: [{ type: 'text', text: withWorkspaceText(formatContext(result), workspace) }],
         structuredContent: {
+          ...workspaceStructured(workspace),
           task: result.task,
           updates: result.updates,
           latest_handoff: result.latestHandoff ?? null,

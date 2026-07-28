@@ -19,16 +19,29 @@ import { registerTasks } from './commands/tasks.js';
 import { registerWatchCommand } from './commands/watch.js';
 import { registerWhoCommand } from './commands/who.js';
 import { notifyIfUpdateAvailable } from './update-notifier.js';
+import { configureCliWorkspace, parseCliWorkspaceOptions } from './workspace-options.js';
 
 const program = new Command();
+let workspaceRoot = resolveRepoRoot(process.cwd(), process.env);
 let activeCommand: { name: string; startedAt: number } | undefined;
 const telemetry = createTelemetryClient({
   surface: 'cli',
-  workspaceRoot: () => resolveRepoRoot(process.cwd(), process.env),
+  workspaceRoot: () => workspaceRoot,
 });
-program.name('concord').description('Shared work-state for coding agents').version(VERSION);
+program
+  .name('concord')
+  .description('Shared work-state for coding agents')
+  .version(VERSION)
+  .option('-C, --repo <path>', 'use the Concord workspace for this repository path')
+  .option('--workspace <id>', 'use a workspace id returned by join_workspace');
 
-program.hook('preAction', (_command, actionCommand) => {
+program.hook('preAction', (command, actionCommand) => {
+  const options = parseCliWorkspaceOptions(command.opts());
+  const selected = configureCliWorkspace(options, process.cwd(), process.env);
+  if (selected !== undefined) {
+    workspaceRoot = selected.repoRoot;
+    process.stderr.write(`Concord workspace: ${selected.workspaceId} (${selected.repoRoot})\n`);
+  }
   activeCommand = { name: actionCommand.name(), startedAt: performance.now() };
 });
 
