@@ -7,6 +7,7 @@ import {
   handleClaimWork,
   toClaimWorkStructured,
 } from '../../src/tools/claim-work.js';
+import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 
 describe('handleClaimWork', () => {
   let repos: Repositories;
@@ -51,6 +52,26 @@ describe('handleClaimWork', () => {
     expect(again.alreadyClaimed).toBe(true);
     expect(again.task.title).toBe('Retry');
     expect(repos.tasks.list()).toHaveLength(1);
+  });
+
+  it('rejects re-claiming scope owned by another registered agent', () => {
+    handleRegisterAgent(repos, { agent_id: 'codex:one', kind: 'codex' });
+    handleRegisterAgent(repos, { agent_id: 'codex:two', kind: 'codex' });
+    handleClaimWork(repos, {
+      task_id: 'TASK-OWNED',
+      title: 'Owned',
+      agent_id: 'codex:one',
+    });
+
+    expect(() =>
+      handleClaimWork(repos, {
+        task_id: 'TASK-OWNED',
+        title: 'Take over',
+        agent_id: 'codex:two',
+        modules: ['new-scope'],
+      }),
+    ).toThrow(/offer_handoff or reassign_task/u);
+    expect(repos.tasks.get('TASK-OWNED')?.modules).toEqual([]);
   });
 
   it('ignores non-active tasks when detecting overlaps', () => {

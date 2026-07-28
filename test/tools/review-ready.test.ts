@@ -40,17 +40,18 @@ describe('handleReviewReady', () => {
     ]);
   });
 
-  it('auto-creates a stub task when marking an unclaimed task review-ready', () => {
-    const result = handleReviewReady(repos, { task_id: 'TASK-77', plan_summary: 'Small fix' });
-    expect(result.taskAutoCreated).toBe(true);
-    expect(repos.tasks.get('TASK-77')?.status).toBe('review_ready');
-    expect(formatReviewReadyText(result)).toContain('review-ready');
+  it('rejects review evidence for an unclaimed task', () => {
+    expect(() =>
+      handleReviewReady(repos, { task_id: 'TASK-77', plan_summary: 'Small fix' }),
+    ).toThrow(/not claimed/u);
   });
 
   it('defaults array and diff fields when omitted', () => {
+    handleClaimWork(repos, { task_id: 'TASK-1', title: 'Defaults' });
     const result = handleReviewReady(repos, { task_id: 'TASK-1', plan_summary: 'x' });
     expect(result.review.testsRun).toEqual([]);
     expect(result.review.provenance).toEqual([]);
     expect(result.review.diffSize).toBeNull();
+    expect(formatReviewReadyText(result)).toContain('review-ready');
   });
 });

@@ -98,10 +98,10 @@ describe('presence refresh through write tools', () => {
     expect(repos.agents.list()).toHaveLength(1);
   });
 
-  it('a write with an unregistered agent_id is a safe no-op (no throw, no ghost row)', () => {
+  it('rejects a write with an unregistered agent_id and creates no ghost row', () => {
     expect(() =>
       handleClaimWork(repos, { task_id: 'TASK-2', title: 'Work', agent_id: 'ghost:zzzz' }),
-    ).not.toThrow();
+    ).toThrow(/not registered/u);
     expect(repos.agents.get('ghost:zzzz')).toBeUndefined();
     expect(repos.agents.list()).toHaveLength(1);
   });
@@ -119,8 +119,35 @@ describe('presence refresh through write tools', () => {
       status: 'done',
       what_changed: 'finished',
       agent_id: 'claude-code:7p8v',
+      expected_version: 1,
     });
     expect(repos.agents.get('claude-code:7p8v')).toBeDefined();
     expect(repos.agents.list()).toHaveLength(1);
+  });
+
+  it('allows collaborative findings but protects owner-only task updates', () => {
+    handleRegisterAgent(repos, { agent_id: 'codex:other', kind: 'codex' });
+    handleClaimWork(repos, {
+      task_id: 'TASK-4',
+      title: 'Owned work',
+      agent_id: 'claude-code:7p8v',
+    });
+
+    expect(() =>
+      handleUpdateTask(repos, {
+        task_id: 'TASK-4',
+        kind: 'progress',
+        content: 'pretend progress',
+        agent_id: 'codex:other',
+      }),
+    ).toThrow(/current owner/u);
+    expect(() =>
+      handleUpdateTask(repos, {
+        task_id: 'TASK-4',
+        kind: 'finding',
+        content: 'related API behavior',
+        agent_id: 'codex:other',
+      }),
+    ).not.toThrow();
   });
 });

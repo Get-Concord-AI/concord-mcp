@@ -19,12 +19,26 @@ export function handleUpdateTask(repos: Repositories, input: UpdateTaskInput): U
   if (task === undefined) {
     throw new Error(`Task ${input.task_id} is not claimed. Call claim_work first.`);
   }
+  if (input.agent_id !== undefined && repos.agents.get(input.agent_id) === undefined) {
+    throw new Error(`Agent ${input.agent_id} is not registered. Call register_agent first.`);
+  }
+  if (task.agentId !== null) {
+    if (input.agent_id === undefined) {
+      throw new Error(`Task ${input.task_id} is owned by ${task.agentId}; agent_id is required.`);
+    }
+    const collaborative = input.kind === 'question' || input.kind === 'finding';
+    if (!collaborative && input.agent_id !== task.agentId) {
+      throw new Error(
+        `Agent ${input.agent_id} cannot record ${input.kind} for ${input.task_id}; current owner is ${task.agentId}.`,
+      );
+    }
+  }
 
   const update = repos.taskUpdates.create({
     taskId: input.task_id,
     kind: input.kind,
     content: input.content,
-    agent: input.agent ?? task.agent,
+    agent: input.agent ?? input.agent_id ?? task.agent,
   });
   repos.events.record({
     taskId: input.task_id,
