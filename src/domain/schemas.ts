@@ -244,3 +244,27 @@ export const reassignTaskInputShape = {
 } as const;
 export const reassignTaskInputSchema = z.object(reassignTaskInputShape);
 export type ReassignTaskInput = z.infer<typeof reassignTaskInputSchema>;
+
+export const closeTaskInputShape = {
+  task_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  reason: z.string().min(1),
+  outcome: z
+    .enum(['complete', 'closed'])
+    .optional()
+    .describe('Terminal outcome; defaults to closed'),
+  workspace_id: workspaceIdField,
+} as const;
+export const closeTaskInputSchema = z.object(closeTaskInputShape);
+export type CloseTaskInput = z.infer<typeof closeTaskInputSchema>;
+
+export const reopenTaskInputShape = {
+  task_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  reason: z.string().min(1),
+  workspace_id: workspaceIdField,
+} as const;
+export const reopenTaskInputSchema = z.object(reopenTaskInputShape);
+export type ReopenTaskInput = z.infer<typeof reopenTaskInputSchema>;
