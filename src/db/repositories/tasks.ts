@@ -18,6 +18,9 @@ export interface NewTask {
   notes: string | null;
   parentTaskId: string | null;
   agentId: string | null;
+  status?: TaskStatus;
+  assignedAgentId?: string | null;
+  leaseExpiresAt?: string | null;
 }
 
 /** The declared surface of a claim, updated when an agent re-claims with an
@@ -35,6 +38,16 @@ export interface TaskRepository {
   list(): TaskRecord[];
   updateStatus(taskId: string, status: TaskStatus): TaskRecord | undefined;
   updateScope(taskId: string, scope: TaskScope): TaskRecord | undefined;
+  transition(input: TaskTransition): TaskRecord | undefined;
+}
+
+export interface TaskTransition {
+  taskId: string;
+  expectedVersion: number;
+  status: TaskStatus;
+  agentId: string | null;
+  assignedAgentId: string | null;
+  leaseExpiresAt: string | null;
 }
 
 const rawListSchema = z.array(z.unknown());
@@ -44,22 +57,37 @@ export function createTaskRepository(db: ConcordDatabase): TaskRepository {
     INSERT INTO tasks (
       task_id, title, owner, agent, branch, worktree,
       expected_files, modules, domains, risk_tags, notes, status,
-      parent_task_id, agent_id, created_at, updated_at
+      parent_task_id, agent_id, version, assigned_agent_id, lease_expires_at,
+      created_at, updated_at
     ) VALUES (
       @task_id, @title, @owner, @agent, @branch, @worktree,
       @expected_files, @modules, @domains, @risk_tags, @notes, @status,
-      @parent_task_id, @agent_id, @created_at, @updated_at
+      @parent_task_id, @agent_id, @version, @assigned_agent_id, @lease_expires_at,
+      @created_at, @updated_at
     )
   `);
   const getStmt = db.prepare('SELECT * FROM tasks WHERE task_id = ?');
   const listStmt = db.prepare('SELECT * FROM tasks ORDER BY created_at ASC, task_id ASC');
   const updateStatusStmt = db.prepare(
-    'UPDATE tasks SET status = @status, updated_at = @updated_at WHERE task_id = @task_id',
+    `UPDATE tasks
+     SET status = @status, version = version + 1, updated_at = @updated_at
+     WHERE task_id = @task_id`,
   );
   const updateScopeStmt = db.prepare(
     `UPDATE tasks SET expected_files = @expected_files, modules = @modules,
-       domains = @domains, risk_tags = @risk_tags, updated_at = @updated_at
+       domains = @domains, risk_tags = @risk_tags,
+       version = version + 1, updated_at = @updated_at
      WHERE task_id = @task_id`,
+  );
+  const transitionStmt = db.prepare(
+    `UPDATE tasks
+     SET status = @status,
+         agent_id = @agent_id,
+         assigned_agent_id = @assigned_agent_id,
+         lease_expires_at = @lease_expires_at,
+         version = version + 1,
+         updated_at = @updated_at
+     WHERE task_id = @task_id AND version = @expected_version`,
   );
 
   function get(taskId: string): TaskRecord | undefined {
@@ -85,9 +113,12 @@ export function createTaskRepository(db: ConcordDatabase): TaskRepository {
         domains: serializeStringArray(task.domains),
         risk_tags: serializeStringArray(task.riskTags),
         notes: task.notes,
-        status: 'active',
+        status: task.status ?? 'active',
         parent_task_id: task.parentTaskId,
         agent_id: task.agentId,
+        version: 1,
+        assigned_agent_id: task.assignedAgentId ?? null,
+        lease_expires_at: task.leaseExpiresAt ?? null,
         created_at: now,
         updated_at: now,
       });
@@ -116,6 +147,18 @@ export function createTaskRepository(db: ConcordDatabase): TaskRepository {
         updated_at: new Date().toISOString(),
       });
       return get(taskId);
+    },
+    transition(input) {
+      const info = transitionStmt.run({
+        task_id: input.taskId,
+        expected_version: input.expectedVersion,
+        status: input.status,
+        agent_id: input.agentId,
+        assigned_agent_id: input.assignedAgentId,
+        lease_expires_at: input.leaseExpiresAt,
+        updated_at: new Date().toISOString(),
+      });
+      return info.changes === 0 ? undefined : get(input.taskId);
     },
   };
 }
