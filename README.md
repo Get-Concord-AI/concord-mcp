@@ -1,28 +1,70 @@
-# Concord MCP
+<p align="center">
+  <a href="https://getconcord.ai">
+    <img src="./assets/concord-readme-header.png" alt="Concord MCP — shared work-state for coding agents" width="100%">
+  </a>
+</p>
 
-[![npm version](https://img.shields.io/npm/v/@concord-ai/concord-mcp.svg)](https://www.npmjs.com/package/@concord-ai/concord-mcp)
-[![npm downloads](https://img.shields.io/npm/dm/@concord-ai/concord-mcp.svg)](https://www.npmjs.com/package/@concord-ai/concord-mcp)
-[![CI](https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml)
-[![Node.js](https://img.shields.io/node/v/@concord-ai/concord-mcp.svg)](https://www.npmjs.com/package/@concord-ai/concord-mcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+<h1 align="center">Concord MCP</h1>
 
-**Shared work-state for coding agents.** Concord MCP gives Claude Code, Codex,
-Cursor, and other MCP-capable coding assistants a shared work log. Agents can
-register their presence, claim work, share task context, leave handoffs, and
-generate review-ready packets before opening PRs.
+<p align="center"><strong>Google Workspace for your AI agents.</strong></p>
+
+<p align="center">
+  Give Claude Code, Codex, Cursor, and every MCP-capable coding agent one shared
+  place to coordinate work, preserve decisions, and hand off cleanly.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@concord-ai/concord-mcp"><img src="https://img.shields.io/npm/v/@concord-ai/concord-mcp.svg" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@concord-ai/concord-mcp"><img src="https://img.shields.io/npm/dm/@concord-ai/concord-mcp.svg" alt="npm downloads"></a>
+  <a href="https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml"><img src="https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://www.npmjs.com/package/@concord-ai/concord-mcp"><img src="https://img.shields.io/node/v/@concord-ai/concord-mcp.svg" alt="Node.js version"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://getconcord.ai">Website</a> ·
+  <a href="./examples/two-agent-overlap/">Demo</a> ·
+  <a href="./CONTRIBUTING.md">Contributing</a>
+</p>
 
 > ⚠️ Early and under active development. The surface is six focused MCP tools:
 > `register_agent`, `get_work_state`, `claim_work`, `update_task`,
 > `get_task_context`, and `handoff`.
 
-## Why
+## One workspace. Every agent.
 
-Agents work well in isolation, but their plans, assumptions, and decisions only
-become visible at PR time. Teams hack around this today with `AGENTS.md`, handoff
-files, worktrees, and custom scripts. Concord packages the smallest useful version
-of that: a local place for agents to record what they are doing while they do it.
+Google Workspace gave human teams a shared place to see, create, and coordinate
+work. Concord brings that collaboration layer to coding agents — local-first,
+model-agnostic, and built around the repository.
 
-## Install
+| Without Concord                                     | With Concord                                                   |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| Agents discover collisions after editing            | Agents claim files and modules before work begins              |
+| Context disappears when a session ends              | Decisions, assumptions, and findings stay attached to the task |
+| Ownership is implied by chat history                | Assignments and handoffs are explicit and acknowledged         |
+| Humans reconstruct progress from branches and diffs | A live roster and work-state show what is happening now        |
+| Review starts with “what changed?”                  | Review packets arrive with scope, tests, risks, and provenance |
+
+Concord is not another autonomous agent. It is the shared workspace around your
+agents: presence, task memory, ownership, handoffs, and review state through one
+small MCP server.
+
+## Quick start
+
+### Cursor — one-click MCP install
+
+[![Install Concord MCP in Cursor](https://img.shields.io/badge/Install_Concord_MCP-Cursor-7ee787?style=for-the-badge&labelColor=0d1117)](cursor://anysphere.cursor-deeplink/mcp/install?name=concord&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBjb25jb3JkLWFpL2NvbmNvcmQtbWNwQGxhdGVzdCJdfQ==)
+
+The deeplink registers Concord with Cursor through `npx`. Install the CLI and
+add Concord's always-on agent instructions to the current repository:
+
+```bash
+npm install -g @concord-ai/concord-mcp
+concord install
+```
+
+### Claude Code, Codex, and other MCP clients
 
 ```bash
 npm install -g @concord-ai/concord-mcp
@@ -57,19 +99,6 @@ Concord does not auto-update. Upgrading preserves each repository's local
 the workspace is next opened. The interactive `concord` CLI checks npm at most
 once per day and prints an update command when a newer stable release is
 available. Set `CONCORD_NO_UPDATE_CHECK=1` to disable this best-effort check.
-
-## Anonymous telemetry
-
-Concord sends anonymous product-usage metadata to `getconcord.ai` so we can
-measure active installations, feature adoption, errors, and performance. Events
-contain random installation/session identifiers, an irreversible per-install
-workspace pseudonym, Concord/Node/platform versions, normalized MCP client
-metadata, and MCP tool or CLI command names, outcomes, and durations.
-
-Concord never sends code, raw file or repository paths, remotes, usernames,
-task or agent identifiers, command arguments, tool inputs/outputs, or task
-content. Set `CONCORD_TELEMETRY_DISABLED=1` (or `DO_NOT_TRACK=1`) to disable
-telemetry. Delivery is best effort and can never make a Concord operation fail.
 
 ## The six tools
 
@@ -111,7 +140,9 @@ human-readable files:
 
 ## CLI
 
-Agents use the MCP tools; humans use the CLI.
+Concord supports both typed MCP tools and a regular CLI. MCP-capable agents can
+call the tools directly; humans and CLI-oriented agents can work with the same
+shared workspace through `concord` commands.
 
 ```bash
 concord init                 # create the .concord/ workspace
@@ -165,6 +196,19 @@ repo is strictly typed (no `any`, no typecasts), modular, and every PR stays und
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Get-Concord-AI/concord-mcp&type=date&legend=top-left&sealed_token=DbdI1sO4OagCGFjVA8u5Muv8TyjExR3cllFEq-O_HR3Lzj1jwj7p3N1KuL5fqohiyjzgevkwPQTT8oAw-rZfwTGNwRcTD9sb7aM0pDiJ6ZFGbGY2swwz0CNpbh3Usu4Dw6UIXBDuXacj3SBUTvdU7UYqEcAZtYdlTqUphLqPIrnMJa9WbAbg4ksGqaU2" />
  </picture>
 </a>
+
+## Privacy & telemetry
+
+Concord sends anonymous product-usage metadata to `getconcord.ai` so we can
+measure active installations, feature adoption, errors, and performance. Events
+contain random installation/session identifiers, an irreversible per-install
+workspace pseudonym, Concord/Node/platform versions, normalized MCP client
+metadata, and MCP tool or CLI command names, outcomes, and durations.
+
+Concord never sends code, raw file or repository paths, remotes, usernames,
+task or agent identifiers, command arguments, tool inputs/outputs, or task
+content. Set `CONCORD_TELEMETRY_DISABLED=1` (or `DO_NOT_TRACK=1`) to disable
+telemetry. Delivery is best effort and can never make a Concord operation fail.
 
 ## License
 
