@@ -7,14 +7,18 @@ before making changes.
 ## What this project is
 
 `concord-mcp` is a local MCP server plus a `concord` CLI that gives coding agents
-shared work-state: agents **claim work**, leave **handoffs**, and generate
-**review packets** before opening PRs. SQLite is the source of truth; human-
-readable markdown artifacts are rendered from it for PR visibility.
+shared work-state: agents **register their presence**, **claim work**, share
+typed **task context**, leave **handoffs**, and generate **review packets**
+before opening PRs. SQLite is the source of truth; human-readable markdown
+artifacts are rendered from it for PR visibility.
 
-The surface is intentionally two MCP tools: `claim_work` and `handoff` (plus the
-read-only `get_work_state`). Review packets are produced by `handoff` with
-`ready_for_review` set, not a separate tool. Do not add more tools without
-explicit product pull.
+The surface is intentionally six MCP tools: `register_agent`, `get_work_state`,
+`claim_work`, `update_task`, `get_task_context`, and `handoff`. Review packets
+are produced by `handoff` with `ready_for_review` set, not a separate tool.
+`register_agent` was added with explicit product pull for agent presence (who is
+here and what they are working on); liveness is derived from `last_seen` in
+`domain/presence.ts`, not stored. Do not add more tools without explicit product
+pull.
 
 ## Coding rules (non-negotiable)
 
@@ -67,8 +71,8 @@ src/
   config/paths.ts     .concord/ resolution, repo-root discovery
   db/                 SQLite: connection, schema, row parsers, repositories
   domain/             types, Zod input schemas, overlap detection (pure logic)
-  tools/              MCP tools: claim_work, handoff (+ get_work_state read);
-                      review-ready.ts is a handoff-invoked helper, not a tool
+  tools/              five-tool MCP surface; review-ready.ts is a
+                      handoff-invoked helper, not a registered tool
   artifacts/          render HANDOFF.md / REVIEW_PACKET.md / WORK_STATE.json
   install/            per-client instruction writers
   cli/                commander CLI                     [bin: concord]
@@ -81,7 +85,7 @@ CLI commands are thin: validate input → call domain/db → render.
 ## Working in this repo
 
 ```bash
-pnpm install          # native better-sqlite3 build is allowlisted for pnpm 10
+pnpm install          # better-sqlite3 ships prebuilds; the build allowlist is a fallback
 pnpm typecheck        # tsc --noEmit
 pnpm lint             # eslint (strict, type-aware)
 pnpm test             # vitest run

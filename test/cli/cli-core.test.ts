@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,15 +14,20 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { buildStatus, renderStatusText } from '../../src/artifacts/work-state-view.js';
-import { renderTasks } from '../../src/cli/commands/tasks.js';
 import { runInit } from '../../src/cli/commands/init.js';
+import { renderTasks } from '../../src/cli/commands/tasks.js';
+import { runWho } from '../../src/cli/commands/who.js';
+import { openContext } from '../../src/cli/context.js';
+import { configureCliWorkspace } from '../../src/cli/workspace-options.js';
+import { workspaceIdForRoot } from '../../src/config/paths.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
+import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 import { handleReviewReady } from '../../src/tools/review-ready.js';
 
 function repoDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'concord-cli-'));
   mkdirSync(join(dir, '.git'));
-  return dir;
+  return realpathSync(dir);
 }
 
 describe('runInit', () => {
@@ -25,6 +37,18 @@ describe('runInit', () => {
     expect(concordPath).toBe(join(dir, '.concord'));
     expect(existsSync(join(concordPath, 'concord.db'))).toBe(true);
     expect(existsSync(join(concordPath, 'WORK_STATE.json'))).toBe(true);
+    expect(readFileSync(join(dir, '.gitignore'), 'utf8')).toBe('.concord/\n');
+  });
+
+  it('preserves existing gitignore rules and adds the Concord entry once', () => {
+    const dir = repoDir();
+    const gitignorePath = join(dir, '.gitignore');
+    writeFileSync(gitignorePath, 'node_modules/');
+
+    runInit(dir);
+    runInit(dir);
+
+    expect(readFileSync(gitignorePath, 'utf8')).toBe('node_modules/\n.concord/\n');
   });
 });
 
@@ -131,5 +155,118 @@ describe('buildStatus / renderStatusText', () => {
     expect(view.reviewReady[0]?.openQuestionCount).toBe(1);
     expect(view.active).toHaveLength(0);
     expect(renderStatusText(view)).toContain('Sync or queued retries?');
+  });
+
+  it("includes the presence roster and renders a Who's here section", () => {
+    handleRegisterAgent(repos, {
+      agent_id: 'claude-code:7p8v',
+      kind: 'claude-code',
+      summary: 'building frontend',
+    });
+    const view = buildStatus(repos);
+    expect(view.presence).toHaveLength(1);
+    expect(view.presence[0]?.liveness).toBe('live');
+
+    const text = renderStatusText(view);
+    expect(text).toContain("Who's here");
+    expect(text).toContain('claude-code:7p8v');
+    expect(text).toContain('building frontend');
+  });
+
+  it("shows Who's here / none when no agent has registered", () => {
+    expect(renderStatusText(buildStatus(repos))).toContain("Who's here\n  none");
+  });
+
+  it('flags a stale claim once its owning agent has gone away', () => {
+    handleRegisterAgent(repos, { agent_id: 'claude-code:7p8v', kind: 'claude-code' });
+    handleClaimWork(repos, {
+      task_id: 'TASK-42',
+      title: 'Retry',
+      modules: ['billing'],
+      agent_id: 'claude-code:7p8v',
+    });
+
+    // Fresh: nothing stale yet.
+    expect(buildStatus(repos).staleClaims).toEqual([]);
+
+    // 31 minutes later the agent is past the away threshold.
+    const later = Date.now() + 31 * 60 * 1000;
+    const view = buildStatus(repos, later);
+    expect(view.staleClaims).toHaveLength(1);
+    expect(view.staleClaims[0]?.taskId).toBe('TASK-42');
+
+    const text = renderStatusText(view);
+    expect(text).toContain('Stale claims');
+    expect(text).toContain('TASK-42');
+    expect(text).toContain('claude-code:7p8v');
+  });
+});
+
+describe('runWho', () => {
+  it('lists agents registered in the workspace', () => {
+    const dir = repoDir();
+    runInit(dir);
+    handleRegisterAgent(openContext(dir).repos, {
+      agent_id: 'claude-code:7p8v',
+      kind: 'claude-code',
+      summary: 'building frontend',
+    });
+    const out = runWho(dir);
+    expect(out).toContain("Who's here");
+    expect(out).toContain('claude-code:7p8v');
+    expect(out).toContain('building frontend');
+  });
+
+  it('shows none when nobody has registered', () => {
+    const dir = repoDir();
+    runInit(dir);
+    expect(runWho(dir)).toContain('none');
+  });
+});
+
+describe('CLI workspace selection', () => {
+  it('uses the same CONCORD_REPO_ROOT override as MCP resolution', () => {
+    const selected = repoDir();
+    const elsewhere = repoDir();
+    const context = openContext(elsewhere, { CONCORD_REPO_ROOT: selected });
+
+    expect(context.repoRoot).toBe(selected);
+    expect(context.workspaceId).toBe(workspaceIdForRoot(selected));
+  });
+
+  it('configures an explicit --repo from any launch directory', () => {
+    const selected = repoDir();
+    const elsewhere = repoDir();
+    const env: NodeJS.ProcessEnv = {};
+    const identity = configureCliWorkspace({ repo: selected }, elsewhere, env);
+
+    expect(identity).toEqual({
+      workspaceId: workspaceIdForRoot(selected),
+      repoRoot: selected,
+    });
+    expect(openContext(elsewhere, env).repoRoot).toBe(selected);
+  });
+
+  it('selects the MCP workspace id through --workspace', () => {
+    const selected = repoDir();
+    const elsewhere = repoDir();
+    const env: NodeJS.ProcessEnv = {};
+    const workspaceId = workspaceIdForRoot(selected);
+
+    expect(configureCliWorkspace({ workspace: workspaceId }, elsewhere, env)?.repoRoot).toBe(
+      selected,
+    );
+    expect(openContext(elsewhere, env).workspaceId).toBe(workspaceId);
+  });
+
+  it('rejects conflicting CLI selectors', () => {
+    const selected = repoDir();
+    expect(() =>
+      configureCliWorkspace(
+        { repo: selected, workspace: workspaceIdForRoot(selected) },
+        selected,
+        {},
+      ),
+    ).toThrow(/either --repo or --workspace/u);
   });
 });

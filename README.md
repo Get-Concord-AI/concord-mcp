@@ -1,26 +1,70 @@
-# Concord MCP
+<p align="center">
+  <a href="https://getconcord.ai">
+    <img src="./assets/concord-readme-header.png" alt="Concord MCP — shared work-state for coding agents" width="100%">
+  </a>
+</p>
 
-[![npm version](https://img.shields.io/npm/v/@concord-ai/concord-mcp.svg)](https://www.npmjs.com/package/@concord-ai/concord-mcp)
-[![npm downloads](https://img.shields.io/npm/dm/@concord-ai/concord-mcp.svg)](https://www.npmjs.com/package/@concord-ai/concord-mcp)
-[![CI](https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml)
-[![Node.js](https://img.shields.io/node/v/@concord-ai/concord-mcp.svg)](https://www.npmjs.com/package/@concord-ai/concord-mcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+<h1 align="center">Concord MCP</h1>
 
-**Shared work-state for coding agents.** Concord MCP gives Claude Code, Codex,
-Cursor, and other MCP-capable coding assistants a shared work log. Agents can
-claim work, leave handoffs, and generate review-ready packets before opening PRs.
+<p align="center"><strong>Google Workspace for your AI agents.</strong></p>
 
-> ⚠️ Early and under active development. The v0 surface is three MCP tools:
-> `claim_work`, `handoff`, and `review_ready`.
+<p align="center">
+  Give Claude Code, Codex, Cursor, and every MCP-capable coding agent one shared
+  place to coordinate work, preserve decisions, and hand off cleanly.
+</p>
 
-## Why
+<p align="center">
+  <a href="https://www.npmjs.com/package/@concord-ai/concord-mcp"><img src="https://img.shields.io/npm/v/@concord-ai/concord-mcp.svg" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@concord-ai/concord-mcp"><img src="https://img.shields.io/npm/dm/@concord-ai/concord-mcp.svg" alt="npm downloads"></a>
+  <a href="https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml"><img src="https://github.com/Get-Concord-AI/concord-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://www.npmjs.com/package/@concord-ai/concord-mcp"><img src="https://img.shields.io/node/v/@concord-ai/concord-mcp.svg" alt="Node.js version"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
+</p>
 
-Agents work well in isolation, but their plans, assumptions, and decisions only
-become visible at PR time. Teams hack around this today with `AGENTS.md`, handoff
-files, worktrees, and custom scripts. Concord packages the smallest useful version
-of that: a local place for agents to record what they are doing while they do it.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://getconcord.ai">Website</a> ·
+  <a href="./examples/two-agent-overlap/">Demo</a> ·
+  <a href="./CONTRIBUTING.md">Contributing</a>
+</p>
 
-## Install
+> ⚠️ Early and under active development. The surface is 16 focused MCP tools
+> covering workspace selection, presence, task memory, versioned ownership, and
+> acknowledged handoffs.
+
+## One workspace. Every agent.
+
+Google Workspace gave human teams a shared place to see, create, and coordinate
+work. Concord brings that collaboration layer to coding agents — local-first,
+model-agnostic, and built around the repository.
+
+| Without Concord                                     | With Concord                                                   |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| Agents discover collisions after editing            | Agents claim files and modules before work begins              |
+| Context disappears when a session ends              | Decisions, assumptions, and findings stay attached to the task |
+| Ownership is implied by chat history                | Assignments and handoffs are explicit and acknowledged         |
+| Humans reconstruct progress from branches and diffs | A live roster and work-state show what is happening now        |
+| Review starts with “what changed?”                  | Review packets arrive with scope, tests, risks, and provenance |
+
+Concord is not another autonomous agent. It is the shared workspace around your
+agents: presence, task memory, ownership, handoffs, and review state through one
+small MCP server.
+
+## Quick start
+
+### Cursor — one-click MCP install
+
+[![Install Concord MCP in Cursor](https://img.shields.io/badge/Install_Concord_MCP-Cursor-7ee787?style=for-the-badge&labelColor=0d1117)](cursor://anysphere.cursor-deeplink/mcp/install?name=concord&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBjb25jb3JkLWFpL2NvbmNvcmQtbWNwQGxhdGVzdCJdfQ==)
+
+The deeplink registers Concord with Cursor through `npx`. Install the CLI and
+add Concord's always-on agent instructions to the current repository:
+
+```bash
+npm install -g @concord-ai/concord-mcp
+concord install
+```
+
+### Claude Code, Codex, and other MCP clients
 
 ```bash
 npm install -g @concord-ai/concord-mcp
@@ -40,22 +84,79 @@ setup:
 > Concord works through MCP tools plus the installed instructions on any
 > MCP-capable client.
 
-## The three tools
+## Upgrade
 
-| Tool           | When                 | What it does                                                                     |
-| -------------- | -------------------- | -------------------------------------------------------------------------------- |
-| `claim_work`   | before editing       | records the task + expected files/modules; flags overlaps with other active work |
-| `handoff`      | when done or blocked | captures what changed, tests run, assumptions, decisions, guardrails             |
-| `review_ready` | before a PR          | records plan, tests, open questions, and provenance                              |
+When a new Concord version is available, update the global package and confirm
+the installed version:
+
+```bash
+npm install -g @concord-ai/concord-mcp@latest
+concord --version
+```
+
+Concord does not auto-update. Upgrading preserves each repository's local
+`.concord/` workspace; any required database migrations run automatically when
+the workspace is next opened. The interactive `concord` CLI checks npm at most
+once per day and prints an update command when a newer stable release is
+available. Set `CONCORD_NO_UPDATE_CHECK=1` to disable this best-effort check.
+
+## The tools
+
+| Tools                                                         | Purpose                                                                                 |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `join_workspace`                                              | joins/selects a repository without restarting MCP and returns its workspace id          |
+| `register_agent`, `get_work_state`                            | registers presence and reads the roster, task lifecycle, overlaps, and stale claims     |
+| `claim_work`, `update_task`, `get_task_context`               | claims scoped work, records task memory, and reads evidence plus ownership history      |
+| `assign_task`, `accept_task`, `release_task`, `reassign_task` | separates assignment from acceptance and protects transitions with task versions        |
+| `offer_handoff`, `accept_handoff`, `decline_handoff`          | delivers a handoff to a named registered recipient with acceptance, decline, and expiry |
+| `handoff`                                                     | records completion/review evidence without transferring ownership                       |
+| `close_task`, `reopen_task`                                   | records terminal `complete`/`closed` outcomes and audited reopening                     |
+
+Every write tool accepts your `register_agent` `agent_id`, which keeps your
+presence live just by working. `get_work_state` shows **who is here** (with
+liveness), and flags **stale claims** — an active claim whose owning agent has
+gone away without handing off.
+
+Every task and presence operation also accepts an optional `workspace_id`
+returned by `join_workspace`. Omit it to use the active/default workspace.
+Responses report both the selected workspace id and repository root, so a
+client can detect a misrouted call.
+
+Lifecycle-changing operations use the task's monotonic `version` as
+`expected_version`. If two agents act on the same version, only the first
+transition succeeds. Assignment leaves work in `assigned` until the named
+agent calls `accept_task`; similarly, `offer_handoff` keeps ownership with the
+sender until the recipient accepts. Every ownership change is retained in an
+append-only audit history.
 
 ## What you get
 
-SQLite is the local source of truth (gitignored). Concord renders human-readable
-artifacts you can commit so they show up in PRs:
+SQLite is the local source of truth, kept in the `.concord/` at the **root of
+the repo** the work is happening in. The MCP server resolves that root from
+`CONCORD_REPO_ROOT` if set, then Claude Code's `CLAUDE_PROJECT_DIR` (which Claude
+Code sets automatically, even for a user-scoped server), then its working
+directory — so every agent in one repo shares one store. Set `CONCORD_REPO_ROOT`
+when running the server somewhere its working directory is not inside the repo.
+An already-running server can instead call `join_workspace` with any existing
+repository path; no MCP restart is required.
+
+Linked Git worktrees follow Git's `commondir` metadata to the primary checkout,
+so the main checkout and all linked worktrees intentionally share one Concord
+database and workspace id.
+
+To restrict dynamic joins, set `CONCORD_ALLOWED_ROOTS` to a path-delimited list
+of allowed repository roots. Without an allowlist, explicit roots must still
+exist and be directories; invalid paths are rejected rather than creating an
+accidental workspace.
+
+`concord init` adds `.concord/` to the
+repository's `.gitignore`, so the generated workspace stays local by default.
+Teams that want selected artifacts in PRs can remove that rule or force-add the
+human-readable files:
 
 ```text
 .concord/
-├── concord.db          local source of truth (gitignored)
+├── concord.db          local source of truth
 ├── HANDOFF.md          human-readable handoff
 ├── REVIEW_PACKET.md    review-ready evidence
 └── WORK_STATE.json     generated export (optional)
@@ -63,17 +164,34 @@ artifacts you can commit so they show up in PRs:
 
 ## CLI
 
-Agents use the MCP tools; humans use the CLI.
+Concord supports both typed MCP tools and a regular CLI. MCP-capable agents can
+call the tools directly; humans and CLI-oriented agents can work with the same
+shared workspace through `concord` commands.
 
 ```bash
 concord init                 # create the .concord/ workspace
-concord status               # active work, overlaps, review-ready, open questions
+concord status               # roster, active work, overlaps, stale claims, review-ready
+concord dashboard            # live, keyboard-driven view of agents, tasks, alerts, and activity
+concord who                  # which agents are present and what they are working on
 concord tasks                # list all tracked tasks
 concord handoff <task-id>    # print the latest handoff
 concord review-packet <id>   # print the latest review packet
 concord export markdown      # regenerate .concord/ artifacts
 concord doctor               # workspace checks + per-task tool adoption
+
+concord --repo ../project status        # select by repository path from anywhere
+concord --workspace ws_... status       # select an id returned by join_workspace
 ```
+
+`--repo` and `--workspace` are global, mutually exclusive options. The CLI uses
+the same `CONCORD_REPO_ROOT` → `CLAUDE_PROJECT_DIR` → working-directory priority
+and the same linked-worktree canonicalization as MCP.
+
+`concord dashboard` is a read-only, full-screen local TUI. It refreshes from the
+shared SQLite workspace every second while keeping agents, tasks, alerts,
+context, and timeline inside a fixed terminal viewport. Use `Tab` to change
+panes, `j`/`k` or the arrow keys to select work, `/` to filter, `?` for help,
+and `q` to quit.
 
 ## Try the demo
 
@@ -81,14 +199,16 @@ concord doctor               # workspace checks + per-task tool adoption
 pnpm demo
 ```
 
-Runs the [two-agent overlap demo](./examples/two-agent-overlap/): two agents claim
-overlapping work (Concord flags it), then one hands off and marks the task
-review-ready — printing the generated artifacts.
+Runs the [two-agent overlap demo](./examples/two-agent-overlap/): two agents
+claim overlapping work, share and read task context, then one hands off and
+marks the task review-ready. The example also includes a two-terminal flow for
+watching those real MCP calls appear live in `concord dashboard`.
 
 ## What this is / is not
 
-Shared work-state and guardrails for the coding agents you already use. **Not** an
-orchestrator, code reviewer, memory vector DB, or autonomous coding agent.
+Shared work-state and task memory for coding agents using the same local
+checkout. **Not** an orchestrator, code reviewer, hosted sync service, memory
+vector DB, or autonomous coding agent.
 
 See also: [Why not just use markdown?](./docs/why-not-markdown.md)
 
@@ -107,6 +227,19 @@ repo is strictly typed (no `any`, no typecasts), modular, and every PR stays und
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Get-Concord-AI/concord-mcp&type=date&legend=top-left&sealed_token=DbdI1sO4OagCGFjVA8u5Muv8TyjExR3cllFEq-O_HR3Lzj1jwj7p3N1KuL5fqohiyjzgevkwPQTT8oAw-rZfwTGNwRcTD9sb7aM0pDiJ6ZFGbGY2swwz0CNpbh3Usu4Dw6UIXBDuXacj3SBUTvdU7UYqEcAZtYdlTqUphLqPIrnMJa9WbAbg4ksGqaU2" />
  </picture>
 </a>
+
+## Privacy & telemetry
+
+Concord sends anonymous product-usage metadata to `getconcord.ai` so we can
+measure active installations, feature adoption, errors, and performance. Events
+contain random installation/session identifiers, an irreversible per-install
+workspace pseudonym, Concord/Node/platform versions, normalized MCP client
+metadata, and MCP tool or CLI command names, outcomes, and durations.
+
+Concord never sends code, raw file or repository paths, remotes, usernames,
+task or agent identifiers, command arguments, tool inputs/outputs, or task
+content. Set `CONCORD_TELEMETRY_DISABLED=1` (or `DO_NOT_TRACK=1`) to disable
+telemetry. Delivery is best effort and can never make a Concord operation fail.
 
 ## License
 

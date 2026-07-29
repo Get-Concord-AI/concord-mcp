@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
+import Database from 'better-sqlite3';
 import { openDatabase } from '../../src/db/connection.js';
 import { parseStringArray, parseTaskRow, serializeStringArray } from '../../src/db/rows.js';
+import { migrations } from '../../src/db/schema.js';
 
 describe('openDatabase', () => {
   it('applies all migrations (user_version at head) and creates tables', () => {
     const db = openDatabase(':memory:');
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(3);
+    expect(version).toBe(7);
 
     const raw: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     const names = new Set(
@@ -21,6 +26,55 @@ describe('openDatabase', () => {
     expect(names.has('handoffs')).toBe(true);
     expect(names.has('events')).toBe(true);
     expect(names.has('reviews')).toBe(true);
+    expect(names.has('task_updates')).toBe(true);
+    expect(names.has('agents')).toBe(true);
+    expect(names.has('task_ownership_events')).toBe(true);
+  });
+
+  it('upgrades a version-6 database without losing legacy task ownership', () => {
+    const filename = join(mkdtempSync(join(tmpdir(), 'concord-upgrade-')), 'legacy.db');
+    const legacy = new Database(filename);
+    for (let index = 0; index < 6; index += 1) {
+      legacy.exec(migrations[index] ?? '');
+      legacy.pragma(`user_version = ${String(index + 1)}`);
+    }
+    legacy
+      .prepare(
+        `INSERT INTO tasks (
+          task_id, title, owner, agent, branch, worktree, expected_files,
+          modules, domains, risk_tags, notes, status, parent_task_id, agent_id,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'LEGACY',
+        'Legacy task',
+        'alex',
+        'codex',
+        null,
+        null,
+        '[]',
+        '[]',
+        '[]',
+        '[]',
+        null,
+        'handed_off',
+        null,
+        'codex:old',
+        '2026-01-01T00:00:00.000Z',
+        '2026-01-01T00:00:00.000Z',
+      );
+    legacy.close();
+
+    const upgraded = openDatabase(filename);
+    const task = parseTaskRow(
+      upgraded.prepare('SELECT * FROM tasks WHERE task_id = ?').get('LEGACY'),
+    );
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(7);
+    expect(task.status).toBe('handed_off');
+    expect(task.agentId).toBe('codex:old');
+    expect(task.version).toBe(1);
+    expect(task.assignedAgentId).toBeNull();
   });
 });
 
@@ -45,6 +99,10 @@ describe('row parsing', () => {
       notes: null,
       status: 'active',
       parent_task_id: null,
+      agent_id: null,
+      version: 1,
+      assigned_agent_id: null,
+      lease_expires_at: null,
       created_at: '2026-07-17T00:00:00.000Z',
       updated_at: '2026-07-17T00:00:00.000Z',
     });

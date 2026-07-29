@@ -4,6 +4,7 @@ import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { formatHandoffText, handleHandoff } from '../../src/tools/handoff.js';
+import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 
 describe('handleHandoff', () => {
   let repos: Repositories;
@@ -11,7 +12,7 @@ describe('handleHandoff', () => {
     repos = createRepositories(openDatabase(':memory:'));
   });
 
-  it('records a handoff for a claimed task and marks it handed off', () => {
+  it('records evidence without transferring ownership or changing task status', () => {
     handleClaimWork(repos, { task_id: 'TASK-12', title: 'Retry', modules: ['billing'] });
     const result = handleHandoff(repos, {
       task_id: 'TASK-12',
@@ -24,7 +25,7 @@ describe('handleHandoff', () => {
 
     expect(result.taskAutoCreated).toBe(false);
     expect(result.handoff.whatChanged).toBe('Queued retries instead of synchronous');
-    expect(repos.tasks.get('TASK-12')?.status).toBe('handed_off');
+    expect(repos.tasks.get('TASK-12')?.status).toBe('active');
     expect(repos.handoffs.latestForTask('TASK-12')?.status).toBe('done');
     expect(repos.events.listByTask('TASK-12').map((e) => e.tool)).toEqual([
       'claim_work',
@@ -32,18 +33,18 @@ describe('handleHandoff', () => {
     ]);
   });
 
-  it('auto-creates a stub task when handing off an unclaimed task', () => {
-    const result = handleHandoff(repos, {
-      task_id: 'TASK-99',
-      status: 'blocked',
-      what_changed: 'Started but blocked on API keys',
-    });
-    expect(result.taskAutoCreated).toBe(true);
-    expect(repos.tasks.get('TASK-99')?.status).toBe('handed_off');
-    expect(formatHandoffText(result)).toContain('created a stub task');
+  it('rejects evidence for an unclaimed task', () => {
+    expect(() =>
+      handleHandoff(repos, {
+        task_id: 'TASK-99',
+        status: 'blocked',
+        what_changed: 'Started but blocked on API keys',
+      }),
+    ).toThrow(/not claimed/u);
   });
 
   it('formats needs-review recipients', () => {
+    handleClaimWork(repos, { task_id: 'TASK-1', title: 'Review recipients' });
     const result = handleHandoff(repos, {
       task_id: 'TASK-1',
       status: 'done',
@@ -85,7 +86,55 @@ describe('handleHandoff', () => {
     handleClaimWork(repos, { task_id: 'TASK-12', title: 'Retry' });
     const result = handleHandoff(repos, { task_id: 'TASK-12', status: 'done', what_changed: 'x' });
     expect(result.reviewReady).toBe(false);
-    expect(repos.tasks.get('TASK-12')?.status).toBe('handed_off');
+    expect(repos.tasks.get('TASK-12')?.status).toBe('active');
     expect(repos.reviews.latestForTask('TASK-12')).toBeUndefined();
+  });
+
+  it('prevents an unrelated agent from recording owner evidence', () => {
+    handleRegisterAgent(repos, { agent_id: 'codex:owner', kind: 'codex' });
+    handleRegisterAgent(repos, { agent_id: 'codex:other', kind: 'codex' });
+    handleClaimWork(repos, {
+      task_id: 'TASK-OWNED',
+      title: 'Owned',
+      agent_id: 'codex:owner',
+    });
+    expect(() =>
+      handleHandoff(repos, {
+        task_id: 'TASK-OWNED',
+        status: 'done',
+        what_changed: 'not mine',
+        agent_id: 'codex:other',
+      }),
+    ).toThrow(/current owner/u);
+  });
+
+  it('requires the current version for an owned review-ready transition', () => {
+    handleRegisterAgent(repos, { agent_id: 'codex:owner', kind: 'codex' });
+    handleClaimWork(repos, {
+      task_id: 'TASK-REVIEW',
+      title: 'Review',
+      agent_id: 'codex:owner',
+    });
+    expect(() =>
+      handleHandoff(repos, {
+        task_id: 'TASK-REVIEW',
+        status: 'done',
+        what_changed: 'ready',
+        agent_id: 'codex:owner',
+        ready_for_review: true,
+      }),
+    ).toThrow(/expected_version is required/u);
+    expect(repos.handoffs.latestForTask('TASK-REVIEW')).toBeUndefined();
+
+    const result = handleHandoff(repos, {
+      task_id: 'TASK-REVIEW',
+      status: 'done',
+      what_changed: 'ready',
+      agent_id: 'codex:owner',
+      expected_version: 1,
+      ready_for_review: true,
+    });
+    expect(result.reviewReady).toBe(true);
+    expect(repos.tasks.get('TASK-REVIEW')?.version).toBe(2);
   });
 });

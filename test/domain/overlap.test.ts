@@ -18,6 +18,10 @@ function task(partial: Partial<TaskRecord> & { taskId: string }): TaskRecord {
     notes: null,
     status: partial.status ?? 'active',
     parentTaskId: partial.parentTaskId ?? null,
+    agentId: null,
+    version: partial.version ?? 1,
+    assignedAgentId: partial.assignedAgentId ?? null,
+    leaseExpiresAt: partial.leaseExpiresAt ?? null,
     createdAt: '2026-07-17T00:00:00.000Z',
     updatedAt: '2026-07-17T00:00:00.000Z',
   };

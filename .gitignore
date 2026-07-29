@@ -8,10 +8,11 @@ dist/
 # Test coverage
 coverage/
 
-# Concord local source-of-truth DB (machine-specific, never committed)
-.concord/concord.db
-.concord/concord.db-shm
-.concord/concord.db-wal
+# Local agent and Concord state (machine-specific, never committed)
+.codex/
+.concord/
+.cursor/
+AGENTS.md
 
 # Logs
 *.log

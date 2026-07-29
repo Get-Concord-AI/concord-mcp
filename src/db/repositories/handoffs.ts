@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
 import type { ConcordDatabase } from '../connection.js';
-import { parseHandoffRow, serializeStringArray, type HandoffRecord } from '../rows.js';
+import {
+  parseHandoffRow,
+  serializeStringArray,
+  type HandoffDeliveryStatus,
+  type HandoffRecord,
+} from '../rows.js';
 
 /** Input for recording a handoff. Array fields default to `[]` at the caller. */
 export interface NewHandoff {
@@ -16,12 +21,24 @@ export interface NewHandoff {
   guardrailsChecked: readonly string[];
   needsReviewFrom: readonly string[];
   nextSteps: readonly string[];
+  fromAgentId?: string | null;
+  toAgentId?: string | null;
+  deliveryStatus?: HandoffDeliveryStatus;
+  expiresAt?: string | null;
+  taskVersion?: number | null;
 }
 
 export interface HandoffRepository {
   create(handoff: NewHandoff): HandoffRecord;
   listByTask(taskId: string): HandoffRecord[];
   latestForTask(taskId: string): HandoffRecord | undefined;
+  get(id: number): HandoffRecord | undefined;
+  pendingForTask(taskId: string): HandoffRecord | undefined;
+  resolve(
+    id: number,
+    status: Exclude<HandoffDeliveryStatus, 'recorded' | 'pending'>,
+    reason: string | null,
+  ): HandoffRecord | undefined;
 }
 
 const rawListSchema = z.array(z.unknown());
@@ -31,11 +48,13 @@ export function createHandoffRepository(db: ConcordDatabase): HandoffRepository 
     INSERT INTO handoffs (
       task_id, status, changed_files, what_changed, tests_run, known_risks,
       assumptions, decisions, guardrails_checked, needs_review_from, next_steps,
-      created_at
+      from_agent_id, to_agent_id, delivery_status, expires_at, resolved_at,
+      task_version, resolution_reason, created_at
     ) VALUES (
       @task_id, @status, @changed_files, @what_changed, @tests_run, @known_risks,
       @assumptions, @decisions, @guardrails_checked, @needs_review_from, @next_steps,
-      @created_at
+      @from_agent_id, @to_agent_id, @delivery_status, @expires_at, @resolved_at,
+      @task_version, @resolution_reason, @created_at
     )
   `);
   const getByIdStmt = db.prepare('SELECT * FROM handoffs WHERE id = ?');
@@ -45,6 +64,23 @@ export function createHandoffRepository(db: ConcordDatabase): HandoffRepository 
   const latestStmt = db.prepare(
     'SELECT * FROM handoffs WHERE task_id = ? ORDER BY created_at DESC, id DESC LIMIT 1',
   );
+  const pendingStmt = db.prepare(
+    `SELECT * FROM handoffs
+     WHERE task_id = ? AND delivery_status = 'pending'
+     ORDER BY id DESC LIMIT 1`,
+  );
+  const resolveStmt = db.prepare(
+    `UPDATE handoffs
+     SET delivery_status = @delivery_status,
+         resolved_at = @resolved_at,
+         resolution_reason = @resolution_reason
+     WHERE id = @id AND delivery_status = 'pending'`,
+  );
+
+  function get(id: number): HandoffRecord | undefined {
+    const raw: unknown = getByIdStmt.get(id);
+    return raw === undefined ? undefined : parseHandoffRow(raw);
+  }
 
   return {
     create(handoff) {
@@ -60,6 +96,13 @@ export function createHandoffRepository(db: ConcordDatabase): HandoffRepository 
         guardrails_checked: serializeStringArray(handoff.guardrailsChecked),
         needs_review_from: serializeStringArray(handoff.needsReviewFrom),
         next_steps: serializeStringArray(handoff.nextSteps),
+        from_agent_id: handoff.fromAgentId ?? null,
+        to_agent_id: handoff.toAgentId ?? null,
+        delivery_status: handoff.deliveryStatus ?? 'recorded',
+        expires_at: handoff.expiresAt ?? null,
+        resolved_at: null,
+        task_version: handoff.taskVersion ?? null,
+        resolution_reason: null,
         created_at: new Date().toISOString(),
       });
       const raw: unknown = getByIdStmt.get(info.lastInsertRowid);
@@ -78,6 +121,20 @@ export function createHandoffRepository(db: ConcordDatabase): HandoffRepository 
         return undefined;
       }
       return parseHandoffRow(raw);
+    },
+    get,
+    pendingForTask(taskId) {
+      const raw: unknown = pendingStmt.get(taskId);
+      return raw === undefined ? undefined : parseHandoffRow(raw);
+    },
+    resolve(id, status, reason) {
+      const info = resolveStmt.run({
+        id,
+        delivery_status: status,
+        resolved_at: new Date().toISOString(),
+        resolution_reason: reason,
+      });
+      return info.changes === 0 ? undefined : get(id);
     },
   };
 }

@@ -12,14 +12,18 @@ export function renderTasks(tasks: readonly TaskRecord[]): string {
     .map((task) => {
       const id = task.taskId.padEnd(10);
       const status = task.status.padEnd(13);
-      const agent = (task.agent ?? '-').padEnd(12);
-      return `${id} ${status} ${agent} ${task.title}`;
+      const agent = (task.agentId ?? task.assignedAgentId ?? task.agent ?? '-').padEnd(18);
+      return `${id} ${status} v${String(task.version).padEnd(4)} ${agent} ${task.title}`;
     })
     .join('\n');
 }
 
 export function runTasks(cwd: string): string {
-  return renderTasks(openContext(cwd).repos.tasks.list());
+  const context = openContext(cwd);
+  return [
+    `Workspace: ${context.workspaceId} (${context.repoRoot})`,
+    renderTasks(context.repos.tasks.list()),
+  ].join('\n');
 }
 
 export function registerTasks(program: Command): void {

@@ -4,6 +4,12 @@ import type { Repositories, TaskRecord } from '../db/index.js';
 import { assessClaimBreadth } from '../domain/decomposition.js';
 import { detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
 import { claimWorkInputShape, type ClaimWorkInput } from '../domain/schemas.js';
+import {
+  selectToolWorkspace,
+  type SelectWorkspace,
+  workspaceStructured,
+  withWorkspaceText,
+} from './workspace-routing.js';
 
 export interface ClaimWorkResult {
   task: TaskRecord;
@@ -56,6 +62,19 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
 
   const existing = repos.tasks.get(input.task_id);
 
+  if (input.agent_id !== undefined && repos.agents.get(input.agent_id) === undefined) {
+    throw new Error(`Agent ${input.agent_id} is not registered. Call register_agent first.`);
+  }
+  if (
+    existing?.agentId !== null &&
+    existing?.agentId !== undefined &&
+    input.agent_id !== existing.agentId
+  ) {
+    throw new Error(
+      `Task ${input.task_id} is owned by ${existing.agentId}; use offer_handoff or reassign_task.`,
+    );
+  }
+
   // Parent is set at first claim and preserved thereafter (identity is idempotent).
   const parentTaskId = existing ? existing.parentTaskId : (input.parent_task_id ?? null);
 
@@ -94,6 +113,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
       ...scope,
       notes: input.notes ?? null,
       parentTaskId,
+      agentId: input.agent_id ?? null,
     });
   } else if (scopeAdded.length > 0) {
     task = repos.tasks.updateScope(input.task_id, scope) ?? existing;
@@ -107,6 +127,11 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     status: 'success',
     detail: overlaps.length > 0 ? `${String(overlaps.length)} overlap(s)` : null,
   });
+
+  // Working refreshes presence: a registered agent stays live just by claiming.
+  if (input.agent_id !== undefined) {
+    repos.agents.touch(input.agent_id);
+  }
 
   return {
     task,
@@ -162,6 +187,10 @@ export function formatClaimWorkText(result: ClaimWorkResult): string {
  * overlap entries, so the payload is internally consistent. */
 export function toClaimWorkStructured(result: ClaimWorkResult): {
   task_id: string;
+  status: string;
+  version: number;
+  agent_id: string | null;
+  assigned_agent_id: string | null;
   parent_task_id: string | null;
   already_claimed: boolean;
   overlaps: { task_id: string; title: string; reasons: string[] }[];
@@ -171,6 +200,10 @@ export function toClaimWorkStructured(result: ClaimWorkResult): {
 } {
   return {
     task_id: result.task.taskId,
+    status: result.task.status,
+    version: result.task.version,
+    agent_id: result.task.agentId,
+    assigned_agent_id: result.task.assignedAgentId,
     parent_task_id: result.task.parentTaskId,
     already_claimed: result.alreadyClaimed,
     overlaps: result.overlaps.map((overlap) => ({
@@ -188,6 +221,7 @@ export function registerClaimWork(
   server: McpServer,
   repos: Repositories,
   onWrite?: () => void,
+  selectWorkspace?: SelectWorkspace,
 ): void {
   server.registerTool(
     'claim_work',
@@ -200,11 +234,17 @@ export function registerClaimWork(
       inputSchema: claimWorkInputShape,
     },
     (args) => {
+      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleClaimWork(repos, args);
       onWrite?.();
       return {
-        content: [{ type: 'text', text: formatClaimWorkText(result) }],
-        structuredContent: toClaimWorkStructured(result),
+        content: [
+          { type: 'text', text: withWorkspaceText(formatClaimWorkText(result), workspace) },
+        ],
+        structuredContent: {
+          ...workspaceStructured(workspace),
+          ...toClaimWorkStructured(result),
+        },
       };
     },
   );

@@ -2,10 +2,20 @@ import { dirname } from 'node:path';
 
 import type { Repositories, TaskRecord } from '../db/index.js';
 import { detectOverlaps } from '../domain/overlap.js';
+import {
+  buildRoster,
+  detectStaleClaims,
+  type PresenceEntry,
+  type StaleClaim,
+} from '../domain/presence.js';
 
 interface ActiveEntry {
   taskId: string;
   agent: string;
+  agentId: string | null;
+  assignedAgentId: string | null;
+  status: string;
+  version: number;
   branch: string;
   touches: string;
   parentTaskId: string | null;
@@ -38,6 +48,11 @@ export interface StatusView {
   overlaps: OverlapPair[];
   reviewReady: ReviewEntry[];
   openQuestions: OpenQuestionEntry[];
+  /** Registered agents with derived liveness — "who is here and what they are
+   * doing", most-live first. */
+  presence: PresenceEntry[];
+  /** Active claims whose owning agent has gone away or never registered. */
+  staleClaims: StaleClaim[];
 }
 
 function touchesOf(task: TaskRecord): string {
@@ -46,9 +61,10 @@ function touchesOf(task: TaskRecord): string {
   return unique.length > 0 ? unique.join(', ') : '-';
 }
 
-export function buildStatus(repos: Repositories): StatusView {
+export function buildStatus(repos: Repositories, now: number = Date.now()): StatusView {
   const tasks = repos.tasks.list();
-  const active = tasks.filter((task) => task.status === 'active');
+  const activeStatuses = new Set(['assigned', 'active', 'blocked', 'handoff_offered']);
+  const active = tasks.filter((task) => activeStatuses.has(task.status));
 
   const overlaps: OverlapPair[] = [];
   const seenPairs = new Set<string>();
@@ -94,6 +110,10 @@ export function buildStatus(repos: Repositories): StatusView {
     active: active.map((task) => ({
       taskId: task.taskId,
       agent: task.agent ?? '-',
+      agentId: task.agentId,
+      assignedAgentId: task.assignedAgentId,
+      status: task.status,
+      version: task.version,
       branch: task.branch ?? '-',
       touches: touchesOf(task),
       parentTaskId: task.parentTaskId,
@@ -101,18 +121,35 @@ export function buildStatus(repos: Repositories): StatusView {
     overlaps,
     reviewReady,
     openQuestions,
+    presence: buildRoster(repos.agents.list(), now),
+    staleClaims: detectStaleClaims(tasks, repos.agents.list(), now),
   };
 }
 
+/** Render the presence roster as indented lines, or a placeholder when empty. */
+export function renderRosterLines(roster: readonly PresenceEntry[]): string[] {
+  if (roster.length === 0) {
+    return ['  none'];
+  }
+  return roster.map((entry) => {
+    const state = `${entry.liveness}/${entry.status}`;
+    const doing = entry.summary ?? '-';
+    return `  ${entry.agentId.padEnd(18)} ${state.padEnd(20)} ${doing}  (${String(entry.ageSeconds)}s ago)`;
+  });
+}
+
 export function renderStatusText(view: StatusView): string {
-  const lines = ['Concord workspace', '', 'Active work'];
+  const lines = ['Concord workspace', '', "Who's here"];
+  lines.push(...renderRosterLines(view.presence));
+
+  lines.push('', 'Active work');
   if (view.active.length === 0) {
     lines.push('  none');
   } else {
     for (const entry of view.active) {
       const parent = entry.parentTaskId === null ? '' : `  (child of ${entry.parentTaskId})`;
       lines.push(
-        `  ${entry.taskId.padEnd(10)} ${entry.agent.padEnd(12)} ${entry.branch.padEnd(20)} touches: ${entry.touches}${parent}`,
+        `  ${entry.taskId.padEnd(10)} ${entry.status.padEnd(16)} v${String(entry.version).padEnd(4)} ${(entry.agentId ?? entry.assignedAgentId ?? entry.agent).padEnd(18)} ${entry.branch.padEnd(20)} touches: ${entry.touches}${parent}`,
       );
     }
   }
@@ -123,6 +160,19 @@ export function renderStatusText(view: StatusView): string {
   } else {
     for (const overlap of view.overlaps) {
       lines.push(`  ${overlap.a} <-> ${overlap.b}: ${overlap.reasons.join('; ')}`);
+    }
+  }
+
+  lines.push('', 'Stale claims');
+  if (view.staleClaims.length === 0) {
+    lines.push('  none');
+  } else {
+    for (const claim of view.staleClaims) {
+      const detail =
+        claim.reason === 'agent-unregistered'
+          ? 'agent never registered'
+          : `agent away ${String(claim.ageSeconds ?? 0)}s`;
+      lines.push(`  ${claim.taskId.padEnd(10)} ${claim.agentId} (${detail})`);
     }
   }
 

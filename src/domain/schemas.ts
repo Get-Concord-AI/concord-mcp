@@ -1,10 +1,80 @@
 import { z } from 'zod';
 
+import { agentStatusValues } from '../db/rows.js';
+
 /**
  * Zod input schemas for the MCP tools. Each tool exposes its schema as a raw
  * shape (the form `McpServer.registerTool` expects) plus an inferred input type.
  * Fields use snake_case to match the tool's public JSON contract.
  */
+
+/** Optional instance identity carried by every write so it refreshes presence.
+ * Distinct from the `agent` *kind* string — this identifies one running
+ * instance (e.g. `claude-code:7p8v`), obtained from `register_agent`. */
+const agentIdField = z
+  .string()
+  .optional()
+  .describe(
+    'Identity of the registered agent instance doing this work, e.g. claude-code:7p8v. ' +
+      "Supplying it refreshes the agent's presence (liveness) in the roster.",
+  );
+
+/** Optional workspace selector shared by every MCP operation. */
+export const workspaceIdField = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    'Workspace id returned by join_workspace. Omit to use the active/default workspace for this MCP session.',
+  );
+
+const taskVersionField = z
+  .number()
+  .int()
+  .positive()
+  .describe('Task version last read by the caller; stale versions are rejected');
+
+export const joinWorkspaceInputShape = {
+  root: z
+    .string()
+    .min(1)
+    .describe('Existing repository or directory to join as a Concord workspace'),
+} as const;
+
+export const joinWorkspaceInputSchema = z.object(joinWorkspaceInputShape);
+export type JoinWorkspaceInput = z.infer<typeof joinWorkspaceInputSchema>;
+
+export const getWorkStateInputShape = {
+  workspace_id: workspaceIdField,
+} as const;
+export const getWorkStateInputSchema = z.object(getWorkStateInputShape).default({});
+
+export const registerAgentInputShape = {
+  agent_id: z
+    .string()
+    .optional()
+    .describe(
+      'Stable per-session identity for this agent instance, e.g. claude-code:7p8v. Omit on the ' +
+        'first call to have one generated, then reuse the returned id on every later call so ' +
+        'presence stays attributed to the same instance.',
+    ),
+  kind: z.string().min(1).describe('Agent type / provider, e.g. claude-code, codex, cursor'),
+  owner: z.string().optional().describe('Human accountable for this agent'),
+  model: z.string().optional().describe('Model the agent is running, e.g. opus-4.8'),
+  summary: z.string().optional().describe('One line: what this agent is working on right now'),
+  status: z
+    .enum(agentStatusValues)
+    .optional()
+    .describe('Reported status: active, blocked, waiting_review, or done (default active)'),
+  branch: z.string().optional().describe('Git branch, if known'),
+  worktree: z.string().optional().describe('Git worktree path, if used'),
+  cwd: z.string().optional().describe('Working directory, for disambiguating instances'),
+  pid: z.number().int().optional().describe('Process id, for disambiguating instances'),
+  workspace_id: workspaceIdField,
+} as const;
+
+export const registerAgentInputSchema = z.object(registerAgentInputShape);
+export type RegisterAgentInput = z.infer<typeof registerAgentInputSchema>;
 
 export const claimWorkInputShape = {
   task_id: z.string().min(1).describe('Stable identifier for the task, e.g. TASK-12'),
@@ -32,10 +102,43 @@ export const claimWorkInputShape = {
   domains: z.array(z.string()).optional().describe('Product domains touched, e.g. payments'),
   risk_tags: z.array(z.string()).optional().describe('Risk tags, e.g. payment-flow'),
   notes: z.string().optional().describe('Freeform notes'),
+  agent_id: agentIdField,
+  workspace_id: workspaceIdField,
 } as const;
 
 export const claimWorkInputSchema = z.object(claimWorkInputShape);
 export type ClaimWorkInput = z.infer<typeof claimWorkInputSchema>;
+
+export const updateTaskInputShape = {
+  task_id: z.string().min(1).describe('Claimed task receiving this memory entry'),
+  kind: z
+    .enum([
+      'intent',
+      'progress',
+      'assumption',
+      'decision',
+      'question',
+      'answer',
+      'blocker',
+      'finding',
+    ])
+    .describe('The kind of task-scoped update'),
+  content: z.string().min(1).describe('Concise context another agent needs'),
+  agent: z.string().optional().describe('Agent recording the update; defaults to the claimant'),
+  agent_id: agentIdField,
+  workspace_id: workspaceIdField,
+} as const;
+
+export const updateTaskInputSchema = z.object(updateTaskInputShape);
+export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;
+
+export const getTaskContextInputShape = {
+  task_id: z.string().min(1).describe('Task whose shared context should be read'),
+  workspace_id: workspaceIdField,
+} as const;
+
+export const getTaskContextInputSchema = z.object(getTaskContextInputShape);
+export type GetTaskContextInput = z.infer<typeof getTaskContextInputSchema>;
 
 export const handoffInputShape = {
   task_id: z.string().min(1).describe('The task being handed off, e.g. TASK-12'),
@@ -65,6 +168,9 @@ export const handoffInputShape = {
     .array(z.object({ field: z.string(), source: z.string() }))
     .optional()
     .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
+  agent_id: agentIdField,
+  expected_version: taskVersionField.optional(),
+  workspace_id: workspaceIdField,
 } as const;
 
 export const handoffInputSchema = z.object(handoffInputShape);
@@ -82,7 +188,123 @@ export const reviewReadyInputShape = {
     .array(z.object({ field: z.string(), source: z.string() }))
     .optional()
     .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
+  agent_id: agentIdField,
+  expected_version: taskVersionField.optional(),
+  workspace_id: workspaceIdField,
 } as const;
 
 export const reviewReadyInputSchema = z.object(reviewReadyInputShape);
 export type ReviewReadyInput = z.infer<typeof reviewReadyInputSchema>;
+
+const lifecycleActorField = z
+  .string()
+  .min(1)
+  .describe('Registered agent_id performing this lifecycle transition');
+
+export const assignTaskInputShape = {
+  task_id: z.string().min(1),
+  to_agent_id: z.string().min(1).describe('Registered agent receiving the assignment'),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  lease_seconds: z.number().int().positive().optional(),
+  reason: z.string().min(1).optional(),
+  workspace_id: workspaceIdField,
+} as const;
+export const assignTaskInputSchema = z.object(assignTaskInputShape);
+export type AssignTaskInput = z.infer<typeof assignTaskInputSchema>;
+
+export const acceptTaskInputShape = {
+  task_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  workspace_id: workspaceIdField,
+} as const;
+export const acceptTaskInputSchema = z.object(acceptTaskInputShape);
+export type AcceptTaskInput = z.infer<typeof acceptTaskInputSchema>;
+
+export const releaseTaskInputShape = {
+  task_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  reason: z.string().min(1).optional(),
+  workspace_id: workspaceIdField,
+} as const;
+export const releaseTaskInputSchema = z.object(releaseTaskInputShape);
+export type ReleaseTaskInput = z.infer<typeof releaseTaskInputSchema>;
+
+export const reassignTaskInputShape = {
+  task_id: z.string().min(1),
+  to_agent_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  lease_seconds: z.number().int().positive().optional(),
+  reason: z.string().min(1),
+  force: z.boolean().optional(),
+  workspace_id: workspaceIdField,
+} as const;
+export const reassignTaskInputSchema = z.object(reassignTaskInputShape);
+export type ReassignTaskInput = z.infer<typeof reassignTaskInputSchema>;
+
+export const closeTaskInputShape = {
+  task_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  reason: z.string().min(1),
+  outcome: z
+    .enum(['complete', 'closed'])
+    .optional()
+    .describe('Terminal outcome; defaults to closed'),
+  workspace_id: workspaceIdField,
+} as const;
+export const closeTaskInputSchema = z.object(closeTaskInputShape);
+export type CloseTaskInput = z.infer<typeof closeTaskInputSchema>;
+
+export const reopenTaskInputShape = {
+  task_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  reason: z.string().min(1),
+  workspace_id: workspaceIdField,
+} as const;
+export const reopenTaskInputSchema = z.object(reopenTaskInputShape);
+export type ReopenTaskInput = z.infer<typeof reopenTaskInputSchema>;
+
+export const offerHandoffInputShape = {
+  task_id: z.string().min(1),
+  to_agent_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  what_changed: z.string().min(1),
+  changed_files: z.array(z.string()).optional(),
+  tests_run: z.array(z.string()).optional(),
+  known_risks: z.array(z.string()).optional(),
+  assumptions: z.array(z.string()).optional(),
+  decisions: z.array(z.string()).optional(),
+  guardrails_checked: z.array(z.string()).optional(),
+  next_steps: z.array(z.string()).optional(),
+  expires_seconds: z.number().int().positive().optional(),
+  workspace_id: workspaceIdField,
+} as const;
+export const offerHandoffInputSchema = z.object(offerHandoffInputShape);
+export type OfferHandoffInput = z.infer<typeof offerHandoffInputSchema>;
+
+export const acceptHandoffInputShape = {
+  task_id: z.string().min(1),
+  handoff_id: z.number().int().positive(),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  workspace_id: workspaceIdField,
+} as const;
+export const acceptHandoffInputSchema = z.object(acceptHandoffInputShape);
+export type AcceptHandoffInput = z.infer<typeof acceptHandoffInputSchema>;
+
+export const declineHandoffInputShape = {
+  task_id: z.string().min(1),
+  handoff_id: z.number().int().positive(),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  reason: z.string().min(1),
+  workspace_id: workspaceIdField,
+} as const;
+export const declineHandoffInputSchema = z.object(declineHandoffInputShape);
+export type DeclineHandoffInput = z.infer<typeof declineHandoffInputSchema>;

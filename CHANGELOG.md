@@ -6,6 +6,71 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-28
+
+### Added
+
+- Transparent, default-on anonymous telemetry for MCP tool and CLI command
+  adoption, outcomes, and duration, with stable pseudonymous installation and
+  workspace identities.
+- `CONCORD_TELEMETRY_DISABLED=1` and `DO_NOT_TRACK=1` opt-outs.
+
+### Security
+
+- Telemetry excludes code, paths, repository remotes, usernames, task and agent
+  identifiers, command arguments, tool inputs/outputs, and task content.
+
+## [0.4.1] - 2026-07-26
+
+### Added
+
+- Interactive CLI commands now show a cached, best-effort notice when a newer
+  stable Concord release is available on npm.
+
+### Fixed
+
+- `concord dashboard` now uses a bounded full-screen viewport and alternate
+  screen buffer, preventing refresh frames from accumulating in terminal
+  scrollback.
+
+## [0.4.0] - 2026-07-26
+
+### Added
+
+- Agent presence registry with the `register_agent` MCP tool, derived
+  live/idle/away states, `concord who`, and stale-claim detection.
+- `concord dashboard`, a live read-only TUI for agents, tasks, coordination
+  alerts, task memory, handoffs, review state, and recent activity.
+- A paced two-terminal demo that shows real MCP activity appearing in the
+  dashboard.
+
+### Changed
+
+- Claude Code sessions can auto-register their presence through the
+  `SessionStart` hook, and normal write-tool activity refreshes agent presence.
+- The MCP server resolves its shared store at the repository root so agents
+  started from different working directories converge on one workspace.
+
+## [0.3.0] - 2026-07-23
+
+### Added
+
+- Task-scoped memory with typed `update_task` entries for intent, progress,
+  assumptions, decisions, questions, answers, blockers, and findings.
+- `get_task_context` for reading a task's ordered updates, latest handoff and
+  review evidence, and current overlap warnings.
+
+## [0.2.0] - 2026-07-22
+
+### Added
+
+- Read-only work-state tool and resource, change notifications, overlap
+  enforcement commands, task decomposition, and normalized overlap matching.
+
+### Changed
+
+- Review readiness is now part of `handoff` via `ready_for_review`.
+
 ## [0.1.1]
 
 ### Changed
@@ -27,6 +92,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Get-Concord-AI/concord-mcp/releases/tag/v0.1.0
