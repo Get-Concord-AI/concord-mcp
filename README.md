@@ -71,10 +71,13 @@ npm install -g @concord-ai/concord-mcp
 concord install
 ```
 
-`concord install` writes Concord's tool instructions into your client configs
-(`CLAUDE.md`, `AGENTS.md`, `.codex/`, `.cursor/rules/`). Then register the MCP
-server with your client and let your agent use the tools through MCP. Per-client
-setup:
+`concord install` does both halves of the setup: it registers the MCP server
+(`.mcp.json`, `.cursor/mcp.json`, and Codex's `~/.codex/config.toml`) and writes
+Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
+`.codex/`, `.cursor/rules/`). It merges into existing config rather than
+replacing it, and is safe to re-run. Pass `--no-mcp` to write only the
+instructions and manage MCP registration yourself. Restart your client
+afterwards so it picks up the new server. Per-client setup:
 
 - [Claude Code](./docs/claude-code.md)
 - [Codex](./docs/codex.md)

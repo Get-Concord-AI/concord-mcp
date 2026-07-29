@@ -6,9 +6,13 @@
 npm install -g @concord-ai/concord-mcp
 ```
 
-## 2. Register the MCP server
+## 2. Set up your repo
 
-Add Concord to `.cursor/mcp.json`:
+```bash
+concord install
+```
+
+This registers the MCP server in `.cursor/mcp.json`:
 
 ```json
 {
@@ -20,16 +24,16 @@ Add Concord to `.cursor/mcp.json`:
 }
 ```
 
-## 3. Install the agent instructions
+and writes `.cursor/rules/concord.mdc` (with `alwaysApply: true`) so the agent
+knows when to claim work, share task context, and hand off. Existing servers and
+rules are preserved and it is idempotent. Restart Cursor afterwards so it picks
+up the server. Pass `--no-mcp` to write only the rule and register Concord
+yourself with the JSON above.
 
-```bash
-concord install
-```
+The one-click deeplink in the README registers Concord through `npx` instead,
+for trying it without a global install.
 
-This writes `.cursor/rules/concord.mdc` (with `alwaysApply: true`) so the agent
-knows when to claim work, share task context, and hand off. It is idempotent.
-
-## 4. Use it
+## 3. Use it
 
 Track progress and artifacts from the terminal:
 
