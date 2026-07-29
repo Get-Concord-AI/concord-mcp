@@ -6,9 +6,13 @@
 npm install -g @concord-ai/concord-mcp
 ```
 
-## 2. Register the MCP server
+## 2. Set up your repo
 
-Add Concord to your project's `.mcp.json`:
+```bash
+concord install
+```
+
+This does two things. It registers the MCP server in your project's `.mcp.json`:
 
 ```json
 {
@@ -20,23 +24,19 @@ Add Concord to your project's `.mcp.json`:
 }
 ```
 
-Or use the Claude Code CLI:
+And it writes a Concord block into `CLAUDE.md` telling the agent when to claim
+work, share task context, and hand off. Both merge into whatever is already
+there — other MCP servers and existing instructions are preserved — so it is
+safe to re-run. Restart Claude Code afterwards so it picks up the server.
+
+To manage `.mcp.json` yourself, pass `--no-mcp` and register Concord by hand
+with the JSON above or:
 
 ```bash
 claude mcp add concord -- concord-mcp
 ```
 
-## 3. Install the agent instructions
-
-```bash
-concord install
-```
-
-This writes a Concord block into `CLAUDE.md` telling the agent when to claim
-work, share task context, and hand off. It preserves any existing content and is
-safe to re-run.
-
-## 4. Use it
+## 3. Use it
 
 Ask Claude to start a task. It should call `claim_work` before editing,
 `update_task` while working, and `get_task_context` when resuming or

@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `concord install` now registers the MCP server itself, writing `.mcp.json`
+  (Claude Code), `.cursor/mcp.json` (Cursor), and `[mcp_servers.concord]` in
+  Codex's `~/.codex/config.toml` (honoring `CODEX_HOME`). Previously it wrote
+  only the agent instructions, leaving registration as a manual step that was
+  easy to miss — the instructions landed but the tools were never connected.
+  Existing servers, unrelated keys, and TOML comments are preserved, and
+  re-running is a no-op. Pass `--no-mcp` to skip registration. A config file
+  that cannot be parsed is reported and left untouched rather than overwritten.
+
 ## [0.5.0] - 2026-07-28
 
 ### Added

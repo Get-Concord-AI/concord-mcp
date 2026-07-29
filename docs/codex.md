@@ -6,27 +6,31 @@
 npm install -g @concord-ai/concord-mcp
 ```
 
-## 2. Register the MCP server
+## 2. Set up your repo
 
-Add Concord to your Codex config (`~/.codex/config.toml`):
+```bash
+concord install
+```
+
+This registers the MCP server in your Codex config (`~/.codex/config.toml`, or
+`$CODEX_HOME/config.toml` when that is set):
 
 ```toml
 [mcp_servers.concord]
 command = "concord-mcp"
 ```
 
-Refer to the current Codex MCP documentation if the config format has changed.
+and writes a Concord block into `AGENTS.md` (and `.codex/concord.md`) describing
+when to claim work, share task context, and hand off. The rest of your config —
+other tables, and the comments around them — is left as-is, and re-running is a
+no-op. Pass `--no-mcp` to write only the instructions and add the table above
+yourself.
 
-## 3. Install the agent instructions
+Note this is the one file `concord install` writes outside the repo, since Codex
+keeps MCP servers in user-global config rather than per-project. Refer to the
+current Codex MCP documentation if the config format has changed.
 
-```bash
-concord install
-```
-
-This writes a Concord block into `AGENTS.md` (and `.codex/concord.md`) describing
-when to claim work, share task context, and hand off. It is idempotent.
-
-## 4. Use it
+## 3. Use it
 
 Codex should call `claim_work` before editing, `update_task` while working, and
 `get_task_context` when resuming or coordinating. An assigned task must be
