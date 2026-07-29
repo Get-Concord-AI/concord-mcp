@@ -9,6 +9,7 @@ dist/
 coverage/
 
 # Local agent and Concord state (machine-specific, never committed)
+.claude/
 .codex/
 .concord/
 .cursor/
