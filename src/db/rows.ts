@@ -94,7 +94,7 @@ export interface TaskRecord {
   status: TaskStatus;
   /** The parent task this is a subtask of, or null for a top-level task. */
   parentTaskId: string | null;
-  /** The agent instance (register_agent identity) that claimed this, or null.
+  /** The agent instance identity that claimed this, or null.
    * Distinct from `agent` (the kind string): used to check the claimant's
    * liveness for stale-claim detection. */
   agentId: string | null;

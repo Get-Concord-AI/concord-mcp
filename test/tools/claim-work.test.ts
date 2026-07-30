@@ -2,11 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
-import {
-  formatClaimWorkText,
-  handleClaimWork,
-  toClaimWorkStructured,
-} from '../../src/tools/claim-work.js';
+import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 
 describe('handleClaimWork', () => {
@@ -39,7 +35,6 @@ describe('handleClaimWork', () => {
     expect(result.overlaps).toHaveLength(1);
     expect(result.overlaps[0]?.taskId).toBe('TASK-12');
     expect(result.checkedAgainst).toBe(1);
-    expect(formatClaimWorkText(result)).toContain('Potential overlaps (1 of 1 active task(s))');
   });
 
   it('is idempotent: re-claiming returns the existing task without duplicating', () => {
@@ -70,7 +65,7 @@ describe('handleClaimWork', () => {
         agent_id: 'codex:two',
         modules: ['new-scope'],
       }),
-    ).toThrow(/offer_handoff or reassign_task/u);
+    ).toThrow(/transfer_work/u);
     expect(repos.tasks.get('TASK-OWNED')?.modules).toEqual([]);
   });
 
@@ -85,14 +80,10 @@ describe('handleClaimWork', () => {
     expect(result.overlaps).toEqual([]);
   });
 
-  it('makes an empty result explicitly point-in-time rather than definitive', () => {
+  it('reports how many active tasks the point-in-time overlap check considered', () => {
     // First claim: nobody else is active, so there is nothing to compare against.
     const first = handleClaimWork(repos, { task_id: 'TASK-1', title: 'Solo' });
     expect(first.checkedAgainst).toBe(0);
-    const firstText = formatClaimWorkText(first);
-    expect(firstText).not.toContain('No potential overlaps with active tasks.');
-    expect(firstText).toContain('No other active claims to check against yet');
-    expect(firstText).toContain('concord status');
 
     // Second, non-overlapping claim: compared against 1 active task, still clean,
     // but the wording stays point-in-time.
@@ -103,10 +94,6 @@ describe('handleClaimWork', () => {
     });
     expect(second.overlaps).toEqual([]);
     expect(second.checkedAgainst).toBe(1);
-    const secondText = formatClaimWorkText(second);
-    expect(secondText).toContain('No overlaps with the 1 other active task(s) at claim time');
-    expect(secondText).toContain('point-in-time');
-    expect(secondText).toContain('concord status');
   });
 
   it('does not nudge a well-scoped claim', () => {
@@ -117,7 +104,6 @@ describe('handleClaimWork', () => {
       expected_files: ['src/billing/retry.ts'],
     });
     expect(result.breadthReasons).toEqual([]);
-    expect(formatClaimWorkText(result)).not.toContain('Heads-up');
   });
 
   it('nudges an oversized claim to split, without blocking it', () => {
@@ -133,9 +119,6 @@ describe('handleClaimWork', () => {
     expect(repos.tasks.get('TODO-FRONTEND-001')).toBeDefined();
     // ... but it surfaces a decomposition suggestion.
     expect(result.breadthReasons.length).toBeGreaterThan(0);
-    const text = formatClaimWorkText(result);
-    expect(text).toContain('Heads-up: this claim looks broad');
-    expect(text).toContain('independently-handoffable');
   });
 
   it('shows the breadth nudge alongside overlaps', () => {
@@ -145,9 +128,8 @@ describe('handleClaimWork', () => {
       title: 'Big overlapping claim',
       modules: ['app-shell', 'todo-ui', 'client-state', 'api-client'],
     });
-    const text = formatClaimWorkText(result);
-    expect(text).toContain('Potential overlaps');
-    expect(text).toContain('Heads-up: this claim looks broad');
+    expect(result.overlaps).toHaveLength(1);
+    expect(result.breadthReasons.length).toBeGreaterThan(0);
   });
 
   it('extends scope on re-claim, persists the union, and reports what was added', () => {
@@ -171,14 +153,12 @@ describe('handleClaimWork', () => {
     expect(stored?.modules).toEqual(['app-shell', 'api-client']);
     expect(stored?.expectedFiles).toEqual(['app/page.tsx', 'lib/api.ts']);
     expect(repos.tasks.list()).toHaveLength(1);
-    expect(formatClaimWorkText(again)).toContain('Extended claim scope');
   });
 
   it('re-claiming with no new scope adds nothing', () => {
     handleClaimWork(repos, { task_id: 'T', title: 'FE', modules: ['app-shell'] });
     const again = handleClaimWork(repos, { task_id: 'T', title: 'FE', modules: ['app-shell'] });
     expect(again.scopeAdded).toEqual([]);
-    expect(formatClaimWorkText(again)).not.toContain('Extended claim scope');
   });
 
   it('recomputes overlaps against the merged scope on re-claim', () => {
@@ -190,18 +170,6 @@ describe('handleClaimWork', () => {
     expect(again.overlaps.some((overlap) => overlap.taskId === 'OTHER')).toBe(true);
   });
 
-  it('emits internally-consistent snake_case structured output', () => {
-    handleClaimWork(repos, { task_id: 'OTHER', title: 'Owns', modules: ['billing'] });
-    const result = handleClaimWork(repos, { task_id: 'MINE', title: 'Mine', modules: ['billing'] });
-    const structured = toClaimWorkStructured(result);
-    expect(structured.overlaps[0]?.task_id).toBe('OTHER');
-    expect(Object.keys(structured)).toEqual(
-      expect.arrayContaining(['task_id', 'already_claimed', 'checked_against', 'scope_added']),
-    );
-    // No camelCase leak inside the overlap entries.
-    expect(JSON.stringify(structured)).not.toContain('taskId');
-  });
-
   it('records a parent task id and does not flag overlaps with its own parent', () => {
     handleClaimWork(repos, { task_id: 'FE-1', title: 'Frontend', modules: ['app-shell'] });
     const child = handleClaimWork(repos, {
@@ -211,7 +179,6 @@ describe('handleClaimWork', () => {
       modules: ['app-shell'],
     });
     expect(child.task.parentTaskId).toBe('FE-1');
-    expect(toClaimWorkStructured(child).parent_task_id).toBe('FE-1');
     // Shares a module with its parent, but that is expected — not flagged.
     expect(child.overlaps).toEqual([]);
   });

@@ -61,7 +61,7 @@ describe('handleGetWorkState', () => {
 });
 
 describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
-  it('exposes get_work_state as a tool and concord://work-state as a resource', async () => {
+  it('exposes inspect_work and concord://work-state as equivalent read surfaces', async () => {
     const repos = createRepositories(openDatabase(':memory:'));
     handleClaimWork(repos, {
       task_id: 'TASK-1',
@@ -77,20 +77,14 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
 
     try {
       const tools = await client.listTools();
-      expect(tools.tools.map((t) => t.name)).toContain('get_work_state');
-      expect(tools.tools.map((t) => t.name)).toContain('update_task');
-      expect(tools.tools.map((t) => t.name)).toContain('get_task_context');
-      expect(tools.tools.map((t) => t.name)).toContain('assign_task');
-      expect(tools.tools.map((t) => t.name)).toContain('accept_task');
-      expect(tools.tools.map((t) => t.name)).toContain('offer_handoff');
-      expect(tools.tools.map((t) => t.name)).toContain('accept_handoff');
-      expect(tools.tools.map((t) => t.name)).toContain('close_task');
+      expect(tools.tools.map((t) => t.name)).toContain('inspect_work');
+      expect(tools.tools.map((t) => t.name)).not.toContain('get_work_state');
       expect(tools.tools.map((t) => t.name)).not.toContain('join_workspace');
 
       const resources = await client.listResources();
       expect(resources.resources.map((r) => r.uri)).toContain(WORK_STATE_URI);
 
-      const called = await client.callTool({ name: 'get_work_state' });
+      const called = await client.callTool({ name: 'inspect_work', arguments: {} });
       expect(JSON.stringify(called)).toContain('TASK-1');
 
       const read = await client.readResource({ uri: WORK_STATE_URI });
@@ -118,8 +112,10 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
       });
 
       await client.subscribeResource({ uri: WORK_STATE_URI });
-      // A write via claim_work should push an update to the subscriber.
-      await client.callTool({ name: 'claim_work', arguments: { task_id: 'T1', title: 'X' } });
+      await client.callTool({
+        name: 'start_work',
+        arguments: { task_id: 'T1', title: 'X', kind: 'test-agent' },
+      });
       await received;
 
       expect(updated).toContain(WORK_STATE_URI);
@@ -129,7 +125,7 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
     }
   });
 
-  it('joins and explicitly selects multiple repositories without restarting', async () => {
+  it('selects already-opened repositories without exposing a join tool', async () => {
     const firstRoot = repoDir('first');
     const secondRoot = repoDir('second');
     const manager = new WorkspaceManager(firstRoot);
@@ -148,34 +144,39 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
 
     try {
       const tools = await client.listTools();
-      expect(tools.tools.map((tool) => tool.name)).toContain('join_workspace');
+      expect(tools.tools.map((tool) => tool.name)).not.toContain('join_workspace');
 
+      manager.join(secondRoot);
       const firstClaim = await client.callTool({
-        name: 'claim_work',
-        arguments: { task_id: 'FIRST', title: 'First task' },
+        name: 'start_work',
+        arguments: {
+          task_id: 'FIRST',
+          title: 'First task',
+          kind: 'test-agent',
+          workspace_id: workspaceIdForRoot(firstRoot),
+        },
       });
       expect(JSON.stringify(firstClaim)).toContain(workspaceIdForRoot(firstRoot));
 
-      const joined = await client.callTool({
-        name: 'join_workspace',
-        arguments: { root: secondRoot },
-      });
-      expect(JSON.stringify(joined)).toContain(workspaceIdForRoot(secondRoot));
-
       await client.callTool({
-        name: 'claim_work',
-        arguments: { task_id: 'SECOND', title: 'Second task' },
+        name: 'start_work',
+        arguments: {
+          task_id: 'SECOND',
+          title: 'Second task',
+          kind: 'test-agent',
+          workspace_id: workspaceIdForRoot(secondRoot),
+        },
       });
 
       const firstState = await client.callTool({
-        name: 'get_work_state',
+        name: 'inspect_work',
         arguments: { workspace_id: workspaceIdForRoot(firstRoot) },
       });
       expect(JSON.stringify(firstState)).toContain('FIRST');
       expect(JSON.stringify(firstState)).not.toContain('SECOND');
 
       const secondState = await client.callTool({
-        name: 'get_work_state',
+        name: 'inspect_work',
         arguments: { workspace_id: workspaceIdForRoot(secondRoot) },
       });
       expect(JSON.stringify(secondState)).toContain('SECOND');
@@ -187,7 +188,7 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
     }
   });
 
-  it('returns an MCP tool error for an invalid join root', async () => {
+  it('returns an MCP tool error for an invalid workspace selector', async () => {
     const root = repoDir('invalid-join');
     const manager = new WorkspaceManager(root);
     const server = createServer(manager.current().repos, { workspaceManager: manager });
@@ -197,11 +198,11 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
 
     try {
       const result = await client.callTool({
-        name: 'join_workspace',
-        arguments: { root: join(root, 'missing') },
+        name: 'inspect_work',
+        arguments: { workspace_id: 'not-a-workspace' },
       });
       expect(result.isError).toBe(true);
-      expect(JSON.stringify(result)).toContain('Workspace root does not exist');
+      expect(JSON.stringify(result)).toContain('Invalid workspace id');
     } finally {
       await client.close();
       await server.close();

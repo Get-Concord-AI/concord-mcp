@@ -1,18 +1,9 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
 import type { HandoffRecord, Repositories, TaskRecord } from '../db/index.js';
-import { handoffInputShape, type HandoffInput } from '../domain/schemas.js';
+import type { HandoffInput } from '../domain/operations.js';
 import { handleReviewReady } from './review-ready.js';
-import {
-  selectToolWorkspace,
-  type SelectWorkspace,
-  workspaceStructured,
-  withWorkspaceText,
-} from './workspace-routing.js';
 
 export interface HandoffResult {
   handoff: HandoffRecord;
-  taskAutoCreated: boolean;
   /** True when `ready_for_review` was set, so a review packet was also produced. */
   reviewReady: boolean;
   task: TaskRecord;
@@ -20,15 +11,15 @@ export interface HandoffResult {
 
 /**
  * Record completion/review evidence for an existing task. Ownership transfer
- * is handled separately by offer_handoff/accept_handoff.
+ * is handled separately by transfer_work.
  */
 export function handleHandoff(repos: Repositories, input: HandoffInput): HandoffResult {
   const existing = repos.tasks.get(input.task_id);
   if (existing === undefined) {
-    throw new Error(`Task ${input.task_id} is not claimed. Call claim_work first.`);
+    throw new Error(`Task ${input.task_id} is not claimed. Call start_work first.`);
   }
   if (input.agent_id !== undefined && repos.agents.get(input.agent_id) === undefined) {
-    throw new Error(`Agent ${input.agent_id} is not registered. Call register_agent first.`);
+    throw new Error(`Agent ${input.agent_id} is not registered. Call start_work first.`);
   }
   if (existing.agentId !== null && input.agent_id !== existing.agentId) {
     throw new Error(
@@ -84,7 +75,6 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
         assumptions: input.assumptions,
         open_questions: input.open_questions,
         provenance: input.provenance,
-        agent_id: input.agent_id,
         expected_version: input.expected_version,
       });
     }
@@ -92,60 +82,7 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
     if (task === undefined) {
       throw new Error(`Task ${input.task_id} disappeared while evidence was recorded.`);
     }
-    return { handoff, taskAutoCreated: false, reviewReady, task };
+    return { handoff, reviewReady, task };
   });
   return transact();
-}
-
-export function formatHandoffText(result: HandoffResult): string {
-  const { handoff } = result;
-  const lines = [`Recorded handoff for ${handoff.taskId} (status: ${handoff.status}).`];
-  if (result.taskAutoCreated) {
-    lines.push('Note: task was not claimed first; created a stub task.');
-  }
-  lines.push(`Changed files: ${String(handoff.changedFiles.length)}`);
-  if (handoff.needsReviewFrom.length > 0) {
-    lines.push(`Needs review from: ${handoff.needsReviewFrom.join(', ')}`);
-  }
-  if (result.reviewReady) {
-    lines.push('Marked review-ready; REVIEW_PACKET.md regenerated.');
-  }
-  return lines.join('\n');
-}
-
-export function registerHandoff(
-  server: McpServer,
-  repos: Repositories,
-  onWrite?: () => void,
-  selectWorkspace?: SelectWorkspace,
-): void {
-  server.registerTool(
-    'handoff',
-    {
-      title: 'Hand off work',
-      description:
-        'Record completion/review evidence for owned work: what changed, tests, assumptions, ' +
-        'decisions, and guardrails. This does not transfer ownership; use offer_handoff for that. ' +
-        'Set ready_for_review before a PR to also produce a review packet.',
-      inputSchema: handoffInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleHandoff(repos, args);
-      onWrite?.();
-      return {
-        content: [{ type: 'text', text: withWorkspaceText(formatHandoffText(result), workspace) }],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          task_id: result.handoff.taskId,
-          handoff_id: result.handoff.id,
-          task_auto_created: result.taskAutoCreated,
-          review_ready: result.reviewReady,
-          status: result.task.status,
-          version: result.task.version,
-          agent_id: result.task.agentId,
-        },
-      };
-    },
-  );
 }

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
-import { formatReviewReadyText, handleReviewReady } from '../../src/tools/review-ready.js';
+import { handleReviewReady } from '../../src/tools/review-ready.js';
 
 describe('handleReviewReady', () => {
   let repos: Repositories;
@@ -26,7 +26,6 @@ describe('handleReviewReady', () => {
       ],
     });
 
-    expect(result.taskAutoCreated).toBe(false);
     expect(result.review.testsRun).toHaveLength(2);
     expect(result.review.provenance).toEqual([
       { field: 'tests', source: 'command output' },
@@ -52,6 +51,5 @@ describe('handleReviewReady', () => {
     expect(result.review.testsRun).toEqual([]);
     expect(result.review.provenance).toEqual([]);
     expect(result.review.diffSize).toBeNull();
-    expect(formatReviewReadyText(result)).toContain('review-ready');
   });
 });

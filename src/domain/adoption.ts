@@ -1,10 +1,10 @@
 import type { EventRecord, ToolName } from '../db/index.js';
 
-/** Which of the three v0 tools have been called for a task. */
+/** Which required workflow stages are present in the compatible event history. */
 export interface TaskAdoption {
   taskId: string;
-  claimWork: boolean;
-  handoff: boolean;
+  startWork: boolean;
+  finishWork: boolean;
   reviewReady: boolean;
 }
 
@@ -25,8 +25,8 @@ export function buildAdoption(events: readonly EventRecord[]): TaskAdoption[] {
 
   return [...byTask.entries()].map(([taskId, tools]) => ({
     taskId,
-    claimWork: tools.has('claim_work'),
-    handoff: tools.has('handoff'),
+    startWork: tools.has('claim_work'),
+    finishWork: tools.has('handoff'),
     reviewReady: tools.has('review_ready'),
   }));
 }

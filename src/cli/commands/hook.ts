@@ -96,9 +96,9 @@ export interface SessionStartResult {
 }
 
 /**
- * Register this Claude Code session as an agent so its presence exists even if
- * the model never calls `register_agent`, and tell the model its `agent_id` plus
- * who else is active. Reads a SessionStart JSON payload.
+ * Register this Claude Code session before — or even if — the model calls
+ * `start_work`, then tell it the `agent_id` and who else is active. Reads a
+ * SessionStart JSON payload.
  */
 export function handleSessionStart(repos: Repositories, rawJson: string): SessionStartResult {
   let parsed: unknown = {};
@@ -128,7 +128,7 @@ export function handleSessionStart(repos: Repositories, rawJson: string): Sessio
   );
   const lines = [
     `Concord: registered this session as agent \`${agentId}\`. Pass agent_id="${agentId}" to ` +
-      'Concord tools (claim_work, update_task, handoff) so your work is attributed and your ' +
+      'Concord tools (start_work, update_work, finish_work) so your work is attributed and your ' +
       'presence stays live.',
   ];
   if (others.length === 0) {

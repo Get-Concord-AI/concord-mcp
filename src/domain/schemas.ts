@@ -1,32 +1,22 @@
 import { z } from 'zod';
 
-import { agentStatusValues } from '../db/rows.js';
-
 /**
- * Zod input schemas for the MCP tools. Each tool exposes its schema as a raw
- * shape (the form `McpServer.registerTool` expects) plus an inferred input type.
- * Fields use snake_case to match the tool's public JSON contract.
+ * The five public MCP workflow contracts. Internal lifecycle operations derive
+ * their TypeScript inputs from these shapes in operations.ts; they are not
+ * separate externally validated tools.
  */
 
-/** Optional instance identity carried by every write so it refreshes presence.
- * Distinct from the `agent` *kind* string — this identifies one running
- * instance (e.g. `claude-code:7p8v`), obtained from `register_agent`. */
+const taskIdField = z.string().min(1).describe('Stable task identifier, e.g. TASK-12');
+
 const agentIdField = z
   .string()
   .optional()
-  .describe(
-    'Identity of the registered agent instance doing this work, e.g. claude-code:7p8v. ' +
-      "Supplying it refreshes the agent's presence (liveness) in the roster.",
-  );
+  .describe('Existing agent identity to refresh; omit on the first call to generate one');
 
-/** Optional workspace selector shared by every MCP operation. */
-export const workspaceIdField = z
+const actorAgentIdField = z
   .string()
   .min(1)
-  .optional()
-  .describe(
-    'Workspace id returned by join_workspace. Omit to use the active/default workspace for this MCP session.',
-  );
+  .describe('Registered agent identity performing this operation');
 
 const taskVersionField = z
   .number()
@@ -34,83 +24,60 @@ const taskVersionField = z
   .positive()
   .describe('Task version last read by the caller; stale versions are rejected');
 
-export const joinWorkspaceInputShape = {
-  root: z
-    .string()
-    .min(1)
-    .describe('Existing repository or directory to join as a Concord workspace'),
+const workspaceIdField = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    'Workspace id returned by a Concord operation. Omit to use the automatically resolved repository workspace.',
+  );
+
+const evidenceInputShape = {
+  what_changed: z.string().min(1).describe('Concise summary of what changed'),
+  changed_files: z.array(z.string()).optional().describe('Files that changed'),
+  tests_run: z.array(z.string()).optional().describe('Test commands run'),
+  known_risks: z.array(z.string()).optional().describe('Known risks introduced'),
+  assumptions: z.array(z.string()).optional().describe('Assumptions made'),
+  decisions: z.array(z.string()).optional().describe('Notable decisions and why'),
+  guardrails_checked: z.array(z.string()).optional().describe('Guardrails checked'),
+  next_steps: z.array(z.string()).optional().describe('Remaining work or follow-ups'),
 } as const;
 
-export const joinWorkspaceInputSchema = z.object(joinWorkspaceInputShape);
-export type JoinWorkspaceInput = z.infer<typeof joinWorkspaceInputSchema>;
+const provenanceField = z
+  .array(z.object({ field: z.string(), source: z.string() }))
+  .optional()
+  .describe('Evidence source for review claims');
 
-export const getWorkStateInputShape = {
-  workspace_id: workspaceIdField,
-} as const;
-export const getWorkStateInputSchema = z.object(getWorkStateInputShape).default({});
-
-export const registerAgentInputShape = {
-  agent_id: z
-    .string()
-    .optional()
-    .describe(
-      'Stable per-session identity for this agent instance, e.g. claude-code:7p8v. Omit on the ' +
-        'first call to have one generated, then reuse the returned id on every later call so ' +
-        'presence stays attributed to the same instance.',
-    ),
-  kind: z.string().min(1).describe('Agent type / provider, e.g. claude-code, codex, cursor'),
-  owner: z.string().optional().describe('Human accountable for this agent'),
-  model: z.string().optional().describe('Model the agent is running, e.g. opus-4.8'),
-  summary: z.string().optional().describe('One line: what this agent is working on right now'),
-  status: z
-    .enum(agentStatusValues)
-    .optional()
-    .describe('Reported status: active, blocked, waiting_review, or done (default active)'),
-  branch: z.string().optional().describe('Git branch, if known'),
-  worktree: z.string().optional().describe('Git worktree path, if used'),
-  cwd: z.string().optional().describe('Working directory, for disambiguating instances'),
-  pid: z.number().int().optional().describe('Process id, for disambiguating instances'),
-  workspace_id: workspaceIdField,
-} as const;
-
-export const registerAgentInputSchema = z.object(registerAgentInputShape);
-export type RegisterAgentInput = z.infer<typeof registerAgentInputSchema>;
-
-export const claimWorkInputShape = {
-  task_id: z.string().min(1).describe('Stable identifier for the task, e.g. TASK-12'),
+export const startWorkInputShape = {
+  task_id: taskIdField,
   title: z.string().min(1).describe('Short human-readable title'),
-  owner: z.string().optional().describe('Person or team accountable for the task (optional)'),
-  agent: z
-    .string()
-    .optional()
-    .describe(
-      'Stable identifier for the agent doing the work, e.g. claude-code or codex. Keep it ' +
-        'consistent across a session so the same agent is not recorded under different names.',
-    ),
+  kind: z.string().min(1).describe('Agent type or provider, e.g. claude-code or codex'),
+  agent_id: agentIdField,
+  owner: z.string().optional().describe('Human accountable for this agent and task'),
+  model: z.string().optional().describe('Model the agent is running'),
+  summary: z.string().optional().describe('One-line description of the current work'),
   branch: z.string().optional().describe('Git branch, if known'),
   worktree: z.string().optional().describe('Git worktree path, if used'),
-  parent_task_id: z
-    .string()
-    .optional()
-    .describe(
-      'Parent task id when this is a subtask of a larger effort, e.g. TODO-FRONTEND-001.1 ' +
-        'is a subtask of TODO-FRONTEND-001. Overlaps between a parent and its own child are ' +
-        'not flagged.',
-    ),
-  expected_files: z.array(z.string()).optional().describe('Files the task expects to touch'),
-  modules: z.array(z.string()).optional().describe('Logical modules touched, e.g. billing'),
-  domains: z.array(z.string()).optional().describe('Product domains touched, e.g. payments'),
-  risk_tags: z.array(z.string()).optional().describe('Risk tags, e.g. payment-flow'),
-  notes: z.string().optional().describe('Freeform notes'),
-  agent_id: agentIdField,
+  cwd: z.string().optional().describe('Agent working directory'),
+  pid: z.number().int().optional().describe('Agent process id, if known'),
+  parent_task_id: z.string().optional().describe('Parent task for a smaller claimed unit'),
+  expected_files: z.array(z.string()).optional().describe('Files expected to change'),
+  modules: z.array(z.string()).optional().describe('Logical modules touched'),
+  domains: z.array(z.string()).optional().describe('Product domains touched'),
+  risk_tags: z.array(z.string()).optional().describe('Risk tags shared with related work'),
+  notes: z.string().optional().describe('Concise task notes'),
   workspace_id: workspaceIdField,
 } as const;
+export type StartWorkInput = z.infer<z.ZodObject<typeof startWorkInputShape>>;
 
-export const claimWorkInputSchema = z.object(claimWorkInputShape);
-export type ClaimWorkInput = z.infer<typeof claimWorkInputSchema>;
+export const inspectWorkInputShape = {
+  task_id: taskIdField.optional().describe('Task to inspect; omit for the whole workspace state'),
+  workspace_id: workspaceIdField,
+} as const;
+export type InspectWorkInput = z.infer<z.ZodObject<typeof inspectWorkInputShape>>;
 
-export const updateTaskInputShape = {
-  task_id: z.string().min(1).describe('Claimed task receiving this memory entry'),
+export const updateWorkInputShape = {
+  task_id: taskIdField,
   kind: z
     .enum([
       'intent',
@@ -122,189 +89,71 @@ export const updateTaskInputShape = {
       'blocker',
       'finding',
     ])
-    .describe('The kind of task-scoped update'),
+    .describe('Kind of task-scoped update'),
   content: z.string().min(1).describe('Concise context another agent needs'),
-  agent: z.string().optional().describe('Agent recording the update; defaults to the claimant'),
   agent_id: agentIdField,
   workspace_id: workspaceIdField,
 } as const;
+export type UpdateWorkInput = z.infer<z.ZodObject<typeof updateWorkInputShape>>;
 
-export const updateTaskInputSchema = z.object(updateTaskInputShape);
-export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;
+const transferWorkActionValues = [
+  'assign',
+  'accept',
+  'decline',
+  'release',
+  'reassign',
+  'offer',
+  'reopen',
+] as const;
 
-export const getTaskContextInputShape = {
-  task_id: z.string().min(1).describe('Task whose shared context should be read'),
-  workspace_id: workspaceIdField,
-} as const;
-
-export const getTaskContextInputSchema = z.object(getTaskContextInputShape);
-export type GetTaskContextInput = z.infer<typeof getTaskContextInputSchema>;
-
-export const handoffInputShape = {
-  task_id: z.string().min(1).describe('The task being handed off, e.g. TASK-12'),
-  status: z.string().min(1).describe('Handoff status, e.g. done, blocked, in_progress'),
-  what_changed: z.string().min(1).describe('Concise summary of what changed'),
-  changed_files: z.array(z.string()).optional().describe('Files that changed'),
-  tests_run: z.array(z.string()).optional().describe('Test commands run'),
-  known_risks: z.array(z.string()).optional().describe('Known risks introduced'),
-  assumptions: z.array(z.string()).optional().describe('Assumptions the agent made'),
-  decisions: z.array(z.string()).optional().describe('Notable decisions and why'),
-  guardrails_checked: z.array(z.string()).optional().describe('Guardrails manually checked'),
-  needs_review_from: z.array(z.string()).optional().describe('Who should review'),
-  next_steps: z.array(z.string()).optional().describe('Remaining work or follow-ups'),
-  ready_for_review: z
-    .boolean()
-    .optional()
-    .describe(
-      'Set true when this handoff also marks the task ready for review (before a PR). ' +
-        'This renders REVIEW_PACKET.md from the handoff.',
-    ),
-  diff_size: z
-    .string()
-    .optional()
-    .describe('Rough diff size for the review packet, e.g. "+120 / -30"'),
-  open_questions: z.array(z.string()).optional().describe('Unresolved questions for the reviewer'),
-  provenance: z
-    .array(z.object({ field: z.string(), source: z.string() }))
-    .optional()
-    .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
-  agent_id: agentIdField,
-  expected_version: taskVersionField.optional(),
-  workspace_id: workspaceIdField,
-} as const;
-
-export const handoffInputSchema = z.object(handoffInputShape);
-export type HandoffInput = z.infer<typeof handoffInputSchema>;
-
-export const reviewReadyInputShape = {
-  task_id: z.string().min(1).describe('The task being marked review-ready'),
-  plan_summary: z.string().min(1).describe('What the change intended to do'),
-  tests_run: z.array(z.string()).optional().describe('Test commands run'),
-  diff_size: z.string().optional().describe('Rough diff size, e.g. "+120 / -30"'),
-  guardrails_checked: z.array(z.string()).optional().describe('Guardrails checked'),
-  assumptions: z.array(z.string()).optional().describe('Assumptions made'),
-  open_questions: z.array(z.string()).optional().describe('Unresolved questions for review'),
-  provenance: z
-    .array(z.object({ field: z.string(), source: z.string() }))
-    .optional()
-    .describe('Where each claim came from, e.g. { field: "tests", source: "command output" }'),
-  agent_id: agentIdField,
-  expected_version: taskVersionField.optional(),
-  workspace_id: workspaceIdField,
-} as const;
-
-export const reviewReadyInputSchema = z.object(reviewReadyInputShape);
-export type ReviewReadyInput = z.infer<typeof reviewReadyInputSchema>;
-
-const lifecycleActorField = z
-  .string()
-  .min(1)
-  .describe('Registered agent_id performing this lifecycle transition');
-
-export const assignTaskInputShape = {
-  task_id: z.string().min(1),
-  to_agent_id: z.string().min(1).describe('Registered agent receiving the assignment'),
-  agent_id: lifecycleActorField,
+export const transferWorkInputShape = {
+  task_id: taskIdField,
+  action: z
+    .enum(transferWorkActionValues)
+    .describe('Ownership action to apply through the versioned task state machine'),
+  agent_id: actorAgentIdField,
   expected_version: taskVersionField,
+  to_agent_id: z.string().min(1).optional().describe('Required for assign, reassign, and offer'),
+  handoff_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Pending handoff to resolve; inferred from the task when omitted'),
   lease_seconds: z.number().int().positive().optional(),
-  reason: z.string().min(1).optional(),
-  workspace_id: workspaceIdField,
-} as const;
-export const assignTaskInputSchema = z.object(assignTaskInputShape);
-export type AssignTaskInput = z.infer<typeof assignTaskInputSchema>;
-
-export const acceptTaskInputShape = {
-  task_id: z.string().min(1),
-  agent_id: lifecycleActorField,
-  expected_version: taskVersionField,
-  workspace_id: workspaceIdField,
-} as const;
-export const acceptTaskInputSchema = z.object(acceptTaskInputShape);
-export type AcceptTaskInput = z.infer<typeof acceptTaskInputSchema>;
-
-export const releaseTaskInputShape = {
-  task_id: z.string().min(1),
-  agent_id: lifecycleActorField,
-  expected_version: taskVersionField,
-  reason: z.string().min(1).optional(),
-  workspace_id: workspaceIdField,
-} as const;
-export const releaseTaskInputSchema = z.object(releaseTaskInputShape);
-export type ReleaseTaskInput = z.infer<typeof releaseTaskInputSchema>;
-
-export const reassignTaskInputShape = {
-  task_id: z.string().min(1),
-  to_agent_id: z.string().min(1),
-  agent_id: lifecycleActorField,
-  expected_version: taskVersionField,
-  lease_seconds: z.number().int().positive().optional(),
-  reason: z.string().min(1),
-  force: z.boolean().optional(),
-  workspace_id: workspaceIdField,
-} as const;
-export const reassignTaskInputSchema = z.object(reassignTaskInputShape);
-export type ReassignTaskInput = z.infer<typeof reassignTaskInputSchema>;
-
-export const closeTaskInputShape = {
-  task_id: z.string().min(1),
-  agent_id: lifecycleActorField,
-  expected_version: taskVersionField,
-  reason: z.string().min(1),
-  outcome: z
-    .enum(['complete', 'closed'])
-    .optional()
-    .describe('Terminal outcome; defaults to closed'),
-  workspace_id: workspaceIdField,
-} as const;
-export const closeTaskInputSchema = z.object(closeTaskInputShape);
-export type CloseTaskInput = z.infer<typeof closeTaskInputSchema>;
-
-export const reopenTaskInputShape = {
-  task_id: z.string().min(1),
-  agent_id: lifecycleActorField,
-  expected_version: taskVersionField,
-  reason: z.string().min(1),
-  workspace_id: workspaceIdField,
-} as const;
-export const reopenTaskInputSchema = z.object(reopenTaskInputShape);
-export type ReopenTaskInput = z.infer<typeof reopenTaskInputSchema>;
-
-export const offerHandoffInputShape = {
-  task_id: z.string().min(1),
-  to_agent_id: z.string().min(1),
-  agent_id: lifecycleActorField,
-  expected_version: taskVersionField,
-  what_changed: z.string().min(1),
-  changed_files: z.array(z.string()).optional(),
-  tests_run: z.array(z.string()).optional(),
-  known_risks: z.array(z.string()).optional(),
-  assumptions: z.array(z.string()).optional(),
-  decisions: z.array(z.string()).optional(),
-  guardrails_checked: z.array(z.string()).optional(),
-  next_steps: z.array(z.string()).optional(),
   expires_seconds: z.number().int().positive().optional(),
+  force: z.boolean().optional(),
+  reason: z.string().min(1).optional(),
+  what_changed: evidenceInputShape.what_changed.optional().describe('Required for offer'),
+  changed_files: evidenceInputShape.changed_files,
+  tests_run: evidenceInputShape.tests_run,
+  known_risks: evidenceInputShape.known_risks,
+  assumptions: evidenceInputShape.assumptions,
+  decisions: evidenceInputShape.decisions,
+  guardrails_checked: evidenceInputShape.guardrails_checked,
+  next_steps: evidenceInputShape.next_steps,
   workspace_id: workspaceIdField,
 } as const;
-export const offerHandoffInputSchema = z.object(offerHandoffInputShape);
-export type OfferHandoffInput = z.infer<typeof offerHandoffInputSchema>;
+export type TransferWorkInput = z.infer<z.ZodObject<typeof transferWorkInputShape>>;
 
-export const acceptHandoffInputShape = {
-  task_id: z.string().min(1),
-  handoff_id: z.number().int().positive(),
-  agent_id: lifecycleActorField,
+export const finishWorkInputShape = {
+  task_id: taskIdField,
+  agent_id: actorAgentIdField,
   expected_version: taskVersionField,
+  outcome: z
+    .enum(['handoff', 'review_ready', 'complete', 'closed'])
+    .default('complete')
+    .describe('Final task state; handoff records evidence without changing lifecycle state'),
+  ...evidenceInputShape,
+  needs_review_from: z.array(z.string()).optional().describe('Who should review'),
+  diff_size: z.string().optional().describe('Rough diff size, e.g. +120 / -30'),
+  open_questions: z.array(z.string()).optional().describe('Unresolved review questions'),
+  provenance: provenanceField,
+  reason: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Audited terminal reason; defaults to the change summary'),
   workspace_id: workspaceIdField,
 } as const;
-export const acceptHandoffInputSchema = z.object(acceptHandoffInputShape);
-export type AcceptHandoffInput = z.infer<typeof acceptHandoffInputSchema>;
-
-export const declineHandoffInputShape = {
-  task_id: z.string().min(1),
-  handoff_id: z.number().int().positive(),
-  agent_id: lifecycleActorField,
-  expected_version: taskVersionField,
-  reason: z.string().min(1),
-  workspace_id: workspaceIdField,
-} as const;
-export const declineHandoffInputSchema = z.object(declineHandoffInputShape);
-export type DeclineHandoffInput = z.infer<typeof declineHandoffInputSchema>;
+export type FinishWorkInput = z.infer<z.ZodObject<typeof finishWorkInputShape>>;

@@ -1,5 +1,5 @@
-// End-to-end demo: two agents claim overlapping work, then one hands off and
-// marks the task review-ready. Drives the real Concord MCP server over stdio
+// End-to-end demo: two agents start overlapping work, then one records evidence
+// and marks the task review-ready. Drives the real Concord MCP server over stdio
 // and prints the artifacts it produces. Run with `pnpm demo` (builds first).
 
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
@@ -56,30 +56,12 @@ console.log('# Concord — two-agent overlap demo\n');
 console.log(`Workspace: ${workdir}`);
 console.log(`Watch live: (cd ${JSON.stringify(workdir)} && concord dashboard)\n`);
 
-console.log('$ claude-code and codex register their presence');
+console.log('$ claude-code starts TASK-12');
 console.log(
-  await call('register_agent', {
-    agent_id: 'claude-code:demo',
-    kind: 'claude-code',
-    summary: 'Adding Stripe retry handling',
-  }),
-);
-console.log(
-  await call('register_agent', {
-    agent_id: 'codex:demo',
-    kind: 'codex',
-    summary: 'Fixing invoice totals',
-  }),
-  '\n',
-);
-await pause();
-
-console.log('$ claude-code claims TASK-12');
-console.log(
-  await call('claim_work', {
+  await call('start_work', {
     task_id: 'TASK-12',
     title: 'Add Stripe retry handling',
-    agent: 'claude-code',
+    kind: 'claude-code',
     agent_id: 'claude-code:demo',
     branch: 'feat/billing-retry',
     modules: ['billing', 'stripe'],
@@ -91,7 +73,7 @@ await pause();
 
 console.log('$ claude-code records task context as it works');
 console.log(
-  await call('update_task', {
+  await call('update_work', {
     task_id: 'TASK-12',
     kind: 'intent',
     content: 'Keep checkout responsive when Stripe retries are needed',
@@ -99,7 +81,7 @@ console.log(
   }),
 );
 console.log(
-  await call('update_task', {
+  await call('update_work', {
     task_id: 'TASK-12',
     kind: 'decision',
     content: 'Use a queued retry so user-path calls never block checkout',
@@ -109,12 +91,12 @@ console.log(
 );
 await pause();
 
-console.log('$ codex claims TASK-14 (also touches billing)');
+console.log('$ codex starts TASK-14 (also touches billing)');
 console.log(
-  await call('claim_work', {
+  await call('start_work', {
     task_id: 'TASK-14',
     title: 'Fix invoice totals',
-    agent: 'codex',
+    kind: 'codex',
     agent_id: 'codex:demo',
     modules: ['billing'],
     expected_files: ['src/billing/invoices.ts'],
@@ -124,20 +106,20 @@ console.log(
 await pause();
 
 console.log('$ codex reads TASK-12 context before coordinating');
-console.log(await call('get_task_context', { task_id: 'TASK-12' }), '\n');
+console.log(await call('inspect_work', { task_id: 'TASK-12' }), '\n');
 
-console.log('$ claude-code hands off TASK-12 and marks it review-ready');
+console.log('$ claude-code finishes TASK-12 and marks it review-ready');
 console.log(
-  await call('handoff', {
+  await call('finish_work', {
     task_id: 'TASK-12',
     agent_id: 'claude-code:demo',
-    status: 'done',
+    expected_version: 1,
+    outcome: 'review_ready',
     what_changed: 'Queued retries instead of blocking checkout',
     changed_files: ['src/billing/retry.ts'],
     tests_run: ['pnpm test billing'],
     decisions: ['Use a queued retry so user-path calls never block checkout'],
     needs_review_from: ['payments-team'],
-    ready_for_review: true,
     diff_size: '+120 / -30',
     guardrails_checked: ['Stripe changes covered by an artificial payment test'],
     open_questions: ['Notify the account owner immediately or only after the final retry?'],

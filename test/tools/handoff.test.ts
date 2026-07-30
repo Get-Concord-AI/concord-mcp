@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
-import { formatHandoffText, handleHandoff } from '../../src/tools/handoff.js';
+import { handleHandoff } from '../../src/tools/handoff.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 
 describe('handleHandoff', () => {
@@ -23,7 +23,6 @@ describe('handleHandoff', () => {
       needs_review_from: ['payments-team'],
     });
 
-    expect(result.taskAutoCreated).toBe(false);
     expect(result.handoff.whatChanged).toBe('Queued retries instead of synchronous');
     expect(repos.tasks.get('TASK-12')?.status).toBe('active');
     expect(repos.handoffs.latestForTask('TASK-12')?.status).toBe('done');
@@ -43,7 +42,7 @@ describe('handleHandoff', () => {
     ).toThrow(/not claimed/u);
   });
 
-  it('formats needs-review recipients', () => {
+  it('records needs-review recipients', () => {
     handleClaimWork(repos, { task_id: 'TASK-1', title: 'Review recipients' });
     const result = handleHandoff(repos, {
       task_id: 'TASK-1',
@@ -51,7 +50,7 @@ describe('handleHandoff', () => {
       what_changed: 'x',
       needs_review_from: ['alex', 'sam'],
     });
-    expect(formatHandoffText(result)).toContain('Needs review from: alex, sam');
+    expect(result.handoff.needsReviewFrom).toEqual(['alex', 'sam']);
   });
 
   it('produces a review packet when ready_for_review is set (folded review_ready)', () => {
@@ -79,7 +78,6 @@ describe('handleHandoff', () => {
       'handoff',
       'review_ready',
     ]);
-    expect(formatHandoffText(result)).toContain('Marked review-ready');
   });
 
   it('does not produce a review packet on a plain handoff', () => {

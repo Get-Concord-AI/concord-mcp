@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Five public workflow tools — `start_work`, `inspect_work`, `update_work`,
+  `transfer_work`, and `finish_work` — replace the granular MCP lifecycle
+  surface. The server now supplies concise workflow instructions directly, and
+  `concord doctor` identifies generated instruction blocks that need refreshing.
 - `concord install` now registers the MCP server itself, writing `.mcp.json`
   (Claude Code), `.cursor/mcp.json` (Cursor), and `[mcp_servers.concord]` in
   Codex's `~/.codex/config.toml` (honoring `CODEX_HOME`). Previously it wrote
@@ -16,6 +20,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Existing servers, unrelated keys, and TOML comments are preserved, and
   re-running is a no-op. Pass `--no-mcp` to skip registration. A config file
   that cannot be parsed is reported and left untouched rather than overwritten.
+
+### Removed
+
+- The earlier granular MCP tool names are no longer registered as public
+  aliases. Update Concord and re-run `concord install` to migrate local agent
+  instructions.
+- Dormant granular tool schemas, registration adapters, and presentation
+  helpers were removed; internal lifecycle operations derive their types from
+  the five workflow contracts.
 
 ## [0.5.0] - 2026-07-28
 

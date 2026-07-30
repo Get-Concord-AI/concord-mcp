@@ -73,7 +73,7 @@ describe('task-scoped memory', () => {
         kind: 'progress',
         content: 'Started',
       }),
-    ).toThrow(/claim_work/);
-    expect(() => handleGetTaskContext(repos, { task_id: 'MISSING' })).toThrow(/claim_work/);
+    ).toThrow(/start_work/);
+    expect(() => handleGetTaskContext(repos, { task_id: 'MISSING' })).toThrow(/start_work/);
   });
 });

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BLOCK_END, BLOCK_START, upsertBlock } from '../../src/install/block.js';
 import { installConcord } from '../../src/install/index.js';
+import { CONCORD_INSTRUCTION_VERSION } from '../../src/install/instructions.js';
 
 describe('upsertBlock', () => {
   it('appends a wrapped block to existing content', () => {
@@ -43,7 +44,11 @@ describe('installConcord', () => {
     for (const relPath of written) {
       expect(existsSync(join(root, relPath))).toBe(true);
     }
-    expect(readFileSync(join(root, 'CLAUDE.md'), 'utf8')).toContain('claim_work');
+    const claudeInstructions = readFileSync(join(root, 'CLAUDE.md'), 'utf8');
+    expect(claudeInstructions).toContain('start_work');
+    expect(claudeInstructions).toContain(
+      `<!-- concord:workflow-version=${CONCORD_INSTRUCTION_VERSION} -->`,
+    );
     expect(readFileSync(join(root, '.cursor', 'rules', 'concord.mdc'), 'utf8')).toContain(
       'alwaysApply: true',
     );
@@ -58,7 +63,7 @@ describe('installConcord', () => {
     const second = readFileSync(join(root, 'CLAUDE.md'), 'utf8');
 
     expect(first).toContain('# Existing project rules');
-    expect(first).toContain('claim_work');
+    expect(first).toContain('start_work');
     expect(second).toBe(first);
   });
 });

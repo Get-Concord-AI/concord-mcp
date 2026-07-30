@@ -33,7 +33,7 @@ program
   .description('Shared work-state for coding agents')
   .version(VERSION)
   .option('-C, --repo <path>', 'use the Concord workspace for this repository path')
-  .option('--workspace <id>', 'use a workspace id returned by join_workspace');
+  .option('--workspace <id>', 'use a workspace id returned by a Concord operation');
 
 program.hook('preAction', (command, actionCommand) => {
   const options = parseCliWorkspaceOptions(command.opts());

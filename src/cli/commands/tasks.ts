@@ -6,7 +6,7 @@ import { openContext } from '../context.js';
 /** Render the full task list as a padded table (or a placeholder when empty). */
 export function renderTasks(tasks: readonly TaskRecord[]): string {
   if (tasks.length === 0) {
-    return 'No tasks yet. Agents create tasks by calling claim_work.';
+    return 'No tasks yet. Agents create tasks by calling start_work.';
   }
   return tasks
     .map((task) => {

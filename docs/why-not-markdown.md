@@ -15,10 +15,10 @@ Markdown handoff files are:
 
 Concord keeps the good parts and fixes those gaps:
 
-- **Structured** — agents record work through validated lifecycle tools,
-  including `claim_work`, `update_task`, and `handoff`, so the data is
+- **Structured** — agents record work through five validated workflow tools,
+  including `start_work`, `update_work`, and `finish_work`, so the data is
   consistent and queryable.
-- **Shared early** — `claim_work` flags overlaps between active tasks before
+- **Shared early** — `start_work` flags overlaps between active tasks before
   either PR exists.
 - **Visible to humans** — Concord still produces `HANDOFF.md` and
   `REVIEW_PACKET.md` you can commit and read in a PR.
