@@ -28,9 +28,9 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-> ⚠️ Early and under active development. The surface is 16 focused MCP tools
-> covering workspace selection, presence, task memory, versioned ownership, and
-> acknowledged handoffs.
+> ⚠️ Early and under active development. The public surface is five workflow
+> tools covering presence, task memory, versioned ownership, and evidence-rich
+> handoffs.
 
 ## One workspace. Every agent.
 
@@ -105,32 +105,44 @@ available. Set `CONCORD_NO_UPDATE_CHECK=1` to disable this best-effort check.
 
 ## The tools
 
-| Tools                                                         | Purpose                                                                                 |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `join_workspace`                                              | joins/selects a repository without restarting MCP and returns its workspace id          |
-| `register_agent`, `get_work_state`                            | registers presence and reads the roster, task lifecycle, overlaps, and stale claims     |
-| `claim_work`, `update_task`, `get_task_context`               | claims scoped work, records task memory, and reads evidence plus ownership history      |
-| `assign_task`, `accept_task`, `release_task`, `reassign_task` | separates assignment from acceptance and protects transitions with task versions        |
-| `offer_handoff`, `accept_handoff`, `decline_handoff`          | delivers a handoff to a named registered recipient with acceptance, decline, and expiry |
-| `handoff`                                                     | records completion/review evidence without transferring ownership                       |
-| `close_task`, `reopen_task`                                   | records terminal `complete`/`closed` outcomes and audited reopening                     |
+| Tool            | Purpose                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| `start_work`    | registers presence, claims or accepts one task, and reports scope overlaps before editing    |
+| `inspect_work`  | reads either the workspace roster/state or one task's context and ownership history          |
+| `update_work`   | records durable progress, decisions, assumptions, questions, blockers, answers, and findings |
+| `transfer_work` | assigns, accepts, declines, releases, reassigns, offers handoffs, or reopens versioned work  |
+| `finish_work`   | records evidence and optionally marks a task review-ready, complete, or closed               |
 
-Every write tool accepts your `register_agent` `agent_id`, which keeps your
-presence live just by working. `get_work_state` shows **who is here** (with
-liveness), and flags **stale claims** — an active claim whose owning agent has
-gone away without handing off.
+Writes accept an `agent_id`, which keeps presence live just by working.
+`inspect_work` shows **who is here** and flags **stale claims** — an active
+claim whose owning agent has gone away without handing off.
 
-Every task and presence operation also accepts an optional `workspace_id`
-returned by `join_workspace`. Omit it to use the active/default workspace.
-Responses report both the selected workspace id and repository root, so a
-client can detect a misrouted call.
+Concord resolves the repository workspace automatically. Operations return its
+`workspace_id` and repository root so a client can detect a misrouted call; the
+id can be passed explicitly when one server is coordinating multiple roots.
 
 Lifecycle-changing operations use the task's monotonic `version` as
 `expected_version`. If two agents act on the same version, only the first
-transition succeeds. Assignment leaves work in `assigned` until the named
-agent calls `accept_task`; similarly, `offer_handoff` keeps ownership with the
-sender until the recipient accepts. Every ownership change is retained in an
-append-only audit history.
+transition succeeds. Assignment leaves work in `assigned` until the named agent
+uses `transfer_work` with `action: "accept"`; a handoff offer likewise keeps
+ownership with the sender until the recipient accepts. Every ownership change
+is retained in an append-only audit history.
+
+### Migrating from the granular surface
+
+The five tools replace the earlier public names; there are no legacy aliases.
+Update the package and re-run `concord install` to refresh generated
+instructions. `concord doctor` reports stale instruction blocks.
+
+| Earlier tools                                          | Replacement                                             |
+| ------------------------------------------------------ | ------------------------------------------------------- |
+| `register_agent`, `claim_work`                         | `start_work`                                            |
+| `accept_task`                                          | `start_work` or `transfer_work` with `action: "accept"` |
+| `get_work_state`, `get_task_context`                   | `inspect_work`                                          |
+| `update_task`                                          | `update_work`                                           |
+| `assign_task`, `release_task`, `reassign_task`         | `transfer_work`                                         |
+| `offer_handoff`, `accept_handoff`, `decline_handoff`   | `transfer_work`                                         |
+| `handoff`, `review_ready`, `close_task`, `reopen_task` | `finish_work` or `transfer_work`                        |
 
 ## What you get
 
@@ -140,17 +152,14 @@ the repo** the work is happening in. The MCP server resolves that root from
 Code sets automatically, even for a user-scoped server), then its working
 directory — so every agent in one repo shares one store. Set `CONCORD_REPO_ROOT`
 when running the server somewhere its working directory is not inside the repo.
-An already-running server can instead call `join_workspace` with any existing
-repository path; no MCP restart is required.
 
 Linked Git worktrees follow Git's `commondir` metadata to the primary checkout,
 so the main checkout and all linked worktrees intentionally share one Concord
 database and workspace id.
 
-To restrict dynamic joins, set `CONCORD_ALLOWED_ROOTS` to a path-delimited list
-of allowed repository roots. Without an allowlist, explicit roots must still
-exist and be directories; invalid paths are rejected rather than creating an
-accidental workspace.
+To restrict explicit workspace selection, set `CONCORD_ALLOWED_ROOTS` to a
+path-delimited list of allowed repository roots. Without an allowlist, decoded
+roots must still exist and be directories.
 
 `concord init` adds `.concord/` to the
 repository's `.gitignore`, so the generated workspace stays local by default.
@@ -183,7 +192,7 @@ concord export markdown      # regenerate .concord/ artifacts
 concord doctor               # workspace checks + per-task tool adoption
 
 concord --repo ../project status        # select by repository path from anywhere
-concord --workspace ws_... status       # select an id returned by join_workspace
+concord --workspace ws_... status       # select an id returned by a Concord operation
 ```
 
 `--repo` and `--workspace` are global, mutually exclusive options. The CLI uses

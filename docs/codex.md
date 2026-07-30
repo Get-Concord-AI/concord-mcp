@@ -32,12 +32,11 @@ current Codex MCP documentation if the config format has changed.
 
 ## 3. Use it
 
-Codex should call `claim_work` before editing, `update_task` while working, and
-`get_task_context` when resuming or coordinating. An assigned task must be
-accepted with its current version before editing. Transfers use
-`offer_handoff` plus recipient `accept_handoff`/`decline_handoff`; `handoff`
-itself records evidence without changing ownership. Before a PR it calls `handoff`
-with `ready_for_review`. Track it from your terminal:
+Codex should call `start_work` before editing, `update_work` while working, and
+`inspect_work` when resuming or coordinating. Assignments, acceptance, and
+handoffs use `transfer_work` with the task's current version. Before a PR it
+calls `finish_work` with `outcome: "review_ready"` and the evidence needed for
+review. Track it from your terminal:
 
 ```bash
 concord status

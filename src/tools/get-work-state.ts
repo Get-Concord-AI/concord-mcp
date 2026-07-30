@@ -4,14 +4,12 @@ import {
   UnsubscribeRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { buildStatus, renderStatusText, type StatusView } from '../artifacts/work-state-view.js';
+import { buildStatus, type StatusView } from '../artifacts/work-state-view.js';
 import type { Repositories } from '../db/index.js';
-import { getWorkStateInputSchema } from '../domain/schemas.js';
 import {
   selectToolWorkspace,
   type SelectWorkspace,
   workspaceStructured,
-  withWorkspaceText,
 } from './workspace-routing.js';
 
 /** Stable URI for the read-only work-state resource. */
@@ -27,49 +25,18 @@ export function handleGetWorkState(repos: Repositories): StatusView {
 }
 
 /**
- * Register the read surface for shared work-state: the `get_work_state` tool
- * (which agents can call directly) and the `concord://work-state` resource (the
- * MCP-native read). Both return the same snapshot. This is read-only and does
- * not change the three-tool *write* surface.
+ * Register the read-only `concord://work-state` resource. The public
+ * `inspect_work` workflow tool returns the same workspace snapshot.
  *
  * Returns a `notifyChanged` callback: call it after any write so subscribed
  * clients are pushed a `resources/updated` for `concord://work-state`. MCP
  * cannot wake an idle client — this is push while a session is connected.
  */
-export function registerWorkState(
+export function registerWorkStateResource(
   server: McpServer,
   repos: Repositories,
   selectWorkspace?: SelectWorkspace,
 ): () => void {
-  server.registerTool(
-    'get_work_state',
-    {
-      title: 'Get work state',
-      description:
-        'Read the current shared work-state: who is present (the agent roster with liveness), ' +
-        'active claims, overlaps (recomputed live across all active tasks), and review-ready ' +
-        'tasks. Read-only — call this before claiming to see who else is here and what they are ' +
-        'already working on.',
-      inputSchema: getWorkStateInputSchema,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const view = handleGetWorkState(repos);
-      return {
-        content: [{ type: 'text', text: withWorkspaceText(renderStatusText(view), workspace) }],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          presence: view.presence,
-          active: view.active,
-          overlaps: view.overlaps,
-          stale_claims: view.staleClaims,
-          review_ready: view.reviewReady,
-          open_questions: view.openQuestions,
-        },
-      };
-    },
-  );
-
   server.registerResource(
     'work-state',
     WORK_STATE_URI,

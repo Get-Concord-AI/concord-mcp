@@ -25,7 +25,7 @@ export const workspaceIdField = z
   .min(1)
   .optional()
   .describe(
-    'Workspace id returned by join_workspace. Omit to use the active/default workspace for this MCP session.',
+    'Workspace id returned by a Concord operation. Omit to use the automatically resolved repository workspace.',
   );
 
 const taskVersionField = z
@@ -308,3 +308,129 @@ export const declineHandoffInputShape = {
 } as const;
 export const declineHandoffInputSchema = z.object(declineHandoffInputShape);
 export type DeclineHandoffInput = z.infer<typeof declineHandoffInputSchema>;
+
+/**
+ * Public workflow schemas. The granular lifecycle schemas above remain the
+ * internal contracts for the proven state-machine handlers; MCP exposes only
+ * these five task-oriented operations.
+ */
+export const startWorkInputShape = {
+  task_id: z.string().min(1).describe('Stable identifier for the task, e.g. TASK-12'),
+  title: z.string().min(1).describe('Short human-readable title'),
+  kind: z.string().min(1).describe('Agent type or provider, e.g. claude-code or codex'),
+  agent_id: z
+    .string()
+    .optional()
+    .describe('Existing agent identity to refresh; omit on the first call to generate one'),
+  owner: z.string().optional().describe('Human accountable for this agent and task'),
+  model: z.string().optional().describe('Model the agent is running'),
+  summary: z.string().optional().describe('One-line description of the current work'),
+  branch: z.string().optional().describe('Git branch, if known'),
+  worktree: z.string().optional().describe('Git worktree path, if used'),
+  cwd: z.string().optional().describe('Agent working directory'),
+  pid: z.number().int().optional().describe('Agent process id, if known'),
+  parent_task_id: z.string().optional().describe('Parent task for a smaller claimed unit'),
+  expected_files: z.array(z.string()).optional().describe('Files expected to change'),
+  modules: z.array(z.string()).optional().describe('Logical modules touched'),
+  domains: z.array(z.string()).optional().describe('Product domains touched'),
+  risk_tags: z.array(z.string()).optional().describe('Risk tags shared with related work'),
+  notes: z.string().optional().describe('Concise task notes'),
+  workspace_id: workspaceIdField,
+} as const;
+export const startWorkInputSchema = z.object(startWorkInputShape);
+export type StartWorkInput = z.infer<typeof startWorkInputSchema>;
+
+export const inspectWorkInputShape = {
+  task_id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Task to inspect; omit for the whole workspace state'),
+  workspace_id: workspaceIdField,
+} as const;
+export const inspectWorkInputSchema = z.object(inspectWorkInputShape).default({});
+export type InspectWorkInput = z.infer<typeof inspectWorkInputSchema>;
+
+export const updateWorkInputShape = {
+  task_id: updateTaskInputShape.task_id,
+  kind: updateTaskInputShape.kind,
+  content: updateTaskInputShape.content,
+  agent_id: agentIdField,
+  workspace_id: workspaceIdField,
+} as const;
+export const updateWorkInputSchema = z.object(updateWorkInputShape);
+export type UpdateWorkInput = z.infer<typeof updateWorkInputSchema>;
+
+export const transferWorkActionValues = [
+  'assign',
+  'accept',
+  'decline',
+  'release',
+  'reassign',
+  'offer',
+  'reopen',
+] as const;
+
+export const transferWorkInputShape = {
+  task_id: z.string().min(1),
+  action: z
+    .enum(transferWorkActionValues)
+    .describe('Ownership action to apply through the versioned task state machine'),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  to_agent_id: z.string().min(1).optional().describe('Required for assign, reassign, and offer'),
+  handoff_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Pending handoff to resolve; inferred from the task when omitted'),
+  lease_seconds: z.number().int().positive().optional(),
+  expires_seconds: z.number().int().positive().optional(),
+  force: z.boolean().optional(),
+  reason: z.string().min(1).optional(),
+  what_changed: z.string().min(1).optional().describe('Required when offering a handoff'),
+  changed_files: z.array(z.string()).optional(),
+  tests_run: z.array(z.string()).optional(),
+  known_risks: z.array(z.string()).optional(),
+  assumptions: z.array(z.string()).optional(),
+  decisions: z.array(z.string()).optional(),
+  guardrails_checked: z.array(z.string()).optional(),
+  next_steps: z.array(z.string()).optional(),
+  workspace_id: workspaceIdField,
+} as const;
+export const transferWorkInputSchema = z.object(transferWorkInputShape);
+export type TransferWorkInput = z.infer<typeof transferWorkInputSchema>;
+
+export const finishWorkInputShape = {
+  task_id: z.string().min(1),
+  agent_id: lifecycleActorField,
+  expected_version: taskVersionField,
+  outcome: z
+    .enum(['handoff', 'review_ready', 'complete', 'closed'])
+    .default('complete')
+    .describe('Final task state; handoff records evidence without changing lifecycle state'),
+  what_changed: z.string().min(1),
+  changed_files: z.array(z.string()).optional(),
+  tests_run: z.array(z.string()).optional(),
+  known_risks: z.array(z.string()).optional(),
+  assumptions: z.array(z.string()).optional(),
+  decisions: z.array(z.string()).optional(),
+  guardrails_checked: z.array(z.string()).optional(),
+  needs_review_from: z.array(z.string()).optional(),
+  next_steps: z.array(z.string()).optional(),
+  diff_size: z.string().optional(),
+  open_questions: z.array(z.string()).optional(),
+  provenance: z
+    .array(z.object({ field: z.string(), source: z.string() }))
+    .optional()
+    .describe('Evidence source for review claims'),
+  reason: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Audited terminal reason; defaults to the change summary'),
+  workspace_id: workspaceIdField,
+} as const;
+export const finishWorkInputSchema = z.object(finishWorkInputShape);
+export type FinishWorkInput = z.infer<typeof finishWorkInputSchema>;

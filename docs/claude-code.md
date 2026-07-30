@@ -38,13 +38,11 @@ claude mcp add concord -- concord-mcp
 
 ## 3. Use it
 
-Ask Claude to start a task. It should call `claim_work` before editing,
-`update_task` while working, and `get_task_context` when resuming or
-coordinating. Assigned work must be accepted with its current version.
-Ownership transfer uses `offer_handoff` and recipient acceptance/decline;
-`handoff` records evidence only. Before a PR it calls `handoff` with
-`ready_for_review` and the current `expected_version`. Check
-progress with:
+Ask Claude to start a task. It should call `start_work` before editing,
+`update_work` while working, and `inspect_work` when resuming or coordinating.
+Assignments and handoffs use `transfer_work` with the task's current version.
+Before a PR it calls `finish_work` with `outcome: "review_ready"`, evidence, and
+the current `expected_version`. Check progress with:
 
 ```bash
 concord status
