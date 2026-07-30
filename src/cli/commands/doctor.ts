@@ -17,10 +17,6 @@ const instructionTargets = [
   join('.cursor', 'rules', 'concord.mdc'),
 ] as const;
 
-function yesNo(value: boolean): string {
-  return value ? 'yes' : 'no ';
-}
-
 export interface InstructionIssues {
   stale: string[];
   unreadable: string[];
@@ -104,7 +100,7 @@ export function buildDoctorReport(ctx: CliContext): string {
   } else {
     for (const entry of adoption) {
       lines.push(
-        `  ${entry.taskId.padEnd(10)} claim_work: ${yesNo(entry.claimWork)}  handoff: ${yesNo(entry.handoff)}  review_ready: ${yesNo(entry.reviewReady)}`,
+        `  ${entry.taskId.padEnd(10)} claim_work: ${entry.claimWork ? 'yes' : 'no'}  handoff: ${entry.handoff ? 'yes' : 'no'}  review_ready: ${entry.reviewReady ? 'yes' : 'no'}`,
       );
     }
   }
