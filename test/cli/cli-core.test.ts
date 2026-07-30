@@ -54,7 +54,7 @@ describe('runInit', () => {
 
 describe('renderTasks', () => {
   it('shows a placeholder when there are no tasks', () => {
-    expect(renderTasks([])).toContain('No tasks yet');
+    expect(renderTasks([])).toContain('calling start_work');
   });
 
   it('renders a row per task', () => {

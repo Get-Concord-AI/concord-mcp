@@ -78,6 +78,8 @@ describe('handleSessionStart', () => {
     );
     expect(result.agentId).toBe('claude-code:a1b2c3d4');
     expect(result.message).toContain('claude-code:a1b2c3d4');
+    expect(result.message).toContain('start_work, update_work, finish_work');
+    expect(result.message).not.toContain('claim_work');
     expect(result.message).toContain('No other agents');
     expect(repos.agents.get('claude-code:a1b2c3d4')?.cwd).toBe('/repo');
   });

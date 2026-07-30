@@ -1,9 +1,8 @@
 import type { ProvenanceEntry, Repositories, ReviewRecord } from '../db/index.js';
-import { type ReviewReadyInput } from '../domain/schemas.js';
+import type { ReviewReadyInput } from '../domain/operations.js';
 
 export interface ReviewReadyResult {
   review: ReviewRecord;
-  taskAutoCreated: boolean;
 }
 
 function toProvenance(entries: ReviewReadyInput['provenance']): ProvenanceEntry[] {
@@ -18,7 +17,7 @@ function toProvenance(entries: ReviewReadyInput['provenance']): ProvenanceEntry[
 export function handleReviewReady(repos: Repositories, input: ReviewReadyInput): ReviewReadyResult {
   const existing = repos.tasks.get(input.task_id);
   if (existing === undefined) {
-    throw new Error(`Task ${input.task_id} is not claimed. Call claim_work first.`);
+    throw new Error(`Task ${input.task_id} is not claimed. Call start_work first.`);
   }
 
   if (input.expected_version !== undefined && input.expected_version !== existing.version) {
@@ -57,19 +56,7 @@ export function handleReviewReady(repos: Repositories, input: ReviewReadyInput):
       status: 'success',
       detail: `${String(review.openQuestions.length)} open question(s)`,
     });
-    return { review, taskAutoCreated: false };
+    return { review };
   });
   return transact();
-}
-
-export function formatReviewReadyText(result: ReviewReadyResult): string {
-  const { review } = result;
-  const lines = [`${review.taskId} is review-ready.`];
-  if (result.taskAutoCreated) {
-    lines.push('Note: task was not claimed first; created a stub task.');
-  }
-  lines.push(`Tests run: ${String(review.testsRun.length)}`);
-  lines.push(`Guardrails checked: ${String(review.guardrailsChecked.length)}`);
-  lines.push(`Open questions: ${String(review.openQuestions.length)}`);
-  return lines.join('\n');
 }

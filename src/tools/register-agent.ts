@@ -1,16 +1,8 @@
 import { randomBytes } from 'node:crypto';
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
 import type { AgentRecord, Repositories } from '../db/index.js';
+import type { RegisterAgentInput } from '../domain/operations.js';
 import { buildRoster, type PresenceEntry } from '../domain/presence.js';
-import { registerAgentInputShape, type RegisterAgentInput } from '../domain/schemas.js';
-import {
-  selectToolWorkspace,
-  type SelectWorkspace,
-  workspaceStructured,
-  withWorkspaceText,
-} from './workspace-routing.js';
 
 export interface RegisterAgentResult {
   agent: AgentRecord;
@@ -54,81 +46,4 @@ export function handleRegisterAgent(
   });
 
   return { agent, firstRegistration, roster: buildRoster(repos.agents.list(), now) };
-}
-
-export function formatRegisterAgentText(result: RegisterAgentResult): string {
-  const verb = result.firstRegistration ? 'Registered' : 'Refreshed presence';
-  const owner = result.agent.owner === null ? '' : ` (owner ${result.agent.owner})`;
-  const lines = [`${verb} as ${result.agent.agentId}${owner}.`];
-
-  const others = result.roster.filter((entry) => entry.agentId !== result.agent.agentId);
-  if (others.length === 0) {
-    lines.push('No other agents are registered yet.');
-  } else {
-    lines.push(`${String(others.length)} other agent(s) here:`);
-    for (const entry of others) {
-      const doing = entry.summary ?? 'no summary';
-      lines.push(`  - ${entry.agentId} [${entry.liveness}/${entry.status}]: ${doing}`);
-    }
-  }
-  return lines.join('\n');
-}
-
-function rosterToStructured(roster: readonly PresenceEntry[]): {
-  agent_id: string;
-  kind: string;
-  owner: string | null;
-  summary: string | null;
-  status: string;
-  liveness: string;
-  last_seen: string;
-  age_seconds: number;
-}[] {
-  return roster.map((entry) => ({
-    agent_id: entry.agentId,
-    kind: entry.kind,
-    owner: entry.owner,
-    summary: entry.summary,
-    status: entry.status,
-    liveness: entry.liveness,
-    last_seen: entry.lastSeen,
-    age_seconds: entry.ageSeconds,
-  }));
-}
-
-export function registerRegisterAgent(
-  server: McpServer,
-  repos: Repositories,
-  onWrite?: () => void,
-  selectWorkspace?: SelectWorkspace,
-): void {
-  server.registerTool(
-    'register_agent',
-    {
-      title: 'Register agent',
-      description:
-        'Register this agent instance so other agents know who you are and what you are working ' +
-        'on. Call once at session start (reuse the returned agent_id afterwards) and again to ' +
-        'refresh your summary/status. Returns the current roster of active agents. Works without ' +
-        'a task claim, so recon and research agents are visible too.',
-      inputSchema: registerAgentInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleRegisterAgent(repos, args);
-      onWrite?.();
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(formatRegisterAgentText(result), workspace) },
-        ],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          agent_id: result.agent.agentId,
-          first_registration: result.firstRegistration,
-          status: result.agent.status,
-          roster: rosterToStructured(result.roster),
-        },
-      };
-    },
-  );
 }

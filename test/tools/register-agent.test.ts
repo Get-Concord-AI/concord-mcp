@@ -4,11 +4,7 @@ import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleHandoff } from '../../src/tools/handoff.js';
-import {
-  formatRegisterAgentText,
-  generateAgentId,
-  handleRegisterAgent,
-} from '../../src/tools/register-agent.js';
+import { generateAgentId, handleRegisterAgent } from '../../src/tools/register-agent.js';
 import { handleUpdateTask } from '../../src/tools/update-task.js';
 
 describe('handleRegisterAgent', () => {
@@ -46,7 +42,7 @@ describe('handleRegisterAgent', () => {
     expect(repos.agents.list()).toHaveLength(1);
   });
 
-  it('returns a roster of every registered agent and names others in the text', () => {
+  it('returns a roster of every registered agent', () => {
     handleRegisterAgent(repos, {
       agent_id: 'codex:9q2r',
       kind: 'codex',
@@ -60,16 +56,9 @@ describe('handleRegisterAgent', () => {
       'claude-code:7p8v',
       'codex:9q2r',
     ]);
-    const text = formatRegisterAgentText(result);
-    expect(text).toContain('Registered as claude-code:7p8v');
-    expect(text).toContain('1 other agent(s) here');
-    expect(text).toContain('codex:9q2r');
-    expect(text).toContain('building the backend');
-  });
-
-  it('says so when no other agents are registered', () => {
-    const result = handleRegisterAgent(repos, { agent_id: 'solo:0001', kind: 'claude-code' });
-    expect(formatRegisterAgentText(result)).toContain('No other agents are registered yet.');
+    expect(result.roster.find((entry) => entry.agentId === 'codex:9q2r')?.summary).toBe(
+      'building the backend',
+    );
   });
 
   it('generateAgentId produces distinct kind-prefixed ids', () => {

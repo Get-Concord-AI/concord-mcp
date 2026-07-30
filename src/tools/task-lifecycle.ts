@@ -1,5 +1,3 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
 import type {
   AgentRecord,
   OwnershipEventRecord,
@@ -8,26 +6,14 @@ import type {
   TaskStatus,
   ToolName,
 } from '../db/index.js';
-import {
-  acceptTaskInputShape,
-  type AcceptTaskInput,
-  assignTaskInputShape,
-  type AssignTaskInput,
-  closeTaskInputShape,
-  type CloseTaskInput,
-  reassignTaskInputShape,
-  type ReassignTaskInput,
-  releaseTaskInputShape,
-  type ReleaseTaskInput,
-  reopenTaskInputShape,
-  type ReopenTaskInput,
-} from '../domain/schemas.js';
-import {
-  selectToolWorkspace,
-  type SelectWorkspace,
-  workspaceStructured,
-  withWorkspaceText,
-} from './workspace-routing.js';
+import type {
+  AcceptTaskInput,
+  AssignTaskInput,
+  CloseTaskInput,
+  ReassignTaskInput,
+  ReleaseTaskInput,
+  ReopenTaskInput,
+} from '../domain/operations.js';
 
 export interface TaskLifecycleResult {
   task: TaskRecord;
@@ -50,7 +36,7 @@ interface TransitionRequest {
 function registeredAgent(repos: Repositories, agentId: string): AgentRecord {
   const agent = repos.agents.get(agentId);
   if (agent === undefined) {
-    throw new Error(`Agent ${agentId} is not registered. Call register_agent first.`);
+    throw new Error(`Agent ${agentId} is not registered. Call start_work first.`);
   }
   return agent;
 }
@@ -280,150 +266,4 @@ export function handleReopenTask(repos: Repositories, input: ReopenTaskInput): T
     leaseExpiresAt: null,
     reason: input.reason,
   });
-}
-
-function lifecycleText(action: string, result: TaskLifecycleResult): string {
-  return `${action} ${result.task.taskId}; status ${result.task.status}, version ${String(result.task.version)}.`;
-}
-
-function lifecycleStructured(result: TaskLifecycleResult): Record<string, unknown> {
-  return {
-    task_id: result.task.taskId,
-    status: result.task.status,
-    version: result.task.version,
-    agent_id: result.task.agentId,
-    assigned_agent_id: result.task.assignedAgentId,
-    lease_expires_at: result.task.leaseExpiresAt,
-    ownership_event_id: result.ownershipEvent.id,
-  };
-}
-
-export function registerTaskLifecycle(
-  server: McpServer,
-  repos: Repositories,
-  onWrite?: () => void,
-  selectWorkspace?: SelectWorkspace,
-): void {
-  server.registerTool(
-    'assign_task',
-    {
-      title: 'Assign task',
-      description:
-        'Offer an existing task to a registered agent. Assignment does not mean acceptance or active work.',
-      inputSchema: assignTaskInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleAssignTask(repos, args);
-      onWrite?.();
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(lifecycleText('Assigned', result), workspace) },
-        ],
-        structuredContent: { ...workspaceStructured(workspace), ...lifecycleStructured(result) },
-      };
-    },
-  );
-  server.registerTool(
-    'accept_task',
-    {
-      title: 'Accept task',
-      description:
-        'Accept a live assignment using its current task version and become active owner.',
-      inputSchema: acceptTaskInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleAcceptTask(repos, args);
-      onWrite?.();
-      const action =
-        result.ownershipEvent.transition === 'expire_assignment'
-          ? 'Expired assignment for'
-          : 'Accepted';
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(lifecycleText(action, result), workspace) },
-        ],
-        structuredContent: { ...workspaceStructured(workspace), ...lifecycleStructured(result) },
-      };
-    },
-  );
-  server.registerTool(
-    'release_task',
-    {
-      title: 'Release task',
-      description: 'Release a task owned by this registered agent back to proposed/unassigned.',
-      inputSchema: releaseTaskInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleReleaseTask(repos, args);
-      onWrite?.();
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(lifecycleText('Released', result), workspace) },
-        ],
-        structuredContent: { ...workspaceStructured(workspace), ...lifecycleStructured(result) },
-      };
-    },
-  );
-  server.registerTool(
-    'reassign_task',
-    {
-      title: 'Reassign task',
-      description:
-        'Reassign owned work with an audited reason. Non-owner force requires a registered agent for the same human owner.',
-      inputSchema: reassignTaskInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleReassignTask(repos, args);
-      onWrite?.();
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(lifecycleText('Reassigned', result), workspace) },
-        ],
-        structuredContent: { ...workspaceStructured(workspace), ...lifecycleStructured(result) },
-      };
-    },
-  );
-  server.registerTool(
-    'close_task',
-    {
-      title: 'Close task',
-      description: 'Close owned work with an audited reason and expected task version.',
-      inputSchema: closeTaskInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleCloseTask(repos, args);
-      onWrite?.();
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(lifecycleText('Closed', result), workspace) },
-        ],
-        structuredContent: { ...workspaceStructured(workspace), ...lifecycleStructured(result) },
-      };
-    },
-  );
-  server.registerTool(
-    'reopen_task',
-    {
-      title: 'Reopen task',
-      description:
-        'Reopen terminal, legacy handed-off, or review-ready work with an audited reason.',
-      inputSchema: reopenTaskInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleReopenTask(repos, args);
-      onWrite?.();
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(lifecycleText('Reopened', result), workspace) },
-        ],
-        structuredContent: { ...workspaceStructured(workspace), ...lifecycleStructured(result) },
-      };
-    },
-  );
 }

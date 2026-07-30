@@ -1,5 +1,3 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
 import type {
   HandoffDeliveryStatus,
   HandoffRecord,
@@ -7,20 +5,11 @@ import type {
   Repositories,
   TaskRecord,
 } from '../db/index.js';
-import {
-  acceptHandoffInputShape,
-  type AcceptHandoffInput,
-  declineHandoffInputShape,
-  type DeclineHandoffInput,
-  offerHandoffInputShape,
-  type OfferHandoffInput,
-} from '../domain/schemas.js';
-import {
-  selectToolWorkspace,
-  type SelectWorkspace,
-  workspaceStructured,
-  withWorkspaceText,
-} from './workspace-routing.js';
+import type {
+  AcceptHandoffInput,
+  DeclineHandoffInput,
+  OfferHandoffInput,
+} from '../domain/operations.js';
 
 export interface HandoffLifecycleResult {
   task: TaskRecord;
@@ -30,7 +19,7 @@ export interface HandoffLifecycleResult {
 
 function requireRegistered(repos: Repositories, agentId: string): void {
   if (repos.agents.get(agentId) === undefined) {
-    throw new Error(`Agent ${agentId} is not registered. Call register_agent first.`);
+    throw new Error(`Agent ${agentId} is not registered. Call start_work first.`);
   }
 }
 
@@ -268,94 +257,5 @@ export function handleDeclineHandoff(
     handoff.fromAgentId,
     'decline_handoff',
     input.reason,
-  );
-}
-
-function handoffText(action: string, result: HandoffLifecycleResult): string {
-  return `${action} handoff ${String(result.handoff.id)} for ${result.task.taskId}; status ${result.task.status}, version ${String(result.task.version)}.`;
-}
-
-function handoffStructured(result: HandoffLifecycleResult): Record<string, unknown> {
-  return {
-    task_id: result.task.taskId,
-    task_status: result.task.status,
-    version: result.task.version,
-    agent_id: result.task.agentId,
-    assigned_agent_id: result.task.assignedAgentId,
-    handoff_id: result.handoff.id,
-    delivery_status: result.handoff.deliveryStatus,
-    from_agent_id: result.handoff.fromAgentId,
-    to_agent_id: result.handoff.toAgentId,
-    expires_at: result.handoff.expiresAt,
-    ownership_event_id: result.ownershipEvent.id,
-  };
-}
-
-export function registerHandoffLifecycle(
-  server: McpServer,
-  repos: Repositories,
-  onWrite?: () => void,
-  selectWorkspace?: SelectWorkspace,
-): void {
-  server.registerTool(
-    'offer_handoff',
-    {
-      title: 'Offer handoff',
-      description:
-        'Offer owned active/blocked work to a registered recipient with evidence. Ownership stays with the sender until acceptance.',
-      inputSchema: offerHandoffInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleOfferHandoff(repos, args);
-      onWrite?.();
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(handoffText('Offered', result), workspace) },
-        ],
-        structuredContent: { ...workspaceStructured(workspace), ...handoffStructured(result) },
-      };
-    },
-  );
-  server.registerTool(
-    'accept_handoff',
-    {
-      title: 'Accept handoff',
-      description:
-        'Accept a pending handoff addressed to this registered agent and atomically become owner.',
-      inputSchema: acceptHandoffInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleAcceptHandoff(repos, args);
-      onWrite?.();
-      const action = result.handoff.deliveryStatus === 'expired' ? 'Expired' : 'Accepted';
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(handoffText(action, result), workspace) },
-        ],
-        structuredContent: { ...workspaceStructured(workspace), ...handoffStructured(result) },
-      };
-    },
-  );
-  server.registerTool(
-    'decline_handoff',
-    {
-      title: 'Decline handoff',
-      description:
-        'Decline a pending handoff addressed to this registered agent and return it to the sender.',
-      inputSchema: declineHandoffInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleDeclineHandoff(repos, args);
-      onWrite?.();
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(handoffText('Declined', result), workspace) },
-        ],
-        structuredContent: { ...workspaceStructured(workspace), ...handoffStructured(result) },
-      };
-    },
   );
 }

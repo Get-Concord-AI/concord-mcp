@@ -18,7 +18,7 @@ export const WORK_STATE_URI = 'concord://work-state';
 /**
  * Read the current shared work-state. Pure read: no writes, no artifact
  * regeneration. Overlaps are recomputed live across all active tasks, so this
- * reflects claims made after any single agent's own `claim_work` returned.
+ * reflects claims made after any single agent's own `start_work` returned.
  */
 export function handleGetWorkState(repos: Repositories): StatusView {
   return buildStatus(repos);

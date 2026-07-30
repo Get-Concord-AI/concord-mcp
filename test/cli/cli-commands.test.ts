@@ -41,8 +41,18 @@ describe('buildAdoption', () => {
     const adoption = buildAdoption(repos.events.list());
     const one = adoption.find((a) => a.taskId === 'TASK-1');
     const two = adoption.find((a) => a.taskId === 'TASK-2');
-    expect(one).toEqual({ taskId: 'TASK-1', claimWork: true, handoff: true, reviewReady: false });
-    expect(two).toEqual({ taskId: 'TASK-2', claimWork: true, handoff: false, reviewReady: false });
+    expect(one).toEqual({
+      taskId: 'TASK-1',
+      startWork: true,
+      finishWork: true,
+      reviewReady: false,
+    });
+    expect(two).toEqual({
+      taskId: 'TASK-2',
+      startWork: true,
+      finishWork: false,
+      reviewReady: false,
+    });
   });
 });
 
@@ -76,7 +86,7 @@ describe('CLI read/export commands', () => {
     const report = runDoctor(dir);
     expect(report).toContain('schema v7, expected v7');
     expect(report).toContain('TASK-12');
-    expect(report).toContain('claim_work: yes');
+    expect(report).toContain('start_work: yes');
     // The resolved workspace path is surfaced so agents don't have to hunt for it.
     expect(report).toContain('repo root');
     expect(report).toContain(join(dir, '.concord'));

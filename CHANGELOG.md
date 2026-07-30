@@ -26,6 +26,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The earlier granular MCP tool names are no longer registered as public
   aliases. Update Concord and re-run `concord install` to migrate local agent
   instructions.
+- Dormant granular tool schemas, registration adapters, and presentation
+  helpers were removed; internal lifecycle operations derive their types from
+  the five workflow contracts.
 
 ## [0.5.0] - 2026-07-28
 

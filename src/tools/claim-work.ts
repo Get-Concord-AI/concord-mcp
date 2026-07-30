@@ -1,15 +1,7 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
 import type { Repositories, TaskRecord } from '../db/index.js';
 import { assessClaimBreadth } from '../domain/decomposition.js';
+import type { ClaimWorkInput } from '../domain/operations.js';
 import { detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
-import { claimWorkInputShape, type ClaimWorkInput } from '../domain/schemas.js';
-import {
-  selectToolWorkspace,
-  type SelectWorkspace,
-  workspaceStructured,
-  withWorkspaceText,
-} from './workspace-routing.js';
 
 export interface ClaimWorkResult {
   task: TaskRecord;
@@ -63,7 +55,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
   const existing = repos.tasks.get(input.task_id);
 
   if (input.agent_id !== undefined && repos.agents.get(input.agent_id) === undefined) {
-    throw new Error(`Agent ${input.agent_id} is not registered. Call register_agent first.`);
+    throw new Error(`Agent ${input.agent_id} is not registered. Call start_work first.`);
   }
   if (
     existing?.agentId !== null &&
@@ -71,7 +63,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     input.agent_id !== existing.agentId
   ) {
     throw new Error(
-      `Task ${input.task_id} is owned by ${existing.agentId}; use offer_handoff or reassign_task.`,
+      `Task ${input.task_id} is owned by ${existing.agentId}; use transfer_work to offer or reassign it.`,
     );
   }
 
@@ -141,111 +133,4 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     breadthReasons: assessClaimBreadth(scope),
     scopeAdded,
   };
-}
-
-export function formatClaimWorkText(result: ClaimWorkResult): string {
-  const verb = result.alreadyClaimed ? 'Already claimed' : 'Claimed';
-  const lines = [`${verb} ${result.task.taskId} (${result.task.title}).`];
-
-  if (result.alreadyClaimed && result.scopeAdded.length > 0) {
-    lines.push(`Extended claim scope (added ${result.scopeAdded.join(', ')}).`);
-  }
-
-  if (result.overlaps.length === 0) {
-    if (result.checkedAgainst === 0) {
-      lines.push(
-        'No other active claims to check against yet. Overlaps are only checked at ' +
-          'claim time, so a later overlapping claim will not appear here — run ' +
-          '`concord status` to re-check as others claim work.',
-      );
-    } else {
-      lines.push(
-        `No overlaps with the ${String(result.checkedAgainst)} other active task(s) at claim time. ` +
-          'This is a point-in-time check — run `concord status` to re-check as new work is claimed.',
-      );
-    }
-  } else {
-    lines.push(
-      `Potential overlaps (${String(result.overlaps.length)} of ${String(result.checkedAgainst)} active task(s)):`,
-    );
-    for (const overlap of result.overlaps) {
-      lines.push(`  - ${overlap.taskId} (${overlap.title}): ${overlap.reasons.join('; ')}`);
-    }
-  }
-
-  if (result.breadthReasons.length > 0) {
-    lines.push(
-      `Heads-up: this claim looks broad (${result.breadthReasons.join('; ')}). ` +
-        'Consider splitting it into smaller, independently-handoffable tasks and claiming each separately.',
-    );
-  }
-
-  return lines.join('\n');
-}
-
-/** The `claim_work` MCP structured output. All keys are snake_case, including
- * overlap entries, so the payload is internally consistent. */
-export function toClaimWorkStructured(result: ClaimWorkResult): {
-  task_id: string;
-  status: string;
-  version: number;
-  agent_id: string | null;
-  assigned_agent_id: string | null;
-  parent_task_id: string | null;
-  already_claimed: boolean;
-  overlaps: { task_id: string; title: string; reasons: string[] }[];
-  checked_against: number;
-  breadth_reasons: string[];
-  scope_added: string[];
-} {
-  return {
-    task_id: result.task.taskId,
-    status: result.task.status,
-    version: result.task.version,
-    agent_id: result.task.agentId,
-    assigned_agent_id: result.task.assignedAgentId,
-    parent_task_id: result.task.parentTaskId,
-    already_claimed: result.alreadyClaimed,
-    overlaps: result.overlaps.map((overlap) => ({
-      task_id: overlap.taskId,
-      title: overlap.title,
-      reasons: overlap.reasons,
-    })),
-    checked_against: result.checkedAgainst,
-    breadth_reasons: result.breadthReasons,
-    scope_added: result.scopeAdded,
-  };
-}
-
-export function registerClaimWork(
-  server: McpServer,
-  repos: Repositories,
-  onWrite?: () => void,
-  selectWorkspace?: SelectWorkspace,
-): void {
-  server.registerTool(
-    'claim_work',
-    {
-      title: 'Claim work',
-      description:
-        'Record that an agent is starting a task and flag overlaps with other active tasks. ' +
-        'Call this before editing code. Overlap detection is point-in-time (only against tasks ' +
-        'already active at claim time); run `concord status` to re-check as others claim.',
-      inputSchema: claimWorkInputShape,
-    },
-    (args) => {
-      const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleClaimWork(repos, args);
-      onWrite?.();
-      return {
-        content: [
-          { type: 'text', text: withWorkspaceText(formatClaimWorkText(result), workspace) },
-        ],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          ...toClaimWorkStructured(result),
-        },
-      };
-    },
-  );
 }

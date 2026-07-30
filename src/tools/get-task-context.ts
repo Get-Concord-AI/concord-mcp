@@ -1,5 +1,3 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
 import type {
   HandoffRecord,
   OwnershipEventRecord,
@@ -8,14 +6,8 @@ import type {
   TaskRecord,
   TaskUpdateRecord,
 } from '../db/index.js';
+import type { GetTaskContextInput } from '../domain/operations.js';
 import { detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
-import { getTaskContextInputShape, type GetTaskContextInput } from '../domain/schemas.js';
-import {
-  selectToolWorkspace,
-  type SelectWorkspace,
-  workspaceStructured,
-  withWorkspaceText,
-} from './workspace-routing.js';
 
 export interface TaskContextResult {
   task: TaskRecord;
@@ -33,7 +25,7 @@ export function handleGetTaskContext(
 ): TaskContextResult {
   const task = repos.tasks.get(input.task_id);
   if (!task) {
-    throw new Error(`Task "${input.task_id}" is not claimed. Call claim_work first.`);
+    throw new Error(`Task "${input.task_id}" is not claimed. Call start_work first.`);
   }
 
   const overlaps =
@@ -64,77 +56,4 @@ export function handleGetTaskContext(
     pendingHandoff: repos.handoffs.pendingForTask(task.taskId),
     ownershipHistory: repos.ownershipEvents.listByTask(task.taskId),
   };
-}
-
-function formatContext(result: TaskContextResult): string {
-  const updates =
-    result.updates.length === 0
-      ? '  None'
-      : result.updates
-          .map(
-            (update) => `  [${update.kind}] ${update.content} — ${update.agent ?? 'unknown agent'}`,
-          )
-          .join('\n');
-  const overlaps =
-    result.overlaps.length === 0
-      ? '  None'
-      : result.overlaps
-          .map((overlap) => `  ${overlap.taskId}: ${overlap.reasons.join('; ')}`)
-          .join('\n');
-
-  return [
-    `${result.task.taskId} — ${result.task.title}`,
-    `Status: ${result.task.status} (version ${String(result.task.version)})`,
-    `Owner agent: ${result.task.agentId ?? 'unassigned'}`,
-    `Assigned agent: ${result.task.assignedAgentId ?? 'none'}`,
-    `Lease expires: ${result.task.leaseExpiresAt ?? 'none'}`,
-    `Notes: ${result.task.notes ?? 'not recorded'}`,
-    'Updates:',
-    updates,
-    'Live overlaps:',
-    overlaps,
-    `Latest handoff: ${result.latestHandoff?.whatChanged ?? 'none'}`,
-    `Pending handoff: ${result.pendingHandoff === undefined ? 'none' : `${String(result.pendingHandoff.id)} to ${result.pendingHandoff.toAgentId ?? 'unknown'}`}`,
-    `Ownership transitions: ${String(result.ownershipHistory.length)}`,
-    `Review plan: ${result.latestReview?.planSummary ?? 'not submitted'}`,
-  ].join('\n');
-}
-
-export function registerGetTaskContext(
-  server: McpServer,
-  repos: Repositories,
-  selectWorkspace?: SelectWorkspace,
-): void {
-  server.registerTool(
-    'get_task_context',
-    {
-      title: 'Get task context',
-      description:
-        "Read a claimed task's scope, ordered updates, latest handoff and review, and current overlaps.",
-      inputSchema: getTaskContextInputShape,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    (input) => {
-      const workspace = selectToolWorkspace(selectWorkspace, input.workspace_id);
-      const result = handleGetTaskContext(repos, input);
-      return {
-        content: [{ type: 'text', text: withWorkspaceText(formatContext(result), workspace) }],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          task: result.task,
-          updates: result.updates,
-          latest_handoff: result.latestHandoff ?? null,
-          latest_review: result.latestReview ?? null,
-          pending_handoff: result.pendingHandoff ?? null,
-          ownership_history: result.ownershipHistory,
-          overlaps: result.overlaps,
-        },
-      };
-    },
-  );
 }

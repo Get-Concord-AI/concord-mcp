@@ -72,7 +72,7 @@ export function buildDoctorReport(ctx: CliContext): string {
   } else {
     for (const entry of adoption) {
       lines.push(
-        `  ${entry.taskId.padEnd(10)} claim_work: ${entry.claimWork ? 'yes' : 'no'}  handoff: ${entry.handoff ? 'yes' : 'no'}  review_ready: ${entry.reviewReady ? 'yes' : 'no'}`,
+        `  ${entry.taskId.padEnd(10)} start_work: ${entry.startWork ? 'yes' : 'no'}  finish_work: ${entry.finishWork ? 'yes' : 'no'}  review_ready: ${entry.reviewReady ? 'yes' : 'no'}`,
       );
     }
   }
