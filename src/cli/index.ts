@@ -11,9 +11,8 @@ import { registerDoctorCommand } from './commands/doctor.js';
 import { registerExportCommand } from './commands/export.js';
 import { registerHandoffCommand } from './commands/handoff.js';
 import { registerHookCommand } from './commands/hook.js';
-import { registerInit } from './commands/init.js';
-import { registerInstallCommand } from './commands/install.js';
 import { registerReviewPacketCommand } from './commands/review-packet.js';
+import { registerSetupCommand } from './commands/setup.js';
 import { registerStatus } from './commands/status.js';
 import { registerTasks } from './commands/tasks.js';
 import { registerWatchCommand } from './commands/watch.js';
@@ -56,8 +55,7 @@ program.hook('postAction', (_command, actionCommand) => {
   }
 });
 
-registerInit(program);
-registerInstallCommand(program);
+registerSetupCommand(program);
 registerStatus(program);
 registerWhoCommand(program);
 registerTasks(program);

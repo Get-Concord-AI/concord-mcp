@@ -13,7 +13,7 @@ describe('openDatabase', () => {
   it('applies all migrations (user_version at head) and creates tables', () => {
     const db = openDatabase(':memory:');
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(7);
+    expect(version).toBe(8);
 
     const raw: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     const names = new Set(
@@ -29,6 +29,9 @@ describe('openDatabase', () => {
     expect(names.has('task_updates')).toBe(true);
     expect(names.has('agents')).toBe(true);
     expect(names.has('task_ownership_events')).toBe(true);
+    expect(names.has('agent_endpoints')).toBe(true);
+    expect(names.has('agent_messages')).toBe(true);
+    expect(names.has('agent_message_events')).toBe(true);
   });
 
   it('upgrades a version-6 database without losing legacy task ownership', () => {
@@ -70,7 +73,7 @@ describe('openDatabase', () => {
     const task = parseTaskRow(
       upgraded.prepare('SELECT * FROM tasks WHERE task_id = ?').get('LEGACY'),
     );
-    expect(upgraded.pragma('user_version', { simple: true })).toBe(7);
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(8);
     expect(task.status).toBe('handed_off');
     expect(task.agentId).toBe('codex:old');
     expect(task.version).toBe(1);

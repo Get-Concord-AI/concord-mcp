@@ -9,12 +9,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { Command } from '@commander-js/extra-typings';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { buildStatus, renderStatusText } from '../../src/artifacts/work-state-view.js';
-import { runInit } from '../../src/cli/commands/init.js';
+import { registerSetupCommand, runSetup } from '../../src/cli/commands/setup.js';
 import { renderTasks } from '../../src/cli/commands/tasks.js';
 import { runWho } from '../../src/cli/commands/who.js';
 import { openContext } from '../../src/cli/context.js';
@@ -30,14 +31,27 @@ function repoDir(): string {
   return realpathSync(dir);
 }
 
-describe('runInit', () => {
-  it('creates the .concord workspace with a database', () => {
+describe('runSetup', () => {
+  it('registers one setup command without separate init/install commands', () => {
+    const program = new Command();
+    registerSetupCommand(program);
+
+    expect(program.commands.map((command) => command.name())).toEqual(['setup']);
+  });
+
+  it('creates state, instructions, and repository-pinned MCP configs', () => {
     const dir = repoDir();
-    const concordPath = runInit(dir);
-    expect(concordPath).toBe(join(dir, '.concord'));
-    expect(existsSync(join(concordPath, 'concord.db'))).toBe(true);
-    expect(existsSync(join(concordPath, 'WORK_STATE.json'))).toBe(true);
+    const codexHome = mkdtempSync(join(tmpdir(), 'concord-codex-'));
+    const result = runSetup(dir, { env: { CODEX_HOME: codexHome } });
+
+    expect(result.concordPath).toBe(join(dir, '.concord'));
+    expect(existsSync(join(result.concordPath, 'concord.db'))).toBe(true);
+    expect(existsSync(join(result.concordPath, 'WORK_STATE.json'))).toBe(true);
     expect(readFileSync(join(dir, '.gitignore'), 'utf8')).toBe('.concord/\n');
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('start_work');
+    expect(readFileSync(join(dir, '.cursor', 'mcp.json'), 'utf8')).toContain(
+      `"CONCORD_REPO_ROOT": "${dir}"`,
+    );
   });
 
   it('preserves existing gitignore rules and adds the Concord entry once', () => {
@@ -45,10 +59,25 @@ describe('runInit', () => {
     const gitignorePath = join(dir, '.gitignore');
     writeFileSync(gitignorePath, 'node_modules/');
 
-    runInit(dir);
-    runInit(dir);
+    runSetup(dir, { mcp: false });
+    runSetup(dir, { mcp: false });
 
     expect(readFileSync(gitignorePath, 'utf8')).toBe('node_modules/\n.concord/\n');
+  });
+
+  it('records one local approval for detected live-prompt integrations', () => {
+    const dir = repoDir();
+    const result = runSetup(dir, {
+      mcp: false,
+      agentCommunications: true,
+      communicationProviders: ['codex', 'claude', 'cursor'],
+    });
+
+    const config = readFileSync(join(result.concordPath, 'agent-integrations.json'), 'utf8');
+    expect(config).toContain('"approved": true');
+    expect(config).toContain('"codex"');
+    expect(config).toContain('"claude"');
+    expect(config).toContain('"cursor"');
   });
 });
 
@@ -205,7 +234,7 @@ describe('buildStatus / renderStatusText', () => {
 describe('runWho', () => {
   it('lists agents registered in the workspace', () => {
     const dir = repoDir();
-    runInit(dir);
+    runSetup(dir, { mcp: false });
     handleRegisterAgent(openContext(dir).repos, {
       agent_id: 'claude-code:7p8v',
       kind: 'claude-code',
@@ -219,7 +248,7 @@ describe('runWho', () => {
 
   it('shows none when nobody has registered', () => {
     const dir = repoDir();
-    runInit(dir);
+    runSetup(dir, { mcp: false });
     expect(runWho(dir)).toContain('none');
   });
 });

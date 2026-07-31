@@ -36,9 +36,10 @@ export interface GetTaskContextInput {
   task_id: NonNullable<InspectWorkInput['task_id']>;
 }
 
-export type UpdateTaskInput = Pick<UpdateWorkInput, 'task_id' | 'kind' | 'content' | 'agent_id'> & {
-  agent?: string | undefined;
-};
+export type UpdateTaskInput = Require<
+  Pick<UpdateWorkInput, 'task_id' | 'kind' | 'content' | 'agent_id'>,
+  'task_id' | 'kind'
+> & { agent?: string | undefined };
 
 type FinishEvidenceInput = Pick<
   FinishWorkInput,

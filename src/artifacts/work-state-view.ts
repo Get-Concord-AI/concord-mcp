@@ -2,6 +2,7 @@ import { dirname } from 'node:path';
 
 import type { Repositories, TaskRecord } from '../db/index.js';
 import { detectOverlaps } from '../domain/overlap.js';
+import { endpointPromptable } from '../tools/agent-messages.js';
 import {
   buildRoster,
   detectStaleClaims,
@@ -39,6 +40,13 @@ interface OpenQuestionEntry {
   question: string;
 }
 
+interface CommunicationEntry {
+  agentId: string;
+  promptable: boolean;
+  provider: string | null;
+  capabilities: string[];
+}
+
 /** A read-only snapshot of shared work-state: active claims, overlaps computed
  * live across all active tasks, and review-ready tasks with their open
  * questions. Rendered by both the CLI (`concord status`) and the
@@ -53,6 +61,8 @@ export interface StatusView {
   presence: PresenceEntry[];
   /** Active claims whose owning agent has gone away or never registered. */
   staleClaims: StaleClaim[];
+  /** Prompt addressability without exposing provider session handles. */
+  communications: CommunicationEntry[];
 }
 
 function touchesOf(task: TaskRecord): string {
@@ -123,6 +133,15 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
     openQuestions,
     presence: buildRoster(repos.agents.list(), now),
     staleClaims: detectStaleClaims(tasks, repos.agents.list(), now),
+    communications: repos.agents.list().map((agent) => {
+      const endpoint = repos.agentEndpoints.getByAgent(agent.agentId);
+      return {
+        agentId: agent.agentId,
+        promptable: endpointPromptable(endpoint, now),
+        provider: endpoint?.provider ?? null,
+        capabilities: endpoint?.capabilities ?? [],
+      };
+    }),
   };
 }
 
@@ -141,6 +160,17 @@ export function renderRosterLines(roster: readonly PresenceEntry[]): string[] {
 export function renderStatusText(view: StatusView): string {
   const lines = ['Concord workspace', '', "Who's here"];
   lines.push(...renderRosterLines(view.presence));
+
+  lines.push('', 'Live prompting');
+  if (view.communications.length === 0) {
+    lines.push('  none');
+  } else {
+    for (const entry of view.communications) {
+      lines.push(
+        `  ${entry.agentId.padEnd(18)} ${entry.promptable ? 'promptable' : 'unreachable'}${entry.provider === null ? '' : ` via ${entry.provider}`}`,
+      );
+    }
+  }
 
   lines.push('', 'Active work');
   if (view.active.length === 0) {

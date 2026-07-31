@@ -1,4 +1,12 @@
 import { openDatabase, type ConcordDatabase } from './connection.js';
+import {
+  createAgentEndpointRepository,
+  type AgentEndpointRepository,
+} from './repositories/agent-endpoints.js';
+import {
+  createAgentMessageRepository,
+  type AgentMessageRepository,
+} from './repositories/agent-messages.js';
 import { createAgentRepository, type AgentRepository } from './repositories/agents.js';
 import { createEventRepository, type EventRepository } from './repositories/events.js';
 import { createHandoffRepository, type HandoffRepository } from './repositories/handoffs.js';
@@ -25,6 +33,8 @@ export type {
   OwnershipEventRepository,
 } from './repositories/ownership-events.js';
 export type { NewAgent, AgentRepository } from './repositories/agents.js';
+export type { NewAgentEndpoint, AgentEndpointRepository } from './repositories/agent-endpoints.js';
+export type { NewAgentMessage, AgentMessageRepository } from './repositories/agent-messages.js';
 export type {
   TaskRecord,
   TaskStatus,
@@ -40,6 +50,12 @@ export type {
   AgentStatus,
   OwnershipEventRecord,
   HandoffDeliveryStatus,
+  AgentEndpointRecord,
+  AgentEndpointStatus,
+  AgentMessageRecord,
+  AgentMessageStatus,
+  AgentMessageErrorCode,
+  AgentMessageEventRecord,
 } from './rows.js';
 
 /** The full set of Concord repositories bound to one database. */
@@ -51,6 +67,8 @@ export interface Repositories {
   taskUpdates: TaskUpdateRepository;
   events: EventRepository;
   agents: AgentRepository;
+  agentEndpoints: AgentEndpointRepository;
+  agentMessages: AgentMessageRepository;
   ownershipEvents: OwnershipEventRepository;
 }
 
@@ -64,6 +82,8 @@ export function createRepositories(db: ConcordDatabase): Repositories {
     taskUpdates: createTaskUpdateRepository(db),
     events: createEventRepository(db),
     agents: createAgentRepository(db),
+    agentEndpoints: createAgentEndpointRepository(db),
+    agentMessages: createAgentMessageRepository(db),
     ownershipEvents: createOwnershipEventRepository(db),
   };
 }
