@@ -1,13 +1,15 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { databasePath } from '../../src/config/paths.js';
 import { openDatabase } from '../../src/db/connection.js';
-import { createRepositories, type Repositories } from '../../src/db/index.js';
+import { createRepositories, openRepositories, type Repositories } from '../../src/db/index.js';
 import {
   startAgentRelay,
+  startWorkspaceAgentRelay,
   type AgentSessionDelivery,
   type RunningAgentRelay,
 } from '../../src/relay/server.js';
@@ -131,5 +133,47 @@ describe('local agent relay', () => {
         },
       }),
     ).rejects.toThrow('Refusing to replace non-socket relay path');
+  });
+
+  it('starts from the public workspace API without internal repository injection', async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'concord-relay-workspace-'));
+    mkdirSync(join(repoRoot, '.git'));
+    mkdirSync(join(repoRoot, '.concord'));
+    const setupRepos = openRepositories(databasePath(repoRoot));
+    setupRepos.agents.upsert({
+      agentId: 'codex:public',
+      kind: 'codex',
+      owner: null,
+      model: null,
+      pid: null,
+      cwd: repoRoot,
+      worktree: null,
+      branch: null,
+      summary: null,
+      status: 'active',
+    });
+    setupRepos.db.close();
+    const address = join(repoRoot, '.concord', 'public.sock');
+
+    const workspaceRelay = await startWorkspaceAgentRelay({
+      repoRoot,
+      agentId: 'codex:public',
+      address,
+      hasActiveTurn: () => true,
+      adapter: {
+        provider: 'codex',
+        steer: () => Promise.resolve('turn-public'),
+        startTurn: () => Promise.resolve('turn-public'),
+      },
+    });
+    const verificationRepos = openRepositories(databasePath(repoRoot));
+    expect(verificationRepos.agentEndpoints.getByAgent('codex:public')).toMatchObject({
+      endpointId: workspaceRelay.endpointId,
+      status: 'connected',
+    });
+    verificationRepos.db.close();
+
+    await workspaceRelay.close();
+    await workspaceRelay.close();
   });
 });

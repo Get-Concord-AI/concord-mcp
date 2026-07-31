@@ -2,7 +2,8 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { chmodSync, existsSync, lstatSync, unlinkSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 
-import type { Repositories } from '../db/index.js';
+import { openRepositories, type Repositories } from '../db/index.js';
+import { databasePath, resolveExplicitRepoRoot } from '../config/paths.js';
 import {
   decodeRelayDelivery,
   encodeRelayFrame,
@@ -37,6 +38,10 @@ export interface RunningAgentRelay {
   credential: string;
   address: string;
   close(): Promise<void>;
+}
+
+export interface WorkspaceAgentRelayServerOptions extends Omit<AgentRelayServerOptions, 'repos'> {
+  repoRoot: string;
 }
 
 function respond(socket: Socket, response: RelayResponse): void {
@@ -197,6 +202,41 @@ export async function startAgentRelay(
         });
       });
       removeUnixSocket(options.address);
+    },
+  };
+}
+
+/**
+ * Public package entry point for client integrations. It binds the relay to a
+ * repository's Concord database and owns that connection for the relay's
+ * lifetime, so an installed host does not need Concord's internal repositories.
+ */
+export async function startWorkspaceAgentRelay(
+  options: WorkspaceAgentRelayServerOptions,
+): Promise<RunningAgentRelay> {
+  const { repoRoot, ...relayOptions } = options;
+  const repos = openRepositories(databasePath(resolveExplicitRepoRoot(repoRoot)));
+  let relay: RunningAgentRelay;
+  try {
+    relay = await startAgentRelay({ ...relayOptions, repos });
+  } catch (error) {
+    repos.db.close();
+    throw error;
+  }
+
+  let closed = false;
+  return {
+    endpointId: relay.endpointId,
+    credential: relay.credential,
+    address: relay.address,
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      try {
+        await relay.close();
+      } finally {
+        repos.db.close();
+      }
     },
   };
 }
