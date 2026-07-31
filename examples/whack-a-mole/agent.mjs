@@ -214,7 +214,12 @@ function toolLabel(name, detail) {
 
 function resultText(result) {
   const first = result.content?.[0];
-  return first?.type === 'text' ? first.text.split('\n')[0] : '';
+  if (first?.type !== 'text') return '';
+  const lines = first.text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.at(-1) ?? '';
 }
 
 const transport = new StdioClientTransport({
