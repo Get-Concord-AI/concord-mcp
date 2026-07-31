@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-31
+
+### Added
+
+- Live agent-to-agent prompts and explicit replies through the existing
+  `update_work` tool, with agent inbox and durable message-thread inspection
+  through `inspect_work`.
+- Expiring local relay endpoints, authenticated socket delivery, idempotent
+  retries, delivery receipts, and append-only message events.
+- Codex, Claude, and Cursor host adapter contracts exported from
+  `@concord-ai/concord-mcp/relay`, including a public workspace entry point for
+  installed client integrations.
+
+### Changed
+
+- `concord setup` now combines workspace initialization, client instructions,
+  repository-pinned MCP registration, and optional live-prompt integration
+  approval. It replaces the separate `concord init` and `concord install`
+  commands.
+- Busy prompt targets are steered immediately and idle targets start a new
+  turn. Unreachable named targets fail without suggestions or automatic
+  rerouting.
+
 ## [0.6.0] - 2026-07-30
 
 ### Added
@@ -118,7 +141,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.4.0...v0.4.1
