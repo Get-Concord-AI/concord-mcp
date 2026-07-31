@@ -5,6 +5,7 @@ import type {
   ReviewRecord,
   TaskRecord,
   TaskUpdateRecord,
+  AgentMessageRecord,
 } from '../db/index.js';
 import type { GetTaskContextInput } from '../domain/operations.js';
 import { detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
@@ -17,6 +18,7 @@ export interface TaskContextResult {
   overlaps: OverlapWarning[];
   pendingHandoff: HandoffRecord | undefined;
   ownershipHistory: OwnershipEventRecord[];
+  messages: AgentMessageRecord[];
 }
 
 export function handleGetTaskContext(
@@ -55,5 +57,6 @@ export function handleGetTaskContext(
     overlaps,
     pendingHandoff: repos.handoffs.pendingForTask(task.taskId),
     ownershipHistory: repos.ownershipEvents.listByTask(task.taskId),
+    messages: repos.agentMessages.listByTask(task.taskId),
   };
 }

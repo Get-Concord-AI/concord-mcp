@@ -1,10 +1,10 @@
 /** Version of the generated agent workflow contract. */
-export const CONCORD_INSTRUCTION_VERSION = '1';
+export const CONCORD_INSTRUCTION_VERSION = '2';
 
 /** Concise MCP-native guidance, versioned with the running server. */
 export const CONCORD_SERVER_INSTRUCTIONS = `Concord coordinates coding agents through five workflow tools.
 - Call start_work before editing. It registers your agent, claims or accepts the task, and reports overlaps.
-- Use inspect_work to read workspace or task context and update_work for durable progress, decisions, questions, blockers, and findings.
+- Use inspect_work to read workspace, task, agent, or message context. Use update_work for durable progress or to prompt/reply to another promptable workspace agent, including while that agent is busy.
 - Use transfer_work for assignment, acceptance, decline, release, reassignment, evidence-bearing handoff offers, and reopening.
 - Call finish_work before finishing, review, or closure with changed files, tests, assumptions, decisions, risks, and provenance.
 Keep claims small and resolve reported overlaps before editing.`;
@@ -19,8 +19,9 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
 - **Before editing**, call \`start_work\` with the task, your agent kind/id, and
   expected files or modules. It registers presence, accepts assigned work when
   appropriate, claims the scope, and returns overlap warnings.
-- Use \`inspect_work\` to read the workspace or one task. Use \`update_work\` for
-  durable progress, decisions, assumptions, questions, blockers, and findings.
+- Use \`inspect_work\` to read the workspace, one task, one agent, or one message
+  thread. Use \`update_work\` for durable progress and for live prompts/replies
+  to another promptable workspace agent, including while that agent is busy.
 - Use \`transfer_work\` for assignment, acceptance, decline, release,
   reassignment, evidence-bearing handoff offers, and reopening.
 - **Before finishing**, call \`finish_work\` once with the outcome, changed

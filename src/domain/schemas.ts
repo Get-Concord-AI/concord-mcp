@@ -72,12 +72,18 @@ export type StartWorkInput = z.infer<z.ZodObject<typeof startWorkInputShape>>;
 
 export const inspectWorkInputShape = {
   task_id: taskIdField.optional().describe('Task to inspect; omit for the whole workspace state'),
+  agent_id: z.string().min(1).optional().describe('Agent communication inbox/outbox to inspect'),
+  message_id: z.string().min(1).optional().describe('Prompt/reply thread to inspect'),
   workspace_id: workspaceIdField,
 } as const;
 export type InspectWorkInput = z.infer<z.ZodObject<typeof inspectWorkInputShape>>;
 
 export const updateWorkInputShape = {
-  task_id: taskIdField,
+  operation: z
+    .enum(['record', 'prompt', 'reply'])
+    .optional()
+    .describe('Defaults to record; prompt and reply deliver live inter-agent messages'),
+  task_id: taskIdField.optional().describe('Required for record; optional context for prompts'),
   kind: z
     .enum([
       'intent',
@@ -89,9 +95,22 @@ export const updateWorkInputShape = {
       'blocker',
       'finding',
     ])
+    .optional()
     .describe('Kind of task-scoped update'),
-  content: z.string().min(1).describe('Concise context another agent needs'),
+  content: z.string().min(1).max(16_384).describe('Concise context another agent needs'),
   agent_id: agentIdField,
+  to_agent_id: z.string().min(1).optional().describe('Recipient required for prompt'),
+  reply_to_message_id: z.string().min(1).optional().describe('Message being answered for reply'),
+  idempotency_key: z
+    .string()
+    .min(1)
+    .max(128)
+    .optional()
+    .describe('Required for prompt and reply; makes delivery safe to retry'),
+  delivery_mode: z
+    .literal('steer')
+    .optional()
+    .describe('Live delivery mode; steer is the only mode in v1'),
   workspace_id: workspaceIdField,
 } as const;
 export type UpdateWorkInput = z.infer<z.ZodObject<typeof updateWorkInputShape>>;

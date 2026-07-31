@@ -150,4 +150,68 @@ export const migrations: readonly string[] = [
   CREATE INDEX idx_handoffs_pending_recipient
     ON handoffs(to_agent_id, delivery_status);
   `,
+  // 008 — addressable agent sessions and durable inter-agent messages.
+  // Endpoint credentials and provider addresses remain local to the ignored
+  // Concord database; generated artifacts expose only promptability/status.
+  `
+  CREATE TABLE agent_endpoints (
+    endpoint_id      TEXT PRIMARY KEY,
+    agent_id         TEXT NOT NULL REFERENCES agents(agent_id),
+    provider         TEXT NOT NULL,
+    transport        TEXT NOT NULL,
+    capabilities     TEXT NOT NULL DEFAULT '[]',
+    address          TEXT NOT NULL,
+    credential_hash  TEXT NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'connected',
+    last_seen        TEXT NOT NULL,
+    expires_at       TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    CHECK (status IN ('connected', 'disconnected'))
+  );
+  CREATE UNIQUE INDEX idx_agent_endpoints_agent
+    ON agent_endpoints(agent_id);
+  CREATE INDEX idx_agent_endpoints_status
+    ON agent_endpoints(status, last_seen);
+
+  CREATE TABLE agent_messages (
+    message_id          TEXT PRIMARY KEY,
+    task_id             TEXT REFERENCES tasks(task_id),
+    sender_agent_id     TEXT NOT NULL REFERENCES agents(agent_id),
+    recipient_agent_id  TEXT NOT NULL REFERENCES agents(agent_id),
+    reply_to_message_id TEXT REFERENCES agent_messages(message_id),
+    content             TEXT NOT NULL,
+    delivery_mode       TEXT NOT NULL DEFAULT 'steer',
+    status              TEXT NOT NULL DEFAULT 'pending',
+    provider            TEXT,
+    provider_receipt    TEXT,
+    error_code          TEXT,
+    error_detail        TEXT,
+    idempotency_key     TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    delivered_at        TEXT,
+    replied_at          TEXT,
+    failed_at           TEXT,
+    CHECK (delivery_mode = 'steer'),
+    CHECK (status IN ('pending', 'delivered', 'replied', 'failed')),
+    UNIQUE (sender_agent_id, idempotency_key)
+  );
+  CREATE INDEX idx_agent_messages_recipient
+    ON agent_messages(recipient_agent_id, created_at, message_id);
+  CREATE INDEX idx_agent_messages_sender
+    ON agent_messages(sender_agent_id, created_at, message_id);
+  CREATE INDEX idx_agent_messages_task
+    ON agent_messages(task_id, created_at, message_id);
+
+  CREATE TABLE agent_message_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id  TEXT NOT NULL REFERENCES agent_messages(message_id),
+    event       TEXT NOT NULL,
+    detail      TEXT,
+    created_at  TEXT NOT NULL,
+    CHECK (event IN ('accepted', 'delivered', 'replied', 'failed'))
+  );
+  CREATE INDEX idx_agent_message_events_message
+    ON agent_message_events(message_id, id);
+  `,
 ];

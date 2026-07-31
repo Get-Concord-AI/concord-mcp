@@ -9,22 +9,26 @@ npm install -g @concord-ai/concord-mcp
 ## 2. Set up your repo
 
 ```bash
-concord install
+concord setup
 ```
 
-This does two things. It registers the MCP server in your project's `.mcp.json`:
+This creates `.concord/` and registers the MCP server in your project's
+`.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "concord": {
-      "command": "concord-mcp"
+      "command": "concord-mcp",
+      "env": {
+        "CONCORD_REPO_ROOT": "/absolute/path/to/this/repository"
+      }
     }
   }
 }
 ```
 
-And it writes a Concord block into `CLAUDE.md` telling the agent when to claim
+It also writes a Concord block into `CLAUDE.md` telling the agent when to claim
 work, share task context, and hand off. Both merge into whatever is already
 there — other MCP servers and existing instructions are preserved — so it is
 safe to re-run. Restart Claude Code afterwards so it picks up the server.
@@ -50,3 +54,8 @@ concord doctor   # shows per-task tool adoption
 ```
 
 Generated `HANDOFF.md` and `REVIEW_PACKET.md` land in `.concord/`.
+
+With the live-prompt integration approved by `concord setup --agent-comms`,
+another workspace agent can address this Claude session through `update_work`.
+The managed-session adapter pushes streaming input into a busy turn and starts
+a turn while idle; existing sessions need one restart after installation.

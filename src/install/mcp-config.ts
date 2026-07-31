@@ -29,7 +29,7 @@ export class McpConfigParseError extends Error {
  * Every other server and every unrelated top-level key is preserved, and
  * passing the previous output back in is a no-op.
  */
-export function upsertMcpServer(existing: string | undefined): string {
+export function upsertMcpServer(existing: string | undefined, repoRoot: string): string {
   const source: unknown =
     existing === undefined || existing.trim() === '' ? {} : JSON.parse(existing);
   const config = mcpConfigSchema.parse(source);
@@ -37,7 +37,13 @@ export function upsertMcpServer(existing: string | undefined): string {
 
   const next = {
     ...config,
-    mcpServers: { ...servers, [CONCORD_SERVER_KEY]: { command: CONCORD_SERVER_COMMAND } },
+    mcpServers: {
+      ...servers,
+      [CONCORD_SERVER_KEY]: {
+        command: CONCORD_SERVER_COMMAND,
+        env: { CONCORD_REPO_ROOT: repoRoot },
+      },
+    },
   };
   return `${JSON.stringify(next, null, 2)}\n`;
 }
@@ -48,7 +54,7 @@ function writeMcpConfig(repoRoot: string, relPath: string): string {
 
   let updated: string;
   try {
-    updated = upsertMcpServer(existing);
+    updated = upsertMcpServer(existing, repoRoot);
   } catch {
     throw new McpConfigParseError(relPath);
   }

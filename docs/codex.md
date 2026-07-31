@@ -9,11 +9,11 @@ npm install -g @concord-ai/concord-mcp
 ## 2. Set up your repo
 
 ```bash
-concord install
+concord setup
 ```
 
-This registers the MCP server in your Codex config (`~/.codex/config.toml`, or
-`$CODEX_HOME/config.toml` when that is set):
+This creates `.concord/` and registers the MCP server in your Codex config
+(`~/.codex/config.toml`, or `$CODEX_HOME/config.toml` when that is set):
 
 ```toml
 [mcp_servers.concord]
@@ -26,7 +26,7 @@ other tables, and the comments around them — is left as-is, and re-running is 
 no-op. Pass `--no-mcp` to write only the instructions and add the table above
 yourself.
 
-Note this is the one file `concord install` writes outside the repo, since Codex
+Note this is the one file `concord setup` writes outside the repo, since Codex
 keeps MCP servers in user-global config rather than per-project. Refer to the
 current Codex MCP documentation if the config format has changed.
 
@@ -42,6 +42,11 @@ review. Track it from your terminal:
 concord status
 concord doctor
 ```
+
+With the live-prompt integration approved by `concord setup --agent-comms`,
+another workspace agent can address this Codex session through `update_work`.
+The Codex app-server adapter uses `turn/steer` during an active turn and
+`turn/start` while idle; existing sessions need one restart after installation.
 
 > Enforcement is instruction-based on clients without hooks — `concord doctor`
 > makes skipped tools visible regardless.

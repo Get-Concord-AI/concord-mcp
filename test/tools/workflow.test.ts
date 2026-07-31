@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { createServer } from '../../src/server.js';
+import type { AgentMessageDispatcher } from '../../src/tools/agent-messages.js';
 import { PUBLIC_WORKFLOW_TOOLS } from '../../src/tools/workflow.js';
 
 interface Harness {
@@ -12,8 +13,11 @@ interface Harness {
   server: ReturnType<typeof createServer>;
 }
 
-async function connect(repos: Repositories): Promise<Harness> {
-  const server = createServer(repos);
+async function connect(
+  repos: Repositories,
+  messageDispatcher?: AgentMessageDispatcher,
+): Promise<Harness> {
+  const server = createServer(repos, messageDispatcher === undefined ? {} : { messageDispatcher });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'workflow-test', version: '0.0.0' });
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
@@ -343,6 +347,241 @@ describe('simplified workflow MCP contract', () => {
       expect(result.isError).toBe(true);
       expect(repos.handoffs.latestForTask('TASK-STALE')).toBeUndefined();
       expect(repos.tasks.get('TASK-STALE')?.status).toBe('active');
+    } finally {
+      await close(harness);
+    }
+  });
+
+  it('steers a busy agent immediately and exposes the durable message thread', async () => {
+    const deliveries: Parameters<AgentMessageDispatcher['deliver']>[0][] = [];
+    const harness = await connect(repos, {
+      deliver(request) {
+        deliveries.push(request);
+        return Promise.resolve({ provider: 'codex', receipt: 'turn-42' });
+      },
+    });
+    try {
+      for (const [taskId, agentId] of [
+        ['TASK-SENDER', 'codex:sender'],
+        ['TASK-TARGET', 'codex:target'],
+      ]) {
+        await harness.client.callTool({
+          name: 'start_work',
+          arguments: { task_id: taskId, title: taskId, kind: 'codex', agent_id: agentId },
+        });
+      }
+      repos.agentEndpoints.upsert({
+        endpointId: 'endpoint-target',
+        agentId: 'codex:target',
+        provider: 'codex',
+        transport: 'local-socket',
+        capabilities: ['steer', 'start-turn', 'active-turn'],
+        address: '/tmp/concord-target.sock',
+        credentialHash: 'hash',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+
+      const sent = await harness.client.callTool({
+        name: 'update_work',
+        arguments: {
+          operation: 'prompt',
+          task_id: 'TASK-TARGET',
+          agent_id: 'codex:sender',
+          to_agent_id: 'codex:target',
+          content: 'Please re-check the parser boundary.',
+          idempotency_key: 'sender-1',
+        },
+      });
+
+      expect(sent.isError).not.toBe(true);
+      expect(deliveries).toHaveLength(1);
+      expect(deliveries[0]).toMatchObject({
+        senderAgentId: 'codex:sender',
+        recipientAgentId: 'codex:target',
+        activeTurn: true,
+      });
+      expect(deliveries[0]?.content).toContain('Please re-check the parser boundary.');
+      const message = repos.agentMessages.listByTask('TASK-TARGET')[0];
+      expect(message).toMatchObject({ status: 'delivered', providerReceipt: 'turn-42' });
+
+      const inspected = await harness.client.callTool({
+        name: 'inspect_work',
+        arguments: { message_id: message?.messageId },
+      });
+      expect(inspected.isError).not.toBe(true);
+      expect(JSON.stringify(inspected)).toContain('accepted');
+      expect(JSON.stringify(inspected)).toContain('delivered');
+    } finally {
+      await close(harness);
+    }
+  });
+
+  it('records an explicit reply and does not redeliver an idempotent replay', async () => {
+    let deliveryCount = 0;
+    const harness = await connect(repos, {
+      deliver(request) {
+        deliveryCount += 1;
+        return Promise.resolve({ provider: request.endpoint.provider });
+      },
+    });
+    try {
+      for (const agentId of ['codex:a', 'claude:b']) {
+        repos.agents.upsert({
+          agentId,
+          kind: agentId.split(':')[0] ?? 'agent',
+          owner: null,
+          model: null,
+          pid: null,
+          cwd: null,
+          worktree: null,
+          branch: null,
+          summary: null,
+          status: 'active',
+        });
+        repos.agentEndpoints.upsert({
+          endpointId: `endpoint-${agentId}`,
+          agentId,
+          provider: agentId.split(':')[0] ?? 'agent',
+          transport: 'local-socket',
+          capabilities: ['steer', 'start-turn'],
+          address: `/tmp/${agentId}.sock`,
+          credentialHash: 'hash',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        });
+      }
+
+      const promptArguments = {
+        operation: 'prompt',
+        agent_id: 'codex:a',
+        to_agent_id: 'claude:b',
+        content: 'What did you find?',
+        idempotency_key: 'question-1',
+      } as const;
+      await harness.client.callTool({ name: 'update_work', arguments: promptArguments });
+      await harness.client.callTool({ name: 'update_work', arguments: promptArguments });
+      expect(deliveryCount).toBe(1);
+
+      const parent = repos.agentMessages.listByAgent('codex:a')[0];
+      const reply = await harness.client.callTool({
+        name: 'update_work',
+        arguments: {
+          operation: 'reply',
+          agent_id: 'claude:b',
+          reply_to_message_id: parent?.messageId,
+          content: 'The boundary is safe.',
+          idempotency_key: 'answer-1',
+        },
+      });
+      expect(reply.isError).not.toBe(true);
+      expect(repos.agentMessages.get(parent?.messageId ?? '')?.status).toBe('replied');
+      expect(repos.agentMessages.listThread(parent?.messageId ?? '')).toHaveLength(2);
+    } finally {
+      await close(harness);
+    }
+  });
+
+  it('fails immediately for an unreachable target without suggesting another agent', async () => {
+    repos.agents.upsert({
+      agentId: 'codex:sender',
+      kind: 'codex',
+      owner: null,
+      model: null,
+      pid: null,
+      cwd: null,
+      worktree: null,
+      branch: null,
+      summary: null,
+      status: 'active',
+    });
+    repos.agents.upsert({
+      agentId: 'cursor:offline',
+      kind: 'cursor',
+      owner: null,
+      model: null,
+      pid: null,
+      cwd: null,
+      worktree: null,
+      branch: null,
+      summary: null,
+      status: 'active',
+    });
+    const harness = await connect(repos);
+    try {
+      const result = await harness.client.callTool({
+        name: 'update_work',
+        arguments: {
+          operation: 'prompt',
+          agent_id: 'codex:sender',
+          to_agent_id: 'cursor:offline',
+          content: 'Are you there?',
+          idempotency_key: 'offline-1',
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result)).toContain('target_not_promptable');
+      expect(JSON.stringify(result)).not.toContain('candidate');
+      expect(repos.agentMessages.listByAgent('cursor:offline')[0]?.status).toBe('failed');
+    } finally {
+      await close(harness);
+    }
+  });
+
+  it('retries a durable pending message after an interrupted delivery attempt', async () => {
+    for (const agentId of ['codex:sender', 'codex:target']) {
+      repos.agents.upsert({
+        agentId,
+        kind: 'codex',
+        owner: null,
+        model: null,
+        pid: null,
+        cwd: null,
+        worktree: null,
+        branch: null,
+        summary: null,
+        status: 'active',
+      });
+    }
+    repos.agentEndpoints.upsert({
+      endpointId: 'endpoint-target',
+      agentId: 'codex:target',
+      provider: 'codex',
+      transport: 'local-socket',
+      capabilities: ['steer'],
+      address: '/tmp/target.sock',
+      credentialHash: 'hash',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const pending = repos.agentMessages.create({
+      messageId: 'pending-message',
+      taskId: null,
+      senderAgentId: 'codex:sender',
+      recipientAgentId: 'codex:target',
+      replyToMessageId: null,
+      content: 'Retry me',
+      idempotencyKey: 'pending-1',
+    });
+    let deliveries = 0;
+    const harness = await connect(repos, {
+      deliver() {
+        deliveries += 1;
+        return Promise.resolve({ provider: 'codex' });
+      },
+    });
+    try {
+      const result = await harness.client.callTool({
+        name: 'update_work',
+        arguments: {
+          operation: 'prompt',
+          agent_id: 'codex:sender',
+          to_agent_id: 'codex:target',
+          content: 'Retry me',
+          idempotency_key: 'pending-1',
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(deliveries).toBe(1);
+      expect(repos.agentMessages.get(pending.messageId)?.status).toBe('delivered');
+      expect(JSON.stringify(result)).toContain('"idempotent_replay":true');
     } finally {
       await close(harness);
     }

@@ -35,6 +35,13 @@ import {
 } from './task-lifecycle.js';
 import { handleUpdateTask, type UpdateTaskResult } from './update-task.js';
 import {
+  AgentMessageDeliveryError,
+  handleSendAgentMessage,
+  inspectAgentCommunication,
+  type AgentMessageDispatcher,
+  type SendAgentMessageResult,
+} from './agent-messages.js';
+import {
   selectToolWorkspace,
   type SelectWorkspace,
   workspaceStructured,
@@ -166,18 +173,70 @@ export function handleStartWork(repos: Repositories, input: StartWorkInput): Sta
 
 export type InspectWorkResult =
   | { scope: 'workspace'; state: ReturnType<typeof handleGetWorkState> }
-  | { scope: 'task'; context: TaskContextResult };
+  | { scope: 'task'; context: TaskContextResult }
+  | { scope: 'agent'; communication: ReturnType<typeof inspectAgentCommunication> }
+  | {
+      scope: 'message';
+      thread: ReturnType<Repositories['agentMessages']['listThread']>;
+      events: ReturnType<Repositories['agentMessages']['listEvents']>;
+    };
 
 export function handleInspectWork(repos: Repositories, input: InspectWorkInput): InspectWorkResult {
-  return input.task_id === undefined
-    ? { scope: 'workspace', state: handleGetWorkState(repos) }
-    : { scope: 'task', context: handleGetTaskContext(repos, { task_id: input.task_id }) };
+  const selectors = [input.task_id, input.agent_id, input.message_id].filter(
+    (value) => value !== undefined,
+  );
+  if (selectors.length > 1) {
+    throw new Error('inspect_work accepts only one of task_id, agent_id, or message_id.');
+  }
+  if (input.task_id !== undefined) {
+    return { scope: 'task', context: handleGetTaskContext(repos, { task_id: input.task_id }) };
+  }
+  if (input.agent_id !== undefined) {
+    return { scope: 'agent', communication: inspectAgentCommunication(repos, input.agent_id) };
+  }
+  if (input.message_id !== undefined) {
+    const message = repos.agentMessages.get(input.message_id);
+    if (message === undefined) {
+      throw new Error(`Agent message ${input.message_id} does not exist.`);
+    }
+    return {
+      scope: 'message',
+      thread: repos.agentMessages.listThread(input.message_id),
+      events: repos.agentMessages.listEvents(input.message_id),
+    };
+  }
+  return { scope: 'workspace', state: handleGetWorkState(repos) };
 }
 
-export function handleUpdateWork(repos: Repositories, input: UpdateWorkInput): UpdateTaskResult {
+export type UpdateWorkResult = UpdateTaskResult | SendAgentMessageResult;
+
+function updateRequired<T>(value: T | undefined, field: string, operation: string): T {
+  if (value === undefined) {
+    throw new Error(`${field} is required when update_work operation is ${operation}.`);
+  }
+  return value;
+}
+
+export async function handleUpdateWork(
+  repos: Repositories,
+  input: UpdateWorkInput,
+  dispatcher: AgentMessageDispatcher,
+): Promise<UpdateWorkResult> {
+  const operation = input.operation ?? 'record';
+  if (operation !== 'record') {
+    return handleSendAgentMessage(repos, dispatcher, {
+      operation,
+      agentId: updateRequired(input.agent_id, 'agent_id', operation),
+      toAgentId: input.to_agent_id,
+      replyToMessageId: input.reply_to_message_id,
+      taskId: input.task_id,
+      content: input.content,
+      idempotencyKey: updateRequired(input.idempotency_key, 'idempotency_key', operation),
+    });
+  }
   return handleUpdateTask(repos, {
-    task_id: input.task_id,
-    kind: input.kind,
+    task_id: updateRequired(input.task_id, 'task_id', operation),
+    kind: updateRequired(input.kind, 'kind', operation),
     content: input.content,
     agent_id: input.agent_id,
     agent: input.agent_id,
@@ -354,6 +413,9 @@ export function registerWorkflowTools(
   repos: Repositories,
   onWrite?: () => void,
   selectWorkspace?: SelectWorkspace,
+  dispatcher: AgentMessageDispatcher = {
+    deliver: () => Promise.reject(new Error('Concord relay is not connected')),
+  },
 ): void {
   server.registerTool(
     'start_work',
@@ -400,8 +462,8 @@ export function registerWorkflowTools(
     {
       title: 'Inspect work',
       description:
-        'Read one task and its shared context when task_id is provided, or read the workspace ' +
-        'roster, active work, overlaps, stale claims, questions, and review state when omitted.',
+        'Read the workspace, one task, one agent communication inbox/outbox, or one durable ' +
+        'prompt/reply thread by supplying at most one selector.',
       inputSchema: inspectWorkInputShape,
       annotations: {
         readOnlyHint: true,
@@ -435,6 +497,46 @@ export function registerWorkflowTools(
             stale_claims: result.state.staleClaims,
             review_ready: result.state.reviewReady,
             open_questions: result.state.openQuestions,
+            communications: result.state.communications,
+          },
+        };
+      }
+      if (result.scope === 'agent') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: withWorkspaceText(
+                `${result.communication.agentId}; promptable ${String(result.communication.promptable)}, ` +
+                  `${String(result.communication.inbox.length)} inbox message(s), ` +
+                  `${String(result.communication.outbox.length)} outbox message(s).`,
+                workspace,
+              ),
+            },
+          ],
+          structuredContent: {
+            ...workspaceStructured(workspace),
+            scope: result.scope,
+            ...result.communication,
+          },
+        };
+      }
+      if (result.scope === 'message') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: withWorkspaceText(
+                `${String(result.thread.length)} message(s) in thread.`,
+                workspace,
+              ),
+            },
+          ],
+          structuredContent: {
+            ...workspaceStructured(workspace),
+            scope: result.scope,
+            thread: result.thread,
+            events: result.events,
           },
         };
       }
@@ -460,6 +562,7 @@ export function registerWorkflowTools(
           pending_handoff: result.context.pendingHandoff ?? null,
           ownership_history: result.context.ownershipHistory,
           overlaps: result.context.overlaps,
+          messages: result.context.messages,
         },
       };
     },
@@ -470,34 +573,83 @@ export function registerWorkflowTools(
     {
       title: 'Update work',
       description:
-        'Append concise task-scoped progress, intent, decision, assumption, question, answer, ' +
-        'blocker, or finding context.',
+        'Record task context or deliver a live prompt/reply to another promptable workspace agent.',
       inputSchema: updateWorkInputShape,
     },
-    (args) => {
+    async (args) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleUpdateWork(repos, args);
-      onWrite?.();
-      return {
-        content: [
-          {
-            type: 'text',
-            text: withWorkspaceText(
-              `Recorded ${result.update.kind} for ${result.update.taskId}.`,
-              workspace,
-            ),
+      try {
+        const result = await handleUpdateWork(repos, args, dispatcher);
+        onWrite?.();
+        if ('update' in result) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: withWorkspaceText(
+                  `Recorded ${result.update.kind} for ${result.update.taskId}.`,
+                  workspace,
+                ),
+              },
+            ],
+            structuredContent: {
+              ...workspaceStructured(workspace),
+              operation: 'record',
+              update_id: result.update.id,
+              task_id: result.update.taskId,
+              kind: result.update.kind,
+              content: result.update.content,
+              agent: result.update.agent,
+              created_at: result.update.createdAt,
+            },
+          };
+        }
+        return {
+          content: [
+            {
+              type: 'text',
+              text: withWorkspaceText(
+                `${args.operation ?? 'prompt'} ${result.message.messageId}; status ${result.message.status}.`,
+                workspace,
+              ),
+            },
+          ],
+          structuredContent: {
+            ...workspaceStructured(workspace),
+            operation: args.operation,
+            message_id: result.message.messageId,
+            status: result.message.status,
+            sender_agent_id: result.message.senderAgentId,
+            recipient_agent_id: result.message.recipientAgentId,
+            reply_to_message_id: result.message.replyToMessageId,
+            provider: result.message.provider,
+            provider_receipt: result.message.providerReceipt,
+            delivered_at: result.message.deliveredAt,
+            idempotent_replay: result.idempotentReplay,
           },
-        ],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          update_id: result.update.id,
-          task_id: result.update.taskId,
-          kind: result.update.kind,
-          content: result.update.content,
-          agent: result.update.agent,
-          created_at: result.update.createdAt,
-        },
-      };
+        };
+      } catch (error) {
+        onWrite?.();
+        if (error instanceof AgentMessageDeliveryError) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: withWorkspaceText(error.message, workspace),
+              },
+            ],
+            structuredContent: {
+              ...workspaceStructured(workspace),
+              operation: args.operation,
+              message_id: error.messageId || null,
+              status: 'failed',
+              error_code: error.code,
+            },
+          };
+        }
+        throw error;
+      }
     },
   );
 

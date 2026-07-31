@@ -54,12 +54,15 @@ describe('migrations', () => {
     expect(names.has('task_updates')).toBe(true);
     expect(names.has('agents')).toBe(true);
     expect(names.has('task_ownership_events')).toBe(true);
+    expect(names.has('agent_endpoints')).toBe(true);
+    expect(names.has('agent_messages')).toBe(true);
+    expect(names.has('agent_message_events')).toBe(true);
   });
 
   it('is idempotent when reopening (user_version already at head)', () => {
     const { db } = newRepos();
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(7);
+    expect(version).toBe(8);
   });
 });
 

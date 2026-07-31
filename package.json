@@ -32,6 +32,12 @@
     "concord-mcp": "dist/index.js",
     "concord": "dist/cli/index.js"
   },
+  "exports": {
+    "./relay": {
+      "types": "./dist/relay/index.d.ts",
+      "import": "./dist/relay/index.js"
+    }
+  },
   "publishConfig": {
     "access": "public"
   },

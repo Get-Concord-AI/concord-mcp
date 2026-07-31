@@ -13,16 +13,17 @@ import {
 
 describe('upsertMcpServer', () => {
   it('registers the concord server in an empty config', () => {
-    const out = upsertMcpServer(undefined);
+    const out = upsertMcpServer(undefined, '/tmp/project');
     expect(out).toContain('mcpServers');
     expect(out).toContain(CONCORD_SERVER_KEY);
     expect(out).toContain(CONCORD_SERVER_COMMAND);
+    expect(out).toContain('"CONCORD_REPO_ROOT": "/tmp/project"');
     expect(out.endsWith('\n')).toBe(true);
   });
 
   it('is idempotent: re-running produces identical output', () => {
-    const once = upsertMcpServer(undefined);
-    const twice = upsertMcpServer(once);
+    const once = upsertMcpServer(undefined, '/tmp/project');
+    const twice = upsertMcpServer(once, '/tmp/project');
     expect(twice).toBe(once);
   });
 
@@ -31,7 +32,7 @@ describe('upsertMcpServer', () => {
       $schema: 'https://example.test/schema.json',
       mcpServers: { other: { command: 'other-server', args: ['--flag'] } },
     });
-    const out = upsertMcpServer(existing);
+    const out = upsertMcpServer(existing, '/tmp/project');
     expect(out).toContain('"$schema"');
     expect(out).toContain('other-server');
     expect(out).toContain('--flag');
@@ -39,12 +40,12 @@ describe('upsertMcpServer', () => {
   });
 
   it('does not duplicate the server when it is already present', () => {
-    const twice = upsertMcpServer(upsertMcpServer(undefined));
+    const twice = upsertMcpServer(upsertMcpServer(undefined, '/tmp/project'), '/tmp/project');
     expect(twice.split(CONCORD_SERVER_COMMAND).length - 1).toBe(1);
   });
 
   it('throws on malformed JSON rather than discarding it', () => {
-    expect(() => upsertMcpServer('{ not json')).toThrow();
+    expect(() => upsertMcpServer('{ not json', '/tmp/project')).toThrow();
   });
 });
 
@@ -56,7 +57,9 @@ describe('installMcpConfigs', () => {
     expect(written).toEqual(['.mcp.json', join('.cursor', 'mcp.json')]);
     for (const relPath of written) {
       expect(existsSync(join(root, relPath))).toBe(true);
-      expect(readFileSync(join(root, relPath), 'utf8')).toContain(CONCORD_SERVER_COMMAND);
+      const content = readFileSync(join(root, relPath), 'utf8');
+      expect(content).toContain(CONCORD_SERVER_COMMAND);
+      expect(content).toContain(`"CONCORD_REPO_ROOT": "${root}"`);
     }
   });
 

@@ -4,6 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { writeArtifacts } from './artifacts/index.js';
 import { resolveRepoRoot } from './config/paths.js';
 import { createServer } from './server.js';
+import { SocketAgentMessageDispatcher } from './relay/socket-dispatcher.js';
 import { createTelemetryClient } from './telemetry/client.js';
 import { TelemetryTransport } from './telemetry/transport.js';
 import { WorkspaceManager } from './workspaces/manager.js';
@@ -13,6 +14,7 @@ async function main(): Promise<void> {
   const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, process.env);
   const server = createServer(workspaceManager.current().repos, {
     workspaceManager,
+    messageDispatcher: new SocketAgentMessageDispatcher(),
     onToolWrite: (workspace) => {
       if (workspace !== undefined) {
         writeArtifacts(workspace.concordPath, workspace.repos);

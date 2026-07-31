@@ -52,32 +52,23 @@ small MCP server.
 
 ## Quick start
 
-### Cursor — one-click MCP install
-
-[![Install Concord MCP in Cursor](https://img.shields.io/badge/Install_Concord_MCP-Cursor-7ee787?style=for-the-badge&labelColor=0d1117)](cursor://anysphere.cursor-deeplink/mcp/install?name=concord&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBjb25jb3JkLWFpL2NvbmNvcmQtbWNwQGxhdGVzdCJdfQ==)
-
-The deeplink registers Concord with Cursor through `npx`. Install the CLI and
-add Concord's always-on agent instructions to the current repository:
-
 ```bash
 npm install -g @concord-ai/concord-mcp
-concord install
+cd /path/to/your/repository
+concord setup
 ```
 
-### Claude Code, Codex, and other MCP clients
-
-```bash
-npm install -g @concord-ai/concord-mcp
-concord install
-```
-
-`concord install` does both halves of the setup: it registers the MCP server
+`concord setup` creates the local `.concord/` workspace, registers the MCP server
 (`.mcp.json`, `.cursor/mcp.json`, and Codex's `~/.codex/config.toml`) and writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
 `.codex/`, `.cursor/rules/`). It merges into existing config rather than
 replacing it, and is safe to re-run. Pass `--no-mcp` to write only the
-instructions and manage MCP registration yourself. Restart your client
-afterwards so it picks up the new server. Per-client setup:
+workspace and instructions while managing MCP registration yourself. Restart
+your client afterwards so it picks up the new server.
+
+In an interactive terminal, setup detects Codex, Claude, and Cursor and asks
+once whether to enable their live-prompt integrations. Use
+`concord setup --agent-comms` to approve them non-interactively.
 
 - [Claude Code](./docs/claude-code.md)
 - [Codex](./docs/codex.md)
@@ -105,17 +96,26 @@ available. Set `CONCORD_NO_UPDATE_CHECK=1` to disable this best-effort check.
 
 ## The tools
 
-| Tool            | Purpose                                                                                      |
-| --------------- | -------------------------------------------------------------------------------------------- |
-| `start_work`    | registers presence, claims or accepts one task, and reports scope overlaps before editing    |
-| `inspect_work`  | reads either the workspace roster/state or one task's context and ownership history          |
-| `update_work`   | records durable progress, decisions, assumptions, questions, blockers, answers, and findings |
-| `transfer_work` | assigns, accepts, declines, releases, reassigns, offers handoffs, or reopens versioned work  |
-| `finish_work`   | records evidence and optionally marks a task review-ready, complete, or closed               |
+| Tool            | Purpose                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------- |
+| `start_work`    | registers presence, claims or accepts one task, and reports scope overlaps before editing   |
+| `inspect_work`  | reads workspace/task state, an agent inbox/outbox, or a durable prompt/reply thread         |
+| `update_work`   | records task context or immediately prompts/replies to another promptable workspace agent   |
+| `transfer_work` | assigns, accepts, declines, releases, reassigns, offers handoffs, or reopens versioned work |
+| `finish_work`   | records evidence and optionally marks a task review-ready, complete, or closed              |
 
 Writes accept an `agent_id`, which keeps presence live just by working.
 `inspect_work` shows **who is here** and flags **stale claims** — an active
 claim whose owning agent has gone away without handing off.
+
+For live agent-to-agent communication, run `concord setup --agent-comms` (or
+accept the one-time interactive setup prompt), then restart existing client
+sessions once. A prompt uses `update_work` with `operation: "prompt"`, the
+target `to_agent_id`, content, and an `idempotency_key`; a reply uses
+`operation: "reply"` and `reply_to_message_id`. Busy targets are steered into
+their current turn, while idle targets start a new turn. Delivery fails
+immediately when the named agent has no reachable relay; Concord does not
+silently reroute it.
 
 Concord resolves the repository workspace automatically. Operations return its
 `workspace_id` and repository root so a client can detect a misrouted call; the
@@ -131,7 +131,7 @@ is retained in an append-only audit history.
 ### Migrating from the granular surface
 
 The five tools replace the earlier public names; there are no legacy aliases.
-Update the package and re-run `concord install` to refresh generated
+Update the package and re-run `concord setup` to refresh generated
 instructions. `concord doctor` reports stale instruction blocks.
 
 | Earlier tools                                          | Replacement                                             |
@@ -161,7 +161,7 @@ To restrict explicit workspace selection, set `CONCORD_ALLOWED_ROOTS` to a
 path-delimited list of allowed repository roots. Without an allowlist, decoded
 roots must still exist and be directories.
 
-`concord init` adds `.concord/` to the
+`concord setup` adds `.concord/` to the
 repository's `.gitignore`, so the generated workspace stays local by default.
 Teams that want selected artifacts in PRs can remove that rule or force-add the
 human-readable files:
@@ -181,7 +181,7 @@ call the tools directly; humans and CLI-oriented agents can work with the same
 shared workspace through `concord` commands.
 
 ```bash
-concord init                 # create the .concord/ workspace
+concord setup                # set up local state, instructions, and MCP clients
 concord status               # roster, active work, overlaps, stale claims, review-ready
 concord dashboard            # live, keyboard-driven view of agents, tasks, alerts, and activity
 concord who                  # which agents are present and what they are working on
