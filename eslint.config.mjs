@@ -5,7 +5,13 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/', 'coverage/', 'node_modules/'],
+    ignores: [
+      'dist/',
+      'coverage/',
+      'node_modules/',
+      'examples/whack-a-mole/fixture/',
+      'examples/whack-a-mole/finished/',
+    ],
   },
   eslint.configs.recommended,
   tseslint.configs.strictTypeChecked,
