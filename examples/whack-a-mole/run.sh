@@ -44,6 +44,9 @@ fi
 if tmux has-session -t "$SESSION-server" 2>/dev/null; then
   tmux kill-session -t "$SESSION-server"
 fi
+if tmux has-session -t "$SESSION-reviewer" 2>/dev/null; then
+  tmux kill-session -t "$SESSION-reviewer"
+fi
 
 if [[ -f "$DEMO_DIR/.demo-server.pid" ]]; then
   old_pid="$(tr -dc '0-9' < "$DEMO_DIR/.demo-server.pid")"
@@ -98,10 +101,8 @@ if [[ "${DEMO_NO_OPEN:-0}" != "1" ]] && command -v open >/dev/null 2>&1; then
 fi
 
 tmux new-session -d -x "${DEMO_TMUX_WIDTH:-180}" -y "${DEMO_TMUX_HEIGHT:-48}" -s "$SESSION" -n live -c "$DEMO_DIR"
-tmux split-window -v -t "$SESSION:live.0" -p 50 -c "$DEMO_DIR"
 tmux split-window -h -t "$SESSION:live.0" -p 50 -c "$DEMO_DIR"
-tmux split-window -v -t "$SESSION:live.2" -p 50 -c "$DEMO_DIR"
-tmux select-layout -t "$SESSION:live" tiled
+tmux split-window -v -t "$SESSION:live.0" -p 50 -c "$DEMO_DIR"
 tmux set-option -t "$SESSION" pane-border-status top
 tmux set-option -t "$SESSION" pane-border-format ' #[bold]#{pane_title}#[default] '
 tmux set-option -t "$SESSION" status-style 'bg=#151a30,fg=#f8f6ef'
@@ -110,14 +111,12 @@ tmux set-option -t "$SESSION" status-right " http://127.0.0.1:$PORT "
 tmux set-option -t "$SESSION" remain-on-exit on
 
 tmux select-pane -t "$SESSION:live.0" -T 'CLAUDE · FRONTEND'
-tmux select-pane -t "$SESSION:live.1" -T 'CODEX · BACKEND'
-tmux select-pane -t "$SESSION:live.2" -T 'CONCORD · SHARED WORKSPACE'
-tmux select-pane -t "$SESSION:live.3" -T 'CLAUDE CODE · REVIEWER'
+tmux select-pane -t "$SESSION:live.1" -T 'CONCORD · SHARED WORKSPACE'
+tmux select-pane -t "$SESSION:live.2" -T 'CODEX · BACKEND'
 
 tmux send-keys -t "$SESSION:live.0" "clear; printf '\\n  CLAUDE IS READY TO BUILD THE GAME UI\\n  Waiting for the demo to begin…\\n'" C-m
-tmux send-keys -t "$SESSION:live.1" "clear; printf '\\n  CODEX IS READY TO BUILD THE SCORE API\\n  Waiting for Claude to claim work…\\n'" C-m
-tmux send-keys -t "$SESSION:live.2" "CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' dashboard" C-m
-tmux send-keys -t "$SESSION:live.3" "clear; printf '\\n  CLAUDE CODE REVIEWER\\n  Waiting for both review packets…\\n'" C-m
+tmux send-keys -t "$SESSION:live.1" "CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' dashboard" C-m
+tmux send-keys -t "$SESSION:live.2" "clear; printf '\\n  CODEX IS READY TO BUILD THE SCORE API\\n  Waiting for Claude to claim work…\\n'" C-m
 
 (
   sleep "$INTRO_SECONDS"
@@ -129,7 +128,7 @@ tmux send-keys -t "$SESSION:live.3" "clear; printf '\\n  CLAUDE CODE REVIEWER\\n
     fi
     sleep 0.1
   done
-  tmux send-keys -t "$SESSION:live.1" "clear; CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' be" C-m
+  tmux send-keys -t "$SESSION:live.2" "clear; CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' be" C-m
 
   for _ in $(seq 1 360); do
     if [[ -f "$DEMO_DIR/.concord/demo-fe.done" && -f "$DEMO_DIR/.concord/demo-be.done" ]]; then
@@ -139,23 +138,25 @@ tmux send-keys -t "$SESSION:live.3" "clear; printf '\\n  CLAUDE CODE REVIEWER\\n
   done
 
   if [[ "$REVIEWER" == "claude" ]]; then
-    tmux send-keys -t "$SESSION:live.3" "clear; CONCORD_REPO_ROOT='$DEMO_DIR' DEMO_PORT='$PORT' bash '$TOOL_DIR/review.sh'" C-m
+    tmux new-session -d -s "$SESSION-reviewer" -n review -c "$DEMO_DIR" \
+      "CONCORD_REPO_ROOT='$DEMO_DIR' DEMO_PORT='$PORT' bash '$TOOL_DIR/review.sh' > .concord/reviewer.log 2>&1"
   else
-    tmux send-keys -t "$SESSION:live.3" "clear; CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' review" C-m
+    tmux new-session -d -s "$SESSION-reviewer" -n review -c "$DEMO_DIR" \
+      "CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' review > .concord/reviewer.log 2>&1"
   fi
 
   for review_tick in $(seq 1 600); do
     if [[ -f "$DEMO_DIR/.concord/demo-review.done" ]]; then
       sleep 1
-      tmux send-keys -t "$SESSION:live.2" C-c
+      tmux send-keys -t "$SESSION:live.1" C-c
       sleep 0.5
-      tmux send-keys -t "$SESSION:live.2" "clear; CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' status; printf '\\n'; CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' doctor; printf '\\n  ✓ GAME BUILT · HANDOFF ACCEPTED · REVIEW APPROVED\\n  Open http://127.0.0.1:$PORT and whack a mole.\\n'" C-m
+      tmux send-keys -t "$SESSION:live.1" "clear; CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' status; printf '\\n'; CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' doctor; printf '\\n  ✓ GAME BUILT · HANDOFF ACCEPTED · REVIEW APPROVED\\n  Open http://127.0.0.1:$PORT and whack a mole.\\n'" C-m
       break
     fi
     if [[ "$REVIEWER" == "claude" && "$review_tick" == "240" ]]; then
-      tmux send-keys -t "$SESSION:live.3" C-c
-      sleep 0.5
-      tmux send-keys -t "$SESSION:live.3" "clear; printf '\\n  Claude Code exceeded 60s — continuing with the local reviewer.\\n\\n'; CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' review" C-m
+      tmux kill-session -t "$SESSION-reviewer" 2>/dev/null || true
+      tmux new-session -d -s "$SESSION-reviewer" -n review -c "$DEMO_DIR" \
+        "CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' review > .concord/reviewer.log 2>&1"
     fi
     sleep 0.25
   done
@@ -173,7 +174,7 @@ if [[ "${DEMO_NO_ATTACH:-0}" == "1" ]]; then
   for _ in $(seq 1 700); do
     if [[ -f "$DEMO_DIR/.concord/demo-review.done" ]]; then
       sleep 2
-      for pane in 0 1 2 3; do
+      for pane in 0 1 2; do
         echo "===== pane $pane ====="
         tmux capture-pane -p -t "$SESSION:live.$pane" -S -80
       done

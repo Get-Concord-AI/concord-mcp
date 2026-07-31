@@ -18,6 +18,9 @@ fi
 if tmux has-session -t "$SESSION-server" 2>/dev/null; then
   tmux kill-session -t "$SESSION-server"
 fi
+if tmux has-session -t "$SESSION-reviewer" 2>/dev/null; then
+  tmux kill-session -t "$SESSION-reviewer"
+fi
 
 if [[ -f "$DEMO_DIR/.demo-server.pid" ]]; then
   server_pid="$(tr -dc '0-9' < "$DEMO_DIR/.demo-server.pid")"

@@ -214,8 +214,9 @@ pnpm demo
 Runs the [Whack-a-Mole live demo](./examples/whack-a-mole/): Claude and Codex
 claim overlapping work, resolve it through a live prompt/reply, build a playable
 app, transfer ownership with evidence, and hand the result to a separate Claude
-Code reviewer. Four tmux panes show both builders, the shared dashboard, and the
-review while the browser hot-reloads the result.
+Code reviewer. Three visible tmux panes put both builders on the left and the
+full-height shared dashboard on the right; the reviewer runs in the background
+while the browser hot-reloads the result.
 
 ## What this is / is not
 
