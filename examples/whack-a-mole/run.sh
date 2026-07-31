@@ -6,55 +6,31 @@ ROOT_DIR="$(cd "$TOOL_DIR/../.." && pwd)"
 DEMO_DIR="${DEMO_DIR:-${TMPDIR:-/tmp}/concord-whack-demo}"
 SESSION="${DEMO_SESSION:-concord-whack}"
 PORT="${DEMO_PORT:-3210}"
-SPEED="${DEMO_SPEED:-1}"
-INTRO_SECONDS="${DEMO_INTRO_SECONDS:-3}"
-GAP_SECONDS="${DEMO_GAP_SECONDS:-2}"
-REVIEWER="${DEMO_REVIEWER:-claude}"
+INTRO_SECONDS="${DEMO_INTRO_SECONDS:-7}"
+FE_TO_BE_GAP="${DEMO_FE_TO_BE_GAP:-3}"
+CLAIM_TIMEOUT="${DEMO_CLAIM_TIMEOUT:-60}"
 CLI="$ROOT_DIR/dist/cli/index.js"
 
 case "$(basename "$DEMO_DIR")" in
   concord-whack-demo*) ;;
-  *)
-    echo "Refusing to reset an unsafe DEMO_DIR: $DEMO_DIR" >&2
-    echo "Its basename must start with concord-whack-demo." >&2
-    exit 1
-    ;;
+  *) echo "Refusing to reset unsafe DEMO_DIR: $DEMO_DIR" >&2; exit 1 ;;
 esac
-
 if [[ "$DEMO_DIR" == "/" || "$DEMO_DIR" == "$HOME" || "$DEMO_DIR" == "$ROOT_DIR" || "$DEMO_DIR" == "$TOOL_DIR" ]]; then
   echo "Refusing to reset protected path: $DEMO_DIR" >&2
   exit 1
 fi
 
-for command_name in node npm tmux curl git; do
-  if ! command -v "$command_name" >/dev/null 2>&1; then
-    echo "Missing required command: $command_name" >&2
-    exit 1
-  fi
+for command_name in node npm tmux curl git claude codex; do
+  command -v "$command_name" >/dev/null 2>&1 || { echo "Missing required command: $command_name" >&2; exit 1; }
 done
 
-if [[ "$REVIEWER" == "claude" ]] && ! command -v claude >/dev/null 2>&1; then
-  echo "Claude Code is not installed; falling back to the deterministic reviewer." >&2
-  REVIEWER="scripted"
-fi
-
-if tmux has-session -t "$SESSION" 2>/dev/null; then
-  tmux kill-session -t "$SESSION"
-fi
-if tmux has-session -t "$SESSION-server" 2>/dev/null; then
-  tmux kill-session -t "$SESSION-server"
-fi
-if tmux has-session -t "$SESSION-reviewer" 2>/dev/null; then
-  tmux kill-session -t "$SESSION-reviewer"
-fi
-
+if tmux has-session -t "$SESSION" 2>/dev/null; then tmux kill-session -t "$SESSION"; fi
+if tmux has-session -t "$SESSION-server" 2>/dev/null; then tmux kill-session -t "$SESSION-server"; fi
+if tmux has-session -t "$SESSION-reviewer" 2>/dev/null; then tmux kill-session -t "$SESSION-reviewer"; fi
 if [[ -f "$DEMO_DIR/.demo-server.pid" ]]; then
   old_pid="$(tr -dc '0-9' < "$DEMO_DIR/.demo-server.pid")"
-  if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
-    kill "$old_pid" 2>/dev/null || true
-  fi
+  [[ -n "$old_pid" ]] && kill "$old_pid" 2>/dev/null || true
 fi
-
 if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "Port $PORT is already in use. Set DEMO_PORT to a free port." >&2
   exit 1
@@ -64,126 +40,113 @@ mkdir -p "$DEMO_DIR"
 find "$DEMO_DIR" -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf -- {} +
 cp -R "$TOOL_DIR/fixture/." "$DEMO_DIR/"
 mv "$DEMO_DIR/gitignore" "$DEMO_DIR/.gitignore"
-
 git -C "$DEMO_DIR" init -q
 git -C "$DEMO_DIR" config user.name "Concord Demo"
 git -C "$DEMO_DIR" config user.email "demo@getconcord.ai"
 git -C "$DEMO_DIR" add .
 git -C "$DEMO_DIR" commit -qm "Initial holding screen"
 
-CONCORD_NO_UPDATE_CHECK=1 node "$CLI" --repo "$DEMO_DIR" setup --no-mcp --agent-comms >/dev/null
-
+# Register the actual MCP server and live-provider integrations. No simulated
+# agent path or reviewer fallback exists in this mode.
+CONCORD_NO_UPDATE_CHECK=1 node "$CLI" --repo "$DEMO_DIR" setup --agent-comms >/dev/null
 if [[ ! -x "$DEMO_DIR/node_modules/.bin/next" ]]; then
   echo "Installing the demo app once (the cache is reused on later runs)…"
   npm --prefix "$DEMO_DIR" install --no-audit --no-fund
 fi
-mkdir -p "$DEMO_DIR/node_modules/.bin"
-ln -sfn "$ROOT_DIR/dist" "$DEMO_DIR/node_modules/.concord-mcp"
+
+# The disposable repo is created by this script, so pre-authorize it for Codex
+# and automatically accept Claude's one-time interactive trust screen below.
+# This avoids leaving the real model session paused before its first MCP call.
+CODEX_CONFIG_PATH="${CODEX_HOME:-$HOME/.codex}/config.toml"
+if [[ -f "$CODEX_CONFIG_PATH" ]] && ! grep -qF "[projects.\"$DEMO_DIR\"]" "$CODEX_CONFIG_PATH"; then
+  printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$DEMO_DIR" >> "$CODEX_CONFIG_PATH"
+fi
 
 tmux new-session -d -s "$SESSION-server" -n next -c "$DEMO_DIR" \
   "npm run dev -- --port '$PORT' > .demo-server.log 2>&1"
-
 ready=0
 for _ in $(seq 1 80); do
-  if curl -fsS "http://127.0.0.1:$PORT" >/dev/null 2>&1; then
-    ready=1
-    break
-  fi
+  if curl -fsS "http://127.0.0.1:$PORT" >/dev/null 2>&1; then ready=1; break; fi
   sleep 0.25
 done
-if [[ "$ready" != "1" ]]; then
-  echo "Next.js did not become ready. Log: $DEMO_DIR/.demo-server.log" >&2
-  exit 1
-fi
+[[ "$ready" == "1" ]] || { echo "Next.js did not become ready. Log: $DEMO_DIR/.demo-server.log" >&2; exit 1; }
+if [[ "${DEMO_NO_OPEN:-0}" != "1" ]] && command -v open >/dev/null 2>&1; then open "http://127.0.0.1:$PORT"; fi
 
-if [[ "${DEMO_NO_OPEN:-0}" != "1" ]] && command -v open >/dev/null 2>&1; then
-  open "http://127.0.0.1:$PORT"
-fi
-
+# Visible layout: real Claude and Codex sessions on the left, full-height
+# Concord dashboard on the right. The reviewer is a real hidden Claude session.
 tmux new-session -d -x "${DEMO_TMUX_WIDTH:-180}" -y "${DEMO_TMUX_HEIGHT:-48}" -s "$SESSION" -n live -c "$DEMO_DIR"
-tmux split-window -h -t "$SESSION:live.0" -p 50 -c "$DEMO_DIR"
-tmux split-window -v -t "$SESSION:live.0" -p 50 -c "$DEMO_DIR"
+FE_PANE="$(tmux display-message -p -t "$SESSION:live.0" '#{pane_id}')"
+DASH_PANE="$(tmux split-window -h -l '50%' -P -F '#{pane_id}' -t "$FE_PANE" -c "$DEMO_DIR")"
+BE_PANE="$(tmux split-window -v -P -F '#{pane_id}' -t "$FE_PANE" -c "$DEMO_DIR")"
 tmux set-option -t "$SESSION" pane-border-status top
 tmux set-option -t "$SESSION" pane-border-format ' #[bold]#{pane_title}#[default] '
 tmux set-option -t "$SESSION" status-style 'bg=#151a30,fg=#f8f6ef'
 tmux set-option -t "$SESSION" status-left ' CONCORD · LIVE '
 tmux set-option -t "$SESSION" status-right " http://127.0.0.1:$PORT "
 tmux set-option -t "$SESSION" remain-on-exit on
+tmux select-pane -t "$FE_PANE" -T 'CLAUDE · FRONTEND'
+tmux select-pane -t "$BE_PANE" -T 'CODEX · BACKEND'
+tmux select-pane -t "$DASH_PANE" -T 'CONCORD · SHARED WORKSPACE'
+tmux send-keys -t "$FE_PANE" "clear; printf '\\n  CLAUDE CODE · REAL SESSION\\n  Waiting for the demo to begin…\\n'" C-m
+tmux send-keys -t "$BE_PANE" "clear; printf '\\n  CODEX · REAL SESSION\\n  Waiting for Claude to claim work…\\n'" C-m
+tmux send-keys -t "$DASH_PANE" "CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' dashboard" C-m
 
-tmux select-pane -t "$SESSION:live.0" -T 'CLAUDE · FRONTEND'
-tmux select-pane -t "$SESSION:live.1" -T 'CODEX · BACKEND'
-tmux select-pane -t "$SESSION:live.2" -T 'CONCORD · SHARED WORKSPACE'
-
-tmux send-keys -t "$SESSION:live.0" "clear; printf '\\n  CLAUDE IS READY TO BUILD THE GAME UI\\n  Waiting for the demo to begin…\\n'" C-m
-tmux send-keys -t "$SESSION:live.1" "clear; printf '\\n  CODEX IS READY TO BUILD THE SCORE API\\n  Waiting for Claude to claim work…\\n'" C-m
-tmux send-keys -t "$SESSION:live.2" "CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' dashboard" C-m
+send_line() {
+  local pane="$1" line="$2"
+  tmux send-keys -t "$pane" C-u
+  tmux send-keys -t "$pane" -l "$line"
+  tmux send-keys -t "$pane" Enter
+}
+accept_claude_trust() {
+  local pane="$1"
+  for _ in $(seq 1 80); do
+    if tmux capture-pane -p -t "$pane" -S -30 2>/dev/null | grep -q 'Yes, I trust this folder'; then
+      tmux send-keys -t "$pane" 1 Enter
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+wait_for_task() {
+  local task="$1" timeout="${2:-$CLAIM_TIMEOUT}" waited=0
+  while (( waited < timeout )); do
+    if (cd "$DEMO_DIR" && CONCORD_NO_UPDATE_CHECK=1 node "$CLI" tasks 2>/dev/null | grep -q "^${task}"); then return 0; fi
+    sleep 1; waited=$((waited + 1))
+  done
+  return 1
+}
 
 (
   sleep "$INTRO_SECONDS"
-  tmux send-keys -t "$SESSION:live.0" "clear; CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' fe" C-m
-  sleep "$GAP_SECONDS"
-  for _ in $(seq 1 120); do
-    if [[ -S "$DEMO_DIR/.concord/fe.sock" ]]; then
-      break
-    fi
-    sleep 0.1
-  done
-  tmux send-keys -t "$SESSION:live.1" "clear; CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' be" C-m
+  send_line "$FE_PANE" "claude --dangerously-skip-permissions --mcp-config .mcp.json --strict-mcp-config --name 'Concord Frontend' \"\$(cat '$TOOL_DIR/prompts/frontend.md')\""
+  accept_claude_trust "$FE_PANE" || true
+  wait_for_task TASK-FE || true
+  sleep "$FE_TO_BE_GAP"
+  send_line "$BE_PANE" "codex --dangerously-bypass-approvals-and-sandbox \"\$(cat '$TOOL_DIR/prompts/backend.md')\""
 
-  for _ in $(seq 1 360); do
-    if [[ -f "$DEMO_DIR/.concord/demo-fe.done" && -f "$DEMO_DIR/.concord/demo-be.done" ]]; then
-      break
-    fi
-    sleep 0.25
-  done
-
-  if [[ "$REVIEWER" == "claude" ]]; then
-    tmux new-session -d -s "$SESSION-reviewer" -n review -c "$DEMO_DIR" \
-      "CONCORD_REPO_ROOT='$DEMO_DIR' DEMO_PORT='$PORT' bash '$TOOL_DIR/review.sh' > .concord/reviewer.log 2>&1"
-  else
-    tmux new-session -d -s "$SESSION-reviewer" -n review -c "$DEMO_DIR" \
-      "CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' review > .concord/reviewer.log 2>&1"
-  fi
-
-  for review_tick in $(seq 1 600); do
-    if [[ -f "$DEMO_DIR/.concord/demo-review.done" ]]; then
-      sleep 1
-      tmux send-keys -t "$SESSION:live.2" C-c
-      sleep 0.5
-      tmux send-keys -t "$SESSION:live.2" "clear; CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' status; printf '\\n'; CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' doctor; printf '\\n  ✓ GAME BUILT · HANDOFF ACCEPTED · REVIEW APPROVED\\n  Open http://127.0.0.1:$PORT and whack a mole.\\n'" C-m
-      break
-    fi
-    if [[ "$REVIEWER" == "claude" && "$review_tick" == "240" ]]; then
-      tmux kill-session -t "$SESSION-reviewer" 2>/dev/null || true
+  # Do not interrupt either model. Once both have genuinely marked work
+  # review-ready, start the independent real Claude reviewer in the background.
+  for _ in $(seq 1 1200); do
+    tasks="$(cd "$DEMO_DIR" && CONCORD_NO_UPDATE_CHECK=1 node "$CLI" tasks 2>/dev/null || true)"
+    if grep -q '^TASK-FE.*review_ready' <<<"$tasks" && grep -q '^TASK-BE.*review_ready' <<<"$tasks"; then
       tmux new-session -d -s "$SESSION-reviewer" -n review -c "$DEMO_DIR" \
-        "CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' review > .concord/reviewer.log 2>&1"
+        "DEMO_PORT='$PORT' bash '$TOOL_DIR/review.sh' > .concord/reviewer.log 2>&1"
+      break
     fi
-    sleep 0.25
+    sleep 1
   done
 ) &
 
 echo
-echo "Concord Whack-a-Mole is live"
-echo "  tmux:   $SESSION"
-echo "  app:    http://127.0.0.1:$PORT"
-echo "  repo:   $DEMO_DIR"
-echo "  review: $REVIEWER"
+echo "Concord Whack-a-Mole is live with real model sessions"
+echo "  tmux: $SESSION"
+echo "  app:  http://127.0.0.1:$PORT"
+echo "  repo: $DEMO_DIR"
 echo
 
 if [[ "${DEMO_NO_ATTACH:-0}" == "1" ]]; then
-  for _ in $(seq 1 700); do
-    if [[ -f "$DEMO_DIR/.concord/demo-review.done" ]]; then
-      sleep 2
-      for pane in 0 1 2; do
-        echo "===== pane $pane ====="
-        tmux capture-pane -p -t "$SESSION:live.$pane" -S -80
-      done
-      exit 0
-    fi
-    sleep 0.25
-  done
-  echo "Demo timed out. Inspect tmux session: $SESSION" >&2
-  exit 1
+  wait
+else
+  exec tmux attach-session -t "$SESSION"
 fi
-
-exec tmux attach-session -t "$SESSION"

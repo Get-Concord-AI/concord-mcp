@@ -1,9 +1,9 @@
 # Concord Whack-a-Mole
 
-A three-pane live demo of two coding agents and one shared workspace, with an
-independent Claude Code review running in the background. The app starts as a
-holding screen and becomes a playable Whack-a-Mole game while the panes show the
-real Concord workflow.
+A three-pane live demo of two real coding-agent sessions and one shared
+workspace, with an independent Claude Code review running in the background. The
+app starts as a holding screen and becomes a playable Whack-a-Mole game while
+the panes show the real Concord workflow.
 
 ```bash
 pnpm demo
@@ -22,26 +22,19 @@ The visible panes show:
    the reviewer’s task activity. The reviewer itself runs in a hidden session so
    the dashboard gets the full right half of the screen.
 
-If Claude Code is unavailable or takes longer than 60 seconds, the reviewer
-pane automatically continues with the same deterministic MCP review so the
-live demo never stalls.
+The frontend and backend panes are actual Claude Code and Codex sessions. The
+reviewer is also a real Claude Code session and runs only after both builders
+have marked their work review-ready. The demo fails clearly if either provider
+CLI is unavailable; it never substitutes scripted agent behavior.
 
 All five public tools appear in the flow: `start_work`, `inspect_work`,
-`update_work`, `transfer_work`, and `finish_work`. The builders are scripted for
-repeatability, but their MCP calls, live prompt/reply relay, task versions,
-handoff, generated evidence, file edits, hot reload, and reviewer are real.
-
-For an offline or automated rehearsal, swap only the reviewer for the
-deterministic version:
-
-```bash
-DEMO_REVIEWER=scripted DEMO_NO_OPEN=1 pnpm demo
-```
+`update_work`, `transfer_work`, and `finish_work`. The model sessions make the
+decisions and edits themselves; Concord supplies the shared state, overlap
+detection, live prompt/reply relay, durable handoff, and review evidence.
 
 Useful controls:
 
 ```bash
-DEMO_SPEED=0.25 pnpm demo       # faster narration
 DEMO_PORT=3211 pnpm demo        # choose another port
 pnpm demo:stop                  # stop tmux and the owned dev server
 ```
