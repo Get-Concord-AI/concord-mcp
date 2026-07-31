@@ -111,12 +111,12 @@ tmux set-option -t "$SESSION" status-right " http://127.0.0.1:$PORT "
 tmux set-option -t "$SESSION" remain-on-exit on
 
 tmux select-pane -t "$SESSION:live.0" -T 'CLAUDE · FRONTEND'
-tmux select-pane -t "$SESSION:live.1" -T 'CONCORD · SHARED WORKSPACE'
-tmux select-pane -t "$SESSION:live.2" -T 'CODEX · BACKEND'
+tmux select-pane -t "$SESSION:live.1" -T 'CODEX · BACKEND'
+tmux select-pane -t "$SESSION:live.2" -T 'CONCORD · SHARED WORKSPACE'
 
 tmux send-keys -t "$SESSION:live.0" "clear; printf '\\n  CLAUDE IS READY TO BUILD THE GAME UI\\n  Waiting for the demo to begin…\\n'" C-m
-tmux send-keys -t "$SESSION:live.1" "CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' dashboard" C-m
-tmux send-keys -t "$SESSION:live.2" "clear; printf '\\n  CODEX IS READY TO BUILD THE SCORE API\\n  Waiting for Claude to claim work…\\n'" C-m
+tmux send-keys -t "$SESSION:live.1" "clear; printf '\\n  CODEX IS READY TO BUILD THE SCORE API\\n  Waiting for Claude to claim work…\\n'" C-m
+tmux send-keys -t "$SESSION:live.2" "CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' dashboard" C-m
 
 (
   sleep "$INTRO_SECONDS"
@@ -128,7 +128,7 @@ tmux send-keys -t "$SESSION:live.2" "clear; printf '\\n  CODEX IS READY TO BUILD
     fi
     sleep 0.1
   done
-  tmux send-keys -t "$SESSION:live.2" "clear; CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' be" C-m
+  tmux send-keys -t "$SESSION:live.1" "clear; CONCORD_SOURCE_ROOT='$ROOT_DIR' DEMO_SPEED='$SPEED' DEMO_PORT='$PORT' node '$TOOL_DIR/agent.mjs' be" C-m
 
   for _ in $(seq 1 360); do
     if [[ -f "$DEMO_DIR/.concord/demo-fe.done" && -f "$DEMO_DIR/.concord/demo-be.done" ]]; then
@@ -148,9 +148,9 @@ tmux send-keys -t "$SESSION:live.2" "clear; printf '\\n  CODEX IS READY TO BUILD
   for review_tick in $(seq 1 600); do
     if [[ -f "$DEMO_DIR/.concord/demo-review.done" ]]; then
       sleep 1
-      tmux send-keys -t "$SESSION:live.1" C-c
+      tmux send-keys -t "$SESSION:live.2" C-c
       sleep 0.5
-      tmux send-keys -t "$SESSION:live.1" "clear; CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' status; printf '\\n'; CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' doctor; printf '\\n  ✓ GAME BUILT · HANDOFF ACCEPTED · REVIEW APPROVED\\n  Open http://127.0.0.1:$PORT and whack a mole.\\n'" C-m
+      tmux send-keys -t "$SESSION:live.2" "clear; CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' status; printf '\\n'; CONCORD_NO_UPDATE_CHECK=1 node '$CLI' --repo '$DEMO_DIR' doctor; printf '\\n  ✓ GAME BUILT · HANDOFF ACCEPTED · REVIEW APPROVED\\n  Open http://127.0.0.1:$PORT and whack a mole.\\n'" C-m
       break
     fi
     if [[ "$REVIEWER" == "claude" && "$review_tick" == "240" ]]; then
