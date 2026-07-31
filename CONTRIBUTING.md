@@ -21,7 +21,7 @@ install (allowlisted via `pnpm.onlyBuiltDependencies`).
 - [ ] Search the codebase for an existing type, Zod schema, repository, or helper
       that already does what you need. Reuse beats duplication.
 - [ ] Confirm your change fits the layered architecture in `CLAUDE.md`.
-- [ ] Keep the planned diff under 600 LOC. If it won't fit, split it.
+- [ ] Keep the change focused and reviewable; split unrelated concerns.
 
 ## Development commands
 
@@ -42,7 +42,7 @@ Run `pnpm lint && pnpm typecheck && pnpm test && pnpm build` before opening a PR
    (`feat:`, `fix:`, `chore:`, `ci:`, `docs:`).
 3. Add or update tests for behaviour changes.
 4. Open a PR against `main`. CI must be green (lint, format, typecheck, test,
-   build, and the 600-LOC size check).
+   build).
 
 ## Coding standards recap
 
@@ -50,5 +50,5 @@ Full detail lives in [`CLAUDE.md`](./CLAUDE.md). The rules CI blocks on:
 
 - No `any`; `unknown` only as input to a Zod `parse`.
 - No typecasts (`as`) except `as const` — narrow with Zod or type guards.
-- No file over 1000 lines; no PR over 600 LOC.
+- No file over 1000 lines; keep changes focused and reviewable.
 - Strict, layered module boundaries; clear naming.

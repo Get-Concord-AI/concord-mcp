@@ -24,7 +24,7 @@
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="https://getconcord.ai">Website</a> ·
-  <a href="./examples/two-agent-overlap/">Demo</a> ·
+  <a href="./examples/whack-a-mole/">Demo</a> ·
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
@@ -211,10 +211,11 @@ and `q` to quit.
 pnpm demo
 ```
 
-Runs the [two-agent overlap demo](./examples/two-agent-overlap/): two agents
-claim overlapping work, share and read task context, then one hands off and
-marks the task review-ready. The example also includes a two-terminal flow for
-watching those real MCP calls appear live in `concord dashboard`.
+Runs the [Whack-a-Mole live demo](./examples/whack-a-mole/): Claude and Codex
+claim overlapping work, resolve it through a live prompt/reply, build a playable
+app, transfer ownership with evidence, and hand the result to a separate Claude
+Code reviewer. Four tmux panes show both builders, the shared dashboard, and the
+review while the browser hot-reloads the result.
 
 ## What this is / is not
 
@@ -227,8 +228,8 @@ See also: [Why not just use markdown?](./docs/why-not-markdown.md)
 ## Contributing
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`CLAUDE.md`](./CLAUDE.md). This
-repo is strictly typed (no `any`, no typecasts), modular, and every PR stays under
-600 LOC. Good first issues are labelled [`good first issue`](https://github.com/Get-Concord-AI/concord-mcp/labels/good%20first%20issue).
+repo is strictly typed (no `any`, no typecasts) and modular. Good first issues
+are labelled [`good first issue`](https://github.com/Get-Concord-AI/concord-mcp/labels/good%20first%20issue).
 
 ## Star History
 

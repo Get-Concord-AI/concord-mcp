@@ -6,7 +6,7 @@ Briefly describe the change and the problem it solves.
 
 - [ ] Follows the coding rules in [`CLAUDE.md`](../CLAUDE.md) (no `any`, no
       typecasts, layered modules)
-- [ ] Diff is under 600 LOC (split it if not)
+- [ ] The change is focused and reviewable
 - [ ] Added/updated tests for behaviour changes
 - [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passes locally
 - [ ] Checked for existing utilities/types before adding new ones
