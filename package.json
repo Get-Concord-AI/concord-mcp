@@ -54,7 +54,8 @@
     "version": "node scripts/sync-version.mjs && git add src/version.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "demo": "pnpm build && node examples/two-agent-overlap/demo.mjs",
+    "demo": "pnpm build && bash examples/whack-a-mole/run.sh",
+    "demo:stop": "bash examples/whack-a-mole/stop.sh",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

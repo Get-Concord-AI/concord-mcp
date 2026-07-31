@@ -1,0 +1,92 @@
+:root {
+  --ink: #f8f6ef;
+  --muted: #b9bdd0;
+  --yellow: #ffd166;
+  --blue: #60a5fa;
+  --orange: #fb923c;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+body {
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+  background:
+    radial-gradient(circle at 30% 10%, #26376d, transparent 36%),
+    linear-gradient(145deg, #11172d, #301b4e);
+}
+button,
+input {
+  font: inherit;
+}
+.holding {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.holding__card {
+  width: min(620px, 100%);
+  text-align: center;
+  padding: 44px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(16px);
+}
+.badge {
+  display: inline-block;
+  color: var(--yellow);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+}
+.mole {
+  margin: 20px 0 6px;
+  font-size: 64px;
+}
+h1 {
+  margin: 0;
+  font-size: clamp(42px, 8vw, 72px);
+  line-height: 1;
+}
+.holding p {
+  color: var(--muted);
+  font-size: 19px;
+}
+.tasks {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 28px 0;
+  flex-wrap: wrap;
+}
+.tasks span {
+  padding: 11px 16px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+}
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-radius: 50%;
+}
+.dot--fe {
+  background: var(--blue);
+}
+.dot--be {
+  background: var(--orange);
+}
+small {
+  color: var(--muted);
+}

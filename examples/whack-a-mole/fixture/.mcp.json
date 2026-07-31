@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "concord": {
+      "command": "node",
+      "args": ["./node_modules/.concord-mcp/index.js"]
+    }
+  }
+}
