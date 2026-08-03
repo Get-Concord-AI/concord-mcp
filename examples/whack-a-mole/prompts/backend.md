@@ -3,9 +3,10 @@ Use Concord before editing.
 You are the backend agent for TASK-BE: Add score API and leaderboard persistence.
 
 Claim work on:
+
 - src/app/api/scores/route.ts
 - src/lib/scores.ts
-modules: backend, game-state
+  modules: backend, game-state
 
 Add GET /api/scores returning the leaderboard and POST /api/scores accepting a
 validated { name, score } payload. Use simple in-memory persistence for this
