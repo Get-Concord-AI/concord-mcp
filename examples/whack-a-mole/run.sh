@@ -58,7 +58,8 @@ fi
 # and automatically accept Claude's one-time interactive trust screen below.
 # This avoids leaving the real model session paused before its first MCP call.
 CODEX_CONFIG_PATH="${CODEX_HOME:-$HOME/.codex}/config.toml"
-if [[ -f "$CODEX_CONFIG_PATH" ]] && ! grep -qF "[projects.\"$DEMO_DIR\"]" "$CODEX_CONFIG_PATH"; then
+if ! grep -qF "[projects.\"$DEMO_DIR\"]" "$CODEX_CONFIG_PATH" 2>/dev/null; then
+  mkdir -p "$(dirname "$CODEX_CONFIG_PATH")"
   printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$DEMO_DIR" >> "$CODEX_CONFIG_PATH"
 fi
 
