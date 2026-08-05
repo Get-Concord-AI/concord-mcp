@@ -70,7 +70,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/better-sqlite3": "^7.6.12",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.1.2",
     "@types/react": "19.2.2",
     "@vitest/coverage-v8": "^4.1.0",
