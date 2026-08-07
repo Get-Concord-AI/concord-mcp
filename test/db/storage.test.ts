@@ -178,6 +178,21 @@ describe('task repository', () => {
     expect(repos.tasks.get('CHILD')?.parentTaskId).toBe('PARENT');
     expect(repos.tasks.get('PARENT')?.parentTaskId).toBeNull();
   });
+
+  it('refreshes task activity without changing its lifecycle version', () => {
+    repos.tasks.create(baseTask);
+    const oldTimestamp = '2026-01-01T00:00:00.000Z';
+    repos.db
+      .prepare('UPDATE tasks SET updated_at = ? WHERE task_id = ?')
+      .run(oldTimestamp, 'TASK-12');
+
+    const touched = repos.tasks.touchActivity('TASK-12');
+
+    expect(touched?.updatedAt).not.toBe(oldTimestamp);
+    expect(touched).toMatchObject({ version: 1, status: 'active' });
+    expect(touched?.expectedFiles).toEqual(baseTask.expectedFiles);
+    expect(repos.tasks.touchActivity('MISSING')).toBeUndefined();
+  });
 });
 
 describe('handoff repository', () => {

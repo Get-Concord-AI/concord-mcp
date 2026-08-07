@@ -1,8 +1,9 @@
-import type { Repositories, TaskUpdateRecord } from '../db/index.js';
+import type { Repositories, TaskRecord, TaskUpdateRecord } from '../db/index.js';
 import type { UpdateTaskInput } from '../domain/operations.js';
 
 export interface UpdateTaskResult {
   update: TaskUpdateRecord;
+  task: TaskRecord;
 }
 
 /** Append one durable, task-scoped memory entry for other agents and sessions. */
@@ -26,20 +27,27 @@ export function handleUpdateTask(repos: Repositories, input: UpdateTaskInput): U
     }
   }
 
-  const update = repos.taskUpdates.create({
-    taskId: input.task_id,
-    kind: input.kind,
-    content: input.content,
-    agent: input.agent ?? input.agent_id ?? task.agent,
+  const transact = repos.db.transaction(() => {
+    const update = repos.taskUpdates.create({
+      taskId: input.task_id,
+      kind: input.kind,
+      content: input.content,
+      agent: input.agent ?? input.agent_id ?? task.agent,
+    });
+    const updatedTask = repos.tasks.touchActivity(input.task_id);
+    if (updatedTask === undefined) {
+      throw new Error(`Task ${input.task_id} disappeared while its update was recorded.`);
+    }
+    repos.events.record({
+      taskId: input.task_id,
+      tool: 'update_task',
+      status: 'success',
+      detail: input.kind,
+    });
+    if (input.agent_id !== undefined) {
+      repos.agents.touch(input.agent_id);
+    }
+    return { update, task: updatedTask };
   });
-  repos.events.record({
-    taskId: input.task_id,
-    tool: 'update_task',
-    status: 'success',
-    detail: input.kind,
-  });
-  if (input.agent_id !== undefined) {
-    repos.agents.touch(input.agent_id);
-  }
-  return { update };
+  return transact();
 }

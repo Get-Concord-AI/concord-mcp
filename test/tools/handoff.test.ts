@@ -14,6 +14,10 @@ describe('handleHandoff', () => {
 
   it('records evidence without transferring ownership or changing task status', () => {
     handleClaimWork(repos, { task_id: 'TASK-12', title: 'Retry', modules: ['billing'] });
+    const oldTimestamp = '2026-01-01T00:00:00.000Z';
+    repos.db
+      .prepare('UPDATE tasks SET updated_at = ? WHERE task_id = ?')
+      .run(oldTimestamp, 'TASK-12');
     const result = handleHandoff(repos, {
       task_id: 'TASK-12',
       status: 'done',
@@ -24,7 +28,8 @@ describe('handleHandoff', () => {
     });
 
     expect(result.handoff.whatChanged).toBe('Queued retries instead of synchronous');
-    expect(repos.tasks.get('TASK-12')?.status).toBe('active');
+    expect(repos.tasks.get('TASK-12')).toMatchObject({ status: 'active', version: 1 });
+    expect(repos.tasks.get('TASK-12')?.updatedAt).not.toBe(oldTimestamp);
     expect(repos.handoffs.latestForTask('TASK-12')?.status).toBe('done');
     expect(repos.events.listByTask('TASK-12').map((e) => e.tool)).toEqual([
       'claim_work',

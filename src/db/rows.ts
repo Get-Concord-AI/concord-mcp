@@ -105,6 +105,7 @@ export interface TaskRecord {
   /** Optional assignment/ownership lease deadline. */
   leaseExpiresAt: string | null;
   createdAt: string;
+  /** Latest successful, meaningful task write; independent of agent heartbeat. */
   updatedAt: string;
 }
 

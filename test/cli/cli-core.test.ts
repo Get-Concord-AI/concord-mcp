@@ -78,6 +78,7 @@ describe('renderTasks', () => {
     expect(output).toContain('TASK-12');
     expect(output).toContain('claude-code');
     expect(output).toContain('Retry');
+    expect(output).toContain(repos.tasks.get('TASK-12')?.updatedAt ?? 'missing timestamp');
   });
 });
 
@@ -114,6 +115,7 @@ describe('buildStatus / renderStatusText', () => {
 
     const text = renderStatusText(view);
     expect(text).toContain('TASK-12');
+    expect(text).toContain(view.active[0]?.updatedAt ?? 'missing timestamp');
     expect(text).toContain('touches: billing');
     expect(text).toContain('TASK-12 <-> TASK-14');
   });

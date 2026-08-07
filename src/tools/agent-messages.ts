@@ -5,6 +5,7 @@ import type {
   AgentMessageErrorCode,
   AgentMessageRecord,
   Repositories,
+  TaskRecord,
 } from '../db/index.js';
 import { deliveryOutlook, transports } from '../domain/delivery.js';
 
@@ -32,6 +33,7 @@ export interface SendAgentMessageInput {
 export interface SendAgentMessageResult {
   message: AgentMessageRecord;
   idempotentReplay: boolean;
+  task: TaskRecord | null;
   /** What the sender should expect about when the recipient will see this. */
   outlook: string;
 }
@@ -131,6 +133,8 @@ export function handleSendAgentMessage(
   if (input.taskId !== undefined && repos.tasks.get(input.taskId) === undefined) {
     throw new Error(`Task ${input.taskId} does not exist.`);
   }
+  const contextualTaskId = input.taskId ?? parent?.taskId ?? null;
+  const task = contextualTaskId === null ? undefined : repos.tasks.get(contextualTaskId);
 
   const replay = repos.agentMessages.getByIdempotency(input.agentId, input.idempotencyKey);
   let message: AgentMessageRecord;
@@ -159,6 +163,7 @@ export function handleSendAgentMessage(
       return {
         message: replay,
         idempotentReplay: true,
+        task: task ?? null,
         outlook: deliveryOutlook(known?.capabilities ?? []),
       };
     }
@@ -167,7 +172,7 @@ export function handleSendAgentMessage(
   } else {
     message = repos.agentMessages.create({
       messageId: randomUUID(),
-      taskId: input.taskId ?? parent?.taskId ?? null,
+      taskId: contextualTaskId,
       senderAgentId: input.agentId,
       recipientAgentId,
       replyToMessageId: parent?.messageId ?? null,
@@ -199,7 +204,14 @@ export function handleSendAgentMessage(
     repos.agentMessages.markReplied(parent.messageId);
   }
   repos.agents.touch(input.agentId);
-  return { message, idempotentReplay, outlook: deliveryOutlook(endpoint.capabilities) };
+  const activityTask =
+    !idempotentReplay && task !== undefined ? repos.tasks.touchActivity(task.taskId) : task;
+  return {
+    message,
+    idempotentReplay,
+    task: activityTask ?? null,
+    outlook: deliveryOutlook(endpoint.capabilities),
+  };
 }
 
 export interface AgentCommunicationView {

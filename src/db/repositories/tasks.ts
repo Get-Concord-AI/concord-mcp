@@ -36,6 +36,7 @@ export interface TaskRepository {
   create(task: NewTask): TaskRecord;
   get(taskId: string): TaskRecord | undefined;
   list(): TaskRecord[];
+  touchActivity(taskId: string): TaskRecord | undefined;
   updateStatus(taskId: string, status: TaskStatus): TaskRecord | undefined;
   updateScope(taskId: string, scope: TaskScope): TaskRecord | undefined;
   transition(input: TaskTransition): TaskRecord | undefined;
@@ -68,6 +69,9 @@ export function createTaskRepository(db: ConcordDatabase): TaskRepository {
   `);
   const getStmt = db.prepare('SELECT * FROM tasks WHERE task_id = ?');
   const listStmt = db.prepare('SELECT * FROM tasks ORDER BY created_at ASC, task_id ASC');
+  const touchActivityStmt = db.prepare(
+    'UPDATE tasks SET updated_at = @updated_at WHERE task_id = @task_id',
+  );
   const updateStatusStmt = db.prepare(
     `UPDATE tasks
      SET status = @status, version = version + 1, updated_at = @updated_at
@@ -132,6 +136,10 @@ export function createTaskRepository(db: ConcordDatabase): TaskRepository {
     list() {
       const raw: unknown = listStmt.all();
       return rawListSchema.parse(raw).map(parseTaskRow);
+    },
+    touchActivity(taskId) {
+      touchActivityStmt.run({ task_id: taskId, updated_at: new Date().toISOString() });
+      return get(taskId);
     },
     updateStatus(taskId, status) {
       updateStatusStmt.run({ task_id: taskId, status, updated_at: new Date().toISOString() });

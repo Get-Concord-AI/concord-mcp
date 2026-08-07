@@ -17,6 +17,7 @@ interface ActiveEntry {
   assignedAgentId: string | null;
   status: string;
   version: number;
+  updatedAt: string;
   branch: string;
   touches: string;
   parentTaskId: string | null;
@@ -124,6 +125,7 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
       assignedAgentId: task.assignedAgentId,
       status: task.status,
       version: task.version,
+      updatedAt: task.updatedAt,
       branch: task.branch ?? '-',
       touches: touchesOf(task),
       parentTaskId: task.parentTaskId,
@@ -179,7 +181,7 @@ export function renderStatusText(view: StatusView): string {
     for (const entry of view.active) {
       const parent = entry.parentTaskId === null ? '' : `  (child of ${entry.parentTaskId})`;
       lines.push(
-        `  ${entry.taskId.padEnd(10)} ${entry.status.padEnd(16)} v${String(entry.version).padEnd(4)} ${(entry.agentId ?? entry.assignedAgentId ?? entry.agent).padEnd(18)} ${entry.branch.padEnd(20)} touches: ${entry.touches}${parent}`,
+        `  ${entry.taskId.padEnd(10)} ${entry.status.padEnd(16)} v${String(entry.version).padEnd(4)} ${(entry.agentId ?? entry.assignedAgentId ?? entry.agent).padEnd(18)} ${entry.branch.padEnd(20)} activity: ${entry.updatedAt}  touches: ${entry.touches}${parent}`,
       );
     }
   }

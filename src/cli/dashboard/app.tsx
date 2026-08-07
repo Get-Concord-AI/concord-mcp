@@ -177,7 +177,7 @@ function Context({ item }: { item: DashboardTask | undefined }): ReactNode {
       <Text wrap="truncate-end">
         owner {item.task.owner ?? '-'} · agent{' '}
         {item.task.agentId ?? item.task.assignedAgentId ?? '-'} · branch {item.task.branch ?? '-'} ·
-        touches {item.touches}
+        activity {item.task.updatedAt} · touches {item.touches}
       </Text>
       {item.updates.slice(-5).map((update) => (
         <Text key={`update-${String(update.id)}`} wrap="truncate-end">

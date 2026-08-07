@@ -380,6 +380,7 @@ function taskFields(task: TaskRecord): Record<string, unknown> {
     task_id: task.taskId,
     status: task.status,
     version: task.version,
+    updated_at: task.updatedAt,
     agent_id: task.agentId,
     assigned_agent_id: task.assignedAgentId,
     lease_expires_at: task.leaseExpiresAt,
@@ -593,6 +594,7 @@ export function registerWorkflowTools(
               content: result.update.content,
               agent: result.update.agent,
               created_at: result.update.createdAt,
+              task_updated_at: result.task.updatedAt,
             },
           };
         }
@@ -618,6 +620,8 @@ export function registerWorkflowTools(
             sender_agent_id: result.message.senderAgentId,
             recipient_agent_id: result.message.recipientAgentId,
             reply_to_message_id: result.message.replyToMessageId,
+            task_id: result.message.taskId,
+            task_updated_at: result.task?.updatedAt ?? null,
             provider: result.message.provider,
             provider_receipt: result.message.providerReceipt,
             delivered_at: result.message.deliveredAt,

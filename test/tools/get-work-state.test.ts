@@ -53,6 +53,7 @@ describe('handleGetWorkState', () => {
       'TASK-1',
       'TASK-2',
     ]);
+    expect(view.active.every((task) => task.updatedAt.length > 0)).toBe(true);
     // TASK-1's claim returned no overlaps at claim time, but the read surface
     // recomputes them, so the TASK-1 <-> TASK-2 conflict is now visible.
     expect(view.overlaps).toHaveLength(1);
@@ -86,6 +87,7 @@ describe('work-state MCP surface (end-to-end via in-memory transport)', () => {
 
       const called = await client.callTool({ name: 'inspect_work', arguments: {} });
       expect(JSON.stringify(called)).toContain('TASK-1');
+      expect(JSON.stringify(called)).toContain('updatedAt');
 
       const read = await client.readResource({ uri: WORK_STATE_URI });
       expect(JSON.stringify(read)).toContain('TASK-1');

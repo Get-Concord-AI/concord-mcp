@@ -67,11 +67,14 @@ describe('writeArtifacts', () => {
       .object({
         generated_at: z.string(),
         presence: z.array(z.object({ agent_id: z.string(), liveness: z.string() })),
-        tasks: z.array(z.object({ task_id: z.string(), status: z.string() })),
+        tasks: z.array(
+          z.object({ task_id: z.string(), status: z.string(), updated_at: z.string() }),
+        ),
       })
       .parse(JSON.parse(readFileSync(join(dir, 'WORK_STATE.json'), 'utf8')));
     expect(workState.generated_at).toBe('2026-07-17T00:00:00.000Z');
     expect(workState.tasks[0]?.task_id).toBe('TASK-12');
+    expect(workState.tasks[0]?.updated_at).toBe(repos.tasks.get('TASK-12')?.updatedAt);
     expect(workState.presence[0]?.agent_id).toBe('claude-code:7p8v');
 
     const events = readFileSync(join(dir, 'events.jsonl'), 'utf8').trim().split('\n');

@@ -99,6 +99,10 @@ describe('dashboard snapshot', () => {
 
     view.stdin.write('j');
     expect(view.lastFrame()).toContain('Use a queued retry');
+    expect(view.lastFrame()).toContain(
+      snapshot.tasks.find((item) => item.task.taskId === 'TASK-12')?.task.updatedAt ??
+        'missing timestamp',
+    );
   });
 
   it('uses a compact view below 70 columns', () => {

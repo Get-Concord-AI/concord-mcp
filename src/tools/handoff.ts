@@ -62,6 +62,10 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
       status: 'success',
       detail: input.status,
     });
+    const activityTask = repos.tasks.touchActivity(input.task_id);
+    if (activityTask === undefined) {
+      throw new Error(`Task ${input.task_id} disappeared while evidence was recorded.`);
+    }
     if (input.agent_id !== undefined) {
       repos.agents.touch(input.agent_id);
     }
@@ -78,7 +82,7 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
         expected_version: input.expected_version,
       });
     }
-    const task = repos.tasks.get(input.task_id);
+    const task = reviewReady ? repos.tasks.get(input.task_id) : activityTask;
     if (task === undefined) {
       throw new Error(`Task ${input.task_id} disappeared while evidence was recorded.`);
     }

@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Task-scoped activity now refreshes the task's `updated_at` timestamp, so
+  current-state views reflect reclaims, progress updates, task-scoped messages,
+  handoffs, reviews, and lifecycle work independently of agent heartbeat.
+  Activity refreshes do not increment the optimistic-concurrency version.
+
 ## [0.7.1] - 2026-08-06
 
 ### Fixed

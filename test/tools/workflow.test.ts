@@ -58,13 +58,34 @@ describe('simplified workflow MCP contract', () => {
         },
       });
       expect(started.isError).not.toBe(true);
+      expect(JSON.stringify(started)).toContain('"updated_at"');
       expect(repos.tasks.get('TASK-1')).toMatchObject({
         status: 'active',
         agentId: 'codex:owner',
         expectedFiles: ['src/server.ts'],
       });
+      const oldTimestamp = '2026-01-01T00:00:00.000Z';
+      repos.db
+        .prepare('UPDATE tasks SET updated_at = ? WHERE task_id = ?')
+        .run(oldTimestamp, 'TASK-1');
 
-      await harness.client.callTool({
+      const reclaimed = await harness.client.callTool({
+        name: 'start_work',
+        arguments: {
+          task_id: 'TASK-1',
+          title: 'Simplify lifecycle',
+          kind: 'codex',
+          agent_id: 'codex:owner',
+        },
+      });
+      expect(reclaimed.isError).not.toBe(true);
+      expect(repos.tasks.get('TASK-1')).toMatchObject({ version: 1 });
+      expect(repos.tasks.get('TASK-1')?.updatedAt).not.toBe(oldTimestamp);
+
+      repos.db
+        .prepare('UPDATE tasks SET updated_at = ? WHERE task_id = ?')
+        .run(oldTimestamp, 'TASK-1');
+      const updated = await harness.client.callTool({
         name: 'update_work',
         arguments: {
           task_id: 'TASK-1',
@@ -73,6 +94,9 @@ describe('simplified workflow MCP contract', () => {
           content: 'Expose five tools',
         },
       });
+      expect(repos.tasks.get('TASK-1')).toMatchObject({ version: 1 });
+      expect(repos.tasks.get('TASK-1')?.updatedAt).not.toBe(oldTimestamp);
+      expect(JSON.stringify(updated)).toContain('"task_updated_at"');
       const inspected = await harness.client.callTool({
         name: 'inspect_work',
         arguments: { task_id: 'TASK-1' },
@@ -362,6 +386,10 @@ describe('simplified workflow MCP contract', () => {
         });
       }
       registerPullEndpoint(repos, 'codex:target', 'codex');
+      const oldTimestamp = '2026-01-01T00:00:00.000Z';
+      repos.db
+        .prepare('UPDATE tasks SET updated_at = ? WHERE task_id = ?')
+        .run(oldTimestamp, 'TASK-TARGET');
 
       const sent = await harness.client.callTool({
         name: 'update_work',
@@ -376,6 +404,12 @@ describe('simplified workflow MCP contract', () => {
       });
 
       expect(sent.isError).not.toBe(true);
+      expect(repos.tasks.get('TASK-TARGET')).toMatchObject({
+        version: 1,
+      });
+      expect(repos.tasks.get('TASK-TARGET')?.updatedAt).not.toBe(oldTimestamp);
+      expect(JSON.stringify(sent)).toContain('"task_id":"TASK-TARGET"');
+      expect(JSON.stringify(sent)).toContain('"task_updated_at"');
       // Codex is reachable only between steps of its own work, and the sender
       // is told so rather than being left to assume it landed.
       expect(JSON.stringify(sent)).toContain('next turn');
@@ -386,6 +420,43 @@ describe('simplified workflow MCP contract', () => {
       const drained = drainInbox(repos, 'codex:target', 'codex');
       expect(drained[0]?.content).toContain('Please re-check the parser boundary.');
       expect(repos.agentMessages.get(message?.messageId ?? '')?.status).toBe('delivered');
+      const deliveredTimestamp = repos.tasks.get('TASK-TARGET')?.updatedAt;
+      drainInbox(repos, 'codex:target', 'codex');
+      expect(repos.tasks.get('TASK-TARGET')?.updatedAt).toBe(deliveredTimestamp);
+
+      repos.db
+        .prepare('UPDATE tasks SET updated_at = ? WHERE task_id = ?')
+        .run(oldTimestamp, 'TASK-TARGET');
+      const replay = await harness.client.callTool({
+        name: 'update_work',
+        arguments: {
+          operation: 'prompt',
+          task_id: 'TASK-TARGET',
+          agent_id: 'codex:sender',
+          to_agent_id: 'codex:target',
+          content: 'Please re-check the parser boundary.',
+          idempotency_key: 'sender-1',
+        },
+      });
+      expect(JSON.stringify(replay)).toContain('"idempotent_replay":true');
+      expect(repos.tasks.get('TASK-TARGET')?.updatedAt).toBe(oldTimestamp);
+
+      const endpoint = repos.agentEndpoints.getByAgent('codex:target');
+      expect(endpoint).toBeDefined();
+      if (endpoint !== undefined) repos.agentEndpoints.disconnect(endpoint.endpointId);
+      const failed = await harness.client.callTool({
+        name: 'update_work',
+        arguments: {
+          operation: 'prompt',
+          task_id: 'TASK-TARGET',
+          agent_id: 'codex:sender',
+          to_agent_id: 'codex:target',
+          content: 'This should fail.',
+          idempotency_key: 'sender-failed',
+        },
+      });
+      expect(failed.isError).toBe(true);
+      expect(repos.tasks.get('TASK-TARGET')?.updatedAt).toBe(oldTimestamp);
 
       const inspected = await harness.client.callTool({
         name: 'inspect_work',
@@ -416,22 +487,55 @@ describe('simplified workflow MCP contract', () => {
         });
         registerPullEndpoint(repos, agentId, agentId.split(':')[0] ?? 'agent');
       }
+      await harness.client.callTool({
+        name: 'start_work',
+        arguments: {
+          task_id: 'TASK-THREAD',
+          title: 'Thread context',
+          kind: 'codex',
+          agent_id: 'codex:a',
+        },
+      });
+      const oldTimestamp = '2026-01-01T00:00:00.000Z';
+      repos.db
+        .prepare('UPDATE tasks SET updated_at = ? WHERE task_id = ?')
+        .run(oldTimestamp, 'TASK-THREAD');
+      await harness.client.callTool({
+        name: 'update_work',
+        arguments: {
+          operation: 'prompt',
+          agent_id: 'codex:a',
+          to_agent_id: 'claude:b',
+          content: 'Unscoped coordination',
+          idempotency_key: 'unscoped-1',
+        },
+      });
+      expect(repos.tasks.get('TASK-THREAD')?.updatedAt).toBe(oldTimestamp);
 
       const promptArguments = {
         operation: 'prompt',
+        task_id: 'TASK-THREAD',
         agent_id: 'codex:a',
         to_agent_id: 'claude:b',
         content: 'What did you find?',
         idempotency_key: 'question-1',
       } as const;
       await harness.client.callTool({ name: 'update_work', arguments: promptArguments });
+      expect(repos.tasks.get('TASK-THREAD')?.updatedAt).not.toBe(oldTimestamp);
+      repos.db
+        .prepare('UPDATE tasks SET updated_at = ? WHERE task_id = ?')
+        .run(oldTimestamp, 'TASK-THREAD');
       await harness.client.callTool({ name: 'update_work', arguments: promptArguments });
-      expect(repos.agentMessages.listByAgent('codex:a')).toHaveLength(1);
+      expect(repos.agentMessages.listByTask('TASK-THREAD')).toHaveLength(1);
+      expect(repos.tasks.get('TASK-THREAD')?.updatedAt).toBe(oldTimestamp);
 
       // A reply is only meaningful once the recipient has actually read the
       // message, which is what draining records.
       drainInbox(repos, 'claude:b', 'claude');
-      const parent = repos.agentMessages.listByAgent('codex:a')[0];
+      const parent = repos.agentMessages.listByTask('TASK-THREAD')[0];
+      repos.db
+        .prepare('UPDATE tasks SET updated_at = ? WHERE task_id = ?')
+        .run(oldTimestamp, 'TASK-THREAD');
       const reply = await harness.client.callTool({
         name: 'update_work',
         arguments: {
@@ -445,6 +549,8 @@ describe('simplified workflow MCP contract', () => {
       expect(reply.isError).not.toBe(true);
       expect(repos.agentMessages.get(parent?.messageId ?? '')?.status).toBe('replied');
       expect(repos.agentMessages.listThread(parent?.messageId ?? '')).toHaveLength(2);
+      expect(repos.tasks.get('TASK-THREAD')?.updatedAt).not.toBe(oldTimestamp);
+      expect(JSON.stringify(reply)).toContain('"task_id":"TASK-THREAD"');
     } finally {
       await close(harness);
     }

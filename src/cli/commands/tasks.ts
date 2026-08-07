@@ -13,7 +13,7 @@ export function renderTasks(tasks: readonly TaskRecord[]): string {
       const id = task.taskId.padEnd(10);
       const status = task.status.padEnd(13);
       const agent = (task.agentId ?? task.assignedAgentId ?? task.agent ?? '-').padEnd(18);
-      return `${id} ${status} v${String(task.version).padEnd(4)} ${agent} ${task.title}`;
+      return `${id} ${status} v${String(task.version).padEnd(4)} ${agent} ${task.updatedAt} ${task.title}`;
     })
     .join('\n');
 }

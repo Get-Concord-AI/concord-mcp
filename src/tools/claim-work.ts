@@ -110,7 +110,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
   } else if (scopeAdded.length > 0) {
     task = repos.tasks.updateScope(input.task_id, scope) ?? existing;
   } else {
-    task = existing;
+    task = repos.tasks.touchActivity(input.task_id) ?? existing;
   }
 
   repos.events.record({
