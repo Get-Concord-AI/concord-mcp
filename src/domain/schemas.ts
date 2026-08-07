@@ -32,6 +32,25 @@ const workspaceIdField = z
     'Workspace id returned by a Concord operation. Omit to use the automatically resolved repository workspace.',
   );
 
+const serializedToolParameterPattern = /<\/\s*(?:summary|notes)\s*>|<\s*parameter\s+name\s*=/i;
+
+/**
+ * Some clients can accidentally serialize later tool arguments into an
+ * earlier free-text field. Accepting that payload would create a claim without
+ * its real expected_files/modules/domains and silently weaken overlap checks.
+ * Reject the recognizable serialization markers so the client retries with
+ * each argument in its proper top-level field.
+ */
+function claimMetadataField(description: string) {
+  return z
+    .string()
+    .refine((value) => !serializedToolParameterPattern.test(value), {
+      message:
+        'Serialized tool parameter markup is not allowed; pass expected_files, notes, and other arguments as separate top-level fields.',
+    })
+    .describe(description);
+}
+
 const evidenceInputShape = {
   what_changed: z.string().min(1).describe('Concise summary of what changed'),
   changed_files: z.array(z.string()).optional().describe('Files that changed'),
@@ -50,22 +69,22 @@ const provenanceField = z
 
 export const startWorkInputShape = {
   task_id: taskIdField,
-  title: z.string().min(1).describe('Short human-readable title'),
-  kind: z.string().min(1).describe('Agent type or provider, e.g. claude-code or codex'),
+  title: claimMetadataField('Short human-readable title').min(1),
+  kind: claimMetadataField('Agent type or provider, e.g. claude-code or codex').min(1),
   agent_id: agentIdField,
-  owner: z.string().optional().describe('Human accountable for this agent and task'),
-  model: z.string().optional().describe('Model the agent is running'),
-  summary: z.string().optional().describe('One-line description of the current work'),
-  branch: z.string().optional().describe('Git branch, if known'),
-  worktree: z.string().optional().describe('Git worktree path, if used'),
-  cwd: z.string().optional().describe('Agent working directory'),
+  owner: claimMetadataField('Human accountable for this agent and task').optional(),
+  model: claimMetadataField('Model the agent is running').optional(),
+  summary: claimMetadataField('One-line description of the current work').optional(),
+  branch: claimMetadataField('Git branch, if known').optional(),
+  worktree: claimMetadataField('Git worktree path, if used').optional(),
+  cwd: claimMetadataField('Agent working directory').optional(),
   pid: z.number().int().optional().describe('Agent process id, if known'),
-  parent_task_id: z.string().optional().describe('Parent task for a smaller claimed unit'),
+  parent_task_id: claimMetadataField('Parent task for a smaller claimed unit').optional(),
   expected_files: z.array(z.string()).optional().describe('Files expected to change'),
   modules: z.array(z.string()).optional().describe('Logical modules touched'),
   domains: z.array(z.string()).optional().describe('Product domains touched'),
   risk_tags: z.array(z.string()).optional().describe('Risk tags shared with related work'),
-  notes: z.string().optional().describe('Concise task notes'),
+  notes: claimMetadataField('Concise task notes').optional(),
   workspace_id: workspaceIdField,
 } as const;
 export type StartWorkInput = z.infer<z.ZodObject<typeof startWorkInputShape>>;
