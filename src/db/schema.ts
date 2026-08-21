@@ -214,4 +214,10 @@ export const migrations: readonly string[] = [
   CREATE INDEX idx_agent_message_events_message
     ON agent_message_events(message_id, id);
   `,
+  // 009 — short lease owned by the process that can wake an idle harness.
+  // This is deliberately separate from the session endpoint lease: hooks can
+  // prove that a session is alive, but cannot prove its background receiver is.
+  `
+  ALTER TABLE agent_endpoints ADD COLUMN receiver_expires_at TEXT;
+  `,
 ];

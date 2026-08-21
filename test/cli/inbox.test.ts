@@ -10,7 +10,7 @@ import {
 } from '../../src/domain/pull-inbox.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../../src/install/instructions.js';
 import { drainInbox, registerPullEndpoint, watchInbox } from '../../src/cli/commands/inbox.js';
-import { monitorCapabilityFor } from '../../src/domain/delivery.js';
+import { effectiveEndpointCapabilities, monitorCapabilityFor } from '../../src/domain/delivery.js';
 import { agentIdForSession } from '../../src/domain/identity.js';
 import { endpointPromptable, handleSendAgentMessage } from '../../src/tools/agent-messages.js';
 
@@ -104,14 +104,58 @@ describe('pull-transport inbox', () => {
 
   it('only advertises Cursor idle reachability while its monitor is running', () => {
     registerPullEndpoint(repos, 'beta', 'cursor');
-    expect(repos.agentEndpoints.getByAgent('beta')?.capabilities).not.toContain('idle');
+    expect(effectiveEndpointCapabilities(repos.agentEndpoints.getByAgent('beta'))).not.toContain(
+      'idle',
+    );
 
     drainInbox(repos, 'beta', 'cursor', monitorCapabilityFor('cursor'));
+    const endpoint = repos.agentEndpoints.getByAgent('beta');
+    expect(endpoint).toBeDefined();
+    if (endpoint !== undefined) {
+      repos.agentEndpoints.heartbeatReceiver(
+        endpoint.endpointId,
+        new Date(Date.now() + 10_000).toISOString(),
+      );
+    }
 
-    expect(repos.agentEndpoints.getByAgent('beta')?.capabilities).toContain('idle');
+    expect(effectiveEndpointCapabilities(repos.agentEndpoints.getByAgent('beta'))).toContain(
+      'idle',
+    );
 
+    // A busy-turn hook may drain concurrently with the monitor. It refreshes
+    // the endpoint without erasing a receiver lease it does not own.
     registerPullEndpoint(repos, 'beta', 'cursor');
-    expect(repos.agentEndpoints.getByAgent('beta')?.capabilities).not.toContain('idle');
+    expect(effectiveEndpointCapabilities(repos.agentEndpoints.getByAgent('beta'))).toContain(
+      'idle',
+    );
+
+    if (endpoint !== undefined) repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+    expect(effectiveEndpointCapabilities(repos.agentEndpoints.getByAgent('beta'))).not.toContain(
+      'idle',
+    );
+  });
+
+  it('stops advertising idle delivery when the receiver heartbeat expires', () => {
+    registerPullEndpoint(repos, 'beta', 'gemini', Date.now(), monitorCapabilityFor('gemini'));
+    const endpoint = repos.agentEndpoints.getByAgent('beta');
+    expect(endpoint).toBeDefined();
+    if (endpoint === undefined) return;
+
+    repos.agentEndpoints.heartbeatReceiver(
+      endpoint.endpointId,
+      new Date(Date.now() + 10_000).toISOString(),
+    );
+    expect(effectiveEndpointCapabilities(repos.agentEndpoints.getByAgent('beta'))).toContain(
+      'idle',
+    );
+
+    repos.agentEndpoints.heartbeatReceiver(
+      endpoint.endpointId,
+      new Date(Date.now() - 1).toISOString(),
+    );
+    const capabilities = effectiveEndpointCapabilities(repos.agentEndpoints.getByAgent('beta'));
+    expect(capabilities).not.toContain('idle');
+    expect(capabilities).not.toContain('inject');
   });
 
   it('removes signal listeners when a one-shot monitor receives a message', async () => {
@@ -128,7 +172,9 @@ describe('pull-transport inbox', () => {
     expect(delivered).toEqual(['wake up']);
     expect(process.listenerCount('SIGINT')).toBe(beforeInt);
     expect(process.listenerCount('SIGTERM')).toBe(beforeTerm);
-    expect(repos.agentEndpoints.getByAgent('beta')?.capabilities).not.toContain('idle');
+    expect(effectiveEndpointCapabilities(repos.agentEndpoints.getByAgent('beta'))).not.toContain(
+      'idle',
+    );
   });
 
   it('keeps a live watcher running through transient SQLite contention', async () => {
@@ -153,7 +199,21 @@ describe('pull-transport inbox', () => {
   });
 
   it('tells the sender a Claude Code agent will see it either way', () => {
-    registerPullEndpoint(repos, 'beta', 'claude-code');
+    registerPullEndpoint(
+      repos,
+      'beta',
+      'claude-code',
+      Date.now(),
+      monitorCapabilityFor('claude-code'),
+    );
+    const endpoint = repos.agentEndpoints.getByAgent('beta');
+    expect(endpoint).toBeDefined();
+    if (endpoint !== undefined) {
+      repos.agentEndpoints.heartbeatReceiver(
+        endpoint.endpointId,
+        new Date(Date.now() + 10_000).toISOString(),
+      );
+    }
     const outlook = handleSendAgentMessage(repos, {
       operation: 'prompt',
       agentId: 'alpha',

@@ -1,6 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { Repositories, TaskRecord } from '../db/index.js';
+import { receiverActive } from '../domain/delivery.js';
+import { harnessConfigFor } from '../domain/harness-config.js';
 import { resolveActorId, type AgentIdentity } from '../domain/identity.js';
 import { SocketAgentMessageDispatcher } from '../relay/socket-dispatcher.js';
 import {
@@ -438,6 +440,54 @@ export function registerWorkflowTools(
   session?: AgentIdentity,
   dispatcher: AgentMessageDispatcher = new SocketAgentMessageDispatcher(),
 ): void {
+  interface WorkflowToolResponse {
+    content: { type: 'text'; text: string }[];
+    structuredContent?: Record<string, unknown>;
+    isError?: boolean;
+  }
+  const warnedInactiveReceivers = new Set<string>();
+
+  /** Add one neutral recovery hint per inactive period to this MCP session. */
+  const withReceiverAdvisory = <T extends WorkflowToolResponse>(result: T): T => {
+    const agentId = session?.agentId;
+    if (agentId === undefined) return result;
+    const endpoint = repos.agentEndpoints.getByAgent(agentId);
+    const config = endpoint === undefined ? undefined : harnessConfigFor(endpoint.provider);
+    if (endpoint === undefined || config?.monitor.verified !== true || !config.monitor.background) {
+      return result;
+    }
+    if (receiverActive(endpoint)) {
+      warnedInactiveReceivers.delete(agentId);
+      return result;
+    }
+    // Give a just-created session time to start the monitor supplied by its
+    // SessionStart hook before describing the receiver as inactive.
+    if (Date.now() - Date.parse(endpoint.createdAt) < 10_000) return result;
+    if (warnedInactiveReceivers.has(agentId)) return result;
+    warnedInactiveReceivers.add(agentId);
+
+    const command = config.monitor.command?.replace('<agent-id>', agentId) ?? null;
+    const recovery =
+      command === null
+        ? `Restart the ${config.monitor.kind.replaceAll('-', ' ')} for this session.`
+        : `Restart it with: \`${command}\`.`;
+    const text =
+      "Concord's idle receiver is inactive; cause unknown. Restart unless intentionally " +
+      `stopped or permission declined. ${recovery}`;
+    return {
+      ...result,
+      content: [...result.content, { type: 'text', text }],
+      structuredContent: {
+        ...result.structuredContent,
+        receiver_advisory: {
+          status: 'inactive',
+          cause: 'unknown',
+          command,
+        },
+      },
+    };
+  };
+
   /** Stamp the resolved actor onto a write tool's arguments. Throws with the
    *  fix-it message when neither the session nor the caller identifies anyone. */
   const withActor = <T extends { agent_id?: string | undefined }>(args: T): WithActor<T> => ({
@@ -465,7 +515,7 @@ export function registerWorkflowTools(
       });
       onWrite?.();
       const task = result.claim.task;
-      return {
+      return withReceiverAdvisory({
         content: [
           {
             type: 'text',
@@ -487,7 +537,7 @@ export function registerWorkflowTools(
           })),
           breadth_reasons: result.claim.breadthReasons,
         },
-      };
+      });
     },
   );
 
@@ -510,7 +560,7 @@ export function registerWorkflowTools(
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleInspectWork(repos, args);
       if (result.scope === 'workspace') {
-        return {
+        return withReceiverAdvisory({
           content: [
             {
               type: 'text',
@@ -533,10 +583,10 @@ export function registerWorkflowTools(
             open_questions: result.state.openQuestions,
             communications: result.state.communications,
           },
-        };
+        });
       }
       if (result.scope === 'agent') {
-        return {
+        return withReceiverAdvisory({
           content: [
             {
               type: 'text',
@@ -553,10 +603,10 @@ export function registerWorkflowTools(
             scope: result.scope,
             ...result.communication,
           },
-        };
+        });
       }
       if (result.scope === 'message') {
-        return {
+        return withReceiverAdvisory({
           content: [
             {
               type: 'text',
@@ -572,9 +622,9 @@ export function registerWorkflowTools(
             thread: result.thread,
             events: result.events,
           },
-        };
+        });
       }
-      return {
+      return withReceiverAdvisory({
         content: [
           {
             type: 'text',
@@ -598,7 +648,7 @@ export function registerWorkflowTools(
           overlaps: result.context.overlaps,
           messages: result.context.messages,
         },
-      };
+      });
     },
   );
 
@@ -616,7 +666,7 @@ export function registerWorkflowTools(
         const result = await handleUpdateWork(repos, withActor(args), dispatcher);
         onWrite?.();
         if ('update' in result) {
-          return {
+          return withReceiverAdvisory({
             content: [
               {
                 type: 'text',
@@ -637,9 +687,9 @@ export function registerWorkflowTools(
               created_at: result.update.createdAt,
               task_updated_at: result.task.updatedAt,
             },
-          };
+          });
         }
-        return {
+        return withReceiverAdvisory({
           content: [
             {
               type: 'text',
@@ -671,11 +721,11 @@ export function registerWorkflowTools(
             immediate_mode: result.immediateMode,
             outlook: result.outlook,
           },
-        };
+        });
       } catch (error) {
         onWrite?.();
         if (error instanceof AgentMessageDeliveryError) {
-          return {
+          return withReceiverAdvisory({
             isError: true,
             content: [
               {
@@ -690,7 +740,7 @@ export function registerWorkflowTools(
               status: 'failed',
               error_code: error.code,
             },
-          };
+          });
         }
         throw error;
       }
@@ -710,7 +760,7 @@ export function registerWorkflowTools(
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleTransferWork(repos, withActor(args));
       onWrite?.();
-      return {
+      return withReceiverAdvisory({
         content: [
           {
             type: 'text',
@@ -726,7 +776,7 @@ export function registerWorkflowTools(
           action: args.action,
           ...transferFields(result),
         },
-      };
+      });
     },
   );
 
@@ -743,7 +793,7 @@ export function registerWorkflowTools(
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleFinishWork(repos, withActor(args));
       onWrite?.();
-      return {
+      return withReceiverAdvisory({
         content: [
           {
             type: 'text',
@@ -761,7 +811,7 @@ export function registerWorkflowTools(
           handoff_id: result.evidence.handoff.id,
           review_ready: result.evidence.reviewReady,
         },
-      };
+      });
     },
   );
 }

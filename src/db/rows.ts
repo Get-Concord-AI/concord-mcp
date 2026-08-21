@@ -486,6 +486,7 @@ export interface AgentEndpointRecord {
   status: AgentEndpointStatus;
   lastSeen: string;
   expiresAt: string | null;
+  receiverExpiresAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -501,6 +502,7 @@ const agentEndpointDbRowSchema = z.object({
   status: agentEndpointStatusSchema,
   last_seen: z.string(),
   expires_at: z.string().nullable(),
+  receiver_expires_at: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -518,6 +520,7 @@ export function parseAgentEndpointRow(raw: unknown): AgentEndpointRecord {
     status: row.status,
     lastSeen: row.last_seen,
     expiresAt: row.expires_at,
+    receiverExpiresAt: row.receiver_expires_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

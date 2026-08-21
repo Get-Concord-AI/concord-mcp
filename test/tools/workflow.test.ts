@@ -699,6 +699,41 @@ describe('one identity per session', () => {
     }
   });
 
+  it('advises once when this session receiver is inactive, then re-arms after recovery', async () => {
+    const identity = resolveIdentity(env);
+    if (identity === undefined) throw new Error('fixture env must resolve an identity');
+    registerPullEndpoint(repos, identity.agentId, identity.kind);
+    repos.db
+      .prepare('UPDATE agent_endpoints SET created_at = ? WHERE agent_id = ?')
+      .run('2026-01-01T00:00:00.000Z', identity.agentId);
+
+    const harness = await connect(repos, identity);
+    try {
+      const first = await harness.client.callTool({ name: 'inspect_work', arguments: {} });
+      expect(JSON.stringify(first)).toContain('idle receiver is inactive; cause unknown');
+      expect(JSON.stringify(first)).toContain('"receiver_advisory"');
+
+      const duplicate = await harness.client.callTool({ name: 'inspect_work', arguments: {} });
+      expect(JSON.stringify(duplicate)).not.toContain('receiver_advisory');
+
+      const endpoint = repos.agentEndpoints.getByAgent(identity.agentId);
+      expect(endpoint).toBeDefined();
+      if (endpoint === undefined) return;
+      repos.agentEndpoints.heartbeatReceiver(
+        endpoint.endpointId,
+        new Date(Date.now() + 10_000).toISOString(),
+      );
+      const recovered = await harness.client.callTool({ name: 'inspect_work', arguments: {} });
+      expect(JSON.stringify(recovered)).not.toContain('receiver_advisory');
+
+      repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+      const inactiveAgain = await harness.client.callTool({ name: 'inspect_work', arguments: {} });
+      expect(JSON.stringify(inactiveAgain)).toContain('receiver_advisory');
+    } finally {
+      await close(harness);
+    }
+  });
+
   it('delivers a peer message to an agent that only ever called start_work', async () => {
     // Two sessions, two servers, one workspace — the shape of the original bug
     // report, where every reply to the start_work agent failed to deliver.

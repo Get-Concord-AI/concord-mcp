@@ -7,7 +7,12 @@ import type {
   Repositories,
   TaskRecord,
 } from '../db/index.js';
-import { deliveryOutlook, supportsImmediateDelivery, transports } from '../domain/delivery.js';
+import {
+  deliveryOutlook,
+  effectiveEndpointCapabilities,
+  supportsImmediateDelivery,
+  transports,
+} from '../domain/delivery.js';
 
 export class AgentMessageDeliveryError extends Error {
   constructor(
@@ -180,7 +185,7 @@ export function handleSendAgentMessage(
         message: replay,
         idempotentReplay: true,
         task: task ?? null,
-        outlook: deliveryOutlook(known?.capabilities ?? []),
+        outlook: deliveryOutlook(effectiveEndpointCapabilities(known)),
         delivery: 'delivered',
         immediateMode: null,
       };
@@ -228,7 +233,7 @@ export function handleSendAgentMessage(
     message,
     idempotentReplay,
     task: activityTask ?? null,
-    outlook: deliveryOutlook(endpoint.capabilities),
+    outlook: deliveryOutlook(effectiveEndpointCapabilities(endpoint)),
     delivery: 'queued_pull',
     immediateMode: null,
   };
@@ -256,7 +261,8 @@ export async function handleSendAgentMessageWithDelivery(
   if (result.message.status !== 'pending') return result;
 
   const endpoint = repos.agentEndpoints.getByAgent(result.message.recipientAgentId);
-  if (endpoint?.transport !== 'local-ipc' || !supportsImmediateDelivery(endpoint.capabilities)) {
+  const capabilities = effectiveEndpointCapabilities(endpoint);
+  if (endpoint?.transport !== 'local-ipc' || !supportsImmediateDelivery(capabilities)) {
     return result;
   }
 
@@ -278,7 +284,7 @@ export async function handleSendAgentMessageWithDelivery(
           : 'The recipient accepted this and started a new turn immediately.',
     };
   } catch (error) {
-    if (endpoint.capabilities.includes('pull')) {
+    if (capabilities.includes('pull')) {
       return {
         ...result,
         outlook:
@@ -317,7 +323,7 @@ export function inspectAgentCommunication(
     agentId,
     promptable: endpointPromptable(endpoint),
     provider: endpoint?.provider ?? null,
-    capabilities: endpoint?.capabilities ?? [],
+    capabilities: effectiveEndpointCapabilities(endpoint),
     inbox: messages.filter((message) => message.recipientAgentId === agentId),
     outbox: messages.filter((message) => message.senderAgentId === agentId),
   };

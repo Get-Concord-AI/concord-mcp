@@ -8,6 +8,7 @@ import { databasePath, resolveRepoRoot } from '../../config/paths.js';
 import type { Repositories } from '../../db/index.js';
 import {
   capabilityFor,
+  effectiveEndpointCapabilities,
   encodeCapabilities,
   monitorCapabilityFor,
   type EndpointCapability,
@@ -26,6 +27,18 @@ import { openContext } from '../context.js';
 
 /** How long a registered pull endpoint stays promptable between drains. */
 const PULL_ENDPOINT_TTL_MS = 90_000;
+/** A receiver that misses this many seconds of polls is no longer advertised. */
+const MIN_RECEIVER_TTL_MS = 10_000;
+
+function receiverExpiry(interval: number, now = Date.now()): string {
+  return new Date(now + Math.max(MIN_RECEIVER_TTL_MS, interval * 3)).toISOString();
+}
+
+function heartbeatReceiver(repos: Repositories, agentId: string, interval: number): void {
+  const endpoint = repos.agentEndpoints.getByAgent(agentId);
+  if (endpoint === undefined) throw new Error(`Agent ${agentId} has no registered endpoint.`);
+  repos.agentEndpoints.heartbeatReceiver(endpoint.endpointId, receiverExpiry(interval));
+}
 
 /**
  * Advertise that `agentId` can receive messages by draining them from inside
@@ -45,9 +58,11 @@ export function registerPullEndpoint(
   ensureAgentRegistered(repos, { agentId, kind: provider }, process.cwd());
   const existing = repos.agentEndpoints.getByAgent(agentId);
   const preservePush = existing?.transport === 'local-ipc' && existing.status === 'connected';
-  const capabilities = preservePush
-    ? [...new Set([...existing.capabilities, ...encodeCapabilities(capability)])]
-    : encodeCapabilities(capability);
+  const preserveReceiver = effectiveEndpointCapabilities(existing, now).includes('idle');
+  const capabilities =
+    preservePush || preserveReceiver
+      ? [...new Set([...(existing?.capabilities ?? []), ...encodeCapabilities(capability)])]
+      : encodeCapabilities(capability);
   repos.agentEndpoints.upsert({
     endpointId: existing?.endpointId ?? randomUUID(),
     agentId,
@@ -124,6 +139,8 @@ export async function watchInbox(
       process.off('SIGTERM', stopWatching);
       try {
         registerPullEndpoint(repos, agentId, provider);
+        const endpoint = repos.agentEndpoints.getByAgent(agentId);
+        if (endpoint !== undefined) repos.agentEndpoints.clearReceiver(endpoint.endpointId);
       } catch (registrationError) {
         if (error === undefined) error = registrationError;
       }
@@ -134,6 +151,7 @@ export async function watchInbox(
       let messages: DeliverableMessage[];
       try {
         messages = drainInbox(repos, agentId, provider, monitorCapability);
+        heartbeatReceiver(repos, agentId, interval);
       } catch (error) {
         // A monitor is the session's live receive endpoint. Transient SQLite
         // contention must delay a poll, never tear that endpoint down.
@@ -283,7 +301,14 @@ export function registerInboxCommand(program: Command): void {
         kind: options.provider,
         ...(options.fromHook === true ? { hookPayload: readHookPayload() ?? '' } : {}),
       });
-      const messages = drainInbox(context.repos, agentId, options.provider);
+      const isMonitor = options.format === 'monitor';
+      const messages = drainInbox(
+        context.repos,
+        agentId,
+        options.provider,
+        isMonitor ? monitorCapabilityFor(options.provider) : capabilityFor(options.provider),
+      );
+      if (isMonitor) heartbeatReceiver(context.repos, agentId, 2_000);
       // Silence matters: a hook that prints on an empty inbox would inject
       // noise into the session on every single tool call.
       if (messages.length === 0) return;

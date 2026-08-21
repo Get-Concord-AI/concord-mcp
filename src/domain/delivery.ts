@@ -79,3 +79,38 @@ export function deliveryOutlook(capabilities: readonly string[]): string {
 export function supportsImmediateDelivery(capabilities: readonly string[]): boolean {
   return capabilities.includes('inject') || capabilities.includes('steer');
 }
+
+/** The small part of an endpoint needed to derive honest receive capability. */
+export interface ReceiverEndpoint {
+  transport: string;
+  capabilities: readonly string[];
+  status: string;
+  expiresAt: string | null;
+  receiverExpiresAt: string | null;
+}
+
+/** Whether something is presently able to wake this endpoint while it is idle. */
+export function receiverActive(endpoint: ReceiverEndpoint | undefined, now = Date.now()): boolean {
+  if (
+    endpoint?.status !== 'connected' ||
+    (!endpoint.capabilities.includes('idle') && !endpoint.capabilities.includes('inject'))
+  ) {
+    return false;
+  }
+  if (endpoint.transport !== 'pull') {
+    return endpoint.expiresAt === null || Date.parse(endpoint.expiresAt) > now;
+  }
+  return endpoint.receiverExpiresAt !== null && Date.parse(endpoint.receiverExpiresAt) > now;
+}
+
+/** Strip idle-only promises when the process that fulfils them is not alive. */
+export function effectiveEndpointCapabilities(
+  endpoint: ReceiverEndpoint | undefined,
+  now = Date.now(),
+): string[] {
+  if (endpoint === undefined) return [];
+  if (receiverActive(endpoint, now)) return [...endpoint.capabilities];
+  return endpoint.capabilities.filter(
+    (capability) => capability !== 'idle' && capability !== 'inject',
+  );
+}

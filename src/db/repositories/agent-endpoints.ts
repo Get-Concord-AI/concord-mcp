@@ -26,6 +26,8 @@ export interface AgentEndpointRepository {
   getByAgent(agentId: string): AgentEndpointRecord | undefined;
   list(): AgentEndpointRecord[];
   heartbeat(endpointId: string, expiresAt?: string | null): AgentEndpointRecord | undefined;
+  heartbeatReceiver(endpointId: string, expiresAt: string): AgentEndpointRecord | undefined;
+  clearReceiver(endpointId: string): AgentEndpointRecord | undefined;
   disconnect(endpointId: string): AgentEndpointRecord | undefined;
 }
 
@@ -63,6 +65,16 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
   const disconnectStmt = db.prepare(`
     UPDATE agent_endpoints
     SET status = 'disconnected', updated_at = @now
+    WHERE endpoint_id = @endpoint_id
+  `);
+  const heartbeatReceiverStmt = db.prepare(`
+    UPDATE agent_endpoints
+    SET receiver_expires_at = @receiver_expires_at, updated_at = @now
+    WHERE endpoint_id = @endpoint_id
+  `);
+  const clearReceiverStmt = db.prepare(`
+    UPDATE agent_endpoints
+    SET receiver_expires_at = NULL, updated_at = @now
     WHERE endpoint_id = @endpoint_id
   `);
 
@@ -109,6 +121,18 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
         expires_at: expiresAt,
         now: new Date().toISOString(),
       });
+      return get(endpointId);
+    },
+    heartbeatReceiver(endpointId, expiresAt) {
+      heartbeatReceiverStmt.run({
+        endpoint_id: endpointId,
+        receiver_expires_at: expiresAt,
+        now: new Date().toISOString(),
+      });
+      return get(endpointId);
+    },
+    clearReceiver(endpointId) {
+      clearReceiverStmt.run({ endpoint_id: endpointId, now: new Date().toISOString() });
       return get(endpointId);
     },
     disconnect(endpointId) {

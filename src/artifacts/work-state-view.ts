@@ -1,6 +1,7 @@
 import { dirname } from 'node:path';
 
 import type { Repositories, TaskRecord } from '../db/index.js';
+import { effectiveEndpointCapabilities } from '../domain/delivery.js';
 import { detectOverlaps } from '../domain/overlap.js';
 import { endpointPromptable } from '../tools/agent-messages.js';
 import {
@@ -141,7 +142,7 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
         agentId: agent.agentId,
         promptable: endpointPromptable(endpoint, now),
         provider: endpoint?.provider ?? null,
-        capabilities: endpoint?.capabilities ?? [],
+        capabilities: effectiveEndpointCapabilities(endpoint, now),
       };
     }),
   };
