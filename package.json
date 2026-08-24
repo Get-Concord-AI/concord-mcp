@@ -1,7 +1,8 @@
 {
   "name": "@concord-ai/concord-mcp",
-  "version": "0.10.0",
-  "description": "Shared work-state and task memory for coding agents: coordinate work, preserve decisions, and hand off through MCP.",
+  "version": "0.10.1",
+  "description": "Cross-harness communication and shared work-state for coding agents through MCP.",
+  "mcpName": "io.github.Get-Concord-AI/concord-mcp",
   "keywords": [
     "mcp",
     "model-context-protocol",

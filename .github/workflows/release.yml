@@ -58,6 +58,17 @@ jobs:
       - name: Publish
         run: npm publish --access public
 
+      - name: Install MCP Registry publisher
+        run: |
+          curl -fsSL \
+            "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" \
+            | tar xz mcp-publisher
+
+      - name: Publish to the MCP Registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
