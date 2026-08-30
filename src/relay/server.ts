@@ -93,6 +93,16 @@ function authenticated(supplied: string, expected: string): boolean {
   );
 }
 
+/** Deterministically spread relay heartbeat phases across one interval. */
+export function relayHeartbeatPhaseDelay(endpointId: string, intervalMs: number): number {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < endpointId.length; index += 1) {
+    hash ^= endpointId.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return Math.floor(((hash >>> 0) / 0x1_0000_0000) * intervalMs);
+}
+
 /** Host a one-frame, local-only delivery endpoint owned by one live session. */
 export async function startAgentRelay(
   options: AgentRelayServerOptions,
@@ -194,21 +204,30 @@ export async function startAgentRelay(
     });
   };
   storeEndpoint();
-  const heartbeat = setInterval(
+
+  const heartbeatIntervalMs = Math.max(1_000, Math.floor(ttlMs / 3));
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  const heartbeatOnce = (): void => {
+    if (closed) return;
+    const current = options.repos.agentEndpoints.getByAgent(options.agentId);
+    if (current?.endpointId !== endpointId) {
+      if (heartbeat !== undefined) clearInterval(heartbeat);
+      closed = true;
+      server.close();
+      return;
+    }
+    storeEndpoint();
+  };
+  const heartbeatStarter = setTimeout(
     () => {
+      heartbeatOnce();
       if (closed) return;
-      const current = options.repos.agentEndpoints.getByAgent(options.agentId);
-      if (current?.endpointId !== endpointId) {
-        clearInterval(heartbeat);
-        closed = true;
-        server.close();
-        return;
-      }
-      storeEndpoint();
+      heartbeat = setInterval(heartbeatOnce, heartbeatIntervalMs);
+      heartbeat.unref();
     },
-    Math.max(1_000, Math.floor(ttlMs / 3)),
+    relayHeartbeatPhaseDelay(endpointId, heartbeatIntervalMs),
   );
-  heartbeat.unref();
+  heartbeatStarter.unref();
 
   return {
     endpointId,
@@ -216,7 +235,8 @@ export async function startAgentRelay(
     close: async () => {
       if (closed) return;
       closed = true;
-      clearInterval(heartbeat);
+      clearTimeout(heartbeatStarter);
+      if (heartbeat !== undefined) clearInterval(heartbeat);
       const current = options.repos.agentEndpoints.getByAgent(options.agentId);
       const ownsAddress = current?.endpointId === endpointId;
       if (ownsAddress) options.repos.agentEndpoints.disconnect(endpointId);

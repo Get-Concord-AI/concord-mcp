@@ -8,7 +8,11 @@ import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { relayAddress } from '../../src/relay/address.js';
 import { CodexAppServerAdapter } from '../../src/relay/adapters.js';
-import { startAgentRelay, type AgentSessionDelivery } from '../../src/relay/server.js';
+import {
+  relayHeartbeatPhaseDelay,
+  startAgentRelay,
+  type AgentSessionDelivery,
+} from '../../src/relay/server.js';
 import { SocketAgentMessageDispatcher } from '../../src/relay/socket-dispatcher.js';
 import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 import { handleSendAgentMessageWithDelivery } from '../../src/tools/agent-messages.js';
@@ -27,6 +31,20 @@ function register(repos: Repositories, agentId: string): void {
     status: 'active',
   });
 }
+
+describe('relay heartbeat phase spreading', () => {
+  it('is deterministic, bounded, and separates endpoint phases', () => {
+    const intervalMs = 5_000;
+    const endpointIds = ['endpoint-a', 'endpoint-b', 'endpoint-c', 'endpoint-d'];
+    const delays = endpointIds.map((endpointId) =>
+      relayHeartbeatPhaseDelay(endpointId, intervalMs),
+    );
+
+    expect(relayHeartbeatPhaseDelay('endpoint-a', intervalMs)).toBe(delays[0]);
+    expect(delays.every((delay) => delay >= 0 && delay < intervalMs)).toBe(true);
+    expect(new Set(delays).size).toBeGreaterThan(2);
+  });
+});
 
 describe('local IPC relay', () => {
   let repos: Repositories;
