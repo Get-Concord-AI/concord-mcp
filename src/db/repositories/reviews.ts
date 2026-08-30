@@ -25,9 +25,11 @@ export interface ReviewRepository {
   create(review: NewReview): ReviewRecord;
   listByTask(taskId: string): ReviewRecord[];
   latestForTask(taskId: string): ReviewRecord | undefined;
+  latestForTasks(taskIds: readonly string[]): ReviewRecord[];
 }
 
 const rawListSchema = z.array(z.unknown());
+const REVIEW_QUERY_CHUNK_SIZE = 500;
 
 export function createReviewRepository(db: ConcordDatabase): ReviewRepository {
   const insertStmt = db.prepare(`
@@ -76,6 +78,31 @@ export function createReviewRepository(db: ConcordDatabase): ReviewRepository {
         return undefined;
       }
       return parseReviewRow(raw);
+    },
+    latestForTasks(taskIds) {
+      if (taskIds.length === 0) return [];
+      const uniqueTaskIds = [...new Set(taskIds)];
+      const reviews: ReviewRecord[] = [];
+
+      for (let offset = 0; offset < uniqueTaskIds.length; offset += REVIEW_QUERY_CHUNK_SIZE) {
+        const chunk = uniqueTaskIds.slice(offset, offset + REVIEW_QUERY_CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(', ');
+        const raw: unknown = db
+          .prepare(
+            `SELECT r.*
+             FROM reviews r
+             JOIN (
+               SELECT task_id, MAX(id) AS id
+               FROM reviews
+               WHERE task_id IN (${placeholders})
+               GROUP BY task_id
+             ) latest ON latest.id = r.id`,
+          )
+          .all(...chunk);
+        reviews.push(...rawListSchema.parse(raw).map(parseReviewRow));
+      }
+
+      return reviews.sort((a, b) => a.taskId.localeCompare(b.taskId));
     },
   };
 }

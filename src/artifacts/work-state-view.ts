@@ -1,6 +1,6 @@
 import { dirname } from 'node:path';
 
-import type { Repositories, TaskRecord } from '../db/index.js';
+import type { Repositories, TaskRecord, TaskStatus } from '../db/index.js';
 import { effectiveEndpointCapabilities } from '../domain/delivery.js';
 import { detectOverlaps } from '../domain/overlap.js';
 import { endpointPromptable } from '../tools/agent-messages.js';
@@ -67,6 +67,17 @@ export interface StatusView {
   communications: CommunicationEntry[];
 }
 
+const ACTIVE_STATUSES = [
+  'assigned',
+  'active',
+  'blocked',
+  'handoff_offered',
+] as const satisfies readonly TaskStatus[];
+const STATUS_VIEW_STATUSES = [
+  ...ACTIVE_STATUSES,
+  'review_ready',
+] as const satisfies readonly TaskStatus[];
+
 function touchesOf(task: TaskRecord): string {
   const values = task.modules.length > 0 ? task.modules : task.expectedFiles.map((f) => dirname(f));
   const unique = [...new Set(values.filter((v) => v !== '.' && v !== ''))];
@@ -74,12 +85,14 @@ function touchesOf(task: TaskRecord): string {
 }
 
 export function buildStatus(repos: Repositories, now: number = Date.now()): StatusView {
-  const tasks = repos.tasks.list();
+  // Status only renders active/review-ready tasks. Keep historical completed/closed
+  // rows out of the hot path so long-lived workspaces do not pay to parse them.
+  const tasks = repos.tasks.listByStatuses(STATUS_VIEW_STATUSES);
   const agents = repos.agents.list();
   const endpointsByAgent = new Map(
     repos.agentEndpoints.list().map((endpoint) => [endpoint.agentId, endpoint] as const),
   );
-  const activeStatuses = new Set(['assigned', 'active', 'blocked', 'handoff_offered']);
+  const activeStatuses = new Set<TaskStatus>(ACTIVE_STATUSES);
   const active = tasks.filter((task) => activeStatuses.has(task.status));
 
   const overlaps: OverlapPair[] = [];
@@ -104,10 +117,16 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
     }
   }
 
+  const reviewTasks = tasks.filter((task) => task.status === 'review_ready');
+  const latestReviews = new Map(
+    repos.reviews
+      .latestForTasks(reviewTasks.map((task) => task.taskId))
+      .map((review) => [review.taskId, review] as const),
+  );
   const reviewReady: ReviewEntry[] = [];
   const openQuestions: OpenQuestionEntry[] = [];
-  for (const task of tasks.filter((t) => t.status === 'review_ready')) {
-    const review = repos.reviews.latestForTask(task.taskId);
+  for (const task of reviewTasks) {
+    const review = latestReviews.get(task.taskId);
     if (review === undefined) {
       continue;
     }
@@ -139,7 +158,7 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
     reviewReady,
     openQuestions,
     presence: buildRoster(agents, now),
-    staleClaims: detectStaleClaims(tasks, agents, now),
+    staleClaims: detectStaleClaims(active, agents, now),
     communications: agents.map((agent) => {
       const endpoint = endpointsByAgent.get(agent.agentId);
       return {
