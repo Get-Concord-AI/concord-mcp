@@ -13,7 +13,7 @@ describe('openDatabase', () => {
   it('applies all migrations (user_version at head) and creates tables', () => {
     const db = openDatabase(':memory:');
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(10);
+    expect(version).toBe(11);
 
     const raw: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     const names = new Set(
@@ -32,6 +32,18 @@ describe('openDatabase', () => {
     expect(names.has('agent_endpoints')).toBe(true);
     expect(names.has('agent_messages')).toBe(true);
     expect(names.has('agent_message_events')).toBe(true);
+  });
+
+  it('adds an index tailored to pending recipient drains', () => {
+    const db = openDatabase(':memory:');
+    const raw: unknown = db.pragma('index_info(idx_agent_messages_pending_recipient)');
+    const columns = z
+      .array(z.object({ seqno: z.number(), cid: z.number(), name: z.string() }))
+      .parse(raw)
+      .sort((a, b) => a.seqno - b.seqno)
+      .map((entry) => entry.name);
+
+    expect(columns).toEqual(['recipient_agent_id', 'status', 'created_at', 'message_id']);
   });
 
   it('upgrades a version-6 database without losing legacy task ownership', () => {
@@ -73,7 +85,7 @@ describe('openDatabase', () => {
     const task = parseTaskRow(
       upgraded.prepare('SELECT * FROM tasks WHERE task_id = ?').get('LEGACY'),
     );
-    expect(upgraded.pragma('user_version', { simple: true })).toBe(10);
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(11);
     expect(task.status).toBe('handed_off');
     expect(task.agentId).toBe('codex:old');
     expect(task.version).toBe(1);

@@ -62,7 +62,7 @@ describe('migrations', () => {
   it('is idempotent when reopening (user_version already at head)', () => {
     const { db } = newRepos();
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(10);
+    expect(version).toBe(11);
   });
 });
 
