@@ -32,6 +32,8 @@ export interface ServerOptions {
   getAvailableUpdate?: () => AvailableUpdate | undefined;
   /** Receives whitelisted, content-free results from workflow handlers. */
   telemetry?: TelemetryRecorder;
+  /** Owner recorded for registrations/claims that do not name one. */
+  defaultOwner?: string | null;
 }
 
 /**
@@ -63,6 +65,7 @@ export function createServer(repos: Repositories, options: ServerOptions = {}): 
     options.getAvailableUpdate,
     undefined,
     options.telemetry,
+    options.defaultOwner ?? null,
   );
   return server;
 }

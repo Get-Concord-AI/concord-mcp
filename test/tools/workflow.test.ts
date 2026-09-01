@@ -9,7 +9,7 @@ import { drainInbox, registerPullEndpoint } from '../../src/cli/commands/inbox.j
 import type { AvailableUpdate } from '../../src/update-notifier.js';
 import { resolveIdentity, type AgentIdentity } from '../../src/domain/identity.js';
 import type { SemanticTelemetryEvent, TelemetryRecorder } from '../../src/telemetry/events.js';
-import { PUBLIC_WORKFLOW_TOOLS } from '../../src/tools/workflow.js';
+import { handleStartWork, PUBLIC_WORKFLOW_TOOLS } from '../../src/tools/workflow.js';
 
 interface Harness {
   client: Client;
@@ -938,5 +938,46 @@ describe('one identity per session', () => {
     } finally {
       await close(harness);
     }
+  });
+});
+
+describe('start_work owner defaulting', () => {
+  it('records the workspace default owner when the call names none', () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    const result = handleStartWork(
+      repos,
+      { task_id: 'TASK-DEFAULT', title: 'Ownerless call', kind: 'claude-code', agent_id: 'claude:s1' },
+      'alex',
+    );
+    expect(result.claim.task.owner).toBe('alex');
+    expect(repos.agents.get('claude:s1')?.owner).toBe('alex');
+  });
+
+  it('lets an explicit owner override the workspace default', () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    const result = handleStartWork(
+      repos,
+      {
+        task_id: 'TASK-EXPLICIT',
+        title: 'Named owner',
+        kind: 'claude-code',
+        agent_id: 'claude:s2',
+        owner: 'sam',
+      },
+      'alex',
+    );
+    expect(result.claim.task.owner).toBe('sam');
+    expect(repos.agents.get('claude:s2')?.owner).toBe('sam');
+  });
+
+  it('still records null when no default resolves', () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    const result = handleStartWork(repos, {
+      task_id: 'TASK-NONE',
+      title: 'No owner anywhere',
+      kind: 'claude-code',
+      agent_id: 'claude:s3',
+    });
+    expect(result.claim.task.owner).toBeNull();
   });
 });

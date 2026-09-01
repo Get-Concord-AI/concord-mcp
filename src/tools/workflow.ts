@@ -90,11 +90,19 @@ function taskOrThrow(repos: Repositories, taskId: string): TaskRecord {
  * operation. Existing assignments, addressed handoffs, proposed tasks, and
  * terminal tasks are resumed through the same proven lifecycle handlers.
  */
-function startWork(repos: Repositories, input: WithActor<StartWorkInput>): StartWorkResult {
+function startWork(
+  repos: Repositories,
+  input: WithActor<StartWorkInput>,
+  defaultOwner: string | null = null,
+): StartWorkResult {
+  // An ownerless task loses its only supervisor when its session ends (see
+  // isHumanSupervisor in task-lifecycle.ts), so a missing owner falls back to
+  // the workspace default resolved at server startup.
+  const owner = input.owner ?? defaultOwner ?? undefined;
   const registration = handleRegisterAgent(repos, {
     agent_id: input.agent_id,
     kind: input.kind,
-    owner: input.owner,
+    owner,
     model: input.model,
     summary: input.summary ?? input.title,
     status: 'active',
@@ -165,7 +173,7 @@ function startWork(repos: Repositories, input: WithActor<StartWorkInput>): Start
   const claim = handleClaimWork(repos, {
     task_id: input.task_id,
     title: input.title,
-    owner: input.owner,
+    owner,
     agent: input.kind,
     agent_id: agentId,
     branch: input.branch,
@@ -184,8 +192,9 @@ function startWork(repos: Repositories, input: WithActor<StartWorkInput>): Start
 export function handleStartWork(
   repos: Repositories,
   input: WithActor<StartWorkInput>,
+  defaultOwner: string | null = null,
 ): StartWorkResult {
-  const transact = repos.db.transaction(() => startWork(repos, input));
+  const transact = repos.db.transaction(() => startWork(repos, input, defaultOwner));
   return transact();
 }
 
@@ -444,6 +453,7 @@ export function registerWorkflowTools(
   getAvailableUpdate?: () => AvailableUpdate | undefined,
   dispatcher: AgentMessageDispatcher = new SocketAgentMessageDispatcher(),
   telemetry?: TelemetryRecorder,
+  defaultOwner: string | null = null,
 ): void {
   interface WorkflowToolResponse {
     content: { type: 'text'; text: string }[];
@@ -563,10 +573,14 @@ export function registerWorkflowTools(
       // The session's kind wins alongside its id: the id embeds the kind, so
       // registering under a different one would describe an agent that is not
       // the one being addressed.
-      const result = handleStartWork(repos, {
-        ...withActor(args),
-        kind: session?.kind ?? args.kind,
-      });
+      const result = handleStartWork(
+        repos,
+        {
+          ...withActor(args),
+          kind: session?.kind ?? args.kind,
+        },
+        defaultOwner,
+      );
       const startedTaskFlowId = taskFlowId(result.claim.task.taskId);
       if (startedTaskFlowId !== undefined) {
         telemetry?.recordEvent({

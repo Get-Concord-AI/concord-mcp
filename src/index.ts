@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
 import { writeArtifacts } from './artifacts/index.js';
 import { startBackgroundUpdateCheck } from './update-notifier.js';
+import { resolveDefaultOwner } from './config/default-owner.js';
 import { resolveRepoRoot } from './config/paths.js';
 import { resolveIdentity } from './domain/identity.js';
 import { createServer } from './server.js';
@@ -28,8 +29,10 @@ async function main(): Promise<void> {
     workspaceRoot: () => workspaceManager.current().repoRoot,
     recordSessionStarted: true,
   });
+  const defaultOwner = resolveDefaultOwner(process.env, repoRoot);
   const server = createServer(workspaceManager.current().repos, {
     workspaceManager,
+    defaultOwner,
     ...(identity === undefined ? {} : { identity }),
     getAvailableUpdate: updateCheck.getAvailableUpdate,
     ...(telemetry === undefined ? {} : { telemetry }),

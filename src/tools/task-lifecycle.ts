@@ -6,6 +6,7 @@ import type {
   TaskStatus,
   ToolName,
 } from '../db/index.js';
+import { deriveLiveness } from '../domain/presence.js';
 import type {
   AcceptTaskInput,
   AssignTaskInput,
@@ -56,6 +57,28 @@ function taskAtVersion(repos: Repositories, taskId: string, expectedVersion: num
 
 function isHumanSupervisor(actor: AgentRecord, task: TaskRecord): boolean {
   return actor.owner !== null && task.owner !== null && actor.owner === task.owner;
+}
+
+/**
+ * An ownerless task whose claiming agent has gone away is orphaned: no human
+ * owner exists to arbitrate, and the only identity allowed to touch it can
+ * never return (session-derived agent ids are minted per session). Without a
+ * rescue path such tasks are permanently stuck. Rescue is deliberately narrow:
+ * only for tasks with no `owner`, only once the claimant's derived liveness has
+ * decayed past `idle`, and only for an actor registered to a human owner —
+ * anonymous agents cannot scoop orphans, and owner arbitration for owned tasks
+ * is unchanged.
+ */
+function isOrphanedClaim(repos: Repositories, task: TaskRecord, now: number): boolean {
+  if (task.owner !== null || task.agentId === null) {
+    return false;
+  }
+  const claimant = repos.agents.get(task.agentId);
+  if (claimant === undefined) {
+    return true;
+  }
+  const liveness = deriveLiveness(claimant.lastSeen, now);
+  return liveness === 'away' || liveness === 'archived';
 }
 
 function requireOwner(task: TaskRecord, actor: AgentRecord): void {
@@ -209,9 +232,10 @@ export function handleReassignTask(
   registeredAgent(repos, input.to_agent_id);
   const task = taskAtVersion(repos, input.task_id, input.expected_version);
   if (task.agentId !== actor.agentId) {
-    if (input.force !== true || !isHumanSupervisor(actor, task)) {
+    const orphanRescue = actor.owner !== null && isOrphanedClaim(repos, task, now);
+    if (input.force !== true || (!isHumanSupervisor(actor, task) && !orphanRescue)) {
       throw new Error(
-        `Only the current owner or a registered agent for human owner ${task.owner ?? '(none)'} can force-reassign ${task.taskId}.`,
+        `Only the current owner, a registered agent for human owner ${task.owner ?? '(none)'}, or — for an ownerless task whose claiming agent is gone — an owner-registered agent with force=true can reassign ${task.taskId}.`,
       );
     }
   }
@@ -246,13 +270,23 @@ export function handleCloseTask(repos: Repositories, input: CloseTaskInput): Tas
   });
 }
 
-export function handleReopenTask(repos: Repositories, input: ReopenTaskInput): TaskLifecycleResult {
+export function handleReopenTask(
+  repos: Repositories,
+  input: ReopenTaskInput,
+  now: number = Date.now(),
+): TaskLifecycleResult {
   const actor = registeredAgent(repos, input.agent_id);
   const task = taskAtVersion(repos, input.task_id, input.expected_version);
   if (!['closed', 'complete', 'handed_off', 'review_ready'].includes(task.status)) {
     throw new Error(`Task ${task.taskId} is ${task.status}, not a terminal/review state.`);
   }
-  if (task.agentId !== null && task.agentId !== actor.agentId && !isHumanSupervisor(actor, task)) {
+  const orphanRescue = actor.owner !== null && isOrphanedClaim(repos, task, now);
+  if (
+    task.agentId !== null &&
+    task.agentId !== actor.agentId &&
+    !isHumanSupervisor(actor, task) &&
+    !orphanRescue
+  ) {
     throw new Error(`Agent ${actor.agentId} cannot reopen ${task.taskId}.`);
   }
   return applyTransition(repos, {

@@ -236,3 +236,131 @@ describe('versioned task lifecycle', () => {
     expect(completed.task.status).toBe('complete');
   });
 });
+
+describe('orphaned ownerless claims', () => {
+  const THIRTY_ONE_MINUTES = 31 * 60 * 1000;
+  let repos: Repositories;
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    // A session that claimed work without ever naming a human owner, then died.
+    handleRegisterAgent(repos, { agent_id: 'opencode:ghost', kind: 'opencode' });
+    handleRegisterAgent(repos, { agent_id: 'claude:rescuer', kind: 'claude-code', owner: 'alex' });
+    handleRegisterAgent(repos, { agent_id: 'codex:anonymous', kind: 'codex' });
+    handleClaimWork(repos, { task_id: 'TASK-GHOST', title: 'Orphaned', agent_id: 'opencode:ghost' });
+  });
+
+  it('lets an owner-registered agent force-take an ownerless task once its claimant is away', () => {
+    const rescued = handleReassignTask(
+      repos,
+      {
+        task_id: 'TASK-GHOST',
+        to_agent_id: 'claude:rescuer',
+        agent_id: 'claude:rescuer',
+        expected_version: 1,
+        force: true,
+        reason: 'claimant session ended',
+      },
+      Date.now() + THIRTY_ONE_MINUTES,
+    );
+    expect(rescued.task.status).toBe('assigned');
+    expect(rescued.task.assignedAgentId).toBe('claude:rescuer');
+    expect(
+      repos.ownershipEvents.listByTask('TASK-GHOST').map((event) => event.transition),
+    ).toContain('force_reassign');
+  });
+
+  it('still refuses while the ownerless claimant is live', () => {
+    expect(() =>
+      handleReassignTask(repos, {
+        task_id: 'TASK-GHOST',
+        to_agent_id: 'claude:rescuer',
+        agent_id: 'claude:rescuer',
+        expected_version: 1,
+        force: true,
+        reason: 'too eager',
+      }),
+    ).toThrow(/can (?:force-)?reassign/);
+  });
+
+  it('refuses rescue by an agent with no registered human owner', () => {
+    expect(() =>
+      handleReassignTask(
+        repos,
+        {
+          task_id: 'TASK-GHOST',
+          to_agent_id: 'codex:anonymous',
+          agent_id: 'codex:anonymous',
+          expected_version: 1,
+          force: true,
+          reason: 'anonymous scoop',
+        },
+        Date.now() + THIRTY_ONE_MINUTES,
+      ),
+    ).toThrow(/can (?:force-)?reassign/);
+  });
+
+  it('never widens takeover of a task that names a different human owner', () => {
+    handleRegisterAgent(repos, { agent_id: 'opencode:sams', kind: 'opencode', owner: 'sam' });
+    handleClaimWork(repos, {
+      task_id: 'TASK-SAM',
+      title: 'Owned by sam',
+      owner: 'sam',
+      agent_id: 'opencode:sams',
+    });
+    expect(() =>
+      handleReassignTask(
+        repos,
+        {
+          task_id: 'TASK-SAM',
+          to_agent_id: 'claude:rescuer',
+          agent_id: 'claude:rescuer',
+          expected_version: 1,
+          force: true,
+          reason: 'not my task',
+        },
+        Date.now() + THIRTY_ONE_MINUTES,
+      ),
+    ).toThrow(/can (?:force-)?reassign/);
+  });
+
+  it('lets an owner-registered agent reopen an ownerless terminal task once its claimant is away', () => {
+    const closed = handleCloseTask(repos, {
+      task_id: 'TASK-GHOST',
+      agent_id: 'opencode:ghost',
+      expected_version: 1,
+      reason: 'done',
+      outcome: 'complete',
+    });
+    const reopened = handleReopenTask(
+      repos,
+      {
+        task_id: 'TASK-GHOST',
+        agent_id: 'claude:rescuer',
+        expected_version: closed.task.version,
+        reason: 'closure record incomplete',
+      },
+      Date.now() + THIRTY_ONE_MINUTES,
+    );
+    expect(reopened.task.status).toBe('active');
+    expect(reopened.task.agentId).toBe('claude:rescuer');
+  });
+
+  it('still refuses reopen of an ownerless terminal task while its claimant is live', () => {
+    const closed = handleCloseTask(repos, {
+      task_id: 'TASK-GHOST',
+      agent_id: 'opencode:ghost',
+      expected_version: 1,
+      reason: 'done',
+      outcome: 'complete',
+    });
+    expect(() =>
+      handleReopenTask(repos, {
+        task_id: 'TASK-GHOST',
+        agent_id: 'claude:rescuer',
+        expected_version: closed.task.version,
+        reason: 'too eager',
+      }),
+    ).toThrow(/cannot reopen/);
+  });
+});
