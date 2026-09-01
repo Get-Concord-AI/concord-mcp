@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Ownerless tasks are no longer permanently stranded when their claiming
+  session ends: an owner-registered agent may now `force`-reassign or reopen an
+  ownerless task once the claimant's derived liveness decays past idle.
+  Owned tasks keep strict same-owner arbitration; live claims and rescuers
+  without a registered human owner are still refused.
+- `start_work` calls that name no `owner` now default it from
+  `CONCORD_DEFAULT_OWNER`, else the repository's `git config user.name`, so new
+  tasks are no longer created ownerless. An explicit `owner` always wins.
+
 ## [0.10.3] - 2026-08-25
 
 ### Added
