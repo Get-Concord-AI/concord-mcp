@@ -3,7 +3,7 @@
   "name": "io.github.Get-Concord-AI/concord-mcp",
   "title": "Concord MCP",
   "description": "Cross-harness communication and shared work-state for AI coding agents.",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "websiteUrl": "https://getconcord.ai",
   "repository": {
     "url": "https://github.com/Get-Concord-AI/concord-mcp",
@@ -14,7 +14,7 @@
     {
       "registryType": "npm",
       "identifier": "@concord-ai/concord-mcp",
-      "version": "0.10.3",
+      "version": "0.10.4",
       "transport": {
         "type": "stdio"
       }
