@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      resume_version:
+        description: Existing npm version whose downstream release steps should resume
+        required: true
+        type: string
 
 # Tokenless publishing via npm Trusted Publishing (OIDC). No NPM_TOKEN secret is
 # used; npm authenticates the workflow through GitHub's OIDC provider. Requires a
@@ -36,6 +42,26 @@ jobs:
           node-version: '24'
           cache: pnpm
 
+      - name: Resolve release metadata
+        id: release
+        env:
+          RESUME_VERSION: ${{ inputs.resume_version }}
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" != "v${package_version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${package_version}" >&2
+            exit 1
+          fi
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${RESUME_VERSION}" != "${package_version}" ]]; then
+            echo "Requested version ${RESUME_VERSION} does not match package version ${package_version}" >&2
+            exit 1
+          fi
+
+          echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${package_version}" >> "${GITHUB_OUTPUT}"
+
       # Trusted publishing needs npm >= 11.5.1.
       - name: Update npm
         run: |
@@ -56,7 +82,28 @@ jobs:
       # Provenance is generated automatically under OIDC; no --provenance flag,
       # no NODE_AUTH_TOKEN.
       - name: Publish
+        if: github.event_name == 'push'
         run: npm publish --access public
+
+      # npm can accept a publish before the new version is visible to registry
+      # consumers. The MCP Registry validates against npm, so wait for that
+      # propagation instead of racing it immediately after publish.
+      - name: Wait for npm package visibility
+        env:
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+        run: |
+          for attempt in {1..30}; do
+            if npm view "@concord-ai/concord-mcp@${PACKAGE_VERSION}" version --prefer-online >/dev/null 2>&1; then
+              echo "@concord-ai/concord-mcp@${PACKAGE_VERSION} is visible on npm"
+              exit 0
+            fi
+
+            echo "Waiting for npm propagation (${attempt}/30)"
+            sleep 10
+          done
+
+          echo "npm version ${PACKAGE_VERSION} was not visible after 5 minutes" >&2
+          exit 1
 
       - name: Install MCP Registry publisher
         run: |
@@ -72,4 +119,5 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ steps.release.outputs.tag }}
           generate_release_notes: true
