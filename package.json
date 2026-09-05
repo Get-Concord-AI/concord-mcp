@@ -1,6 +1,6 @@
 {
   "name": "@concord-ai/concord-mcp",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "description": "Cross-harness communication and shared work-state for coding agents through MCP.",
   "mcpName": "io.github.Get-Concord-AI/concord-mcp",
   "keywords": [
