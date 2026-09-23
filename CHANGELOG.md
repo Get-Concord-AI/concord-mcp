@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-09-23
+
+### Changed
+
+- Draining pending agent messages now uses a dedicated
+  `(recipient_agent_id, status, created_at, message_id)` index (schema v11), so
+  inbox drains no longer scan a recipient's delivered/replied/failed history.
+  Thanks @AdrianLipa90 (#130).
+- Refreshed resolved production and development dependencies within their
+  existing declared version ranges.
+
 ## [0.10.4] - 2026-09-05
 
 ### Changed
@@ -340,7 +351,8 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.4...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.5...HEAD
+[0.10.5]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.4...v0.10.5
 [0.10.4]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.1...v0.10.2
