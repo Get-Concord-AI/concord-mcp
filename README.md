@@ -169,13 +169,14 @@ To restrict explicit workspace selection, set `CONCORD_ALLOWED_ROOTS` to a
 path-delimited list of allowed repository roots. Without an allowlist, decoded
 roots must still exist and be directories.
 
-`concord setup` adds `.concord/` to the
-repository's `.gitignore`, so the generated workspace stays local by default.
-Teams that want selected artifacts in PRs can remove that rule or force-add the
-human-readable files:
+`concord setup` writes a `.concord/.gitignore` containing `*`, so the generated
+workspace ignores itself and stays local without editing the repository's shared
+`.gitignore`. Teams that want selected artifacts in PRs can add negation rules to
+that file (setup never overwrites it) or force-add the human-readable files:
 
 ```text
 .concord/
+├── .gitignore          ignores the whole directory
 ├── concord.db          local source of truth
 ├── HANDOFF.md          human-readable handoff
 ├── REVIEW_PACKET.md    review-ready evidence

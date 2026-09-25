@@ -51,22 +51,27 @@ describe('runSetup', () => {
     expect(result.concordPath).toBe(join(dir, '.concord'));
     expect(existsSync(join(result.concordPath, 'concord.db'))).toBe(true);
     expect(existsSync(join(result.concordPath, 'WORK_STATE.json'))).toBe(true);
-    expect(readFileSync(join(dir, '.gitignore'), 'utf8')).toBe('.concord/\n');
+    expect(readFileSync(join(result.concordPath, '.gitignore'), 'utf8')).toContain('\n*\n');
+    expect(existsSync(join(dir, '.gitignore'))).toBe(false);
     expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('start_work');
     expect(readFileSync(join(dir, '.cursor', 'mcp.json'), 'utf8')).toContain(
       `"CONCORD_REPO_ROOT": "${dir}"`,
     );
   });
 
-  it('preserves existing gitignore rules and adds the Concord entry once', () => {
+  it('leaves the repository gitignore and a customized Concord gitignore untouched', () => {
     const dir = repoDir();
     const gitignorePath = join(dir, '.gitignore');
     writeFileSync(gitignorePath, 'node_modules/');
+    const concordIgnorePath = join(dir, '.concord', '.gitignore');
+    mkdirSync(join(dir, '.concord'));
+    writeFileSync(concordIgnorePath, '*\n!HANDOFF.md\n');
 
     runSetup(dir, { mcp: false });
     runSetup(dir, { mcp: false });
 
-    expect(readFileSync(gitignorePath, 'utf8')).toBe('node_modules/\n.concord/\n');
+    expect(readFileSync(gitignorePath, 'utf8')).toBe('node_modules/');
+    expect(readFileSync(concordIgnorePath, 'utf8')).toBe('*\n!HANDOFF.md\n');
   });
 });
 
