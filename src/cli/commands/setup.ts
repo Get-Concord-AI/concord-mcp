@@ -1,6 +1,6 @@
 import type { Command } from '@commander-js/extra-typings';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
@@ -112,13 +112,21 @@ export async function maybeUpgradeBeforeSetup(
 
 /**
  * Make `.concord/` ignore itself so setup never edits the repository's shared
- * `.gitignore`. An existing file is left alone so teams can customize it.
+ * `.gitignore`. An existing file keeps its rules so teams can add negations;
+ * setup only prepends the catch-all when it is missing, so the rules after it
+ * still re-include what they name.
  */
 export function ensureConcordIgnored(concordPath: string): void {
   const gitignorePath = join(concordPath, '.gitignore');
-  if (existsSync(gitignorePath)) return;
-  mkdirSync(concordPath, { recursive: true });
-  writeFileSync(gitignorePath, CONCORD_GITIGNORE);
+  if (!existsSync(gitignorePath)) {
+    mkdirSync(concordPath, { recursive: true });
+    writeFileSync(gitignorePath, CONCORD_GITIGNORE);
+    return;
+  }
+  const current = readFileSync(gitignorePath, 'utf8');
+  const rules = current.split(/\r?\n/u).map((line) => line.trim());
+  if (rules.includes('*')) return;
+  writeFileSync(gitignorePath, `${CONCORD_GITIGNORE}${current}`);
 }
 
 /** Set up one repository completely: state, instructions, and client registration. */

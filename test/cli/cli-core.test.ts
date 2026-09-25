@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -72,6 +73,33 @@ describe('runSetup', () => {
 
     expect(readFileSync(gitignorePath, 'utf8')).toBe('node_modules/');
     expect(readFileSync(concordIgnorePath, 'utf8')).toBe('*\n!HANDOFF.md\n');
+  });
+
+  it('prepends the catch-all to an existing Concord gitignore that lacks one', () => {
+    const dir = repoDir();
+    const concordIgnorePath = join(dir, '.concord', '.gitignore');
+    mkdirSync(join(dir, '.concord'));
+    writeFileSync(concordIgnorePath, '!HANDOFF.md\n');
+
+    runSetup(dir, { mcp: false });
+
+    const rules = readFileSync(concordIgnorePath, 'utf8').split('\n');
+    expect(rules.indexOf('*')).toBeGreaterThanOrEqual(0);
+    expect(rules.indexOf('*')).toBeLessThan(rules.indexOf('!HANDOFF.md'));
+  });
+
+  it('keeps the generated workspace untracked in a real git repository', () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'concord-git-')));
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+
+    runSetup(dir, { mcp: false });
+
+    const untracked = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], {
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    expect(untracked).not.toContain('.concord/');
+    expect(existsSync(join(dir, '.gitignore'))).toBe(false);
   });
 });
 

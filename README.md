@@ -172,7 +172,10 @@ roots must still exist and be directories.
 `concord setup` writes a `.concord/.gitignore` containing `*`, so the generated
 workspace ignores itself and stays local without editing the repository's shared
 `.gitignore`. Teams that want selected artifacts in PRs can add negation rules to
-that file (setup never overwrites it) or force-add the human-readable files:
+that file (setup keeps existing rules, only ensuring the `*` catch-all) or
+force-add the human-readable files. Repositories set up by Concord 0.10.5 or
+earlier also have a `.concord/` rule in the root `.gitignore`; remove it before
+negations in `.concord/.gitignore` can take effect.
 
 ```text
 .concord/
