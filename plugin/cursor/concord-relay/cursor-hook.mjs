@@ -33,7 +33,9 @@ function agentIdFor(session) {
 }
 
 function concordExecutable() {
-  return process.env.CONCORD_EXECUTABLE?.trim() || 'concord';
+  const overide = process.env.CONCORD_EXECUTABLE?.trim();
+  if (overide) return overide;
+  return process.platform === 'win32' ? 'concord.cmd' : 'concord';
 }
 
 function runConcord(root, args, output = false) {
@@ -43,6 +45,7 @@ function runConcord(root, args, output = false) {
     encoding: 'utf8',
     timeout: 12_000,
     windowsHide: true,
+    shell: process.platform === 'win32',
     stdio: output ? ['ignore', 'pipe', 'pipe'] : 'ignore',
   });
   if (result.error) throw result.error;

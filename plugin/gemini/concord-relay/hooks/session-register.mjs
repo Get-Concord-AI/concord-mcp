@@ -5,7 +5,9 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 function concordExecutable() {
-  return process.env.CONCORD_EXECUTABLE?.trim() || 'concord';
+  const overide = process.env.CONCORD_EXECUTABLE?.trim();
+  if (overide) return overide;
+  return process.platform === 'win32' ? 'concord.cmd' : 'concord';
 }
 
 function sessionIdFrom(payload) {
@@ -28,6 +30,7 @@ function runConcord(args, options = {}) {
     env: process.env,
     encoding: 'utf8',
     input: options.input,
+    shell: process.platform === 'win32',
   });
 }
 
