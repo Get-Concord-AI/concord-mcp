@@ -36,6 +36,18 @@ function repoDir(): string {
 }
 
 describe('runSetup', () => {
+  it.each([{ mcp: false }, { globalInstructions: false }])(
+    'can skip personal instructions with %j',
+    (options) => {
+      const dir = repoDir();
+      const home = mkdtempSync(join(tmpdir(), 'concord-personal-'));
+      runSetup(dir, { ...options, env: { HOME: home, CODEX_HOME: home } });
+      expect(existsSync(join(home, 'AGENTS.md'))).toBe(false);
+      expect(existsSync(join(home, '.claude', 'CLAUDE.md'))).toBe(false);
+      expect(existsSync(join(dir, 'AGENTS.md'))).toBe(true);
+    },
+  );
+
   it('registers one setup command without separate init/install commands', () => {
     const program = new Command();
     registerSetupCommand(program);
@@ -46,13 +58,17 @@ describe('runSetup', () => {
   it('creates state, instructions, and repository-pinned MCP configs', () => {
     const dir = repoDir();
     const codexHome = mkdtempSync(join(tmpdir(), 'concord-codex-'));
-    const result = runSetup(dir, { env: { CODEX_HOME: codexHome } });
+    const result = runSetup(dir, { env: { HOME: codexHome, CODEX_HOME: codexHome } });
 
     expect(result.concordPath).toBe(join(dir, '.concord'));
     expect(existsSync(join(result.concordPath, 'concord.db'))).toBe(true);
     expect(existsSync(join(result.concordPath, 'WORK_STATE.json'))).toBe(true);
     expect(readFileSync(join(dir, '.gitignore'), 'utf8')).toBe('.concord/\n');
     expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('start_work');
+    expect(readFileSync(join(codexHome, 'AGENTS.md'), 'utf8')).toContain(
+      'concord setup --no-global-instructions',
+    );
+    expect(result.written).toContain(join(codexHome, '.cursor', 'rules', 'concord.mdc'));
     expect(readFileSync(join(dir, '.cursor', 'mcp.json'), 'utf8')).toContain(
       `"CONCORD_REPO_ROOT": "${dir}"`,
     );

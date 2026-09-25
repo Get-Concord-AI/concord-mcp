@@ -8,6 +8,7 @@ import { writeArtifacts } from '../../artifacts/index.js';
 import { installClaudeHook } from '../../install/claude-hooks.js';
 import { installCodexMcpConfig } from '../../install/codex-config.js';
 import { installConcord } from '../../install/index.js';
+import { installGlobalInstructions } from '../../install/global-instructions.js';
 import {
   installGlobalAdapters,
   renderAdapterReport,
@@ -28,6 +29,7 @@ export interface SetupOptions {
   claudeHooks?: boolean;
   mcp?: boolean;
   adapters?: boolean;
+  globalInstructions?: boolean;
   requireAdapters?: boolean;
   env?: NodeJS.ProcessEnv;
 }
@@ -130,6 +132,9 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   writeArtifacts(ctx.concordPath, ctx.repos);
 
   const written = installConcord(ctx.repoRoot);
+  if (options.globalInstructions ?? options.mcp !== false) {
+    written.push(...installGlobalInstructions(env));
+  }
   let adapters: AdapterReport[] = [];
   if (options.claudeHooks === true) {
     written.push(installClaudeHook(ctx.repoRoot));
@@ -179,6 +184,10 @@ export function registerSetupCommand(program: Command): void {
     )
     .option('--no-mcp', 'skip MCP client registration; write local state and instructions only')
     .option('--no-adapters', 'skip global harness adapter installation')
+    .option(
+      '--no-global-instructions',
+      'skip user-level Concord instructions for future repositories',
+    )
     .option('--require-adapters', 'fail unless every detected harness adapter is ready')
     .action(async (options) => {
       try {
@@ -187,6 +196,7 @@ export function registerSetupCommand(program: Command): void {
         const setupOptions: SetupOptions = {
           mcp: options.mcp,
           adapters: options.adapters,
+          ...(!options.globalInstructions ? { globalInstructions: false } : {}),
           ...(options.requireAdapters === true ? { requireAdapters: true } : {}),
         };
         if (options.claudeHooks === true) {
