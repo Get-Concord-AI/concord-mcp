@@ -1,6 +1,6 @@
 import type { Command } from '@commander-js/extra-typings';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
@@ -118,12 +118,17 @@ export async function maybeUpgradeBeforeSetup(
  */
 export function ensureConcordIgnored(concordPath: string): void {
   const gitignorePath = join(concordPath, '.gitignore');
-  if (!existsSync(gitignorePath)) {
+  const stat = lstatSync(gitignorePath, { throwIfNoEntry: false });
+  if (!stat?.isFile()) {
+    // Replace a symlink (or other non-file) rather than writing through it,
+    // which could edit a shared, tracked ignore file elsewhere in the repo.
+    if (stat !== undefined) rmSync(gitignorePath);
     mkdirSync(concordPath, { recursive: true });
     writeFileSync(gitignorePath, CONCORD_GITIGNORE);
     return;
   }
-  const current = readFileSync(gitignorePath, 'utf8');
+  // Drop a leading byte-order mark so it cannot end up in front of a rule.
+  const current = readFileSync(gitignorePath, 'utf8').replace(/^\uFEFF/u, '');
   const rules = current.split(/\r?\n/u).map((line) => line.trim());
   if (rules.includes('*')) return;
   writeFileSync(gitignorePath, `${CONCORD_GITIGNORE}${current}`);
