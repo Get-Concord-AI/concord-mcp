@@ -491,7 +491,7 @@ function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
     detected: true,
     status: installed ? 'installed' : 'action_required',
     monitor: config.monitor.kind,
-    capabilities: installed ? [...config.installedCapabilities] : ['pull', 'idle', 'busy'],
+    capabilities: installed ? [...config.installedCapabilities] : ['pull', 'busy'],
     detail: installed
       ? config.installedDetail
       : 'Concord MCP server is not yet registered with Goose.',
@@ -586,9 +586,13 @@ export function installGlobalAdapters(
   });
 
   attempt('goose', () => {
-    if (executablePath('goose', env) !== undefined) {
-      installGooseMcpConfig(env);
+    const goose = executablePath('goose', env);
+    if (goose === undefined) return;
+    const version = versionTuple(run(goose, ['--version'], env).output);
+    if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
+      return;
     }
+    installGooseMcpConfig(env, repoRoot);
   });
 
   const report = statusGlobalAdapters(env, repoRoot).map((entry) => {

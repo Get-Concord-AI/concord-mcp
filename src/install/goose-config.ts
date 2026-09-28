@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { z } from 'zod';
 import { dump, load } from 'js-yaml';
 
 const EXTENSIONS_KEY = 'extensions';
@@ -24,18 +25,15 @@ export function gooseConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(homeFor(env), '.config', 'goose', 'config.yaml');
 }
 
-type UnknownRecord = Record<string, unknown>;
+const looseObjectSchema = z.record(z.string(), z.unknown());
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+type UnknownRecord = z.infer<typeof looseObjectSchema>;
 
 function readConfig(path: string): UnknownRecord {
   if (!existsSync(path)) return {};
   const parsed: unknown = load(readFileSync(path, 'utf8'));
   if (parsed === null || parsed === undefined) return {};
-  if (!isRecord(parsed)) throw new Error(`${path} must contain a YAML mapping.`);
-  return parsed;
+  return looseObjectSchema.parse(parsed);
 }
 
 function writeConfig(path: string, config: UnknownRecord): void {
@@ -49,19 +47,38 @@ export function gooseConfigInstalled(env: NodeJS.ProcessEnv = process.env): bool
   try {
     const config = readConfig(path);
     const extensions = config[EXTENSIONS_KEY];
-    if (!isRecord(extensions)) return false;
-    const entry = extensions[CONCORD_EXTENSION_KEY];
-    return isRecord(entry) && entry['enabled'] === true;
+    const parsedExtensions = looseObjectSchema.safeParse(extensions);
+    if (!parsedExtensions.success) return false;
+
+    const parsedEntry = looseObjectSchema.safeParse(
+      parsedExtensions.data[CONCORD_EXTENSION_KEY],
+    );
+    return parsedEntry.success && parsedEntry.data['enabled'] === true;
   } catch {
     return false;
   }
 }
 
-export function installGooseMcpConfig(env: NodeJS.ProcessEnv = process.env): void {
+export function installGooseMcpConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  repoRoot?: string,
+): void {
   const path = gooseConfigPath(env);
   const config = readConfig(path);
-  const currentExtensions = isRecord(config[EXTENSIONS_KEY]) ? config[EXTENSIONS_KEY] : {};
-  const nextExtensions: UnknownRecord = { ...currentExtensions };
+  const currentExtensions = config[EXTENSIONS_KEY];
+
+  const parsedExtensions =
+    currentExtensions === undefined
+      ? { success: true as const, data: {} }
+      : looseObjectSchema.safeParse(currentExtensions);
+
+  if (!parsedExtensions.success) {
+    throw new Error('Goose extensions configuration must be a mapping.');
+  }
+
+  const nextExtensions: UnknownRecord = {
+    ...parsedExtensions.data,
+  };
 
   nextExtensions[CONCORD_EXTENSION_KEY] = {
     enabled: true,
@@ -70,7 +87,7 @@ export function installGooseMcpConfig(env: NodeJS.ProcessEnv = process.env): voi
     description: 'Concord shared work-state for coding agents',
     cmd: CONCORD_SERVER_COMMAND,
     args: [...CONCORD_SERVER_ARGS],
-    envs: {},
+    envs: repoRoot !== undefined ? { CONCORD_REPO_ROOT: repoRoot } : {},
     timeout: 300,
   };
 
@@ -82,9 +99,12 @@ export function uninstallGooseConfig(env: NodeJS.ProcessEnv = process.env): void
   if (!existsSync(path)) return;
   const config = readConfig(path);
   const extensions = config[EXTENSIONS_KEY];
-  if (!isRecord(extensions)) return;
+
+  const parsedExtensions = looseObjectSchema.safeParse(extensions);
+  if (!parsedExtensions.success) return;
+
   const next: UnknownRecord = {};
-  for (const [key, value] of Object.entries(extensions)) {
+  for (const [key, value] of Object.entries(parsedExtensions.data)) {
     if (key === CONCORD_EXTENSION_KEY) continue;
     next[key] = value;
   }

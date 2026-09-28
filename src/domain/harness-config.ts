@@ -185,9 +185,9 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
       background: false,
       verified: false,
     },
-    installedCapabilities: ['pull', 'idle', 'busy'],
+    installedCapabilities: ['pull', 'busy'],
     installedDetail:
-      'Concord MCP server is registered with Goose; durable inbox delivery handles idle reach.',
+      'Concord MCP server is registered with Goose; durable inbox delivery is available.',
     unsupportedDetail: 'Goose does not meet the verified MCP baseline (1.52.0).',
   },
 };
