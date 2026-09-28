@@ -6,7 +6,7 @@
  * here rather than teaching each caller its own slightly different version.
  */
 
-export const harnessNames = ['claude-code', 'codex', 'cursor', 'gemini', 'grok'] as const;
+export const harnessNames = ['claude-code', 'codex', 'cursor', 'gemini', 'grok', 'goose'] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
 export const transports = ['pull', 'local-ipc', 'app-server'] as const;
@@ -171,6 +171,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedCapabilities: ['pull', 'steer', 'idle', 'busy', 'monitor-command'],
     installedDetail: 'Hooks cover busy turns; a Grok persistent monitor wakes idle sessions.',
     unsupportedDetail: 'Grok Build does not meet the verified hook/monitor baseline (1.0.0).',
+  },
+  goose: {
+    name: 'goose',
+    executable: 'goose',
+    minimumVersion: [1, 52, 0],
+    defaultCapability: busyPull,
+    monitorCapability: idlePull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'idle', 'busy'],
+    installedDetail:
+      'Concord MCP server is registered with Goose; durable inbox delivery handles idle reach.',
+    unsupportedDetail: 'Goose does not meet the verified MCP baseline (1.52.0).',
   },
 };
 

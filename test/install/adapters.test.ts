@@ -1,3 +1,4 @@
+import { installGooseMcpConfig } from '../../src/install/goose-config.js';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -105,6 +106,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'harness-monitor',
+      'harness-monitor',
     ]);
   });
 
@@ -193,5 +195,33 @@ describe('global harness adapters', () => {
 
     expect(report.find((entry) => entry.harness === 'cursor')?.status).toBe('error');
     expect(report.find((entry) => entry.harness === 'gemini')?.status).toBe('installed');
+  });
+  it('installs Goose config idempotently and preserves other extensions', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-goose-home-'));
+
+    const gooseDir = join(home, '.config', 'goose');
+    mkdirSync(gooseDir, { recursive: true });
+    const configPath = join(gooseDir, 'config.yaml');
+    writeFileSync(
+      configPath,
+      `extensions:
+  developer:
+    enabled: true
+    type: builtin
+    name: developer
+`,
+    );
+
+    const env = { HOME: home };
+    installGooseMcpConfig(env);
+
+    const installed = readFileSync(configPath, 'utf8');
+    expect(installed).toContain('concord-relay');
+    expect(installed).toContain('developer');
+
+    installGooseMcpConfig(env);
+    const secondRun = readFileSync(configPath, 'utf8');
+    const occurrences = secondRun.match(/concord-relay/g) ?? [];
+    expect(occurrences).toHaveLength(2);
   });
 });
