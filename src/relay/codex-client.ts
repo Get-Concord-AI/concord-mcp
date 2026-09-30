@@ -1,7 +1,8 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 
 import { z } from 'zod';
 
+import { spawnCommand } from '../process/spawn-command.js';
 import { VERSION } from '../version.js';
 
 const responseSchema = z
@@ -29,7 +30,7 @@ interface PendingRequest {
 
 /** JSONL client for the managed Codex app-server daemon's stdio proxy. */
 export class CodexDaemonClient {
-  private child: ChildProcessWithoutNullStreams | undefined;
+  private child: ChildProcess | undefined;
   private socket: WebSocket | undefined;
   private nextId = 1;
   private buffer = '';
@@ -51,12 +52,20 @@ export class CodexDaemonClient {
     if (this.remoteUrl !== undefined && this.remoteUrl !== '') {
       await this.connectSocket(this.remoteUrl);
     } else {
-      const child = spawn(this.command, [...this.args], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawnCommand(this.command, [...this.args], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const output = child.stdout;
+      const errorOutput = child.stderr;
+      if (output === null || errorOutput === null || child.stdin === null) {
+        child.kill();
+        throw new Error('Codex app-server stdio pipes were not created.');
+      }
       this.child = child;
-      child.stdout.on('data', (chunk: unknown) => {
+      output.on('data', (chunk: unknown) => {
         this.onData(chunkText(chunk));
       });
-      child.stderr.resume();
+      errorOutput.resume();
       child.once('error', (error) => {
         this.failAll(error);
       });
@@ -100,8 +109,13 @@ export class CodexDaemonClient {
 
   private send(message: Record<string, unknown>): void {
     const frame = JSON.stringify(message);
-    if (this.socket !== undefined) this.socket.send(frame);
-    else this.child?.stdin.write(`${frame}\n`);
+    if (this.socket !== undefined) {
+      this.socket.send(frame);
+      return;
+    }
+    const input = this.child?.stdin;
+    if (input === null || input === undefined) return;
+    input.write(`${frame}\n`);
   }
 
   private async connectSocket(url: string): Promise<void> {

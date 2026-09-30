@@ -1,8 +1,9 @@
 import type { Command } from '@commander-js/extra-typings';
-import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 
 import { resolveRepoRoot } from '../../config/paths.js';
+import { spawnCommand } from '../../process/spawn-command.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { relayAddress } from '../../relay/address.js';
 import { CodexAppServerAdapter } from '../../relay/adapters.js';
@@ -64,7 +65,7 @@ async function availablePort(): Promise<number> {
   });
 }
 
-async function waitForCodexServer(url: string, server: ReturnType<typeof spawn>): Promise<void> {
+async function waitForCodexServer(url: string, server: ChildProcess): Promise<void> {
   const healthUrl = url.replace(/^ws:/u, 'http:') + '/readyz';
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (server.exitCode !== null) {
@@ -104,13 +105,13 @@ async function launchCodex(args: readonly string[], repoRoot: string): Promise<v
   // Codex intentionally filters the environment of MCP children, so also run
   // the complete managed tree from the resolved repository root.
   const context = codexManagedLaunchContext(repoRoot, url, process.env);
-  const server = spawn('codex', ['app-server', '--listen', url], {
+  const server = spawnCommand('codex', ['app-server', '--listen', url], {
     ...context,
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   try {
     await waitForCodexServer(url, server);
-    const tui = spawn('codex', ['--remote', url, ...args], {
+    const tui = spawnCommand('codex', ['--remote', url, ...args], {
       ...context,
       stdio: 'inherit',
     });

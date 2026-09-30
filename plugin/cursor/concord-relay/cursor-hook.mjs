@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { spawnCommandSync } from '../../spawn-command.mjs';
 
 function readPayload() {
   const input = readFileSync(0, 'utf8').trim();
@@ -37,7 +38,7 @@ function concordExecutable() {
 }
 
 function runConcord(root, args, output = false) {
-  const result = spawnSync(concordExecutable(), args, {
+  const result = spawnCommandSync(concordExecutable(), args, {
     cwd: root,
     env: process.env,
     encoding: 'utf8',

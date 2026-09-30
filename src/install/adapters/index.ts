@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   chmodSync,
@@ -19,6 +18,7 @@ import {
   type HarnessName,
   type MonitorKind,
 } from '../../domain/harness-config.js';
+import { spawnCommandSync } from '../../process/spawn-command.js';
 import { claudeSkillsPluginPath } from '../claude-plugin.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 
@@ -110,15 +110,17 @@ function run(
   ok: boolean;
   output: string;
 } {
-  const result = spawnSync(command, [...args], {
+  const result = spawnCommandSync(command, args, {
     env,
     encoding: 'utf8',
     timeout: 15_000,
     windowsHide: true,
   });
+  const stdout = typeof result.stdout === 'string' ? result.stdout : '';
+  const stderr = typeof result.stderr === 'string' ? result.stderr : '';
   return {
     ok: result.status === 0,
-    output: `${result.stdout}${result.stderr}`.trim(),
+    output: `${stdout}${stderr}`.trim(),
   };
 }
 

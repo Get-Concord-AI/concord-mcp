@@ -1,10 +1,10 @@
 import type { Command } from '@commander-js/extra-typings';
-import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
 import { writeArtifacts } from '../../artifacts/index.js';
+import { spawnCommand } from '../../process/spawn-command.js';
 import { installClaudeHook } from '../../install/claude-hooks.js';
 import { installCodexMcpConfig } from '../../install/codex-config.js';
 import { installConcord } from '../../install/index.js';
@@ -67,10 +67,8 @@ async function askToUpgrade(update: AvailableUpdate): Promise<boolean> {
 
 function installUpdate(env: NodeJS.ProcessEnv): Promise<number> {
   return new Promise((resolve, reject) => {
-    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    const child = spawn(npm, ['install', '-g', '@concord-ai/concord-mcp@latest'], {
+    const child = spawnCommand('npm', ['install', '-g', '@concord-ai/concord-mcp@latest'], {
       env,
-      shell: false,
       stdio: 'inherit',
     });
     child.once('error', (error) => {
