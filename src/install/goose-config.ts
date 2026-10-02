@@ -50,9 +50,7 @@ export function gooseConfigInstalled(env: NodeJS.ProcessEnv = process.env): bool
     const parsedExtensions = looseObjectSchema.safeParse(extensions);
     if (!parsedExtensions.success) return false;
 
-    const parsedEntry = looseObjectSchema.safeParse(
-      parsedExtensions.data[CONCORD_EXTENSION_KEY],
-    );
+    const parsedEntry = looseObjectSchema.safeParse(parsedExtensions.data[CONCORD_EXTENSION_KEY]);
     return parsedEntry.success && parsedEntry.data['enabled'] === true;
   } catch {
     return false;
