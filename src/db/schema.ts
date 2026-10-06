@@ -224,4 +224,11 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE handoffs ADD COLUMN reported_outcome TEXT;
   `,
+  // 011 — drain pending agent messages by recipient/status without scanning
+  // the recipient's delivered/replied/failed history. The trailing ordering
+  // columns also satisfy the pending-drain ORDER BY from the same index.
+  `
+  CREATE INDEX idx_agent_messages_pending_recipient
+    ON agent_messages(recipient_agent_id, status, created_at, message_id);
+  `,
 ];

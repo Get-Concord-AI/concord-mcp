@@ -1,6 +1,6 @@
 import type { Command } from '@commander-js/extra-typings';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
@@ -22,7 +22,9 @@ import { openContext } from '../context.js';
 import { findAvailableUpdate, type AvailableUpdate } from '../../update-notifier.js';
 import { VERSION } from '../../version.js';
 
-const CONCORD_GITIGNORE_ENTRY = '.concord/';
+/** Ignores everything in `.concord/`, including this file, so nothing needs committing. */
+const CONCORD_GITIGNORE =
+  '# Created by concord setup. Keeps the local Concord workspace untracked.\n*\n';
 
 export interface SetupOptions {
   claudeHooks?: boolean;
@@ -108,17 +110,28 @@ export async function maybeUpgradeBeforeSetup(
   return true;
 }
 
-/** Ensure Concord's generated workspace is ignored without changing other rules. */
-export function ensureConcordIgnored(repoRoot: string): void {
-  const gitignorePath = join(repoRoot, '.gitignore');
-  const current = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf8') : '';
-  const entries = current.split(/\r?\n/u).map((line) => line.trim());
-  if (entries.includes(CONCORD_GITIGNORE_ENTRY)) {
+/**
+ * Make `.concord/` ignore itself so setup never edits the repository's shared
+ * `.gitignore`. An existing file keeps its rules so teams can add negations;
+ * setup only prepends the catch-all when it is missing, so the rules after it
+ * still re-include what they name.
+ */
+export function ensureConcordIgnored(concordPath: string): void {
+  const gitignorePath = join(concordPath, '.gitignore');
+  const stat = lstatSync(gitignorePath, { throwIfNoEntry: false });
+  if (!stat?.isFile()) {
+    // Replace a symlink (or other non-file) rather than writing through it,
+    // which could edit a shared, tracked ignore file elsewhere in the repo.
+    if (stat !== undefined) rmSync(gitignorePath);
+    mkdirSync(concordPath, { recursive: true });
+    writeFileSync(gitignorePath, CONCORD_GITIGNORE);
     return;
   }
-
-  const separator = current.length > 0 && !current.endsWith('\n') ? '\n' : '';
-  writeFileSync(gitignorePath, `${current}${separator}${CONCORD_GITIGNORE_ENTRY}\n`);
+  // Drop a leading byte-order mark so it cannot end up in front of a rule.
+  const current = readFileSync(gitignorePath, 'utf8').replace(/^\uFEFF/u, '');
+  const rules = current.split(/\r?\n/u).map((line) => line.trim());
+  if (rules.includes('*')) return;
+  writeFileSync(gitignorePath, `${CONCORD_GITIGNORE}${current}`);
 }
 
 /** Set up one repository completely: state, instructions, and client registration. */
@@ -126,7 +139,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   const env = options.env ?? process.env;
   const ctx = openContext(cwd, env);
 
-  ensureConcordIgnored(ctx.repoRoot);
+  ensureConcordIgnored(ctx.concordPath);
   writeArtifacts(ctx.concordPath, ctx.repos);
 
   const written = installConcord(ctx.repoRoot);
