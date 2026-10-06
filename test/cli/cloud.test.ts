@@ -136,6 +136,17 @@ describe('concord cloud', () => {
     expect(readMachineKey(deps.env)).toBe('only');
   });
 
+  it('leaves a machine file it cannot read alone', () => {
+    if (process.platform === 'win32' || process.getuid?.() === 0) return;
+    const path = join(home, '.concord', 'machine.json');
+    mkdirSync(join(home, '.concord'), { recursive: true });
+    writeFileSync(path, '{"machineKey":"original"}');
+    chmodSync(path, 0o000);
+    expect(() => ensureMachineKey(deps.env, () => 'imposter')).toThrow(/Cannot read/);
+    chmodSync(path, 0o644);
+    expect(readMachineKey(deps.env)).toBe('original');
+  });
+
   it('replaces a damaged machine file rather than staying stuck on it', () => {
     mkdirSync(join(home, '.concord'), { recursive: true });
     writeFileSync(join(home, '.concord', 'machine.json'), '{"machine');

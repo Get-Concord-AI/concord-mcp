@@ -80,6 +80,18 @@ export function ensureMachineKey(
   } catch {
     const winner = readMachineKey(env);
     if (winner !== undefined) return winner;
+    // A damaged file is replaced, but one that cannot be read may hold this
+    // machine's real key, so it is left alone rather than overwritten.
+    if (existsSync(path)) {
+      try {
+        readFileSync(path);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Cannot read ${path}, this machine's identity: ${reason}`, {
+          cause: error,
+        });
+      }
+    }
     // No hard links here (exFAT, some network shares), or a damaged file in
     // the way: a rename still publishes a complete file, replacing a damaged
     // one. Two first logins at the very same moment on such a filesystem may
