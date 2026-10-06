@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, extname, isAbsolute, join } from 'node:path';
 
-const batchExtension = /\.(?:cmd|bat)$/iu;
+const BATCH_EXTENSION = /\.(?:cmd|bat)$/iu;
 
 export function quoteCmdArgument(value) {
   if (value.length === 0) return '""';
