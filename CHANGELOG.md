@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-06
+
+### Changed
+
+- `concord setup` now writes a self-ignoring `.concord/.gitignore` (`*`) instead
+  of appending `.concord/` to the repository's root `.gitignore`. Existing rules
+  in `.concord/.gitignore` are kept so teams can add negations; a symlinked file
+  is replaced rather than written through (#145).
+- `concord status` and work-state rendering no longer load completed/closed
+  task history, and fetch the latest review packets in batches instead of one
+  query per task. Thanks @AdrianLipa90 (#131).
+- Relay heartbeat refreshes are phase-spread per endpoint so many sessions do
+  not refresh in lockstep. Thanks @AdrianLipa90 (#132).
+- Bumped `@modelcontextprotocol/sdk` to 1.31.0 and refreshed development
+  dependencies (#151, #152).
+
 ## [0.10.5] - 2026-09-23
 
 ### Changed
@@ -351,7 +367,8 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.5...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.5...v0.11.0
 [0.10.5]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.4...v0.10.5
 [0.10.4]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.2...v0.10.3
