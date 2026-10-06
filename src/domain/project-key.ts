@@ -30,8 +30,13 @@ function splitRemote(value: string): { host: string; path: string | null } | nul
   if (value.includes('://')) {
     try {
       const url = new URL(value);
-      // Kept escaped: decoding would let a key change on a second pass.
-      return { host: url.hostname, path: urlPath(url.pathname.slice(1)) };
+      // Kept escaped: decoding would let a key change on a second pass. A
+      // backslash survives in a non-https path, so it is escaped, not reread
+      // as the separator https would make it.
+      return {
+        host: url.hostname,
+        path: urlPath(url.pathname.slice(1).replace(/\\/g, encodeURIComponent)),
+      };
     } catch {
       return null;
     }

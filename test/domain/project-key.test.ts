@@ -39,6 +39,7 @@ describe('normalizeProjectKey', () => {
     'https://example.com/org/100%done',
     'git@example.com:org/repo%23one.git',
     'git@example.com:org/a\\b',
+    'ssh://git@example.com/org/a\\b.git',
     'git@example.com:org/100%done',
   ])('is stable when applied to its own output (%s)', (remote) => {
     // Clients normalise and the server normalises again, so a key must survive
@@ -49,6 +50,12 @@ describe('normalizeProjectKey', () => {
   });
 
   it('keeps different repositories apart, and one repository together, by path', () => {
+    expect(normalizeProjectKey('ssh://git@example.com/org/a\\b.git')).toBe(
+      normalizeProjectKey('git@example.com:org/a\\b.git'),
+    );
+    expect(normalizeProjectKey('ssh://git@example.com/org/a\\b.git')).not.toBe(
+      'example.com/org/a/b',
+    );
     expect(normalizeProjectKey('git@example.com:org/repo%23one.git')).toBe(
       'example.com/org/repo%2523one',
     );
