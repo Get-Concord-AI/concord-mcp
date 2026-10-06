@@ -23,32 +23,35 @@
 export function normalizeProjectKey(remote: string): string | null {
   let value = remote.trim();
 
-  if (value === '') {
+  // A filesystem path is a remote too (`git clone /srv/repo`), but not one that
+  // names the same repository on every machine, so it gets no key.
+  if (value === '' || /^(?:[/\\~.]|[a-z]:[\\/])/i.test(value)) {
     return null;
   }
 
   // scp-like syntax: [user@]host:path — no scheme, and a colon before any slash.
   // A bracketed IPv6 host is matched whole, or its own colons would be taken
-  // for the separator and two spellings of one remote would become two keys.
+  // for the separator. Rewritten as a URL, so every spelling of a host — an
+  // IPv6 address above all — is reduced by the same parser.
   const scp = /^(?:[^@/[]+@)?(\[[^\]]+\]|[^:/[]+):(?!\/)(.+)$/.exec(value);
 
   if (scp !== null && !value.includes('://')) {
-    value = `${scp[1] ?? ''}/${scp[2] ?? ''}`;
-  } else {
-    try {
-      const url = new URL(value.includes('://') ? value : `https://${value}`);
-      value = `${url.hostname}${url.pathname}`;
-    } catch {
-      return null;
-    }
+    value = `ssh://${scp[1] ?? ''}/${scp[2] ?? ''}`;
   }
 
+  try {
+    const url = new URL(value.includes('://') ? value : `https://${value}`);
+    value = `${url.hostname}${url.pathname}`;
+  } catch {
+    return null;
+  }
+
+  // Trailing slashes and `.git` are stripped together, however they repeat, so
+  // a key normalised twice is unchanged.
   const key = value
     .toLowerCase()
     .replace(/\/+/g, '/')
-    .replace(/\/+$/, '')
-    .replace(/\.git$/, '')
-    .replace(/\/+$/, '');
+    .replace(/(?:\/|\.git)+$/, '');
 
   const [host, ...path] = key.split('/');
 

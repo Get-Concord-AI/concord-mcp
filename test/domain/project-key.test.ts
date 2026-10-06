@@ -19,6 +19,7 @@ describe('normalizeProjectKey', () => {
     'git@[2001:db8::1]:org/repo.git',
     'ssh://git@[2001:db8::1]/org/repo.git',
     'https://[2001:db8::1]/Org/Repo',
+    'git@[2001:0db8:0:0:0:0:0:1]:org/repo.git',
   ])('reduces an IPv6-hosted remote %s to one key', (remote) => {
     expect(normalizeProjectKey(remote)).toBe('[2001:db8::1]/org/repo');
   });
@@ -29,6 +30,8 @@ describe('normalizeProjectKey', () => {
     'git@[2001:db8::1]:org/repo.git',
     'https://[2001:db8::1]/org/repo',
     'git@gitlab.com:acme/platform/api.git',
+    'https://example.com/org/repo.git.git',
+    'https://example.com/org/repo.git/.git/',
   ])('is stable when applied to its own output (%s)', (remote) => {
     // Clients normalise and the server normalises again, so a key must survive
     // a second pass unchanged or the two would disagree about one repository.
@@ -49,10 +52,22 @@ describe('normalizeProjectKey', () => {
     );
   });
 
-  it.each(['', '   ', 'repo', 'https://github.com', 'https://github.com/', 'not a url at all'])(
-    'refuses %j rather than inventing a key that collides',
-    (remote) => {
-      expect(normalizeProjectKey(remote)).toBeNull();
-    },
-  );
+  it.each([
+    '',
+    '   ',
+    'repo',
+    'https://github.com',
+    'https://github.com/',
+    'not a url at all',
+    '/tmp/repo',
+    '/srv/git/acme/app.git',
+    './repo',
+    '../acme/app',
+    '~/src/app',
+    'C:\\src\\app',
+    'C:/src/app',
+    'file:///srv/git/app.git',
+  ])('refuses %j rather than inventing a key that collides', (remote) => {
+    expect(normalizeProjectKey(remote)).toBeNull();
+  });
 });
