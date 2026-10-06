@@ -35,6 +35,8 @@ describe('normalizeProjectKey', () => {
     'git@127.1:org/repo.git',
     'git@example.com:org/repo#one.git',
     'https://example.com/org/my%20repo',
+    'https://example.com/org/my%20',
+    'https://example.com/org/100%done',
   ])('is stable when applied to its own output (%s)', (remote) => {
     // Clients normalise and the server normalises again, so a key must survive
     // a second pass unchanged or the two would disagree about one repository.
@@ -48,6 +50,15 @@ describe('normalizeProjectKey', () => {
       'example.com/org/repo#one',
     );
     expect(normalizeProjectKey('git@example.com:org/repo?two')).toBe('example.com/org/repo?two');
+  });
+
+  it('keeps a URL path escaped', () => {
+    expect(normalizeProjectKey('https://example.com/org/my%20repo')).toBe(
+      'example.com/org/my%20repo',
+    );
+    expect(normalizeProjectKey('https://example.com/org/100%done')).toBe(
+      'example.com/org/100%done',
+    );
   });
 
   it('spells a host one way however the remote writes it', () => {

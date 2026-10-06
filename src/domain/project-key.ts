@@ -16,7 +16,9 @@ function splitRemote(value: string): { host: string; path: string } | null {
   if (value.includes('://')) {
     try {
       const url = new URL(value);
-      return { host: url.hostname, path: decodeURIComponent(url.pathname) };
+      // Kept escaped, as the URL parser writes it: decoding would make keys
+      // change on a second pass, and an invalid escape would give none.
+      return { host: url.hostname, path: url.pathname };
     } catch {
       return null;
     }
