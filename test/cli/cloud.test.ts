@@ -110,6 +110,14 @@ describe('concord cloud', () => {
     expect(readMachineKey(deps.env)).toBe('winner');
   });
 
+  it('saves a machine key where hard links are not supported', () => {
+    const unsupported = (): void => {
+      throw new Error('EPERM: operation not permitted, link');
+    };
+    expect(ensureMachineKey(deps.env, () => 'only', unsupported)).toBe('only');
+    expect(readMachineKey(deps.env)).toBe('only');
+  });
+
   it('logs out, forgetting the key but not the machine', async () => {
     expect(runCloudLogout(deps)).toBe('Not logged in.');
     await runCloudLogin({ url: API }, deps);

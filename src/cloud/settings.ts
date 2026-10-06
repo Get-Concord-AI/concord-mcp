@@ -61,21 +61,28 @@ export function readMachineKey(env: NodeJS.ProcessEnv): string | undefined {
  * exclusively, by linking a complete file into place, so two first logins at
  * once agree on one key: the loser reads the winner's.
  */
-export function ensureMachineKey(env: NodeJS.ProcessEnv, mint: () => string): string {
+export function ensureMachineKey(
+  env: NodeJS.ProcessEnv,
+  mint: () => string,
+  link: (from: string, to: string) => void = linkSync,
+): string {
   const saved = readMachineKey(env);
   if (saved !== undefined) return saved;
 
   const path = machinePath(env);
   const machineKey = mint();
+  const content = `${JSON.stringify({ machineKey }, null, 2)}\n`;
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${String(process.pid)}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify({ machineKey }, null, 2)}\n`, { mode: 0o644 });
+  writeFileSync(temporary, content, { mode: 0o644 });
   try {
-    linkSync(temporary, path);
-  } catch (error) {
+    link(temporary, path);
+  } catch {
     const winner = readMachineKey(env);
-    if (winner === undefined) throw error;
-    return winner;
+    if (winner !== undefined) return winner;
+    // No hard links here (exFAT, some network shares): an exclusive create
+    // still lets only one login save its key, if not all at once.
+    writeFileSync(path, content, { mode: 0o644, flag: 'wx' });
   } finally {
     rmSync(temporary, { force: true });
   }
