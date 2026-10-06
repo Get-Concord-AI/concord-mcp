@@ -10,7 +10,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,6 +18,7 @@ import {
   type HarnessName,
   type MonitorKind,
 } from '../../domain/harness-config.js';
+import { userHome } from '../../config/paths.js';
 import { claudeSkillsPluginPath } from '../claude-plugin.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 
@@ -34,13 +34,6 @@ export interface AdapterReport {
   capabilities: string[];
   detail: string;
   installedPath?: string | undefined;
-}
-
-function homeFor(env: NodeJS.ProcessEnv): string {
-  const configured = env['HOME']?.trim();
-  if (configured !== undefined && configured !== '') return configured;
-  const profile = env['USERPROFILE']?.trim();
-  return profile === undefined || profile === '' ? homedir() : profile;
 }
 
 function executablePath(name: string, env: NodeJS.ProcessEnv): string | undefined {
@@ -223,11 +216,11 @@ function statusCodex(env: NodeJS.ProcessEnv): AdapterReport {
 }
 
 function geminiTarget(env: NodeJS.ProcessEnv): string {
-  return join(homeFor(env), '.gemini', 'extensions', 'concord-relay');
+  return join(userHome(env), '.gemini', 'extensions', 'concord-relay');
 }
 
 function cursorTarget(env: NodeJS.ProcessEnv): string {
-  return join(homeFor(env), '.cursor', 'extensions', 'get-concord-ai.concord-relay');
+  return join(userHome(env), '.cursor', 'extensions', 'get-concord-ai.concord-relay');
 }
 
 const CURSOR_HOOKS = {
@@ -249,7 +242,7 @@ const CURSOR_HOOKS = {
 } as const;
 
 function cursorHooksPath(env: NodeJS.ProcessEnv): string {
-  return join(homeFor(env), '.cursor', 'hooks.json');
+  return join(userHome(env), '.cursor', 'hooks.json');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -548,7 +541,7 @@ export function installGlobalAdapters(
       ? entry
       : { ...entry, status: 'error' as const, detail: `Installation failed: ${failure}` };
   });
-  const statePath = join(homeFor(env), '.concord', 'adapters.json');
+  const statePath = join(userHome(env), '.concord', 'adapters.json');
   try {
     mkdirSync(dirname(statePath), { recursive: true });
     writeFileSync(statePath, `${JSON.stringify({ version: 1, adapters: report }, null, 2)}\n`, {
@@ -577,7 +570,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   const grok = executablePath('grok', env);
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
-  const statePath = join(homeFor(env), '.concord', 'adapters.json');
+  const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);
 }
