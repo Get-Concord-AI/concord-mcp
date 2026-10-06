@@ -230,6 +230,14 @@ describe('concord cloud', () => {
     writeLink(repo, { apiUrl: 'https://other.concord.test', projectKey: 'github.com/acme/app' });
     expect(await runCloudStatus(deps)).toContain('Warning: linked to https://other.concord.test');
 
+    const keyCheckDown: Fetch = (input) =>
+      input.endsWith('/v1/meta')
+        ? Promise.resolve(Response.json(META))
+        : Promise.resolve(new Response('unavailable', { status: 503 }));
+    const partial = await runCloudStatus({ ...deps, fetch: keyCheckDown });
+    expect(partial).toContain('API: reachable, v1, compatible');
+    expect(partial).toContain('Key: not checked');
+
     const down: Fetch = () => Promise.reject(new Error('connect ECONNREFUSED'));
     expect(await runCloudStatus({ ...deps, fetch: down })).toContain('API: unreachable');
   });

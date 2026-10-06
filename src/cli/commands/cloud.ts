@@ -142,18 +142,26 @@ export async function runCloudStatus(deps: CloudDeps): Promise<string> {
   }
 
   if (credentials !== undefined) {
+    const reason = (error: unknown): string =>
+      error instanceof Error ? error.message : String(error);
+    // Two checks, reported apart, so a failing key check never hides an API
+    // that answered.
     try {
       const meta = await fetchMeta(credentials.apiUrl, deps.fetch);
       const problem = incompatibility(meta);
-      const key = await checkKey(credentials.apiUrl, credentials.apiKey, deps.fetch);
       lines.push(
         problem === null
           ? `API: reachable, v${String(meta.apiVersion)}, compatible`
           : `API: reachable but ${problem}`,
-        key === 'ok' ? 'Key: accepted' : 'Key: rejected — log in again',
       );
     } catch (error) {
-      lines.push(`API: unreachable (${error instanceof Error ? error.message : String(error)})`);
+      lines.push(`API: unreachable (${reason(error)})`);
+    }
+    try {
+      const key = await checkKey(credentials.apiUrl, credentials.apiKey, deps.fetch);
+      lines.push(key === 'ok' ? 'Key: accepted' : 'Key: rejected — log in again');
+    } catch (error) {
+      lines.push(`Key: not checked (${reason(error)})`);
     }
   }
 
