@@ -13,9 +13,23 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { runCloudLogin, runCloudLogout, type CloudDeps } from '../../src/cli/commands/cloud.js';
+import {
+  runCloudLink,
+  runCloudLogin,
+  runCloudLogout,
+  runCloudStatus,
+  runCloudUnlink,
+  type CloudDeps,
+} from '../../src/cli/commands/cloud.js';
 import { REQUIRED_CAPABILITIES, type Fetch } from '../../src/cloud/client.js';
-import { credentialsPath, ensureMachineKey, readMachineKey } from '../../src/cloud/settings.js';
+import {
+  credentialsPath,
+  ensureMachineKey,
+  linkPath,
+  readLink,
+  readMachineKey,
+  writeLink,
+} from '../../src/cloud/settings.js';
 
 const API = 'https://api.concord.test';
 const KEY = 'cak_live_0123456789abcdef';
@@ -44,16 +58,20 @@ function fakeCloud(meta: object = META): { fetch: Fetch; machines: string[] } {
 
 describe('concord cloud', () => {
   let home: string;
+  let repo: string;
   let deps: CloudDeps;
   let minted = 0;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'concord-home-'));
+    repo = mkdtempSync(join(tmpdir(), 'concord-repo-'));
+    mkdirSync(join(repo, '.git'));
     deps = {
       env: { HOME: home, CONCORD_CLOUD_API_KEY: KEY },
-      cwd: home,
+      cwd: repo,
       fetch: fakeCloud().fetch,
       readStdin: () => Promise.resolve(`${KEY}\n`),
+      originRemote: () => 'git@github.com:Acme/App.git',
       hostname: () => 'devbox',
       newMachineKey: () => `machine-${String(++minted)}`,
     };
@@ -118,6 +136,17 @@ describe('concord cloud', () => {
     expect(readMachineKey(deps.env)).toBe('only');
   });
 
+  it('leaves a machine file it cannot read alone', () => {
+    if (process.platform === 'win32' || process.getuid?.() === 0) return;
+    const path = join(home, '.concord', 'machine.json');
+    mkdirSync(join(home, '.concord'), { recursive: true });
+    writeFileSync(path, '{"machineKey":"original"}');
+    chmodSync(path, 0o000);
+    expect(() => ensureMachineKey(deps.env, () => 'imposter')).toThrow(/Cannot read/);
+    chmodSync(path, 0o644);
+    expect(readMachineKey(deps.env)).toBe('original');
+  });
+
   it('replaces a damaged machine file rather than staying stuck on it', () => {
     mkdirSync(join(home, '.concord'), { recursive: true });
     writeFileSync(join(home, '.concord', 'machine.json'), '{"machine');
@@ -163,5 +192,53 @@ describe('concord cloud', () => {
     await expect(runCloudLogin({ url: API }, { ...deps, fetch: failing })).rejects.toThrow(
       /^[^\n]{1,400}$/,
     );
+  });
+
+  it('links the repository by its normalised origin, and unlinks it', async () => {
+    expect(() => runCloudLink({}, deps)).toThrow(/Not logged in/);
+    await runCloudLogin({ url: API }, deps);
+
+    expect(runCloudLink({}, deps)).toContain('github.com/acme/app');
+    expect(readLink(repo)).toEqual({ apiUrl: API, projectKey: 'github.com/acme/app' });
+
+    expect(runCloudUnlink(deps)).toContain('Unlinked');
+    expect(existsSync(linkPath(repo))).toBe(false);
+    expect(runCloudUnlink(deps)).toContain('was not linked');
+  });
+
+  it('needs --project when there is no origin, and rejects a non-remote', async () => {
+    await runCloudLogin({ url: API }, deps);
+    const noOrigin = { ...deps, originRemote: () => undefined };
+    expect(() => runCloudLink({}, noOrigin)).toThrow(/--project/);
+    expect(() => runCloudLink({ project: 'not a remote' }, noOrigin)).toThrow(/not a git remote/);
+    expect(runCloudLink({ project: 'https://github.com/acme/other' }, noOrigin)).toContain(
+      'github.com/acme/other',
+    );
+  });
+
+  it('reports status without revealing the key', async () => {
+    expect(await runCloudStatus(deps)).toContain('Login: none');
+    await runCloudLogin({ url: API }, deps);
+    runCloudLink({}, deps);
+
+    const out = await runCloudStatus(deps);
+    expect(out).toContain('linked to github.com/acme/app');
+    expect(out).toContain('compatible');
+    expect(out).toContain('Key: accepted');
+    expect(out).not.toContain(KEY);
+
+    writeLink(repo, { apiUrl: 'https://other.concord.test', projectKey: 'github.com/acme/app' });
+    expect(await runCloudStatus(deps)).toContain('Warning: linked to https://other.concord.test');
+
+    const keyCheckDown: Fetch = (input) =>
+      input.endsWith('/v1/meta')
+        ? Promise.resolve(Response.json(META))
+        : Promise.resolve(new Response('unavailable', { status: 503 }));
+    const partial = await runCloudStatus({ ...deps, fetch: keyCheckDown });
+    expect(partial).toContain('API: reachable, v1, compatible');
+    expect(partial).toContain('Key: not checked');
+
+    const down: Fetch = () => Promise.reject(new Error('connect ECONNREFUSED'));
+    expect(await runCloudStatus({ ...deps, fetch: down })).toContain('API: unreachable');
   });
 });
