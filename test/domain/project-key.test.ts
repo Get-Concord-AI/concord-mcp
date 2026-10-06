@@ -32,12 +32,27 @@ describe('normalizeProjectKey', () => {
     'git@gitlab.com:acme/platform/api.git',
     'https://example.com/org/repo.git.git',
     'https://example.com/org/repo.git/.git/',
+    'git@127.1:org/repo.git',
+    'git@example.com:org/repo#one.git',
+    'https://example.com/org/my%20repo',
   ])('is stable when applied to its own output (%s)', (remote) => {
     // Clients normalise and the server normalises again, so a key must survive
     // a second pass unchanged or the two would disagree about one repository.
     const once = normalizeProjectKey(remote);
     if (once === null) throw new Error(`${remote} did not normalise`);
     expect(normalizeProjectKey(once)).toBe(once);
+  });
+
+  it('keeps a path literal, so different repositories keep different keys', () => {
+    expect(normalizeProjectKey('git@example.com:org/repo#one.git')).toBe(
+      'example.com/org/repo#one',
+    );
+    expect(normalizeProjectKey('git@example.com:org/repo?two')).toBe('example.com/org/repo?two');
+  });
+
+  it('spells a host one way however the remote writes it', () => {
+    expect(normalizeProjectKey('git@127.1:org/repo.git')).toBe('127.0.0.1/org/repo');
+    expect(normalizeProjectKey('ssh://git@127.1/org/repo')).toBe('127.0.0.1/org/repo');
   });
 
   it('keeps nested group paths', () => {
@@ -66,6 +81,8 @@ describe('normalizeProjectKey', () => {
     '~/src/app',
     'C:\\src\\app',
     'C:/src/app',
+    'C:repo.git',
+    'c:src/app',
     'file:///srv/git/app.git',
   ])('refuses %j rather than inventing a key that collides', (remote) => {
     expect(normalizeProjectKey(remote)).toBeNull();

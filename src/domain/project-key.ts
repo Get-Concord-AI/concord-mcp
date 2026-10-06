@@ -1,4 +1,41 @@
 /**
+ * A host as the WHATWG URL parser spells it for `https`: lowercased, IPv6
+ * compressed, shortened IPv4 expanded. One parser for every form of remote, so
+ * a key normalised twice is unchanged.
+ */
+function normalizeHost(host: string): string | null {
+  try {
+    return new URL(`https://${host}/`).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/** The host and path a remote names, in whichever of git's forms it is written. */
+function splitRemote(value: string): { host: string; path: string } | null {
+  if (value.includes('://')) {
+    try {
+      const url = new URL(value);
+      return { host: url.hostname, path: decodeURIComponent(url.pathname) };
+    } catch {
+      return null;
+    }
+  }
+
+  // scp-like syntax: [user@]host:path — no scheme, and a colon before any slash.
+  // A bracketed IPv6 host is matched whole, or its own colons would be taken
+  // for the separator. The path is literal, `#` and `?` included.
+  const scp = /^(?:[^@/[]+@)?(\[[^\]]+\]|[^:/[]+):(?!\/)(.+)$/.exec(value);
+  if (scp !== null) {
+    return { host: scp[1] ?? '', path: scp[2] ?? '' };
+  }
+
+  // host/path, as a key itself is written.
+  const slash = value.indexOf('/');
+  return slash === -1 ? null : { host: value.slice(0, slash), path: value.slice(slash + 1) };
+}
+
+/**
  * A repository's identity in the cloud: its git remote, reduced to the part
  * every clone agrees on.
  *
@@ -21,34 +58,22 @@
  * the two in step, with the same tests.
  */
 export function normalizeProjectKey(remote: string): string | null {
-  let value = remote.trim();
+  const value = remote.trim();
 
-  // A filesystem path is a remote too (`git clone /srv/repo`), but not one that
-  // names the same repository on every machine, so it gets no key.
-  if (value === '' || /^(?:[/\\~.]|[a-z]:[\\/])/i.test(value)) {
+  // A filesystem path is a remote too (`git clone /srv/repo`, or `C:repo` on
+  // Windows), but not one that names the same repository on every machine.
+  if (value === '' || /^(?:[/\\~.]|[a-z]:)/i.test(value)) {
     return null;
   }
 
-  // scp-like syntax: [user@]host:path — no scheme, and a colon before any slash.
-  // A bracketed IPv6 host is matched whole, or its own colons would be taken
-  // for the separator. Rewritten as a URL, so every spelling of a host — an
-  // IPv6 address above all — is reduced by the same parser.
-  const scp = /^(?:[^@/[]+@)?(\[[^\]]+\]|[^:/[]+):(?!\/)(.+)$/.exec(value);
-
-  if (scp !== null && !value.includes('://')) {
-    value = `ssh://${scp[1] ?? ''}/${scp[2] ?? ''}`;
-  }
-
-  try {
-    const url = new URL(value.includes('://') ? value : `https://${value}`);
-    value = `${url.hostname}${url.pathname}`;
-  } catch {
+  const remoteParts = splitRemote(value);
+  const remoteHost = remoteParts === null ? null : normalizeHost(remoteParts.host);
+  if (remoteParts === null || remoteHost === null || remoteHost === '') {
     return null;
   }
 
-  // Trailing slashes and `.git` are stripped together, however they repeat, so
-  // a key normalised twice is unchanged.
-  const key = value
+  // Trailing slashes and `.git` are stripped together, however they repeat.
+  const key = `${remoteHost}/${remoteParts.path}`
     .toLowerCase()
     .replace(/\/+/g, '/')
     .replace(/(?:\/|\.git)+$/, '');
