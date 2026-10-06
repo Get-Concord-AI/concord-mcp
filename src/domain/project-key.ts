@@ -89,16 +89,14 @@ export function normalizeProjectKey(remote: string): string | null {
   }
 
   const remoteParts = splitRemote(value);
-  if (remoteParts === null || remoteParts.path === null) {
-    return null;
-  }
-  const remoteHost = normalizeHost(remoteParts.host);
-  if (remoteHost === null || remoteHost === '') {
+  const remotePath = remoteParts?.path ?? null;
+  const remoteHost = remoteParts === null ? null : normalizeHost(remoteParts.host);
+  if (remotePath === null || remoteHost === null || remoteHost === '') {
     return null;
   }
 
   // Trailing slashes and `.git` are stripped together, however they repeat.
-  const key = `${remoteHost}/${remoteParts.path}`
+  const key = `${remoteHost}/${remotePath}`
     .toLowerCase()
     .replace(/\/+/g, '/')
     .replace(/(?:\/|\.git)+$/, '');
