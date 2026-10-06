@@ -69,6 +69,35 @@ export function findRepoRoot(startDir: string): string {
 }
 
 /**
+ * The checkout `startDir` is in: a linked worktree's own root, where
+ * `findRepoRoot` would follow it to the primary checkout. File paths an agent
+ * passes are inside the checkout it works in.
+ */
+export function findCheckoutRoot(startDir: string): string {
+  const start = canonicalPath(startDir);
+  let dir = start;
+  for (;;) {
+    if (existsSync(join(dir, '.git'))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      return start;
+    }
+    dir = parent;
+  }
+}
+
+/** The checkout the MCP server works in, chosen as `resolveRepoRoot` chooses. */
+export function resolveCheckoutRoot(cwd: string, env: NodeJS.ProcessEnv): string {
+  for (const name of ['CONCORD_REPO_ROOT', 'CLAUDE_PROJECT_DIR']) {
+    const configured = env[name]?.trim();
+    if (configured !== undefined && configured !== '') return findCheckoutRoot(configured);
+  }
+  return findCheckoutRoot(cwd);
+}
+
+/**
  * Resolve the repo root for the MCP server, whose own `process.cwd()` is
  * unreliable: when the server is registered at user scope it is launched from
  * wherever the client started, not the repo the agent is editing — so a claim

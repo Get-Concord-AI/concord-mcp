@@ -1,3 +1,4 @@
+import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, relative, sep } from 'node:path';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -14,7 +15,7 @@ import type { AgentIdentity } from '../domain/identity.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../install/instructions.js';
 import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
-import { assertKeySafeUrl } from './client.js';
+import { assertKeySafeUrl, sameApi } from './client.js';
 import { readCredentials, readLink, readMachineKey } from './settings.js';
 
 /**
@@ -36,7 +37,10 @@ export interface CloudSession {
   readonly apiKey: string;
   readonly machineKey: string;
   readonly projectKey: string;
+  /** The primary checkout, which holds the link. */
   readonly repoRoot: string;
+  /** The checkout this session works in: a linked worktree's own root. */
+  readonly checkoutRoot: string;
   readonly identity: AgentIdentity | undefined;
 }
 
@@ -49,6 +53,7 @@ export function cloudSessionFor(
   repoRoot: string,
   env: NodeJS.ProcessEnv,
   identity: AgentIdentity | undefined,
+  checkoutRoot: string = repoRoot,
 ): CloudSession | undefined {
   const link = readLink(repoRoot);
   if (link === undefined) return undefined;
@@ -61,7 +66,7 @@ export function cloudSessionFor(
         'Run `concord cloud login`, or `concord cloud unlink` to work locally.',
     );
   }
-  if (credentials.apiUrl !== link.apiUrl) {
+  if (!sameApi(credentials.apiUrl, link.apiUrl)) {
     throw new Error(
       `${repoRoot} is linked to ${link.apiUrl}, but this machine is logged in to ` +
         `${credentials.apiUrl}. Log in to the linked API, or link again.`,
@@ -69,7 +74,14 @@ export function cloudSessionFor(
   }
 
   assertKeySafeUrl(credentials.apiUrl);
-  return { ...credentials, machineKey, projectKey: link.projectKey, repoRoot, identity };
+  return {
+    ...credentials,
+    machineKey,
+    projectKey: link.projectKey,
+    repoRoot,
+    checkoutRoot,
+    identity,
+  };
 }
 
 /** The tools that act as an agent, and so act as this session's. */
@@ -78,27 +90,46 @@ const WRITE_TOOLS = new Set(['start_work', 'update_work', 'transfer_work', 'fini
 const toolArguments = z.record(z.string(), z.json());
 type ToolArguments = z.infer<typeof toolArguments>;
 
-/** An absolute path inside the repository, made relative; anything else as given. */
-function repoRelative(repoRoot: string, path: string): string {
+/** `path` relative to `root`, or undefined when it is not inside it. */
+function inside(root: string, path: string): string | undefined {
+  const within = relative(root, path);
+  if (within === '' || within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within)) {
+    return undefined;
+  }
+  return within.split(sep).join('/');
+}
+
+/**
+ * An absolute path inside the checkout this session works in, or the primary
+ * one, made relative; anything else as given. Tried as written and resolved,
+ * so a path through a symlink (`/tmp` on macOS) still matches.
+ */
+function repoRelative(
+  session: Pick<CloudSession, 'repoRoot' | 'checkoutRoot'>,
+  path: string,
+): string {
   if (!isAbsolute(path)) return path;
-  const inside = relative(repoRoot, path);
-  if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) return path;
-  return inside.split(sep).join('/');
+  const candidates = existsSync(path) ? [path, realpathSync(path)] : [path];
+  for (const root of [session.checkoutRoot, session.repoRoot]) {
+    for (const candidate of candidates) {
+      const within = inside(root, candidate);
+      if (within !== undefined) return within;
+    }
+  }
+  return path;
 }
 
 /** A tool call's arguments as the cloud should receive them. */
 export function forwardedArguments(
   tool: string,
   args: ToolArguments,
-  session: Pick<CloudSession, 'identity' | 'repoRoot'>,
+  session: Pick<CloudSession, 'identity' | 'repoRoot' | 'checkoutRoot'>,
 ): ToolArguments {
   const forwarded: ToolArguments = {};
   for (const [name, value] of Object.entries(args)) {
     forwarded[name] =
       name.endsWith('files') && Array.isArray(value)
-        ? value.map((item) =>
-            typeof item === 'string' ? repoRelative(session.repoRoot, item) : item,
-          )
+        ? value.map((item) => (typeof item === 'string' ? repoRelative(session, item) : item))
         : value;
   }
 
@@ -127,8 +158,7 @@ export async function connectCloud(session: CloudSession, fetchImpl?: FetchLike)
   return client;
 }
 
-function failure(error: unknown): CallToolResult {
-  const reason = error instanceof Error ? error.message : String(error);
+function failure(reason: string): CallToolResult {
   return {
     isError: true,
     content: [{ type: 'text', text: `Concord Cloud could not be reached: ${reason}` }],
@@ -149,27 +179,45 @@ export function createCloudProxyServer(
     { instructions: CONCORD_SERVER_INSTRUCTIONS, capabilities: { tools: {} } },
   );
 
+  // One client, shared; dropped whenever a connection or a call through it
+  // fails, so the next call connects afresh instead of reusing a broken one.
+  // A tool's own error comes back as a result, never as a failure here.
   let pending: Promise<Client> | undefined;
+  const forget = (attempt: Promise<Client>): void => {
+    if (pending === attempt) pending = undefined;
+  };
   const cloud = (): Promise<Client> => {
-    pending ??= connect().catch((error: unknown) => {
-      pending = undefined;
-      throw error;
-    });
+    if (pending === undefined) {
+      const attempt = connect();
+      pending = attempt;
+      attempt.catch(() => {
+        forget(attempt);
+      });
+    }
     return pending;
   };
 
-  server.server.setRequestHandler(ListToolsRequestSchema, async () => (await cloud()).listTools());
+  server.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const attempt = cloud();
+    try {
+      return await (await attempt).listTools();
+    } catch (error) {
+      forget(attempt);
+      throw error;
+    }
+  });
 
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const attempt = cloud();
     try {
       const { name } = request.params;
       const args = toolArguments.parse(request.params.arguments ?? {});
-      const result = await (
-        await cloud()
+      return await (
+        await attempt
       ).callTool({ name, arguments: forwardedArguments(name, args, session) });
-      return result;
     } catch (error) {
-      return failure(error);
+      forget(attempt);
+      return failure(error instanceof Error ? error.message : String(error));
     }
   });
 

@@ -32,6 +32,12 @@ export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 /** How long any of these calls may take: a cold Cloud Run start is the slow case. */
 const TIMEOUT_MS = 15_000;
 
+/** Whether two API URLs name the same API: spelling aside, the same endpoint. */
+export function sameApi(first: string, second: string): boolean {
+  const normal = (apiUrl: string): string => new URL(apiUrl).href.replace(/\/+$/, '');
+  return normal(first) === normal(second);
+}
+
 function url(apiUrl: string, path: string): string {
   return `${apiUrl.replace(/\/+$/, '')}${path}`;
 }

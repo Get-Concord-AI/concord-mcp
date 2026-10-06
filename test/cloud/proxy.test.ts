@@ -21,7 +21,11 @@ import { ensureMachineKey, writeCredentials, writeLink } from '../../src/cloud/s
 const SESSION_AGENT = { agentId: 'claude-code:aaaa1111', kind: 'claude-code', origin: 'session' };
 
 describe('forwardedArguments', () => {
-  const session = { identity: { ...SESSION_AGENT, origin: 'session' as const }, repoRoot: '/repo' };
+  const session = {
+    identity: { ...SESSION_AGENT, origin: 'session' as const },
+    repoRoot: '/repo',
+    checkoutRoot: '/repo',
+  };
 
   it('acts as the session on write tools, whatever agent the model names', () => {
     expect(forwardedArguments('update_work', { agent_id: 'claude-code:peer' }, session)).toEqual({
@@ -44,6 +48,21 @@ describe('forwardedArguments', () => {
         { ...session, identity: undefined },
       ),
     ).toEqual({ agent_id: 'codex:1' });
+  });
+
+  it('makes paths in a linked worktree relative to that worktree', () => {
+    const worktree = { ...session, checkoutRoot: '/worktrees/task' };
+    const args = { expected_files: ['/worktrees/task/src/a.ts', '/repo/src/b.ts'] };
+    expect(forwardedArguments('inspect_work', args, worktree)).toEqual({
+      expected_files: ['src/a.ts', 'src/b.ts'],
+    });
+  });
+
+  it('treats a name that merely starts with two dots as inside', () => {
+    const args = { expected_files: ['/repo/..config/a.ts', '/repo/../elsewhere/b.ts'] };
+    expect(forwardedArguments('inspect_work', args, session)).toEqual({
+      expected_files: ['..config/a.ts', '/repo/../elsewhere/b.ts'],
+    });
   });
 
   it('sends file paths relative to the repository', () => {
@@ -120,6 +139,7 @@ describe('the cloud proxy', () => {
       machineKey: 'machine-1',
       projectKey: 'github.com/acme/app',
       repoRoot: '/repo',
+      checkoutRoot: '/repo',
       identity: { agentId: SESSION_AGENT.agentId, kind: 'claude-code', origin: 'session' },
     };
     const proxy = createCloudProxyServer(session, () => connectCloud(session));
@@ -156,6 +176,28 @@ describe('the cloud proxy', () => {
       'x-concord-project': 'github.com/acme/app',
       'x-concord-machine': 'machine-1',
     });
+  });
+
+  it('connects afresh after a call through the client fails', async () => {
+    let connects = 0;
+    let broken = true;
+    const flaky = createCloudProxyServer(session, async () => {
+      connects += 1;
+      const real = await connectCloud(session);
+      // A client whose connection has gone: every call through it fails.
+      if (broken) await real.close();
+      return real;
+    });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await flaky.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    expect((await harness.callTool({ name: 'start_work', arguments: {} })).isError).toBe(true);
+    broken = false;
+    expect((await harness.callTool({ name: 'start_work', arguments: {} })).isError).toBeFalsy();
+    expect(connects).toBe(2);
+    await harness.close();
   });
 
   it('answers a call with an error the model can read when the cloud is down', async () => {
@@ -195,6 +237,15 @@ describe('cloudSessionFor', () => {
     expect(() => cloudSessionFor(repo, { HOME: home }, undefined)).toThrow(/logged in to/);
   });
 
+  it('treats API URLs that differ only in spelling as the same API', () => {
+    ensureMachineKey({ HOME: home }, () => 'm');
+    writeLink(repo, { apiUrl: 'https://api.test', projectKey: 'github.com/acme/app' });
+    writeCredentials({ HOME: home }, { ...credentials, apiUrl: 'https://API.test/' });
+    expect(cloudSessionFor(repo, { HOME: home }, undefined)?.projectKey).toBe(
+      'github.com/acme/app',
+    );
+  });
+
   it('combines the login, the machine and the link', () => {
     writeCredentials({ HOME: home }, credentials);
     ensureMachineKey({ HOME: home }, () => 'm');
@@ -204,6 +255,7 @@ describe('cloudSessionFor', () => {
       machineKey: 'm',
       projectKey: 'github.com/acme/app',
       repoRoot: repo,
+      checkoutRoot: repo,
       identity: undefined,
     });
   });

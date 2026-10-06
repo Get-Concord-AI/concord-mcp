@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { writeArtifacts } from './artifacts/index.js';
 import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/proxy.js';
 import { startBackgroundUpdateCheck } from './update-notifier.js';
-import { resolveRepoRoot } from './config/paths.js';
+import { resolveCheckoutRoot, resolveRepoRoot } from './config/paths.js';
 import { resolveIdentity } from './domain/identity.js';
 import { createServer } from './server.js';
 import { ensureAgentRegistered } from './tools/register-agent.js';
@@ -22,7 +22,12 @@ async function main(): Promise<void> {
 
   // A repository linked to Concord Cloud works through it: no local database,
   // and no telemetry from this package for operations that are not local.
-  const cloud = cloudSessionFor(repoRoot, process.env, identity);
+  const cloud = cloudSessionFor(
+    repoRoot,
+    process.env,
+    identity,
+    resolveCheckoutRoot(process.cwd(), process.env),
+  );
   if (cloud !== undefined) {
     const proxy = createCloudProxyServer(cloud, () => connectCloud(cloud));
     await proxy.connect(new StdioServerTransport());
