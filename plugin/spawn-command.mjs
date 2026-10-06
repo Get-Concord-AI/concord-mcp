@@ -1,5 +1,4 @@
 /**
- * Keep in sync with src/process/spawn-command.ts.
  * Hooks import this file from the packaged plugin tree. Each relay directory
  * is linked on its own, and Node resolves those imports from this real path.
  */
