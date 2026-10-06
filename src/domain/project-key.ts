@@ -11,6 +11,19 @@ function normalizeHost(host: string): string | null {
   }
 }
 
+/**
+ * A literal path, spelled as the URL parser spells a URL's path, so a
+ * repository's scp remote and its URL remote agree (`repo#one` and
+ * `repo%23one`). `#` and `?` are escaped first, as they are path here.
+ */
+function escapePath(path: string): string | null {
+  try {
+    return new URL(`https://host/${path.replace(/[#?]/g, encodeURIComponent)}`).pathname;
+  } catch {
+    return null;
+  }
+}
+
 /** The host and path a remote names, in whichever of git's forms it is written. */
 function splitRemote(value: string): { host: string; path: string } | null {
   if (value.includes('://')) {
@@ -26,15 +39,18 @@ function splitRemote(value: string): { host: string; path: string } | null {
 
   // scp-like syntax: [user@]host:path — no scheme, and a colon before any slash.
   // A bracketed IPv6 host is matched whole, or its own colons would be taken
-  // for the separator. The path is literal, `#` and `?` included.
+  // for the separator. The path is literal, `#` and `?` included, and escaped
+  // as a URL path is.
   const scp = /^(?:[^@/[]+@)?(\[[^\]]+\]|[^:/[]+):(?!\/)(.+)$/.exec(value);
   if (scp !== null) {
-    return { host: scp[1] ?? '', path: scp[2] ?? '' };
+    const path = escapePath(scp[2] ?? '');
+    return path === null ? null : { host: scp[1] ?? '', path };
   }
 
   // host/path, as a key itself is written.
   const slash = value.indexOf('/');
-  return slash === -1 ? null : { host: value.slice(0, slash), path: value.slice(slash + 1) };
+  const path = slash === -1 ? null : escapePath(value.slice(slash + 1));
+  return path === null ? null : { host: value.slice(0, slash), path };
 }
 
 /**

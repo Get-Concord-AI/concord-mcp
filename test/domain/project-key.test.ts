@@ -45,11 +45,20 @@ describe('normalizeProjectKey', () => {
     expect(normalizeProjectKey(once)).toBe(once);
   });
 
-  it('keeps a path literal, so different repositories keep different keys', () => {
+  it('keeps different repositories apart, and one repository together, by path', () => {
     expect(normalizeProjectKey('git@example.com:org/repo#one.git')).toBe(
-      'example.com/org/repo#one',
+      'example.com/org/repo%23one',
     );
-    expect(normalizeProjectKey('git@example.com:org/repo?two')).toBe('example.com/org/repo?two');
+    expect(normalizeProjectKey('git@example.com:org/repo#two.git')).toBe(
+      'example.com/org/repo%23two',
+    );
+    expect(normalizeProjectKey('https://example.com/org/repo%23one.git')).toBe(
+      'example.com/org/repo%23one',
+    );
+    expect(normalizeProjectKey('git@example.com:org/my repo')).toBe(
+      normalizeProjectKey('https://example.com/org/my%20repo'),
+    );
+    expect(normalizeProjectKey('git@example.com:org/repo?two')).toBe('example.com/org/repo%3ftwo');
   });
 
   it('keeps a URL path escaped', () => {
