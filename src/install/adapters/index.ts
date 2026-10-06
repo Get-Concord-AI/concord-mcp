@@ -592,7 +592,7 @@ export function installGlobalAdapters(
     if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
       return;
     }
-    installGooseMcpConfig(env, repoRoot);
+    installGooseMcpConfig(env);
   });
 
   const report = statusGlobalAdapters(env, repoRoot).map((entry) => {

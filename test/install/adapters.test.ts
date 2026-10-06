@@ -216,15 +216,15 @@ describe('global harness adapters', () => {
     const env = { HOME: home };
     const repoRoot = join(home, 'project');
 
-    installGooseMcpConfig(env, repoRoot);
+    installGooseMcpConfig(env);
 
     const installed = readFileSync(configPath, 'utf8');
     expect(installed).toContain('concord-relay');
     expect(installed).toContain('developer');
-    expect(installed).toContain('CONCORD_REPO_ROOT');
-    expect(installed).toContain(repoRoot);
+    expect(installed).not.toContain('CONCORD_REPO_ROOT');
+    expect(installed).not.toContain(repoRoot);
 
-    installGooseMcpConfig(env, repoRoot);
+    installGooseMcpConfig(env);
 
     const secondRun = readFileSync(configPath, 'utf8');
     const occurrences = secondRun.match(/concord-relay/g) ?? [];
@@ -249,7 +249,7 @@ describe('global harness adapters', () => {
       capabilities: [],
     });
 
-    expect(existsSync(join(home, '.config', 'goose', 'config', 'config.yaml'))).toBe(false);
+    expect(existsSync(join(home, '.config', 'goose', 'config.yaml'))).toBe(false);
   });
   it('does not overwrite a non-mapping extensions value', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-goose-invalid-'));

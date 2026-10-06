@@ -59,7 +59,6 @@ export function gooseConfigInstalled(env: NodeJS.ProcessEnv = process.env): bool
 
 export function installGooseMcpConfig(
   env: NodeJS.ProcessEnv = process.env,
-  repoRoot?: string,
 ): void {
   const path = gooseConfigPath(env);
   const config = readConfig(path);
@@ -85,7 +84,6 @@ export function installGooseMcpConfig(
     description: 'Concord shared work-state for coding agents',
     cmd: CONCORD_SERVER_COMMAND,
     args: [...CONCORD_SERVER_ARGS],
-    envs: repoRoot !== undefined ? { CONCORD_REPO_ROOT: repoRoot } : {},
     timeout: 300,
   };
 
@@ -100,6 +98,8 @@ export function uninstallGooseConfig(env: NodeJS.ProcessEnv = process.env): void
 
   const parsedExtensions = looseObjectSchema.safeParse(extensions);
   if (!parsedExtensions.success) return;
+
+  if (!(CONCORD_EXTENSION_KEY in parsedExtensions.data)) return;
 
   const next: UnknownRecord = {};
   for (const [key, value] of Object.entries(parsedExtensions.data)) {

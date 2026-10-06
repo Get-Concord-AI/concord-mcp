@@ -5,10 +5,10 @@ Goose's `config.yaml` when `goose` is detected. The extension is added under the
 `extensions` key and preserves any existing extensions and settings.
 
 Goose is an MCP-capable agent with no verified session wake or resume mechanism.
-Concord therefore uses **durable inbox delivery** for idle reach: peer messages
-are queued in the local SQLite workspace and consumed when the Goose session next
-polls the inbox. There is no background monitor or hook to wake an idle session
-automatically.
+Concord can register its MCP server with Goose, but inbox messaging is not
+currently supported because Concord cannot reliably register a Goose session
+endpoint for message delivery. Do not rely on `send_agent_message` for Goose
+sessions yet.
 
 ## Configuration
 
@@ -30,6 +30,4 @@ extensions:
     args:
       - -y
       - '@concord-ai/concord-mcp'
-    envs: {}
     timeout: 300
-```
