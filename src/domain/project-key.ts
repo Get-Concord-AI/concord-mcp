@@ -12,26 +12,26 @@ function normalizeHost(host: string): string | null {
 }
 
 /**
- * A literal path, spelled as the URL parser spells a URL's path, so a
- * repository's scp remote and its URL remote agree (`repo#one` and
- * `repo%23one`). `#` and `?` are escaped first, as they are path here.
+ * A URL path as the URL parser spells it, with every `%` that begins no escape
+ * written `%25`: one spelling of each path, however it arrived, and unchanged
+ * by a second pass.
  */
-function escapePath(path: string): string | null {
+function urlPath(escaped: string): string | null {
   try {
-    return new URL(`https://host/${path.replace(/[#?]/g, encodeURIComponent)}`).pathname;
+    const path = new URL(`https://host/${escaped}`).pathname;
+    return path.replace(/%(?![0-9a-f]{2})/gi, '%25');
   } catch {
     return null;
   }
 }
 
 /** The host and path a remote names, in whichever of git's forms it is written. */
-function splitRemote(value: string): { host: string; path: string } | null {
+function splitRemote(value: string): { host: string; path: string | null } | null {
   if (value.includes('://')) {
     try {
       const url = new URL(value);
-      // Kept escaped, as the URL parser writes it: decoding would make keys
-      // change on a second pass, and an invalid escape would give none.
-      return { host: url.hostname, path: url.pathname };
+      // Kept escaped: decoding would let a key change on a second pass.
+      return { host: url.hostname, path: urlPath(url.pathname.slice(1)) };
     } catch {
       return null;
     }
@@ -39,18 +39,22 @@ function splitRemote(value: string): { host: string; path: string } | null {
 
   // scp-like syntax: [user@]host:path — no scheme, and a colon before any slash.
   // A bracketed IPv6 host is matched whole, or its own colons would be taken
-  // for the separator. The path is literal, `#` and `?` included, and escaped
-  // as a URL path is.
+  // for the separator. Its path is literal, so every character a URL path
+  // would read specially is escaped first: `repo#one`, `repo%23one` and
+  // `repo\one` are three repositories, and `repo#one` is the URL's `repo%23one`.
   const scp = /^(?:[^@/[]+@)?(\[[^\]]+\]|[^:/[]+):(?!\/)(.+)$/.exec(value);
   if (scp !== null) {
-    const path = escapePath(scp[2] ?? '');
-    return path === null ? null : { host: scp[1] ?? '', path };
+    return {
+      host: scp[1] ?? '',
+      path: urlPath((scp[2] ?? '').replace(/[%\\#?]/g, encodeURIComponent)),
+    };
   }
 
-  // host/path, as a key itself is written.
+  // host/path, as a key itself is written: already escaped.
   const slash = value.indexOf('/');
-  const path = slash === -1 ? null : escapePath(value.slice(slash + 1));
-  return path === null ? null : { host: value.slice(0, slash), path };
+  return slash === -1
+    ? null
+    : { host: value.slice(0, slash), path: urlPath(value.slice(slash + 1)) };
 }
 
 /**
@@ -85,8 +89,11 @@ export function normalizeProjectKey(remote: string): string | null {
   }
 
   const remoteParts = splitRemote(value);
-  const remoteHost = remoteParts === null ? null : normalizeHost(remoteParts.host);
-  if (remoteParts === null || remoteHost === null || remoteHost === '') {
+  if (remoteParts === null || remoteParts.path === null) {
+    return null;
+  }
+  const remoteHost = normalizeHost(remoteParts.host);
+  if (remoteHost === null || remoteHost === '') {
     return null;
   }
 

@@ -37,6 +37,9 @@ describe('normalizeProjectKey', () => {
     'https://example.com/org/my%20repo',
     'https://example.com/org/my%20',
     'https://example.com/org/100%done',
+    'git@example.com:org/repo%23one.git',
+    'git@example.com:org/a\\b',
+    'git@example.com:org/100%done',
   ])('is stable when applied to its own output (%s)', (remote) => {
     // Clients normalise and the server normalises again, so a key must survive
     // a second pass unchanged or the two would disagree about one repository.
@@ -46,6 +49,15 @@ describe('normalizeProjectKey', () => {
   });
 
   it('keeps different repositories apart, and one repository together, by path', () => {
+    expect(normalizeProjectKey('git@example.com:org/repo%23one.git')).toBe(
+      'example.com/org/repo%2523one',
+    );
+    expect(normalizeProjectKey('git@example.com:org/a\\b')).not.toBe(
+      normalizeProjectKey('git@example.com:org/a/b'),
+    );
+    expect(normalizeProjectKey('git@example.com:org/100%done')).toBe(
+      normalizeProjectKey('https://example.com/org/100%done'),
+    );
     expect(normalizeProjectKey('git@example.com:org/repo#one.git')).toBe(
       'example.com/org/repo%23one',
     );
@@ -66,7 +78,7 @@ describe('normalizeProjectKey', () => {
       'example.com/org/my%20repo',
     );
     expect(normalizeProjectKey('https://example.com/org/100%done')).toBe(
-      'example.com/org/100%done',
+      'example.com/org/100%25done',
     );
   });
 
