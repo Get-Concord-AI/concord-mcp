@@ -15,7 +15,7 @@ import { z } from 'zod';
 
 import { runCloudLogin, runCloudLogout, type CloudDeps } from '../../src/cli/commands/cloud.js';
 import { REQUIRED_CAPABILITIES, type Fetch } from '../../src/cloud/client.js';
-import { credentialsPath, readMachineKey } from '../../src/cloud/settings.js';
+import { credentialsPath, ensureMachineKey, readMachineKey } from '../../src/cloud/settings.js';
 
 const API = 'https://api.concord.test';
 const KEY = 'cak_live_0123456789abcdef';
@@ -100,6 +100,16 @@ describe('concord cloud', () => {
     expect(sent[0]?.name).toBe('devbox');
   });
 
+  it('agrees on one machine key when two first logins race', () => {
+    const key = ensureMachineKey(deps.env, () => {
+      // Another login saves its key while this one is still minting.
+      expect(ensureMachineKey(deps.env, () => 'winner')).toBe('winner');
+      return 'loser';
+    });
+    expect(key).toBe('winner');
+    expect(readMachineKey(deps.env)).toBe('winner');
+  });
+
   it('logs out, forgetting the key but not the machine', async () => {
     expect(runCloudLogout(deps)).toBe('Not logged in.');
     await runCloudLogin({ url: API }, deps);
@@ -134,12 +144,9 @@ describe('concord cloud', () => {
       Promise.resolve(
         input.endsWith('/v1/meta') ? Response.json(META) : new Response(page, { status: 502 }),
       );
-    const error = await runCloudLogin({ url: API }, { ...deps, fetch: failing }).catch(
-      (caught: unknown) => caught,
+    // One line, and short: the page is flattened and cut, not printed whole.
+    await expect(runCloudLogin({ url: API }, { ...deps, fetch: failing })).rejects.toThrow(
+      /^[^\n]{1,400}$/,
     );
-    expect(error).toBeInstanceOf(Error);
-    const message = error instanceof Error ? error.message : '';
-    expect(message).not.toContain('\n');
-    expect(message.length).toBeLessThan(400);
   });
 });

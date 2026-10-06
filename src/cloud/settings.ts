@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { z } from 'zod';
@@ -48,12 +56,29 @@ export function readMachineKey(env: NodeJS.ProcessEnv): string | undefined {
   return readJson(machinePath(env), machineSchema)?.machineKey;
 }
 
-/** This machine's key, minted and saved the first time one is needed. */
+/**
+ * This machine's key, minted and saved the first time one is needed. Created
+ * exclusively, by linking a complete file into place, so two first logins at
+ * once agree on one key: the loser reads the winner's.
+ */
 export function ensureMachineKey(env: NodeJS.ProcessEnv, mint: () => string): string {
   const saved = readMachineKey(env);
   if (saved !== undefined) return saved;
+
+  const path = machinePath(env);
   const machineKey = mint();
-  writeJson(machinePath(env), { machineKey });
+  mkdirSync(dirname(path), { recursive: true });
+  const temporary = `${path}.${String(process.pid)}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify({ machineKey }, null, 2)}\n`, { mode: 0o644 });
+  try {
+    linkSync(temporary, path);
+  } catch (error) {
+    const winner = readMachineKey(env);
+    if (winner === undefined) throw error;
+    return winner;
+  } finally {
+    rmSync(temporary, { force: true });
+  }
   return machineKey;
 }
 
