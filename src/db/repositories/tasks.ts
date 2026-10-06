@@ -36,6 +36,7 @@ export interface TaskRepository {
   create(task: NewTask): TaskRecord;
   get(taskId: string): TaskRecord | undefined;
   list(): TaskRecord[];
+  listByStatuses(statuses: readonly TaskStatus[]): TaskRecord[];
   touchActivity(taskId: string): TaskRecord | undefined;
   updateStatus(taskId: string, status: TaskStatus): TaskRecord | undefined;
   updateScope(taskId: string, scope: TaskScope): TaskRecord | undefined;
@@ -135,6 +136,16 @@ export function createTaskRepository(db: ConcordDatabase): TaskRepository {
     get,
     list() {
       const raw: unknown = listStmt.all();
+      return rawListSchema.parse(raw).map(parseTaskRow);
+    },
+    listByStatuses(statuses) {
+      if (statuses.length === 0) return [];
+      const placeholders = statuses.map(() => '?').join(', ');
+      const raw: unknown = db
+        .prepare(
+          `SELECT * FROM tasks WHERE status IN (${placeholders}) ORDER BY created_at ASC, task_id ASC`,
+        )
+        .all(...statuses);
       return rawListSchema.parse(raw).map(parseTaskRow);
     },
     touchActivity(taskId) {
