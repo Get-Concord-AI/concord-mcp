@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -17,21 +17,20 @@ const hookDefinitionSchema = z.object({
 
 function fakeConcord(directory: string): { executable: string; log: string } {
   const isWindows = process.platform === 'win32';
-  const executable = join(directory, isWindows ? 'concord.cmd' : 'concord');
+  // A space in the path guards CONCORD_EXECUTABLE overrides under Program Files.
+  const bin = join(directory, 'concord bin');
+  mkdirSync(bin);
+  const executable = join(bin, isWindows ? 'concord.cmd' : 'concord');
   const log = join(directory, 'calls.log');
 
   if (isWindows) {
+    writeFileSync(executable, '@echo off\r\necho %*>> "%CONCORD_TEST_LOG%"\r\necho registered\r\n');
+  } else {
     writeFileSync(
       executable,
-      `@echo off\r\necho %*>> "%CONCORD_TEST_LOG%"\r\necho registered\r\n`,
+      '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CONCORD_TEST_LOG"\ncat >/dev/null\necho registered\n',
     );
-  }
-  else {
-  writeFileSync(
-    executable,
-    '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CONCORD_TEST_LOG"\ncat >/dev/null\necho registered\n',
-  );
-  chmodSync(executable, 0o755);
+    chmodSync(executable, 0o755);
   }
   return { executable, log };
 }
