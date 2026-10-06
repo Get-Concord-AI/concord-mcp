@@ -6,6 +6,7 @@ import { resolveRepoRoot } from '../config/paths.js';
 import { createTelemetryClient } from '../telemetry/client.js';
 import { VERSION } from '../version.js';
 import { registerCheckCommand } from './commands/check.js';
+import { registerCloudCommand } from './commands/cloud.js';
 import { registerAdaptersCommand } from './commands/adapters.js';
 import { registerDashboardCommand } from './commands/dashboard.js';
 import { registerDoctorCommand } from './commands/doctor.js';
@@ -44,7 +45,14 @@ program.hook('preAction', (command, actionCommand) => {
     workspaceRoot = selected.repoRoot;
     process.stderr.write(`Concord workspace: ${selected.workspaceId} (${selected.repoRoot})\n`);
   }
-  activeCommand = { name: actionCommand.name(), startedAt: performance.now() };
+  // `concord cloud …` acts on Concord Cloud, which records its own usage; the
+  // open-source CLI emits no telemetry, success or error, for non-local
+  // operations. Checked by parent, since `cloud status` shares its name with
+  // the local `status`.
+  activeCommand =
+    actionCommand.parent?.name() === 'cloud'
+      ? undefined
+      : { name: actionCommand.name(), startedAt: performance.now() };
 });
 
 program.hook('postAction', (_command, actionCommand) => {
@@ -74,6 +82,7 @@ registerHandoffCommand(program);
 registerReviewPacketCommand(program);
 registerExportCommand(program);
 registerDoctorCommand(program);
+registerCloudCommand(program);
 
 try {
   await notifyIfUpdateAvailable(VERSION);
