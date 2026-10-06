@@ -80,9 +80,13 @@ export function ensureMachineKey(
   } catch {
     const winner = readMachineKey(env);
     if (winner !== undefined) return winner;
-    // No hard links here (exFAT, some network shares): an exclusive create
-    // still lets only one login save its key, if not all at once.
-    writeFileSync(path, content, { mode: 0o644, flag: 'wx' });
+    // No hard links here (exFAT, some network shares), or a damaged file in
+    // the way: a rename still publishes a complete file, replacing a damaged
+    // one. Two first logins at the very same moment on such a filesystem may
+    // register one machine twice, which is harmless; whichever key is saved
+    // is the one every later login uses.
+    renameSync(temporary, path);
+    return readMachineKey(env) ?? machineKey;
   } finally {
     rmSync(temporary, { force: true });
   }

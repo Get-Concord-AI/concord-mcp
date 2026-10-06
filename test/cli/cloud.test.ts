@@ -118,6 +118,13 @@ describe('concord cloud', () => {
     expect(readMachineKey(deps.env)).toBe('only');
   });
 
+  it('replaces a damaged machine file rather than staying stuck on it', () => {
+    mkdirSync(join(home, '.concord'), { recursive: true });
+    writeFileSync(join(home, '.concord', 'machine.json'), '{"machine');
+    expect(ensureMachineKey(deps.env, () => 'repaired')).toBe('repaired');
+    expect(readMachineKey(deps.env)).toBe('repaired');
+  });
+
   it('logs out, forgetting the key but not the machine', async () => {
     expect(runCloudLogout(deps)).toBe('Not logged in.');
     await runCloudLogin({ url: API }, deps);
