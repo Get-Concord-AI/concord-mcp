@@ -31,3 +31,7 @@ extensions:
       - -y
       - '@concord-ai/concord-mcp'
     timeout: 300
+```
+
+> **Note:** Goose configuration is loaded and rewritten as YAML during
+> installation, so existing YAML comments may not be preserved.
