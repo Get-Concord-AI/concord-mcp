@@ -62,7 +62,7 @@ function batchTarget(file, args, env) {
 export function spawnCommandSync(file, args, options) {
   const env = options.env ?? process.env;
   const resolved = process.platform === 'win32' ? resolveWindowsCommand(file, env) : file;
-  if (process.platform !== 'win32' || !batchExtension.test(resolved)) {
+  if (process.platform !== 'win32' || !BATCH_EXTENSION.test(resolved)) {
     return spawnSync(resolved, [...args], { ...options, shell: false });
   }
   const target = batchTarget(resolved, args, env);
