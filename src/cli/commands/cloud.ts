@@ -224,15 +224,21 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+/**
+ * How to open a URL in the browser on each platform, with the URL passed as a
+ * single argument and never through a shell. On Windows that rules out
+ * `cmd /c start`: `cmd` reads `&` (in every OAuth URL) as a command separator.
+ */
+export function browserCommand(platform: NodeJS.Platform, url: string): [string, string[]] {
+  if (platform === 'darwin') return ['open', [url]];
+  if (platform === 'win32') return ['rundll32', ['url.dll,FileProtocolHandler', url]];
+  return ['xdg-open', [url]];
+}
+
 function openUrl(url: string): void {
-  const [command, args]: [string, string[]] =
-    process.platform === 'darwin'
-      ? ['open', [url]]
-      : process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '""', url]]
-        : ['xdg-open', [url]];
+  const [command, args] = browserCommand(process.platform, url);
   // Fire and forget: the link is printed too, for when no browser opens.
-  spawn(command, args, { stdio: 'ignore', detached: true })
+  spawn(command, args, { stdio: 'ignore', detached: true, shell: false })
     .on('error', () => undefined)
     .unref();
 }

@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import {
+  browserCommand,
   runCloudLink,
   runCloudLogin,
   runCloudLogout,
@@ -283,5 +284,19 @@ describe('concord cloud', () => {
 
     const down: Fetch = () => Promise.reject(new Error('connect ECONNREFUSED'));
     expect(await runCloudStatus({ ...deps, fetch: down })).toContain('API: unreachable');
+  });
+});
+
+describe('browserCommand', () => {
+  const url = 'https://auth.concord.test/authorize?client_id=a&state=1.b&calc';
+
+  it('passes the URL whole, as data, on every platform', () => {
+    expect(browserCommand('darwin', url)).toEqual(['open', [url]]);
+    expect(browserCommand('linux', url)).toEqual(['xdg-open', [url]]);
+    // Not `cmd /c start`: cmd would split at each `&` and run what follows.
+    expect(browserCommand('win32', url)).toEqual([
+      'rundll32',
+      ['url.dll,FileProtocolHandler', url],
+    ]);
   });
 });

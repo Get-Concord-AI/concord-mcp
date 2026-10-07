@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 
-import type { CliLogin, Fetch } from './client.js';
+import { assertKeySafeUrl, type CliLogin, type Fetch } from './client.js';
 import type { OAuthTokens } from './settings.js';
 import { requestTokens } from './tokens.js';
 
@@ -105,6 +105,11 @@ export async function browserLogin(
   options: { readonly paste: boolean },
   deps: BrowserLoginDeps,
 ): Promise<OAuthTokens> {
+  // The API names these; whatever it names is opened and posted to, so only
+  // https is accepted, as for anywhere a credential goes.
+  assertKeySafeUrl(login.authorizationEndpoint);
+  assertKeySafeUrl(login.tokenEndpoint);
+
   const verifier = base64url(randomBytes(32));
   const nonce = base64url(randomBytes(24));
   const listener = options.paste ? undefined : await listenForCode();

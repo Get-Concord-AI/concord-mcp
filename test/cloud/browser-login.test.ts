@@ -130,4 +130,22 @@ describe('browserLogin', () => {
       /^paste\./,
     );
   });
+
+  it('refuses an authorization server that is not https', async () => {
+    const deps: BrowserLoginDeps = {
+      openUrl: () => {
+        throw new Error('must not open anything');
+      },
+      print: () => undefined,
+      readLine: () => Promise.reject(new Error('unused')),
+      fetch: () => Promise.reject(new Error('unused')),
+    };
+    await expect(
+      browserLogin(
+        { ...LOGIN, authorizationEndpoint: 'http://evil.example/authorize' },
+        { paste: false },
+        deps,
+      ),
+    ).rejects.toThrow(/not https/);
+  });
 });
