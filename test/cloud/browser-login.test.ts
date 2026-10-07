@@ -99,6 +99,30 @@ describe('browserLogin', () => {
     expect(calls).toBe(1);
   });
 
+  it('still finishes when no browser opens, from the printed link', async () => {
+    const sent: { url?: URL } = {};
+    const opener = browser((state) => `code=the-code&state=${state}`, sent).openUrl;
+    const printed: string[] = [];
+    const deps = {
+      ...browser(() => '', sent),
+      // The browser fails to open, but the person follows the printed link.
+      openUrl: (url: string) => {
+        opener(url);
+        throw new Error('spawn xdg-open ENOENT');
+      },
+      print: (line: string) => {
+        printed.push(line);
+      },
+      fetch: tokenEndpoint(
+        'the-code',
+        () => sent.url?.searchParams.get('code_challenge') ?? undefined,
+      ),
+    };
+
+    expect((await browserLogin(LOGIN, { paste: false }, deps)).accessToken).toBe('access');
+    expect(printed.join('\n')).toContain('open the link above yourself');
+  });
+
   it('stops waiting when the person declines', async () => {
     const deps = {
       ...browser((state) => `error=access_denied&state=${state}`, {}),

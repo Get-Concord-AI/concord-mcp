@@ -135,8 +135,16 @@ export async function browserLogin(
     code = (await deps.readLine()).trim();
     if (code === '') throw new Error('No code was entered.');
   } else {
-    deps.openUrl(authorize.toString());
-    code = await listener.code(state);
+    // Waiting starts first, so the listener's timeout and cleanup are in place
+    // whatever opening the browser does. A browser that fails to open is no
+    // failure: the link is printed above, for the person to open themselves.
+    const arrived = listener.code(state);
+    try {
+      deps.openUrl(authorize.toString());
+    } catch {
+      deps.print('Could not open a browser; open the link above yourself.');
+    }
+    code = await arrived;
   }
 
   return requestTokens(
