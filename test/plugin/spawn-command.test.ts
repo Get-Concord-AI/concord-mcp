@@ -29,9 +29,16 @@ describe('plugin spawn-command', () => {
   });
 
   it('quotes empty arguments, quotes, percent signs, and metacharacters', () => {
-    const values = ['', 'say "hi"', '100%', 'a&b', 'plain'];
+    const values = ['', 'say "hi"', '100%', 'a&b', 'plain', '%PATH%'];
     expect(pluginEval('args.map((arg) => quoteCmdArgument(arg))', '', values)).toBe(
-      JSON.stringify(['""', '"say ""hi"""', '"100%%"', '"a&b"', 'plain']),
+      JSON.stringify([
+        '""',
+        '"say ""hi"""',
+        '"100%%cd:~,%"',
+        '"a&b"',
+        'plain',
+        '"%%cd:~,%PATH%%cd:~,%"',
+      ]),
     );
   });
 
