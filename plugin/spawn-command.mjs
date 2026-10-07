@@ -10,7 +10,7 @@ const BATCH_EXTENSION = /\.(?:cmd|bat)$/iu;
 
 export function quoteCmdArgument(value) {
   if (value.length === 0) return '""';
-  const escaped = value.replaceAll('%', '%%').replaceAll('"', '""');
+  const escaped = value.replaceAll('%', '%%cd:~,%').replaceAll('"', '""');
   if (value !== escaped || /[\s"&|<>^]/u.test(value)) return `"${escaped}"`;
   return value;
 }
