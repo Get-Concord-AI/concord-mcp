@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 
@@ -21,7 +22,9 @@ import {
   removeLink,
   writeCredentials,
   writeLink,
+  type CloudCredentials,
 } from '../../cloud/settings.js';
+import { browserLogin, type BrowserLoginDeps } from '../../cloud/browser-login.js';
 import { bearerFor } from '../../cloud/tokens.js';
 import { resolveRepoRoot } from '../../config/paths.js';
 import { normalizeProjectKey } from '../../domain/project-key.js';
@@ -42,7 +45,12 @@ export interface CloudDeps {
   readonly originRemote: (repoRoot: string) => string | undefined;
   readonly hostname: () => string;
   readonly newMachineKey: () => string;
+  /** For browser login: open a URL, tell the person, read a pasted code. */
+  readonly browser: Omit<BrowserLoginDeps, 'fetch'>;
 }
+
+/** Concord Cloud, unless `--url` names another deployment. */
+export const DEFAULT_API_URL = 'https://api.getconcord.ai';
 
 export const API_KEY_ENV = 'CONCORD_CLOUD_API_KEY';
 
@@ -52,38 +60,61 @@ function maskKey(apiKey: string): string {
 }
 
 export async function runCloudLogin(
-  options: { readonly url: string; readonly keyStdin?: boolean },
+  options: { readonly url?: string; readonly keyStdin?: boolean; readonly browser?: boolean },
   deps: CloudDeps,
 ): Promise<string> {
-  // Never from a flag: a key on the command line lands in shell history.
+  const apiUrl = options.url ?? DEFAULT_API_URL;
+  // A key only ever from stdin or the environment: a flag lands in shell history.
   const apiKey = (
     options.keyStdin === true ? await deps.readStdin() : (deps.env[API_KEY_ENV] ?? '')
   ).trim();
-  if (apiKey === '') {
-    throw new Error(`Pass the API key on stdin with --key-stdin, or set ${API_KEY_ENV}.`);
+  if (options.keyStdin === true && apiKey === '') {
+    throw new Error('No API key arrived on stdin.');
   }
 
-  assertKeySafeUrl(options.url);
-  const meta = await fetchMeta(options.url, deps.fetch);
+  assertKeySafeUrl(apiUrl);
+  const meta = await fetchMeta(apiUrl, deps.fetch);
   const problem = incompatibility(meta);
   if (problem !== null) {
-    throw new Error(`Cannot use ${options.url}: ${problem}.`);
+    throw new Error(`Cannot use ${apiUrl}: ${problem}.`);
   }
+
+  let credentials: CloudCredentials;
+  if (apiKey !== '') {
+    credentials = { apiUrl, apiKey };
+  } else if (meta.cliLogin !== undefined) {
+    const oauth = await browserLogin(
+      meta.cliLogin,
+      { paste: options.browser === false },
+      { ...deps.browser, fetch: deps.fetch },
+    );
+    credentials = { apiUrl, oauth };
+  } else {
+    throw new Error(
+      `${apiUrl} offers no browser login; pass an API key with --key-stdin or ${API_KEY_ENV}.`,
+    );
+  }
+  const bearer = 'apiKey' in credentials ? credentials.apiKey : credentials.oauth.accessToken;
+
   // Kept across logins and logouts, so this machine stays one machine.
   const machineKey = ensureMachineKey(deps.env, deps.newMachineKey);
   const host = deps.hostname();
   const registered = await registerMachine(
-    options.url,
-    apiKey,
+    apiUrl,
+    bearer,
     { machineKey, name: host, hostname: host, platform: process.platform, runtimeVersion: VERSION },
     deps.fetch,
   );
   if (registered === 'rejected') {
-    throw new Error(`${options.url} rejected that API key.`);
+    throw new Error(
+      `${apiUrl} rejected ${'apiKey' in credentials ? 'that API key' : 'the sign-in'}.`,
+    );
   }
 
-  writeCredentials(deps.env, { apiUrl: options.url, apiKey });
-  return `Logged in to ${options.url} (API v${String(meta.apiVersion)}) with key ${maskKey(apiKey)}.`;
+  writeCredentials(deps.env, credentials);
+  return `Logged in to ${apiUrl} (API v${String(meta.apiVersion)}) ${
+    'apiKey' in credentials ? `with key ${maskKey(credentials.apiKey)}` : 'through the browser'
+  }.`;
 }
 
 export function runCloudLogout(deps: CloudDeps): string {
@@ -193,6 +224,29 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+function openUrl(url: string): void {
+  const [command, args]: [string, string[]] =
+    process.platform === 'darwin'
+      ? ['open', [url]]
+      : process.platform === 'win32'
+        ? ['cmd', ['/c', 'start', '""', url]]
+        : ['xdg-open', [url]];
+  // Fire and forget: the link is printed too, for when no browser opens.
+  spawn(command, args, { stdio: 'ignore', detached: true })
+    .on('error', () => undefined)
+    .unref();
+}
+
+async function readLine(): Promise<string> {
+  const lines = createInterface({ input: process.stdin, terminal: false });
+  try {
+    for await (const line of lines) return line;
+    return '';
+  } finally {
+    lines.close();
+  }
+}
+
 function liveDeps(): CloudDeps {
   return {
     env: process.env,
@@ -202,6 +256,11 @@ function liveDeps(): CloudDeps {
     originRemote,
     hostname,
     newMachineKey: randomUUID,
+    browser: {
+      openUrl,
+      print: (line) => process.stderr.write(`${line}\n`),
+      readLine,
+    },
   };
 }
 
@@ -222,9 +281,12 @@ export function registerCloudCommand(program: Command): void {
 
   cloud
     .command('login')
-    .description(`Save a Concord Cloud API key (from stdin or ${API_KEY_ENV})`)
-    .requiredOption('--url <url>', 'Concord Cloud API URL')
-    .option('--key-stdin', 'read the API key from stdin')
+    .description(
+      `Sign in to Concord Cloud in the browser, or with an API key (stdin or ${API_KEY_ENV})`,
+    )
+    .option('--url <url>', `Concord Cloud API URL (default ${DEFAULT_API_URL})`)
+    .option('--key-stdin', 'read an API key from stdin instead of signing in')
+    .option('--no-browser', 'show a sign-in link and paste the code back (for SSH sessions)')
     .action((options) => report(() => runCloudLogin(options, liveDeps())));
 
   cloud

@@ -20,10 +20,20 @@ export const REQUIRED_CAPABILITIES = [
   'message-drain-wait',
 ] as const;
 
+const cliLoginSchema = z.object({
+  authorizationEndpoint: z.url(),
+  tokenEndpoint: z.url(),
+  clientId: z.string().min(1),
+  redirectUri: z.url(),
+});
+/** How this API signs a person in from the CLI, when it offers browser login. */
+export type CliLogin = z.infer<typeof cliLoginSchema>;
+
 const metaSchema = z.object({
   apiVersion: z.number().int(),
   capabilities: z.array(z.string()),
   mcp: z.object({ endpoint: z.string(), tools: z.array(z.string()) }),
+  cliLogin: cliLoginSchema.optional(),
 });
 export type CloudMeta = z.infer<typeof metaSchema>;
 
