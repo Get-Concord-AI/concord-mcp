@@ -15,6 +15,7 @@ import type { AgentIdentity } from '../domain/identity.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../install/instructions.js';
 import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
+import { bearerFor, type Bearer } from './tokens.js';
 import { assertKeySafeUrl, sameApi } from './client.js';
 import { readCredentials, readLink, readMachineKey } from './settings.js';
 
@@ -34,7 +35,8 @@ import { readCredentials, readLink, readMachineKey } from './settings.js';
 
 export interface CloudSession {
   readonly apiUrl: string;
-  readonly apiKey: string;
+  /** A current bearer token, refreshed as needed; see `cloud/tokens.ts`. */
+  readonly bearer: Bearer;
   readonly machineKey: string;
   readonly projectKey: string;
   /** The primary checkout, which holds the link. */
@@ -75,7 +77,8 @@ export function cloudSessionFor(
 
   assertKeySafeUrl(credentials.apiUrl);
   return {
-    ...credentials,
+    apiUrl: credentials.apiUrl,
+    bearer: bearerFor(env, fetch),
     machineKey,
     projectKey: link.projectKey,
     repoRoot,
@@ -147,11 +150,16 @@ export async function connectCloud(session: CloudSession, fetchImpl?: FetchLike)
   const transport = new HttpClientTransport(
     new URL(`${session.apiUrl.replace(/\/+$/, '')}/mcp`),
     {
-      Authorization: `Bearer ${session.apiKey}`,
       'x-concord-project': session.projectKey,
       'x-concord-machine': session.machineKey,
     },
-    fetchImpl,
+    // The token is fetched per request, so a long session is never sent with
+    // one that has expired since it connected.
+    async (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set('Authorization', `Bearer ${await session.bearer()}`);
+      return (fetchImpl ?? fetch)(input, { ...init, headers });
+    },
   );
   const client = new Client({ name: 'concord-mcp', version: VERSION });
   await client.connect(transport);

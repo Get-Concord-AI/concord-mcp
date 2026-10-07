@@ -10,6 +10,7 @@ import {
   fetchMeta,
   incompatibility,
   registerMachine,
+  sameApi,
   type Fetch,
 } from '../../cloud/client.js';
 import {
@@ -21,6 +22,7 @@ import {
   writeCredentials,
   writeLink,
 } from '../../cloud/settings.js';
+import { bearerFor } from '../../cloud/tokens.js';
 import { resolveRepoRoot } from '../../config/paths.js';
 import { normalizeProjectKey } from '../../domain/project-key.js';
 import { VERSION } from '../../version.js';
@@ -128,13 +130,21 @@ export async function runCloudStatus(deps: CloudDeps): Promise<string> {
   const lines = [
     credentials === undefined
       ? 'Login: none (run `concord cloud login`)'
-      : `Login: ${credentials.apiUrl} with key ${maskKey(credentials.apiKey)}`,
+      : `Login: ${credentials.apiUrl} ${
+          'apiKey' in credentials
+            ? `with key ${maskKey(credentials.apiKey)}`
+            : 'signed in through the browser'
+        }`,
     link === undefined
       ? `Repository: ${repoRoot} is local (not linked)`
       : `Repository: ${repoRoot} is linked to ${link.projectKey} on ${link.apiUrl}`,
   ];
 
-  if (credentials !== undefined && link !== undefined && link.apiUrl !== credentials.apiUrl) {
+  if (
+    credentials !== undefined &&
+    link !== undefined &&
+    !sameApi(link.apiUrl, credentials.apiUrl)
+  ) {
     lines.push(
       `Warning: linked to ${link.apiUrl}, but logged in to ${credentials.apiUrl}; ` +
         'the checks below are for the login, and cloud mode will refuse this pair.',
@@ -156,7 +166,8 @@ export async function runCloudStatus(deps: CloudDeps): Promise<string> {
       lines.push(`API: unreachable (${error instanceof Error ? error.message : String(error)})`);
     }
     try {
-      const key = await checkKey(credentials.apiUrl, credentials.apiKey, deps.fetch);
+      const bearer = await bearerFor(deps.env, deps.fetch)();
+      const key = await checkKey(credentials.apiUrl, bearer, deps.fetch);
       lines.push(key === 'ok' ? 'Key: accepted' : 'Key: rejected — log in again');
     } catch (error) {
       lines.push(`Key: not checked (${error instanceof Error ? error.message : String(error)})`);

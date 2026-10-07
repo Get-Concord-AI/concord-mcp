@@ -92,12 +92,12 @@ export function incompatibility(meta: CloudMeta): string | null {
 /** Whether a key is accepted: one cheap authenticated read. */
 export async function checkKey(
   apiUrl: string,
-  apiKey: string,
+  bearer: string,
   fetchImpl: Fetch = fetch,
 ): Promise<'ok' | 'rejected'> {
   assertKeySafeUrl(apiUrl);
   const response = await fetchImpl(url(apiUrl, '/v1/machines'), {
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { Authorization: `Bearer ${bearer}` },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (response.status === 401 || response.status === 403) return 'rejected';
