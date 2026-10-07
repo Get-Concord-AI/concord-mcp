@@ -74,6 +74,13 @@ describe('concord cloud', () => {
       originRemote: () => 'git@github.com:Acme/App.git',
       hostname: () => 'devbox',
       newMachineKey: () => `machine-${String(++minted)}`,
+      browser: {
+        openUrl: () => {
+          throw new Error('no browser in this test');
+        },
+        print: () => undefined,
+        readLine: () => Promise.reject(new Error('no terminal in this test')),
+      },
     };
   });
 
@@ -84,6 +91,42 @@ describe('concord cloud', () => {
     const path = credentialsPath(deps.env);
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ apiUrl: API, apiKey: KEY });
     if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('signs in through the browser when the API offers it and no key is given', async () => {
+    const cliLogin = {
+      authorizationEndpoint: 'https://auth.concord.test/authorize',
+      tokenEndpoint: 'https://auth.concord.test/token',
+      clientId: 'cli-client',
+      redirectUri: 'https://app.concord.test/cli/callback',
+    };
+    const machines: string[] = [];
+    const browserCloud: Fetch = (input, init) => {
+      if (input.endsWith('/v1/meta')) return Promise.resolve(Response.json({ ...META, cliLogin }));
+      if (input === cliLogin.tokenEndpoint) {
+        return Promise.resolve(
+          Response.json({ access_token: 'access', refresh_token: 'refresh', expires_in: 3600 }),
+        );
+      }
+      machines.push(new Headers(init?.headers).get('authorization') ?? '');
+      return Promise.resolve(Response.json({ machine: {} }));
+    };
+
+    const out = await runCloudLogin(
+      { url: API, browser: false },
+      {
+        ...deps,
+        env: { HOME: home },
+        fetch: browserCloud,
+        browser: { ...deps.browser, readLine: () => Promise.resolve('pasted') },
+      },
+    );
+    expect(out).toContain('through the browser');
+    expect(machines).toEqual(['Bearer access']);
+    const saved: unknown = JSON.parse(readFileSync(credentialsPath({ HOME: home }), 'utf8'));
+    expect(
+      z.object({ oauth: z.object({ refreshToken: z.string() }) }).parse(saved).oauth.refreshToken,
+    ).toBe('refresh');
   });
 
   it('reads the key from stdin when asked, trimmed', async () => {
