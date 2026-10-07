@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { assertKeySafeUrl, type Fetch } from './client.js';
+import { assertKeySafeUrl, sameApi, type Fetch } from './client.js';
 import { readCredentials, writeCredentials, type OAuthTokens } from './settings.js';
 
 /**
@@ -61,17 +61,30 @@ export async function requestTokens(
 
 export function bearerFor(
   env: NodeJS.ProcessEnv,
+  /** The API the token is for. A login to another API is never sent here. */
+  apiUrl: string,
   fetchImpl: Fetch,
   now: () => number = Date.now,
 ): Bearer {
-  // One refresh at a time in this process: concurrent calls share it.
-  let refreshing: Promise<string> | undefined;
-
-  return async () => {
+  const current = () => {
     const credentials = readCredentials(env);
     if (credentials === undefined) {
       throw new Error('Not logged in to Concord Cloud; run `concord cloud login`.');
     }
+    if (!sameApi(credentials.apiUrl, apiUrl)) {
+      throw new Error(
+        `This machine is now logged in to ${credentials.apiUrl}, not ${apiUrl}; ` +
+          'restart the session to use the new login.',
+      );
+    }
+    return credentials;
+  };
+
+  // One refresh at a time in this process: concurrent calls share it.
+  let refreshing: Promise<string> | undefined;
+
+  return async () => {
+    const credentials = current();
     if ('apiKey' in credentials) return credentials.apiKey;
     if (credentials.oauth.expiresAt - now() > EARLY_MS) return credentials.oauth.accessToken;
 
@@ -83,6 +96,15 @@ export function bearerFor(
         fetchImpl,
         now,
       ).then((fresh) => {
+        // Saved only over the login it refreshed. Had someone logged out, or
+        // in again, meanwhile, this result is theirs to discard, not to undo.
+        const latest = current();
+        if (!('oauth' in latest) || latest.oauth.refreshToken !== oauth.refreshToken) {
+          if ('oauth' in latest && latest.oauth.expiresAt - now() > EARLY_MS) {
+            return latest.oauth.accessToken;
+          }
+          throw new Error('The Concord Cloud login changed; run `concord cloud login`.');
+        }
         writeCredentials(env, { apiUrl: credentials.apiUrl, oauth: fresh });
         return fresh.accessToken;
       });

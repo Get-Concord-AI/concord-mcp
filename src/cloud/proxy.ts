@@ -78,7 +78,7 @@ export function cloudSessionFor(
   assertKeySafeUrl(credentials.apiUrl);
   return {
     apiUrl: credentials.apiUrl,
-    bearer: bearerFor(env, fetch),
+    bearer: bearerFor(env, credentials.apiUrl, fetch),
     machineKey,
     projectKey: link.projectKey,
     repoRoot,

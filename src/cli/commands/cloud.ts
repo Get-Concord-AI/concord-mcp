@@ -166,7 +166,7 @@ export async function runCloudStatus(deps: CloudDeps): Promise<string> {
       lines.push(`API: unreachable (${error instanceof Error ? error.message : String(error)})`);
     }
     try {
-      const bearer = await bearerFor(deps.env, deps.fetch)();
+      const bearer = await bearerFor(deps.env, credentials.apiUrl, deps.fetch)();
       const key = await checkKey(credentials.apiUrl, bearer, deps.fetch);
       lines.push(key === 'ok' ? 'Key: accepted' : 'Key: rejected — log in again');
     } catch (error) {

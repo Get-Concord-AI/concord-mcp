@@ -5,7 +5,12 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Fetch } from '../../src/cloud/client.js';
-import { readCredentials, writeCredentials, type OAuthTokens } from '../../src/cloud/settings.js';
+import {
+  readCredentials,
+  removeCredentials,
+  writeCredentials,
+  type OAuthTokens,
+} from '../../src/cloud/settings.js';
 import { bearerFor } from '../../src/cloud/tokens.js';
 
 const NOW = 1_800_000_000_000;
@@ -49,13 +54,13 @@ describe('bearerFor', () => {
 
   it('uses an API key as it is', async () => {
     writeCredentials(env, { apiUrl: API, apiKey: 'cak_key' });
-    expect(await bearerFor(env, tokenEndpoint().fetch, () => NOW)()).toBe('cak_key');
+    expect(await bearerFor(env, API, tokenEndpoint().fetch, () => NOW)()).toBe('cak_key');
   });
 
   it('uses a current access token without asking for another', async () => {
     writeCredentials(env, { apiUrl: API, oauth: tokens() });
     const endpoint = tokenEndpoint();
-    expect(await bearerFor(env, endpoint.fetch, () => NOW)()).toBe('access-1');
+    expect(await bearerFor(env, API, endpoint.fetch, () => NOW)()).toBe('access-1');
     expect(endpoint.bodies).toEqual([]);
   });
 
@@ -63,7 +68,7 @@ describe('bearerFor', () => {
     writeCredentials(env, { apiUrl: API, oauth: tokens({ expiresAt: NOW + 30_000 }) });
     const endpoint = tokenEndpoint();
 
-    expect(await bearerFor(env, endpoint.fetch, () => NOW)()).toBe('access-2');
+    expect(await bearerFor(env, API, endpoint.fetch, () => NOW)()).toBe('access-2');
     const sent = new URLSearchParams(endpoint.bodies[0]);
     expect(Object.fromEntries(sent)).toEqual({
       grant_type: 'refresh_token',
@@ -80,7 +85,7 @@ describe('bearerFor', () => {
   it('shares one refresh between concurrent requests', async () => {
     writeCredentials(env, { apiUrl: API, oauth: tokens({ expiresAt: NOW }) });
     const endpoint = tokenEndpoint();
-    const bearer = bearerFor(env, endpoint.fetch, () => NOW);
+    const bearer = bearerFor(env, API, endpoint.fetch, () => NOW);
 
     expect(await Promise.all([bearer(), bearer(), bearer()])).toEqual([
       'access-2',
@@ -93,11 +98,49 @@ describe('bearerFor', () => {
   it('says to log in again when a refresh is refused, and tries again next time', async () => {
     writeCredentials(env, { apiUrl: API, oauth: tokens({ expiresAt: NOW }) });
     const refused = tokenEndpoint(400);
-    const bearer = bearerFor(env, refused.fetch, () => NOW);
+    const bearer = bearerFor(env, API, refused.fetch, () => NOW);
 
     await expect(bearer()).rejects.toThrow(/concord cloud login/);
     await expect(bearer()).rejects.toThrow(/concord cloud login/);
     expect(refused.bodies).toHaveLength(2);
+  });
+
+  it('never sends a token to an API other than the one it was asked for', async () => {
+    writeCredentials(env, { apiUrl: API, apiKey: 'cak_key' });
+    const bearer = bearerFor(env, API, tokenEndpoint().fetch, () => NOW);
+    expect(await bearer()).toBe('cak_key');
+
+    // Logged in elsewhere while this session was running.
+    writeCredentials(env, { apiUrl: 'https://other.concord.test', apiKey: 'cak_other' });
+    await expect(bearer()).rejects.toThrow(/restart the session/);
+  });
+
+  it('discards a refresh that finishes after a logout', async () => {
+    writeCredentials(env, { apiUrl: API, oauth: tokens({ expiresAt: NOW }) });
+    const loggingOut: Fetch = (input, init) => {
+      removeCredentials(env);
+      return tokenEndpoint().fetch(input, init);
+    };
+
+    await expect(bearerFor(env, API, loggingOut, () => NOW)()).rejects.toThrow(/Not logged in/);
+    expect(readCredentials(env)).toBeUndefined();
+  });
+
+  it('keeps a new login made while a refresh was in flight', async () => {
+    writeCredentials(env, { apiUrl: API, oauth: tokens({ expiresAt: NOW }) });
+    const loggingInAgain: Fetch = (input, init) => {
+      writeCredentials(env, {
+        apiUrl: API,
+        oauth: tokens({ accessToken: 'new-login', refreshToken: 'new-refresh' }),
+      });
+      return tokenEndpoint().fetch(input, init);
+    };
+
+    expect(await bearerFor(env, API, loggingInAgain, () => NOW)()).toBe('new-login');
+    const saved = readCredentials(env);
+    expect(saved !== undefined && 'oauth' in saved ? saved.oauth.refreshToken : undefined).toBe(
+      'new-refresh',
+    );
   });
 
   it('never sends a refresh token over plain http', async () => {
@@ -106,7 +149,7 @@ describe('bearerFor', () => {
       oauth: tokens({ expiresAt: NOW, tokenEndpoint: 'http://auth.concord.test/token' }),
     });
     const endpoint = tokenEndpoint();
-    await expect(bearerFor(env, endpoint.fetch, () => NOW)()).rejects.toThrow(/not https/);
+    await expect(bearerFor(env, API, endpoint.fetch, () => NOW)()).rejects.toThrow(/not https/);
     expect(endpoint.bodies).toEqual([]);
   });
 });
