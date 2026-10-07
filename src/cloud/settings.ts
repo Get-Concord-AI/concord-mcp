@@ -24,10 +24,25 @@ import { concordDir, userHome } from '../config/paths.js';
  *   without it everything stays local, exactly as before.
  */
 
-const credentialsSchema = z.object({
-  apiUrl: z.url(),
-  apiKey: z.string().min(1),
+const oauthTokensSchema = z.object({
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
+  /** Epoch milliseconds. */
+  expiresAt: z.number().int(),
+  clientId: z.string().min(1),
+  tokenEndpoint: z.url(),
 });
+export type OAuthTokens = z.infer<typeof oauthTokensSchema>;
+
+/**
+ * An API key (CI, headless machines), or the tokens a browser login obtained.
+ * Either way the file is private to this user; see `cloud/tokens.ts` for how
+ * a request gets its bearer token from it.
+ */
+const credentialsSchema = z.union([
+  z.object({ apiUrl: z.url(), apiKey: z.string().min(1) }),
+  z.object({ apiUrl: z.url(), oauth: oauthTokensSchema }),
+]);
 export type CloudCredentials = z.infer<typeof credentialsSchema>;
 
 const linkSchema = z.object({

@@ -135,7 +135,7 @@ describe('the cloud proxy', () => {
       .parse(cloud.server.address() satisfies AddressInfo | string | null);
     session = {
       apiUrl: `http://127.0.0.1:${String(port)}`,
-      apiKey: 'cak_test',
+      bearer: () => Promise.resolve('cak_test'),
       machineKey: 'machine-1',
       projectKey: 'github.com/acme/app',
       repoRoot: '/repo',
@@ -200,6 +200,23 @@ describe('the cloud proxy', () => {
     await harness.close();
   });
 
+  it('asks for the bearer token on every request, so a refreshed one is used', async () => {
+    let current = 'token-a';
+    const rotating = { ...session, bearer: () => Promise.resolve(current) };
+    const proxy = createCloudProxyServer(rotating, () => connectCloud(rotating));
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await proxy.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    await harness.callTool({ name: 'start_work', arguments: {} });
+    expect(cloud.requests.at(-1)?.authorization).toBe('Bearer token-a');
+    current = 'token-b';
+    await harness.callTool({ name: 'start_work', arguments: {} });
+    expect(cloud.requests.at(-1)?.authorization).toBe('Bearer token-b');
+    await harness.close();
+  });
+
   it('answers a call with an error the model can read when the cloud is down', async () => {
     const down = createCloudProxyServer(session, () => Promise.reject(new Error('ECONNREFUSED')));
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -246,12 +263,16 @@ describe('cloudSessionFor', () => {
     );
   });
 
-  it('combines the login, the machine and the link', () => {
+  it('combines the login, the machine and the link', async () => {
     writeCredentials({ HOME: home }, credentials);
     ensureMachineKey({ HOME: home }, () => 'm');
     writeLink(repo, { apiUrl: 'https://api.test', projectKey: 'github.com/acme/app' });
-    expect(cloudSessionFor(repo, { HOME: home }, undefined)).toEqual({
-      ...credentials,
+    const session = cloudSessionFor(repo, { HOME: home }, undefined);
+    if (session === undefined) throw new Error('expected a cloud session');
+    const { bearer, ...rest } = session;
+    expect(await bearer()).toBe('k');
+    expect(rest).toEqual({
+      apiUrl: 'https://api.test',
       machineKey: 'm',
       projectKey: 'github.com/acme/app',
       repoRoot: repo,
