@@ -1,9 +1,11 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+
+import { fakeCloud, ok, type Route } from './fake-cloud.js';
 
 import {
   agentCachePath,
@@ -11,44 +13,15 @@ import {
   CloudApiError,
   connectPullEndpoint,
   drainCloud,
+  readAgentState,
   registerCloudAgent,
   releaseReceiver,
   renewReceiver,
+  takeDrainKey,
+  updateAgentState,
   toDeliverables,
   type CloudRuntime,
 } from '../../src/cloud/runtime.js';
-
-type JsonValue = z.infer<ReturnType<typeof z.json>>;
-
-interface Recorded {
-  readonly method: string;
-  readonly path: string;
-  readonly body: JsonValue;
-}
-
-interface Reply {
-  readonly status: number;
-  readonly json: object;
-}
-type Route = readonly [string, () => Reply];
-const ok = (json: object): Reply => ({ status: 200, json });
-
-/** A Concord Cloud that answers from `routes` ("METHOD /path"), recording every request. */
-function fakeCloud(routes: readonly Route[]) {
-  const table = new Map(routes);
-  const requests: Recorded[] = [];
-  const fetch = (input: string, init?: RequestInit): Promise<Response> => {
-    const method = init?.method ?? 'GET';
-    const path = new URL(input).pathname;
-    const body = typeof init?.body === 'string' ? z.json().parse(JSON.parse(init.body)) : null;
-    requests.push({ method, path, body });
-    const route = table.get(`${method} ${path}`);
-    const { status, json } =
-      route === undefined ? { status: 404, json: { error: 'no route' } } : route();
-    return Promise.resolve(new Response(status === 204 ? null : JSON.stringify(json), { status }));
-  };
-  return { fetch, requests };
-}
 
 const REGISTRATION = { agentKey: 'claude-code:aaaa1111', kind: 'claude-code' };
 
@@ -241,5 +214,63 @@ describe('cloud runtime', () => {
       { method: 'PUT', path: '/v1/agents/a-uuid/endpoint/receiver', body: { ttlSeconds: 90 } },
       { method: 'DELETE', path: '/v1/agents/a-uuid/endpoint/receiver', body: null },
     ]);
+  });
+
+  it('hands a drain a fresh key, and a lost one to the next drain to replay', () => {
+    const runtime = runtimeWith(fakeCloud([]).fetch);
+
+    const lost = takeDrainKey(runtime, REGISTRATION.agentKey);
+    const replayed = takeDrainKey(runtime, REGISTRATION.agentKey);
+    replayed.finish();
+    const fresh = takeDrainKey(runtime, REGISTRATION.agentKey);
+
+    expect(lost.replay).toBe(false);
+    expect(replayed).toMatchObject({ key: lost.key, replay: true });
+    expect(fresh.replay).toBe(false);
+    expect(fresh.key).not.toBe(lost.key);
+  });
+
+  it('never reuses a drain key another running process holds', () => {
+    const runtime = runtimeWith(fakeCloud([]).fetch);
+    const held = takeDrainKey(runtime, REGISTRATION.agentKey);
+    const dir = agentCachePath(repoRoot, REGISTRATION.agentKey).replace(/\.json$/, '.drains');
+    // As if a hook in another, still-running process had taken it.
+    renameSync(
+      join(dir, `${held.key}.${String(process.pid)}`),
+      join(dir, `${held.key}.${String(process.ppid)}`),
+    );
+
+    const next = takeDrainKey(runtime, REGISTRATION.agentKey);
+
+    expect(next.key).not.toBe(held.key);
+    expect(next.replay).toBe(false);
+  });
+
+  it('forgets a registration whose follow-up failed, so the next call registers again', async () => {
+    const cloud = fakeCloud(registering);
+    const runtime = runtimeWith(cloud.fetch);
+
+    await expect(
+      asCloudAgent(
+        runtime,
+        REGISTRATION,
+        () => Promise.resolve(),
+        () => Promise.reject(new CloudApiError(503, 'down')),
+      ),
+    ).rejects.toMatchObject({ status: 503 });
+
+    expect(readAgentState(runtime, REGISTRATION.agentKey)).toBeUndefined();
+  });
+
+  it('keeps what else is known of an agent when recording more', async () => {
+    const runtime = runtimeWith(fakeCloud(registering).fetch);
+    await registerCloudAgent(runtime, REGISTRATION);
+
+    updateAgentState(runtime, REGISTRATION.agentKey, { watchingUntil: 5 });
+
+    expect(readAgentState(runtime, REGISTRATION.agentKey)).toMatchObject({
+      agentId: 'a-uuid',
+      watchingUntil: 5,
+    });
   });
 });
