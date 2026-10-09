@@ -32,6 +32,7 @@ import {
   HOOK_TIMEOUT_MS,
   registerInCloud,
   watchCloud,
+  watching,
 } from './cloud-inbox.js';
 
 /** How long a registered pull endpoint stays promptable between drains. */
@@ -344,6 +345,16 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         } catch (error) {
           reportCloudFailure(error instanceof Error ? error.message : String(error));
           return;
+        }
+        // Codex is delivered to live by a host on this machine; start one
+        // unless one already holds this session's receiver.
+        const threadId = hookPayload === undefined ? undefined : hookSessionId(hookPayload);
+        if (
+          options.provider === 'codex' &&
+          threadId !== undefined &&
+          !watching(access.runtime, agentId)
+        ) {
+          launchCodexAdapterHost(access.runtime.repoRoot, agentId, threadId);
         }
         process.stdout.write(registeredLine(agentId));
         return;
