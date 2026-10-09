@@ -19,6 +19,7 @@ import {
   renderGeminiAfterTool,
   renderHookPayload,
   renderMonitorLines,
+  toDeliverable,
   type DeliverableMessage,
 } from '../../domain/pull-inbox.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
@@ -75,28 +76,6 @@ export function registerPullEndpoint(
     status: 'connected',
     expiresAt: new Date(now + PULL_ENDPOINT_TTL_MS).toISOString(),
   });
-}
-
-function toDeliverable(message: {
-  messageId: string;
-  senderAgentId: string;
-  taskId: string | null;
-  content: string;
-  replyToMessageId: string | null;
-  createdAt: string;
-  deliveredAt: string | null;
-}): DeliverableMessage {
-  return {
-    messageId: message.messageId,
-    senderAgentId: message.senderAgentId,
-    taskId: message.taskId,
-    content: message.content,
-    messageKind: message.replyToMessageId === null ? 'prompt' : 'reply',
-    deliveryLatencyMs:
-      message.deliveredAt === null
-        ? null
-        : Math.max(0, Date.parse(message.deliveredAt) - Date.parse(message.createdAt)),
-  };
 }
 
 /**

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   agentCachePath,
@@ -14,10 +15,12 @@ import {
   type CloudRuntime,
 } from '../../src/cloud/runtime.js';
 
+type JsonValue = z.infer<ReturnType<typeof z.json>>;
+
 interface Recorded {
   readonly method: string;
   readonly path: string;
-  readonly body: unknown;
+  readonly body: JsonValue;
 }
 
 interface Reply {
@@ -34,7 +37,7 @@ function fakeCloud(routes: readonly Route[]) {
   const fetch = (input: string, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? 'GET';
     const path = new URL(input).pathname;
-    const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+    const body = typeof init?.body === 'string' ? z.json().parse(JSON.parse(init.body)) : null;
     requests.push({ method, path, body });
     const route = table.get(`${method} ${path}`);
     const { status, json } =
@@ -81,7 +84,7 @@ describe('cloud runtime', () => {
       kind: 'claude-code',
       machineId: 'm-uuid',
     });
-    const cached: unknown = JSON.parse(readFileSync(agentCachePath(repoRoot), 'utf8'));
+    const cached = z.json().parse(JSON.parse(readFileSync(agentCachePath(repoRoot), 'utf8')));
     expect(cached).toMatchObject({ agents: { [REGISTRATION.agentKey]: ref } });
   });
 
@@ -151,36 +154,16 @@ describe('cloud runtime', () => {
     await expect(failure).rejects.toMatchObject({ status: 403 });
   });
 
-  it('renders drained messages by the keys agents use, never cloud ids', async () => {
-    const cloud = fakeCloud([
-      [
-        'GET /v1/agents',
-        () =>
-          ok({
-            agents: [
-              {
-                id: 'sender-uuid',
-                agentKey: 'codex:bbbb2222',
-                kind: 'codex',
-                summary: null,
-                status: 'active',
-                lastSeenAt: '2026-10-09T10:00:00.000Z',
-              },
-            ],
-          }),
-      ],
-      ['GET /v1/tasks/task-uuid', () => ok({ task: { taskKey: 'AUTH-12' } })],
-    ]);
-
-    const rendered = await toDeliverables(runtimeWith(cloud.fetch), [
+  it('renders drained messages by the keys the drain returns, asking nothing more', () => {
+    const rendered = toDeliverables([
       {
         id: 'msg-1',
-        senderAgentId: 'sender-uuid',
-        taskId: 'task-uuid',
+        senderAgentKey: 'codex:bbbb2222',
+        taskKey: 'AUTH-12',
         replyToMessageId: 'msg-0',
         content: 'done',
-        createdAt: '2026-10-09T10:00:00.000Z',
-        deliveredAt: '2026-10-09T10:00:01.500Z',
+        createdAt: '2026-10-09T10:00:01.500Z',
+        deliveredAt: '2026-10-09T10:00:00.000Z',
       },
     ]);
 
@@ -191,15 +174,34 @@ describe('cloud runtime', () => {
         taskId: 'AUTH-12',
         content: 'done',
         messageKind: 'reply',
-        deliveryLatencyMs: 1500,
+        // A clock skew between machines never shows as negative latency.
+        deliveryLatencyMs: 0,
       },
     ]);
   });
 
-  it('asks nothing when there is nothing to render', async () => {
-    const cloud = fakeCloud([]);
+  it('passes on a refusal for an agent the cloud still has, without registering again', async () => {
+    const cloud = fakeCloud([
+      ...registering,
+      ['GET /v1/agents/a-uuid', () => ok({ agent: { id: 'a-uuid' } })],
+    ]);
+    const runtime = runtimeWith(cloud.fetch);
+    await registerCloudAgent(runtime, REGISTRATION);
+    cloud.requests.length = 0;
 
-    expect(await toDeliverables(runtimeWith(cloud.fetch), [])).toEqual([]);
-    expect(cloud.requests).toEqual([]);
+    const refused = asCloudAgent(runtime, REGISTRATION, () =>
+      Promise.reject(new CloudApiError(404, 'no endpoint')),
+    );
+
+    await expect(refused).rejects.toMatchObject({ status: 404 });
+    expect(cloud.requests.map((request) => request.path)).toEqual(['/v1/agents/a-uuid']);
+  });
+
+  it('asks for a whole number of seconds the cloud accepts', async () => {
+    const cloud = fakeCloud([['POST /v1/messages/drain', () => ok({ messages: [] })]]);
+
+    await drainCloud(runtimeWith(cloud.fetch), { agentId: 'a', machineId: 'm' }, 'k', 2.7);
+
+    expect(cloud.requests[0]?.body).toMatchObject({ waitSeconds: 2 });
   });
 });

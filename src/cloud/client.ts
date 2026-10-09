@@ -40,7 +40,7 @@ export type CloudMeta = z.infer<typeof metaSchema>;
 export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 /** How long any of these calls may take: a cold Cloud Run start is the slow case. */
-const TIMEOUT_MS = 15_000;
+export const TIMEOUT_MS = 15_000;
 
 /** Whether two API URLs name the same API: spelling aside, the same endpoint. */
 export function sameApi(first: string, second: string): boolean {
@@ -48,7 +48,8 @@ export function sameApi(first: string, second: string): boolean {
   return normal(first) === normal(second);
 }
 
-function url(apiUrl: string, path: string): string {
+/** A path on an API, however its URL is spelled. */
+export function url(apiUrl: string, path: string): string {
   return `${apiUrl.replace(/\/+$/, '')}${path}`;
 }
 
@@ -65,7 +66,7 @@ export function assertKeySafeUrl(apiUrl: string): void {
 }
 
 /** A server's error body, as one short line. */
-async function errorDetail(response: Response): Promise<string> {
+export async function errorDetail(response: Response): Promise<string> {
   return (await response.text()).replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 

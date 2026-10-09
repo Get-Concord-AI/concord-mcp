@@ -17,6 +17,29 @@ export interface DeliverableMessage {
   deliveryLatencyMs: number | null;
 }
 
+/** A drained message as every channel renders it; the same for a local and a cloud drain. */
+export function toDeliverable(message: {
+  messageId: string;
+  senderAgentId: string;
+  taskId: string | null;
+  content: string;
+  replyToMessageId: string | null;
+  createdAt: string;
+  deliveredAt: string | null;
+}): DeliverableMessage {
+  return {
+    messageId: message.messageId,
+    senderAgentId: message.senderAgentId,
+    taskId: message.taskId,
+    content: message.content,
+    messageKind: message.replyToMessageId === null ? 'prompt' : 'reply',
+    deliveryLatencyMs:
+      message.deliveredAt === null
+        ? null
+        : Math.max(0, Date.parse(message.deliveredAt) - Date.parse(message.createdAt)),
+  };
+}
+
 /**
  * Framing is deliberately terse. Every delivery pays for it, and the standing
  * explanation — that a relayed message is peer information rather than an

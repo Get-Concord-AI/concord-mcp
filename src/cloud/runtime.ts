@@ -4,9 +4,9 @@ import { dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
-import type { DeliverableMessage } from '../domain/pull-inbox.js';
+import { toDeliverable, type DeliverableMessage } from '../domain/pull-inbox.js';
 import { VERSION } from '../version.js';
-import type { Fetch } from './client.js';
+import { errorDetail, sameApi, TIMEOUT_MS, url, type Fetch } from './client.js';
 import type { CloudSession } from './proxy.js';
 
 /**
@@ -25,8 +25,6 @@ export type CloudRuntime = Pick<CloudSession, 'apiUrl' | 'bearer' | 'machineKey'
 
 /** A drain waits at most this long; the cloud allows 25 seconds. */
 export const MAX_WAIT_SECONDS = 25;
-/** A cold Cloud Run start is the slow case; a long-poll adds its wait. */
-const TIMEOUT_MS = 15_000;
 
 /** An answer the cloud gave that was not a success. */
 export class CloudApiError extends Error {
@@ -45,21 +43,23 @@ async function call<T>(
   schema: z.ZodType<T>,
   body?: object,
   waitSeconds = 0,
+  signal?: AbortSignal,
 ): Promise<T> {
-  const response = await runtime.fetch(`${runtime.apiUrl.replace(/\/+$/, '')}${path}`, {
+  // A cold Cloud Run start is the slow case; a long-poll adds its wait.
+  const timeout = AbortSignal.timeout(TIMEOUT_MS + waitSeconds * 1000);
+  const response = await runtime.fetch(url(runtime.apiUrl, path), {
     method,
     headers: {
       Authorization: `Bearer ${await runtime.bearer()}`,
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(TIMEOUT_MS + waitSeconds * 1000),
+    signal: signal === undefined ? timeout : AbortSignal.any([timeout, signal]),
   });
   if (!response.ok) {
-    const detail = (await response.text()).replace(/\s+/g, ' ').trim().slice(0, 200);
     throw new CloudApiError(
       response.status,
-      `Concord Cloud answered ${String(response.status)} to ${method} ${path}: ${detail}`,
+      `Concord Cloud answered ${String(response.status)} to ${method} ${path}: ${await errorDetail(response)}`,
     );
   }
   if (response.status === 204) return schema.parse({});
@@ -91,7 +91,7 @@ function readCache(runtime: CloudRuntime): Cache {
     const raw: unknown = JSON.parse(readFileSync(agentCachePath(runtime.repoRoot), 'utf8'));
     const parsed = cacheSchema.safeParse(raw);
     return parsed.success &&
-      parsed.data.apiUrl === runtime.apiUrl &&
+      sameApi(parsed.data.apiUrl, runtime.apiUrl) &&
       parsed.data.machineKey === runtime.machineKey
       ? parsed.data
       : fresh;
@@ -142,7 +142,8 @@ export async function registerCloudAgent(
 
 /**
  * Runs `work` as the agent, registering it first when its id is not cached,
- * and once more when the cloud no longer knows the cached one.
+ * and once more when the cloud no longer knows the cached one. Any other
+ * refusal is the caller's to see: retrying it would only repeat it.
  */
 export async function asCloudAgent<T>(
   runtime: CloudRuntime,
@@ -155,7 +156,19 @@ export async function asCloudAgent<T>(
     return await work(cached);
   } catch (error) {
     if (!(error instanceof CloudApiError) || ![403, 404].includes(error.status)) throw error;
+    if (await agentExists(runtime, cached)) throw error;
     return work(await registerCloudAgent(runtime, registration));
+  }
+}
+
+/** Whether the cloud still has this agent, for this caller. */
+async function agentExists(runtime: CloudRuntime, agent: CloudAgentRef): Promise<boolean> {
+  try {
+    await call(runtime, 'GET', `/v1/agents/${agent.agentId}`, z.object({ agent: withId }));
+    return true;
+  } catch (error) {
+    if (error instanceof CloudApiError && error.status === 404) return false;
+    throw error;
   }
 }
 
@@ -194,8 +207,8 @@ export async function releaseReceiver(runtime: CloudRuntime, agent: CloudAgentRe
 
 const messageSchema = z.object({
   id: z.string(),
-  senderAgentId: z.string().nullable(),
-  taskId: z.string().nullable(),
+  senderAgentKey: z.string().nullable(),
+  taskKey: z.string().nullable(),
   replyToMessageId: z.string().nullable(),
   content: z.string(),
   createdAt: z.string(),
@@ -212,14 +225,17 @@ export async function drainCloud(
   agent: CloudAgentRef,
   drainKey: string,
   waitSeconds = 0,
+  signal?: AbortSignal,
 ): Promise<readonly CloudMessage[]> {
+  const wait = Math.max(0, Math.min(MAX_WAIT_SECONDS, Math.floor(waitSeconds)));
   const { messages } = await call(
     runtime,
     'POST',
     '/v1/messages/drain',
     z.object({ messages: z.array(messageSchema) }),
-    { agentId: agent.agentId, drainKey, waitSeconds: Math.min(waitSeconds, MAX_WAIT_SECONDS) },
-    waitSeconds,
+    { agentId: agent.agentId, drainKey, waitSeconds: wait },
+    wait,
+    signal,
   );
   return messages;
 }
@@ -247,34 +263,19 @@ export async function listCloudAgents(runtime: CloudRuntime): Promise<readonly C
 
 /**
  * Drained messages as the inbox renders them: senders and tasks by the keys
- * agents use, never the cloud's ids.
+ * agents use, which the drain itself returns, so rendering needs no request
+ * that could fail after the messages were taken.
  */
-export async function toDeliverables(
-  runtime: CloudRuntime,
-  messages: readonly CloudMessage[],
-): Promise<DeliverableMessage[]> {
-  if (messages.length === 0) return [];
-  const keys = new Map((await listCloudAgents(runtime)).map((agent) => [agent.id, agent.agentKey]));
-  const taskKeys = new Map<string, string>();
-  for (const taskId of new Set(messages.flatMap((message) => message.taskId ?? []))) {
-    const { task } = await call(
-      runtime,
-      'GET',
-      `/v1/tasks/${taskId}`,
-      z.object({ task: z.object({ taskKey: z.string() }) }),
-    );
-    taskKeys.set(taskId, task.taskKey);
-  }
-  return messages.map((message) => ({
-    messageId: message.id,
-    senderAgentId:
-      message.senderAgentId === null ? 'unknown' : (keys.get(message.senderAgentId) ?? 'unknown'),
-    taskId: message.taskId === null ? null : (taskKeys.get(message.taskId) ?? null),
-    content: message.content,
-    messageKind: message.replyToMessageId === null ? 'prompt' : 'reply',
-    deliveryLatencyMs:
-      message.deliveredAt === null
-        ? null
-        : Date.parse(message.deliveredAt) - Date.parse(message.createdAt),
-  }));
+export function toDeliverables(messages: readonly CloudMessage[]): DeliverableMessage[] {
+  return messages.map((message) =>
+    toDeliverable({
+      messageId: message.id,
+      senderAgentId: message.senderAgentKey ?? 'unknown',
+      taskId: message.taskKey,
+      content: message.content,
+      replyToMessageId: message.replyToMessageId,
+      createdAt: message.createdAt,
+      deliveredAt: message.deliveredAt,
+    }),
+  );
 }
