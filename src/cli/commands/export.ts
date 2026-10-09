@@ -5,6 +5,8 @@ import type { Command } from '@commander-js/extra-typings';
 
 import { writeArtifacts } from '../../artifacts/index.js';
 import { openContext } from '../context.js';
+import { cloudLinked } from './cloud-inbox.js';
+import { CLOUD_EXPORT_MESSAGE } from './cloud-views.js';
 
 const ARTIFACT_FILES = ['HANDOFF.md', 'REVIEW_PACKET.md', 'WORK_STATE.json', 'events.jsonl'];
 
@@ -25,6 +27,11 @@ export function registerExportCommand(program: Command): void {
         process.stderr.write(
           `Unsupported export format: ${format}. Only "markdown" is supported.\n`,
         );
+        process.exitCode = 1;
+        return;
+      }
+      if (cloudLinked(process.cwd())) {
+        process.stderr.write(`${CLOUD_EXPORT_MESSAGE}\n`);
         process.exitCode = 1;
         return;
       }

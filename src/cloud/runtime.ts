@@ -429,3 +429,29 @@ export async function listClaims(
   );
   return claims;
 }
+
+/** The most tasks the cloud returns at once. */
+export const TASK_PAGE = 200;
+
+const taskSchema = z.object({
+  taskKey: z.string(),
+  title: z.string(),
+  status: z.string(),
+  version: z.number(),
+  agentId: z.string().nullable(),
+  assignedAgentId: z.string().nullable(),
+  updatedAt: z.string(),
+});
+export type CloudTask = z.infer<typeof taskSchema>;
+
+/** The linked project's tasks, most recently updated first, as many as the cloud gives at once. */
+export async function listCloudTasks(runtime: CloudRuntime): Promise<readonly CloudTask[]> {
+  const query = new URLSearchParams({ projectKey: runtime.projectKey, limit: String(TASK_PAGE) });
+  const { tasks } = await call(
+    runtime,
+    'GET',
+    `/v1/tasks?${query.toString()}`,
+    z.object({ tasks: z.array(taskSchema) }),
+  );
+  return tasks;
+}
