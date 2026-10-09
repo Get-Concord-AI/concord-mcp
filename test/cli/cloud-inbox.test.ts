@@ -283,4 +283,17 @@ describe('cloud inbox', () => {
 
     expect(Date.now() - started).toBeLessThan(1_500);
   });
+
+  it('holds a token refresh to the hook’s deadline too', async () => {
+    const runtime: CloudRuntime = {
+      ...runtimeWith(fakeCloud(registering).fetch),
+      bearer: () => new Promise<string>(() => undefined),
+      deadline: Date.now() + 200,
+    };
+    const started = Date.now();
+
+    await expect(drainFromCloud(runtime, AGENT, 'claude-code')).rejects.toThrow('in time');
+
+    expect(Date.now() - started).toBeLessThan(1_500);
+  });
 });

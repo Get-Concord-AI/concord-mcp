@@ -286,8 +286,7 @@ function writeMessages(format: string, messages: readonly DeliverableMessage[]):
 }
 
 /** A cloud failure in a hook: said once on stderr, never failing the session's turn. */
-function reportCloudFailure(error: unknown): void {
-  const detail = error instanceof Error ? error.message : String(error);
+function reportCloudFailure(detail: string): void {
   process.stderr.write(`Concord Cloud could not be reached: ${detail}\n`);
 }
 
@@ -331,7 +330,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
       if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
       if (access.kind === 'unusable') {
-        reportCloudFailure(new Error(access.reason));
+        reportCloudFailure(access.reason);
         return;
       }
       const hookPayload = options.fromHook === true ? (readHookPayload() ?? '') : undefined;
@@ -343,7 +342,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         try {
           await registerInCloud(access.runtime, agentId, options.provider, process.cwd());
         } catch (error) {
-          reportCloudFailure(error);
+          reportCloudFailure(error instanceof Error ? error.message : String(error));
           return;
         }
         process.stdout.write(registeredLine(agentId));
@@ -386,7 +385,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         throw new Error(`Unknown --format: ${options.format}`);
       }
       if (access.kind === 'unusable') {
-        reportCloudFailure(new Error(access.reason));
+        reportCloudFailure(access.reason);
         return;
       }
       const agentId = resolveAgentId(options.agent, process.env, {
@@ -398,7 +397,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         try {
           messages = await drainFromCloud(access.runtime, agentId, options.provider);
         } catch (error) {
-          reportCloudFailure(error);
+          reportCloudFailure(error instanceof Error ? error.message : String(error));
           return;
         }
         if (messages.length > 0) writeMessages(options.format, messages);

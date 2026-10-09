@@ -43,6 +43,23 @@ export class CloudApiError extends Error {
   }
 }
 
+/** `work`, unless `signal` gives up on it first: then a timeout, as a request's own would be. */
+function before<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const giveUp = (): void => {
+      reject(new DOMException('Concord Cloud did not answer in time.', 'TimeoutError'));
+    };
+    if (signal.aborted) {
+      giveUp();
+      return;
+    }
+    signal.addEventListener('abort', giveUp, { once: true });
+    work.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', giveUp);
+    });
+  });
+}
+
 async function call<T>(
   runtime: CloudRuntime,
   method: string,
@@ -58,10 +75,12 @@ async function call<T>(
       ? TIMEOUT_MS + waitSeconds * 1000
       : Math.max(0, runtime.deadline - Date.now());
   const timeout = AbortSignal.timeout(budget);
+  // Within the same budget: a browser login refreshing its token is a request too.
+  const token = await before(runtime.bearer(), timeout);
   const response = await runtime.fetch(url(runtime.apiUrl, path), {
     method,
     headers: {
-      Authorization: `Bearer ${await runtime.bearer()}`,
+      Authorization: `Bearer ${token}`,
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),

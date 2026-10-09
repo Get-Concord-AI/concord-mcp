@@ -52,6 +52,16 @@ function runConcord(root, args, output = false) {
   return result.stdout ?? '';
 }
 
+/** Whether `concord inbox status` finds a Concord workspace, local or cloud, from `root`. */
+function inboxStatus(root) {
+  try {
+    runConcord(root, ['inbox', 'status']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function register(root, agentId) {
   runConcord(root, ['inbox', 'register', '--agent', agentId, '--provider', 'cursor']);
 }
@@ -74,10 +84,11 @@ async function main() {
   const payload = readPayload();
   const root = projectRoot(payload);
   const session = sessionId(payload);
-  // A local workspace, or a repository linked to Concord Cloud.
+  // A local workspace, or a repository linked to Concord Cloud. The database
+  // check is the quick path; otherwise the CLI decides, finding the repository
+  // root and a worktree's primary checkout as every other command does.
   const usesConcord =
-    existsSync(join(root, '.concord', 'concord.db')) ||
-    existsSync(join(root, '.concord', 'cloud.json'));
+    Boolean(session) && (existsSync(join(root, '.concord', 'concord.db')) || inboxStatus(root));
   if (!session || !usesConcord) {
     writeResult({});
     return;
