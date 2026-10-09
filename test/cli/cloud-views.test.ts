@@ -100,4 +100,44 @@ describe('cloud views', () => {
 
     expect(await inCloud(local, () => Promise.resolve('cloud'))).toBeUndefined();
   });
+
+  it('puts the liveliest first, whatever order the cloud answers in', async () => {
+    const text = await runCloudWho(
+      runtimeWith([
+        [
+          'GET /v1/agents',
+          () =>
+            ok({
+              agents: [
+                agent('b2', 'codex:bbbb2222', '2026-10-09T09:40:00.000Z'),
+                agent('a1', 'claude-code:aaaa1111', '2026-10-09T09:59:30.000Z'),
+              ],
+            }),
+        ],
+      ]),
+      NOW,
+    );
+
+    expect(text.indexOf('claude-code:aaaa1111')).toBeLessThan(text.indexOf('codex:bbbb2222'));
+  });
+
+  it('says when a full page of tasks may not be all of them', async () => {
+    const task = (n: number) => ({
+      taskKey: `T-${String(n)}`,
+      title: 'work',
+      status: 'active',
+      version: 1,
+      agentId: null,
+      assignedAgentId: null,
+      updatedAt: '2026-10-09T09:00:00.000Z',
+    });
+    const text = await runCloudTasks(
+      runtimeWith([
+        agents,
+        ['GET /v1/tasks', () => ok({ tasks: Array.from({ length: 200 }, (_, n) => task(n)) })],
+      ]),
+    );
+
+    expect(text).toContain('Showing the 200 most recently updated tasks');
+  });
 });

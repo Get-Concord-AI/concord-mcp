@@ -2,7 +2,12 @@ import { z } from 'zod';
 
 import { renderRosterLines } from '../../artifacts/work-state-view.js';
 import { cloudSessionFor, connectCloud } from '../../cloud/proxy.js';
-import { listCloudAgents, listCloudTasks, type CloudRuntime } from '../../cloud/runtime.js';
+import {
+  listCloudAgents,
+  listCloudTasks,
+  TASK_PAGE,
+  type CloudRuntime,
+} from '../../cloud/runtime.js';
 import { agentStatusValues } from '../../db/rows.js';
 import { deriveLiveness, type PresenceEntry } from '../../domain/presence.js';
 import { cloudAccess } from './cloud-inbox.js';
@@ -35,7 +40,9 @@ export async function runCloudWho(
       lastSeen: agent.lastSeenAt,
       ageSeconds: Math.max(0, Math.floor((now - Date.parse(agent.lastSeenAt)) / 1000)),
     }))
-    .filter((entry) => entry.liveness !== 'archived');
+    .filter((entry) => entry.liveness !== 'archived')
+    // Liveness only decays with time, so the most recently seen are the liveliest.
+    .sort((first, second) => second.lastSeen.localeCompare(first.lastSeen));
   return [heading(runtime), "Who's here", ...renderRosterLines(roster)].join('\n');
 }
 
@@ -53,10 +60,18 @@ export async function runCloudTasks(runtime: CloudRuntime): Promise<string> {
     const agent = holder(task.agentId) ?? holder(task.assignedAgentId) ?? '-';
     return `${task.taskKey.padEnd(10)} ${task.status.padEnd(13)} v${String(task.version).padEnd(4)} ${agent.padEnd(18)} ${task.updatedAt} ${task.title}`;
   });
-  return [heading(runtime), ...rows].join('\n');
+  // A full page may not be all of them: the cloud returns the most recent first.
+  const more =
+    tasks.length >= TASK_PAGE
+      ? [
+          `Showing the ${String(TASK_PAGE)} most recently updated tasks; see the dashboard for older ones.`,
+        ]
+      : [];
+  return [heading(runtime), ...rows, ...more].join('\n');
 }
 
-const textContent = z.object({
+const toolResult = z.object({
+  isError: z.boolean().optional(),
   content: z.array(z.object({ type: z.string(), text: z.string().optional() })),
 });
 
@@ -68,12 +83,13 @@ export async function runCloudStatus(runtime: CloudRuntime): Promise<string> {
   const client = await connectCloud(session);
   try {
     const raw: unknown = await client.callTool({ name: 'inspect_work', arguments: {} });
-    const text = textContent
-      .parse(raw)
-      .content.flatMap((part) =>
-        part.type === 'text' && part.text !== undefined ? [part.text] : [],
-      )
+    const result = toolResult.parse(raw);
+    const text = result.content
+      .flatMap((part) => (part.type === 'text' && part.text !== undefined ? [part.text] : []))
       .join('\n');
+    if (result.isError === true) {
+      throw new Error(`Concord Cloud could not show the workspace: ${text}`);
+    }
     return [heading(runtime), text].join('\n');
   } finally {
     await client.close();
