@@ -9,8 +9,11 @@ import {
   agentCachePath,
   asCloudAgent,
   CloudApiError,
+  connectPullEndpoint,
   drainCloud,
   registerCloudAgent,
+  releaseReceiver,
+  renewReceiver,
   toDeliverables,
   type CloudRuntime,
 } from '../../src/cloud/runtime.js';
@@ -42,7 +45,7 @@ function fakeCloud(routes: readonly Route[]) {
     const route = table.get(`${method} ${path}`);
     const { status, json } =
       route === undefined ? { status: 404, json: { error: 'no route' } } : route();
-    return Promise.resolve(new Response(JSON.stringify(json), { status }));
+    return Promise.resolve(new Response(status === 204 ? null : JSON.stringify(json), { status }));
   };
   return { fetch, requests };
 }
@@ -203,5 +206,38 @@ describe('cloud runtime', () => {
     await drainCloud(runtimeWith(cloud.fetch), { agentId: 'a', machineId: 'm' }, 'k', 2.7);
 
     expect(cloud.requests[0]?.body).toMatchObject({ waitSeconds: 2 });
+  });
+
+  it('advertises a pull endpoint, then holds and lets go of the receiver lease', async () => {
+    const cloud = fakeCloud([
+      ['PUT /v1/agents/a-uuid/endpoint', () => ok({ endpoint: {} })],
+      ['PUT /v1/agents/a-uuid/endpoint/receiver', () => ok({ receiverExpiresAt: null })],
+      ['DELETE /v1/agents/a-uuid/endpoint/receiver', () => ({ status: 204, json: {} })],
+    ]);
+    const runtime = runtimeWith(cloud.fetch);
+    const agent = { agentId: 'a-uuid', machineId: 'm-uuid' };
+
+    await connectPullEndpoint(runtime, agent, REGISTRATION.agentKey, 'claude-code', [
+      'pull',
+      'idle',
+    ]);
+    await renewReceiver(runtime, agent, 90);
+    await releaseReceiver(runtime, agent);
+
+    expect(cloud.requests).toEqual([
+      {
+        method: 'PUT',
+        path: '/v1/agents/a-uuid/endpoint',
+        body: {
+          provider: 'claude-code',
+          transport: 'pull',
+          capabilities: ['pull', 'idle'],
+          address: `pull:${REGISTRATION.agentKey}`,
+          credentialHash: 'none',
+        },
+      },
+      { method: 'PUT', path: '/v1/agents/a-uuid/endpoint/receiver', body: { ttlSeconds: 90 } },
+      { method: 'DELETE', path: '/v1/agents/a-uuid/endpoint/receiver', body: null },
+    ]);
   });
 });
