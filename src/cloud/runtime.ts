@@ -52,6 +52,8 @@ export function before<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
     const giveUp = (): void => {
       reject(new DOMException('Concord Cloud did not answer in time.', 'TimeoutError'));
     };
+    // Settled either way, so a rejection after giving up is never unhandled.
+    work.catch(() => undefined);
     if (signal.aborted) {
       giveUp();
       return;
@@ -112,6 +114,8 @@ const cacheSchema = cachedAgent.extend({
   machineKey: z.string(),
   /** Until when a running `inbox watch` holds this agent's receiver, in ms. */
   watchingUntil: z.number().optional(),
+  /** Messages a session never took whose failure the cloud has not yet been told of. */
+  unreported: z.array(z.object({ messageId: z.string(), detail: z.string() })).optional(),
 });
 export type CloudAgentState = z.infer<typeof cacheSchema>;
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { updateAgentState, type CloudRuntime } from '../../src/cloud/runtime.js';
+import { readAgentState, updateAgentState, type CloudRuntime } from '../../src/cloud/runtime.js';
 import { deliverToSession } from '../../src/cli/commands/cloud-codex.js';
 import type { DeliverableMessage } from '../../src/domain/pull-inbox.js';
 import type { AgentSessionAdapter, AgentSessionDelivery } from '../../src/relay/server.js';
@@ -112,50 +112,63 @@ describe('Codex in a linked repository', () => {
     inject: () => new Promise<string | undefined>(() => undefined),
   };
 
-  it('gives up on a handoff Codex never answers, and records it as not delivered', async () => {
+  it('ends a handoff in progress when the host stops, and says it may not have arrived', async () => {
     const cloud = fakeCloud([['POST /v1/messages/m-1/failure', () => ok({ message: {} })]]);
     const runtime = runtimeWith(cloud.fetch);
     updateAgentState(runtime, AGENT, { agentId: 'a-uuid', machineId: 'm-uuid' });
-
-    await deliverToSession(runtime, AGENT, stalled, [message('m-1', 'hi')], undefined, 50);
-
-    expect(cloud.requests.map((request) => request.path)).toEqual(['/v1/messages/m-1/failure']);
-  });
-
-  it('ends a handoff in progress when the host is stopped', async () => {
     const stop = new AbortController();
-    const started = Date.now();
     setTimeout(() => {
       stop.abort();
     }, 50);
 
+    await deliverToSession(runtime, AGENT, stalled, [message('m-1', 'hi')], stop.signal);
+
+    expect(JSON.stringify(cloud.requests[0]?.body)).toContain('may not have arrived');
+  });
+
+  it('hands nothing more to Codex once stopped, and reports the rest as not delivered', async () => {
+    const cloud = fakeCloud([
+      ['POST /v1/messages/m-1/failure', () => ok({ message: {} })],
+      ['POST /v1/messages/m-2/failure', () => ok({ message: {} })],
+    ]);
+    const runtime = runtimeWith(cloud.fetch);
+    updateAgentState(runtime, AGENT, { agentId: 'a-uuid', machineId: 'm-uuid' });
+    const { adapter, handed } = session(false);
+    const stop = new AbortController();
+    stop.abort();
+
     await deliverToSession(
-      runtimeWith(fakeCloud([]).fetch),
+      runtime,
       AGENT,
-      stalled,
-      [message('m-1', 'hi')],
+      adapter,
+      [message('m-1', 'one'), message('m-2', 'two')],
       stop.signal,
     );
 
-    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(handed).toEqual([]);
+    expect(cloud.requests.map((request) => request.path)).toEqual([
+      '/v1/messages/m-1/failure',
+      '/v1/messages/m-2/failure',
+    ]);
   });
 
-  it('retries recording a failure the cloud could not take at first', async () => {
-    let attempts = 0;
+  it('keeps a failure report the cloud could not take, and makes it next time', async () => {
+    let down = true;
     const cloud = fakeCloud([
       [
         'POST /v1/messages/m-1/failure',
-        () => {
-          attempts += 1;
-          return attempts === 1 ? { status: 503, json: { error: 'down' } } : ok({ message: {} });
-        },
+        () => (down ? { status: 503, json: { error: 'down' } } : ok({ message: {} })),
       ],
     ]);
     const runtime = runtimeWith(cloud.fetch);
     updateAgentState(runtime, AGENT, { agentId: 'a-uuid', machineId: 'm-uuid' });
 
     await deliverToSession(runtime, AGENT, session(true, true).adapter, [message('m-1', 'hi')]);
+    expect(readAgentState(runtime, AGENT)?.unreported).toHaveLength(1);
+    down = false;
+    await deliverToSession(runtime, AGENT, session(false).adapter, []);
 
-    expect(attempts).toBe(2);
+    expect(readAgentState(runtime, AGENT)?.unreported).toBeUndefined();
+    expect(cloud.requests).toHaveLength(2);
   });
 });
