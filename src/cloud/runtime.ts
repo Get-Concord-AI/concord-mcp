@@ -47,7 +47,7 @@ export class CloudApiError extends Error {
 }
 
 /** `work`, unless `signal` gives up on it first: then a timeout, as a request's own would be. */
-function before<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+export function before<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const giveUp = (): void => {
       reject(new DOMException('Concord Cloud did not answer in time.', 'TimeoutError'));

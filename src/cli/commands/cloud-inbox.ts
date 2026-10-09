@@ -199,7 +199,7 @@ export async function watchCloud(
   provider: string,
   once: boolean,
   /** Awaited before the next round, so a slow handoff never overlaps the next batch. */
-  emit: (messages: readonly DeliverableMessage[]) => Promise<void> | void,
+  emit: (messages: readonly DeliverableMessage[], stop: AbortSignal) => Promise<void> | void,
 ): Promise<void> {
   const stop = new AbortController();
   const stopped = (): boolean => stop.signal.aborted;
@@ -218,7 +218,7 @@ export async function watchCloud(
           watchingUntil: Date.now() + RECEIVER_TTL_SECONDS * 1000,
         });
         const messages = await drainOnce(runtime, agent, agentKey, MAX_WAIT_SECONDS, stop.signal);
-        if (messages.length > 0) await emit(messages);
+        if (messages.length > 0) await emit(messages, stop.signal);
         if (once && messages.length > 0) return;
       } catch (error) {
         if (stopped()) return;

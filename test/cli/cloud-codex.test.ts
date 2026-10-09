@@ -103,4 +103,59 @@ describe('Codex in a linked repository', () => {
       },
     ]);
   });
+
+  /** A session that never answers, as a wedged app-server would not. */
+  const stalled: AgentSessionAdapter = {
+    provider: 'codex',
+    isBusy: () => false,
+    steer: () => new Promise<string | undefined>(() => undefined),
+    inject: () => new Promise<string | undefined>(() => undefined),
+  };
+
+  it('gives up on a handoff Codex never answers, and records it as not delivered', async () => {
+    const cloud = fakeCloud([['POST /v1/messages/m-1/failure', () => ok({ message: {} })]]);
+    const runtime = runtimeWith(cloud.fetch);
+    updateAgentState(runtime, AGENT, { agentId: 'a-uuid', machineId: 'm-uuid' });
+
+    await deliverToSession(runtime, AGENT, stalled, [message('m-1', 'hi')], undefined, 50);
+
+    expect(cloud.requests.map((request) => request.path)).toEqual(['/v1/messages/m-1/failure']);
+  });
+
+  it('ends a handoff in progress when the host is stopped', async () => {
+    const stop = new AbortController();
+    const started = Date.now();
+    setTimeout(() => {
+      stop.abort();
+    }, 50);
+
+    await deliverToSession(
+      runtimeWith(fakeCloud([]).fetch),
+      AGENT,
+      stalled,
+      [message('m-1', 'hi')],
+      stop.signal,
+    );
+
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('retries recording a failure the cloud could not take at first', async () => {
+    let attempts = 0;
+    const cloud = fakeCloud([
+      [
+        'POST /v1/messages/m-1/failure',
+        () => {
+          attempts += 1;
+          return attempts === 1 ? { status: 503, json: { error: 'down' } } : ok({ message: {} });
+        },
+      ],
+    ]);
+    const runtime = runtimeWith(cloud.fetch);
+    updateAgentState(runtime, AGENT, { agentId: 'a-uuid', machineId: 'm-uuid' });
+
+    await deliverToSession(runtime, AGENT, session(true, true).adapter, [message('m-1', 'hi')]);
+
+    expect(attempts).toBe(2);
+  });
 });
