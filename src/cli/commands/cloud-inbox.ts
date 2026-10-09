@@ -82,7 +82,7 @@ const RECEIVER_TTL_SECONDS = 90;
 const RETRY_DELAY_MS = 5_000;
 
 /** Whether a running `inbox watch` on this machine holds the agent's receiver. */
-function watching(runtime: CloudRuntime, agentKey: string): boolean {
+export function watching(runtime: CloudRuntime, agentKey: string): boolean {
   return (readAgentState(runtime, agentKey)?.watchingUntil ?? 0) > Date.now();
 }
 
@@ -198,7 +198,8 @@ export async function watchCloud(
   agentKey: string,
   provider: string,
   once: boolean,
-  emit: (messages: readonly DeliverableMessage[]) => void,
+  /** Awaited before the next round, so a slow handoff never overlaps the next batch. */
+  emit: (messages: readonly DeliverableMessage[], stop: AbortSignal) => Promise<void> | void,
 ): Promise<void> {
   const stop = new AbortController();
   const stopped = (): boolean => stop.signal.aborted;
@@ -217,7 +218,7 @@ export async function watchCloud(
           watchingUntil: Date.now() + RECEIVER_TTL_SECONDS * 1000,
         });
         const messages = await drainOnce(runtime, agent, agentKey, MAX_WAIT_SECONDS, stop.signal);
-        if (messages.length > 0) emit(messages);
+        if (messages.length > 0) await emit(messages, stop.signal);
         if (once && messages.length > 0) return;
       } catch (error) {
         if (stopped()) return;

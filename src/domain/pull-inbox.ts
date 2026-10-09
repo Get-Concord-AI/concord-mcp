@@ -53,7 +53,7 @@ function renderMessage(message: DeliverableMessage): string {
 }
 
 /** The human-readable block shared by every channel. */
-function renderInboxBody(messages: readonly DeliverableMessage[]): string {
+export function renderInboxBody(messages: readonly DeliverableMessage[]): string {
   return messages.map(renderMessage).join('\n\n');
 }
 

@@ -47,11 +47,13 @@ export class CloudApiError extends Error {
 }
 
 /** `work`, unless `signal` gives up on it first: then a timeout, as a request's own would be. */
-function before<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+export function before<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const giveUp = (): void => {
       reject(new DOMException('Concord Cloud did not answer in time.', 'TimeoutError'));
     };
+    // Settled either way, so a rejection after giving up is never unhandled.
+    work.catch(() => undefined);
     if (signal.aborted) {
       giveUp();
       return;
@@ -454,4 +456,21 @@ export async function listCloudTasks(runtime: CloudRuntime): Promise<readonly Cl
     z.object({ tasks: z.array(taskSchema) }),
   );
   return tasks;
+}
+
+/**
+ * Records that a drained message could not be handed to its session, so its
+ * sender sees it failed rather than taking silence for delivery.
+ */
+export async function reportDeliveryFailure(
+  runtime: CloudRuntime,
+  agent: CloudAgentRef,
+  messageId: string,
+  detail: string,
+): Promise<void> {
+  await call(runtime, 'POST', `/v1/messages/${messageId}/failure`, z.object({}).loose(), {
+    agentId: agent.agentId,
+    errorCode: 'target_not_promptable',
+    errorDetail: detail.slice(0, 5000),
+  });
 }

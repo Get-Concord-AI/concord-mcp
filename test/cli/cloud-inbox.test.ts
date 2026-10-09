@@ -122,9 +122,9 @@ describe('cloud inbox', () => {
     ]);
     const emitted: DeliverableMessage[] = [];
 
-    await watchCloud(runtimeWith(cloud.fetch), AGENT, 'claude-code', true, (messages) =>
-      emitted.push(...messages),
-    );
+    await watchCloud(runtimeWith(cloud.fetch), AGENT, 'claude-code', true, (messages) => {
+      emitted.push(...messages);
+    });
 
     expect(emitted.map((entry) => entry.content)).toEqual(['wake up']);
     const calls = cloud.requests.map((request) => `${request.method} ${request.path}`);
