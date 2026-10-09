@@ -1,0 +1,284 @@
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
+import { dirname, join } from 'node:path';
+
+import { z } from 'zod';
+
+import { toDeliverable, type DeliverableMessage } from '../domain/pull-inbox.js';
+import { VERSION } from '../version.js';
+import { errorDetail, sameApi, TIMEOUT_MS, url, type Fetch } from './client.js';
+import type { CloudSession } from './proxy.js';
+
+/**
+ * A session's runtime against Concord Cloud: what the inbox commands and the
+ * session-start hook do locally over SQLite, done over the cloud's REST API.
+ *
+ * Agents are named by the runtime's own key; the cloud's ids for this machine
+ * and its agents are kept in `.concord/cloud-agents/`, one file each, so a hook that runs
+ * after every tool call costs one request rather than four. A cached id the
+ * cloud no longer knows is registered again and the call retried once.
+ */
+
+export type CloudRuntime = Pick<CloudSession, 'apiUrl' | 'bearer' | 'machineKey' | 'repoRoot'> & {
+  readonly fetch: Fetch;
+};
+
+/** A drain waits at most this long; the cloud allows 25 seconds. */
+export const MAX_WAIT_SECONDS = 25;
+
+/** An answer the cloud gave that was not a success. */
+export class CloudApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+async function call<T>(
+  runtime: CloudRuntime,
+  method: string,
+  path: string,
+  schema: z.ZodType<T>,
+  body?: object,
+  waitSeconds = 0,
+  signal?: AbortSignal,
+): Promise<T> {
+  // A cold Cloud Run start is the slow case; a long-poll adds its wait.
+  const timeout = AbortSignal.timeout(TIMEOUT_MS + waitSeconds * 1000);
+  const response = await runtime.fetch(url(runtime.apiUrl, path), {
+    method,
+    headers: {
+      Authorization: `Bearer ${await runtime.bearer()}`,
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: signal === undefined ? timeout : AbortSignal.any([timeout, signal]),
+  });
+  if (!response.ok) {
+    throw new CloudApiError(
+      response.status,
+      `Concord Cloud answered ${String(response.status)} to ${method} ${path}: ${await errorDetail(response)}`,
+    );
+  }
+  if (response.status === 204) return schema.parse({});
+  const raw: unknown = await response.json();
+  return schema.parse(raw);
+}
+
+const withId = z.object({ id: z.string() });
+const empty = z.object({});
+
+const cachedAgent = z.object({ agentId: z.string(), machineId: z.string() });
+export type CloudAgentRef = z.infer<typeof cachedAgent>;
+
+const cacheSchema = cachedAgent.extend({ apiUrl: z.string(), machineKey: z.string() });
+
+/**
+ * One file per agent, so sessions registering at once never overwrite each
+ * other's ids. The key is hashed into the name: agent keys hold `:` and are
+ * chosen by the runtime, never fit to be a path as written.
+ */
+export function agentCachePath(repoRoot: string, agentKey: string): string {
+  const name = createHash('sha256').update(agentKey).digest('hex').slice(0, 16);
+  return join(repoRoot, '.concord', 'cloud-agents', `${name}.json`);
+}
+
+/** The cached ids, when they were cached for this API and machine; anyone else's are not ours. */
+function readCache(runtime: CloudRuntime, agentKey: string): CloudAgentRef | undefined {
+  try {
+    const raw: unknown = JSON.parse(
+      readFileSync(agentCachePath(runtime.repoRoot, agentKey), 'utf8'),
+    );
+    const parsed = cacheSchema.safeParse(raw);
+    return parsed.success &&
+      sameApi(parsed.data.apiUrl, runtime.apiUrl) &&
+      parsed.data.machineKey === runtime.machineKey
+      ? { agentId: parsed.data.agentId, machineId: parsed.data.machineId }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeCache(runtime: CloudRuntime, agentKey: string, ref: CloudAgentRef): void {
+  const path = agentCachePath(runtime.repoRoot, agentKey);
+  mkdirSync(dirname(path), { recursive: true });
+  const temp = `${path}.${String(process.pid)}.tmp`;
+  const cache = { apiUrl: runtime.apiUrl, machineKey: runtime.machineKey, ...ref };
+  writeFileSync(temp, `${JSON.stringify(cache, null, 2)}\n`);
+  renameSync(temp, path);
+}
+
+export interface AgentRegistration {
+  readonly agentKey: string;
+  readonly kind: string;
+  readonly cwd?: string | undefined;
+}
+
+/** Registers this machine and the agent on it, idempotently, and caches their ids. */
+export async function registerCloudAgent(
+  runtime: CloudRuntime,
+  registration: AgentRegistration,
+): Promise<CloudAgentRef> {
+  const host = hostname();
+  const { machine } = await call(runtime, 'POST', '/v1/machines', z.object({ machine: withId }), {
+    machineKey: runtime.machineKey,
+    name: host,
+    hostname: host,
+    platform: process.platform,
+    runtimeVersion: VERSION,
+  });
+  const { agent } = await call(runtime, 'POST', '/v1/agents', z.object({ agent: withId }), {
+    agentKey: registration.agentKey,
+    kind: registration.kind,
+    machineId: machine.id,
+    pid: process.pid,
+    ...(registration.cwd === undefined ? {} : { cwd: registration.cwd }),
+  });
+  const ref = { agentId: agent.id, machineId: machine.id };
+  writeCache(runtime, registration.agentKey, ref);
+  return ref;
+}
+
+/**
+ * Runs `work` as the agent, registering it first when its id is not cached,
+ * and once more when the cloud no longer knows the cached one. Any other
+ * refusal is the caller's to see: retrying it would only repeat it.
+ */
+export async function asCloudAgent<T>(
+  runtime: CloudRuntime,
+  registration: AgentRegistration,
+  work: (agent: CloudAgentRef) => Promise<T>,
+): Promise<T> {
+  const cached = readCache(runtime, registration.agentKey);
+  if (cached === undefined) return work(await registerCloudAgent(runtime, registration));
+  try {
+    return await work(cached);
+  } catch (error) {
+    if (!(error instanceof CloudApiError) || ![403, 404].includes(error.status)) throw error;
+    if (await agentExists(runtime, cached)) throw error;
+    return work(await registerCloudAgent(runtime, registration));
+  }
+}
+
+/** Whether the cloud still has this agent, for this caller. */
+async function agentExists(runtime: CloudRuntime, agent: CloudAgentRef): Promise<boolean> {
+  try {
+    await call(runtime, 'GET', `/v1/agents/${agent.agentId}`, z.object({ agent: withId }));
+    return true;
+  } catch (error) {
+    if (error instanceof CloudApiError && error.status === 404) return false;
+    throw error;
+  }
+}
+
+/** Advertises that the agent drains its own messages, as `registerPullEndpoint` does locally. */
+export async function connectPullEndpoint(
+  runtime: CloudRuntime,
+  agent: CloudAgentRef,
+  agentKey: string,
+  provider: string,
+  capabilities: readonly string[],
+): Promise<void> {
+  await call(runtime, 'PUT', `/v1/agents/${agent.agentId}/endpoint`, empty, {
+    provider,
+    transport: 'pull',
+    capabilities,
+    address: `pull:${agentKey}`,
+    // A pull endpoint is never dialled, so it has no credential to hash.
+    credentialHash: 'none',
+  });
+}
+
+/** Promises a running receiver for `ttlSeconds`; while it lasts, only drains take messages. */
+export async function renewReceiver(
+  runtime: CloudRuntime,
+  agent: CloudAgentRef,
+  ttlSeconds: number,
+): Promise<void> {
+  await call(runtime, 'PUT', `/v1/agents/${agent.agentId}/endpoint/receiver`, empty, {
+    ttlSeconds,
+  });
+}
+
+export async function releaseReceiver(runtime: CloudRuntime, agent: CloudAgentRef): Promise<void> {
+  await call(runtime, 'DELETE', `/v1/agents/${agent.agentId}/endpoint/receiver`, empty);
+}
+
+const messageSchema = z.object({
+  id: z.string(),
+  senderAgentKey: z.string().nullable(),
+  taskKey: z.string().nullable(),
+  replyToMessageId: z.string().nullable(),
+  content: z.string(),
+  createdAt: z.string(),
+  deliveredAt: z.string().nullable(),
+});
+type CloudMessage = z.infer<typeof messageSchema>;
+
+/**
+ * Takes the agent's pending messages, waiting up to `waitSeconds` for one.
+ * Exactly once per `drainKey`: a retry with the same key replays its batch.
+ */
+export async function drainCloud(
+  runtime: CloudRuntime,
+  agent: CloudAgentRef,
+  drainKey: string,
+  waitSeconds = 0,
+  signal?: AbortSignal,
+): Promise<readonly CloudMessage[]> {
+  const wait = Math.max(0, Math.min(MAX_WAIT_SECONDS, Math.floor(waitSeconds)));
+  const { messages } = await call(
+    runtime,
+    'POST',
+    '/v1/messages/drain',
+    z.object({ messages: z.array(messageSchema) }),
+    { agentId: agent.agentId, drainKey, waitSeconds: wait },
+    wait,
+    signal,
+  );
+  return messages;
+}
+
+const agentSchema = z.object({
+  id: z.string(),
+  agentKey: z.string(),
+  kind: z.string(),
+  summary: z.string().nullable(),
+  status: z.string(),
+  lastSeenAt: z.string(),
+});
+export type CloudAgent = z.infer<typeof agentSchema>;
+
+/** Everyone in the organization, as discovery shows them. */
+export async function listCloudAgents(runtime: CloudRuntime): Promise<readonly CloudAgent[]> {
+  const { agents } = await call(
+    runtime,
+    'GET',
+    '/v1/agents',
+    z.object({ agents: z.array(agentSchema) }),
+  );
+  return agents;
+}
+
+/**
+ * Drained messages as the inbox renders them: senders and tasks by the keys
+ * agents use, which the drain itself returns, so rendering needs no request
+ * that could fail after the messages were taken.
+ */
+export function toDeliverables(messages: readonly CloudMessage[]): DeliverableMessage[] {
+  return messages.map((message) =>
+    toDeliverable({
+      messageId: message.id,
+      senderAgentId: message.senderAgentKey ?? 'unknown',
+      taskId: message.taskKey,
+      content: message.content,
+      replyToMessageId: message.replyToMessageId,
+      createdAt: message.createdAt,
+      deliveredAt: message.deliveredAt,
+    }),
+  );
+}
