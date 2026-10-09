@@ -31,6 +31,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     not answer in time (#164).
   - `who`, `tasks` and `status` read the cloud; `export`, which writes from the
     local database, says so (#165).
+  - Codex receives messages live: the `host-codex` adapter long-polls the cloud
+    and steers or starts Codex turns through its app-server; a message Codex
+    does not take is reported to its sender as not delivered (#169).
   - Nothing served by Concord Cloud records this package's telemetry; the cloud
     records its own usage.
 
