@@ -13,7 +13,7 @@ import { readCredentials, writeCredentials, type OAuthTokens } from './settings.
  * a refresh by another process on this machine is picked up rather than
  * repeated.
  */
-export type Bearer = () => Promise<string>;
+export type Bearer = (signal?: AbortSignal) => Promise<string>;
 
 /** Refreshed this long before expiry, so a token never expires in flight. */
 const EARLY_MS = 60_000;
@@ -32,13 +32,16 @@ export async function requestTokens(
   grant: Record<string, string>,
   fetchImpl: Fetch,
   now: () => number = Date.now,
+  /** A caller with its own deadline (a hook): the request ends with it, not later. */
+  signal?: AbortSignal,
 ): Promise<OAuthTokens> {
   assertKeySafeUrl(oauth.tokenEndpoint);
+  const timeout = AbortSignal.timeout(TIMEOUT_MS);
   const response = await fetchImpl(oauth.tokenEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ ...grant, client_id: oauth.clientId }).toString(),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: signal === undefined ? timeout : AbortSignal.any([timeout, signal]),
   });
   if (!response.ok) {
     throw new Error(
@@ -83,7 +86,7 @@ export function bearerFor(
   // One refresh at a time in this process: concurrent calls share it.
   let refreshing: Promise<string> | undefined;
 
-  return async () => {
+  return async (signal) => {
     const credentials = current();
     if ('apiKey' in credentials) return credentials.apiKey;
     if (credentials.oauth.expiresAt - now() > EARLY_MS) return credentials.oauth.accessToken;
@@ -95,6 +98,7 @@ export function bearerFor(
         { grant_type: 'refresh_token', refresh_token: oauth.refreshToken },
         fetchImpl,
         now,
+        signal,
       ).then((fresh) => {
         // Saved only over the login it refreshed. Had someone logged out, or
         // in again, meanwhile, this result is theirs to discard, not to undo.

@@ -26,6 +26,13 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { resolveAgentId } from '../agent-identity.js';
 import { openContext } from '../context.js';
+import {
+  cloudAccess,
+  drainFromCloud,
+  HOOK_TIMEOUT_MS,
+  registerInCloud,
+  watchCloud,
+} from './cloud-inbox.js';
 
 /** How long a registered pull endpoint stays promptable between drains. */
 const PULL_ENDPOINT_TTL_MS = 90_000;
@@ -189,6 +196,14 @@ function readHookPayload(): string | undefined {
   }
 }
 
+function registeredLine(agentId: string): string {
+  return (
+    `Concord: this session is agent \`${agentId}\` and can receive live messages from other ` +
+    `agents. If a Concord tool asks for agent_id, use "${agentId}"; do not invent a ` +
+    'different id.\n'
+  );
+}
+
 function workspaceExists(cwd: string): boolean {
   try {
     return existsSync(databasePath(resolveRepoRoot(cwd, process.env)));
@@ -236,6 +251,45 @@ function recordDeliveredMessages(
   }
 }
 
+const DRAIN_FORMATS: readonly string[] = [
+  'json',
+  'monitor',
+  'gemini-after-tool',
+  'gemini-after-agent',
+  'post-tool-use',
+  'stop',
+];
+
+/** Writes drained messages in a hook's or a monitor's format. */
+function writeMessages(format: string, messages: readonly DeliverableMessage[]): void {
+  if (format === 'json') {
+    process.stdout.write(`${JSON.stringify(messages)}\n`);
+    return;
+  }
+  if (format === 'monitor') {
+    for (const line of renderMonitorLines(messages)) process.stdout.write(`${line}\n`);
+    return;
+  }
+  if (format === 'gemini-after-tool') {
+    process.stdout.write(renderGeminiAfterTool(messages));
+    return;
+  }
+  if (format === 'gemini-after-agent') {
+    process.stdout.write(renderGeminiAfterAgent(messages));
+    return;
+  }
+  if (format === 'post-tool-use' || format === 'stop') {
+    process.stdout.write(renderHookPayload(format, messages));
+    return;
+  }
+  throw new Error(`Unknown --format: ${format}`);
+}
+
+/** A cloud failure in a hook: said once on stderr, never failing the session's turn. */
+function reportCloudFailure(detail: string): void {
+  process.stderr.write(`Concord Cloud could not be reached: ${detail}\n`);
+}
+
 export function registerInboxCommand(program: Command, telemetry?: TelemetryRecorder): void {
   const inbox = program
     .command('inbox')
@@ -244,10 +298,22 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
   inbox
     .command('status')
     .description('Exit 0 when this directory is a Concord workspace, 1 otherwise')
-    .action(() => {
+    .option('--cloud', 'Exit 0 only when the repository is linked to Concord Cloud')
+    .action((options) => {
       // Lets the relay monitor bail out of a project that does not use Concord
       // instead of polling for the life of the session.
-      if (!workspaceExists(process.cwd())) {
+      const access = cloudAccess(process.cwd());
+      if (access.kind === 'unusable') {
+        // Nothing here can receive messages until the machine logs in again.
+        process.stderr.write(`Concord Cloud: ${access.reason}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      if (access.kind === 'cloud') {
+        process.stdout.write('Concord Cloud workspace linked.\n');
+        return;
+      }
+      if (options.cloud === true || !workspaceExists(process.cwd())) {
         process.exitCode = 1;
         return;
       }
@@ -260,14 +326,29 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     .option('--agent <id>', 'Agent id; defaults to CONCORD_AGENT_ID, then to the current session')
     .option('--provider <name>', 'Client the agent runs in', 'claude-code')
     .option('--from-hook', 'Read the session id from a hook payload on stdin (Codex)')
-    .action((options) => {
-      if (!workspaceExists(process.cwd())) return;
-      const context = openContext(process.cwd());
+    .action(async (options) => {
+      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
+      if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
+      if (access.kind === 'unusable') {
+        reportCloudFailure(access.reason);
+        return;
+      }
       const hookPayload = options.fromHook === true ? (readHookPayload() ?? '') : undefined;
       const agentId = resolveAgentId(options.agent, process.env, {
         kind: options.provider,
         ...(hookPayload === undefined ? {} : { hookPayload }),
       });
+      if (access.kind === 'cloud') {
+        try {
+          await registerInCloud(access.runtime, agentId, options.provider, process.cwd());
+        } catch (error) {
+          reportCloudFailure(error instanceof Error ? error.message : String(error));
+          return;
+        }
+        process.stdout.write(registeredLine(agentId));
+        return;
+      }
+      const context = openContext(process.cwd());
       const existing =
         options.provider === 'codex' ? context.repos.agentEndpoints.getByAgent(agentId) : undefined;
       registerPullEndpoint(context.repos, agentId, options.provider);
@@ -282,11 +363,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       // Name the id. Clients whose session Concord can read resolve it on every
       // tool call; clients that scrub their environment (Codex) cannot, and for
       // those this line is the only place the agent learns who it is.
-      process.stdout.write(
-        `Concord: this session is agent \`${agentId}\` and can receive live messages from other ` +
-          `agents. If a Concord tool asks for agent_id, use "${agentId}"; do not invent a ` +
-          'different id.\n',
-      );
+      process.stdout.write(registeredLine(agentId));
     });
 
   inbox
@@ -300,13 +377,33 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       'post-tool-use and stop emit hook JSON; monitor emits one line per message; json emits raw records',
       'json',
     )
-    .action((options) => {
-      if (!workspaceExists(process.cwd())) return;
-      const context = openContext(process.cwd());
+    .action(async (options) => {
+      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
+      if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
+      // Checked before anything is taken: a format typo must not cost a batch.
+      if (!DRAIN_FORMATS.includes(options.format)) {
+        throw new Error(`Unknown --format: ${options.format}`);
+      }
+      if (access.kind === 'unusable') {
+        reportCloudFailure(access.reason);
+        return;
+      }
       const agentId = resolveAgentId(options.agent, process.env, {
         kind: options.provider,
         ...(options.fromHook === true ? { hookPayload: readHookPayload() ?? '' } : {}),
       });
+      if (access.kind === 'cloud') {
+        let messages: DeliverableMessage[];
+        try {
+          messages = await drainFromCloud(access.runtime, agentId, options.provider);
+        } catch (error) {
+          reportCloudFailure(error instanceof Error ? error.message : String(error));
+          return;
+        }
+        if (messages.length > 0) writeMessages(options.format, messages);
+        return;
+      }
+      const context = openContext(process.cwd());
       const isMonitor = options.format === 'monitor';
       const messages = drainInbox(
         context.repos,
@@ -319,27 +416,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       // noise into the session on every single tool call.
       if (messages.length === 0) return;
       recordDeliveredMessages(telemetry, messages);
-      if (options.format === 'json') {
-        process.stdout.write(`${JSON.stringify(messages)}\n`);
-        return;
-      }
-      if (options.format === 'monitor') {
-        for (const line of renderMonitorLines(messages)) process.stdout.write(`${line}\n`);
-        return;
-      }
-      if (options.format === 'gemini-after-tool') {
-        process.stdout.write(renderGeminiAfterTool(messages));
-        return;
-      }
-      if (options.format === 'gemini-after-agent') {
-        process.stdout.write(renderGeminiAfterAgent(messages));
-        return;
-      }
-      if (options.format === 'post-tool-use' || options.format === 'stop') {
-        process.stdout.write(renderHookPayload(options.format, messages));
-        return;
-      }
-      throw new Error(`Unknown --format: ${options.format}`);
+      writeMessages(options.format, messages);
     });
 
   inbox
@@ -352,19 +429,35 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     .option('--from-hook', 'Read the native session id from a hook payload on stdin')
     .option('--format <format>', 'Output format: monitor or stop', 'monitor')
     .action(async (options) => {
-      if (!workspaceExists(process.cwd())) return;
-      const context = openContext(process.cwd());
+      const access = cloudAccess(process.cwd());
+      if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
+      if (access.kind === 'unusable') throw new Error(`Concord Cloud: ${access.reason}`);
       const hookPayload = options.fromHook === true ? (readHookPayload() ?? '') : undefined;
       const agentId = resolveAgentId(options.agent, process.env, {
         kind: options.provider,
         ...(hookPayload === undefined ? {} : { hookPayload }),
       });
+      if (options.format !== 'monitor' && options.format !== 'stop') {
+        throw new Error(`Unknown --format: ${options.format}`);
+      }
+      const format = options.format;
+      if (access.kind === 'cloud') {
+        // Long-polls the cloud, so --interval does not apply.
+        await watchCloud(
+          access.runtime,
+          agentId,
+          options.provider,
+          options.once === true,
+          (messages) => {
+            writeMessages(format, messages);
+          },
+        );
+        return;
+      }
+      const context = openContext(process.cwd());
       const parsedInterval = Number.parseInt(options.interval, 10);
       if (!Number.isFinite(parsedInterval) || parsedInterval < 250) {
         throw new Error('--interval must be at least 250 milliseconds.');
-      }
-      if (options.format !== 'monitor' && options.format !== 'stop') {
-        throw new Error(`Unknown --format: ${options.format}`);
       }
       await watchInbox(
         context.repos,
@@ -374,11 +467,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         options.once === true,
         (messages) => {
           recordDeliveredMessages(telemetry, messages);
-          if (options.format === 'stop') {
-            process.stdout.write(renderHookPayload('stop', messages));
-            return;
-          }
-          for (const line of renderMonitorLines(messages)) process.stdout.write(`${line}\n`);
+          writeMessages(format, messages);
         },
       );
     });

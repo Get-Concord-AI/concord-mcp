@@ -6,6 +6,7 @@ import { resolveRepoRoot } from '../config/paths.js';
 import { createTelemetryClient } from '../telemetry/client.js';
 import { VERSION } from '../version.js';
 import { registerCheckCommand } from './commands/check.js';
+import { cloudLinked } from './commands/cloud-inbox.js';
 import { registerCloudCommand } from './commands/cloud.js';
 import { registerAdaptersCommand } from './commands/adapters.js';
 import { registerDashboardCommand } from './commands/dashboard.js';
@@ -48,11 +49,13 @@ program.hook('preAction', (command, actionCommand) => {
   // `concord cloud …` acts on Concord Cloud, which records its own usage; the
   // open-source CLI emits no telemetry, success or error, for non-local
   // operations. Checked by parent, since `cloud status` shares its name with
-  // the local `status`.
-  activeCommand =
-    actionCommand.parent?.name() === 'cloud'
-      ? undefined
-      : { name: actionCommand.name(), startedAt: performance.now() };
+  // the local `status`. The inbox in a cloud-linked repository is the cloud's
+  // too.
+  const parent = actionCommand.parent?.name();
+  const nonLocal = parent === 'cloud' || (parent === 'inbox' && cloudLinked(workspaceRoot));
+  activeCommand = nonLocal
+    ? undefined
+    : { name: actionCommand.name(), startedAt: performance.now() };
 });
 
 program.hook('postAction', (_command, actionCommand) => {
