@@ -74,7 +74,11 @@ async function main() {
   const payload = readPayload();
   const root = projectRoot(payload);
   const session = sessionId(payload);
-  if (!session || !existsSync(join(root, '.concord', 'concord.db'))) {
+  // A local workspace, or a repository linked to Concord Cloud.
+  const usesConcord =
+    existsSync(join(root, '.concord', 'concord.db')) ||
+    existsSync(join(root, '.concord', 'cloud.json'));
+  if (!session || !usesConcord) {
     writeResult({});
     return;
   }
