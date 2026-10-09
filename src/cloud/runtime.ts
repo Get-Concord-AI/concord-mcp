@@ -22,8 +22,12 @@ import type { CloudSession } from './proxy.js';
 
 export type CloudRuntime = Pick<CloudSession, 'apiUrl' | 'bearer' | 'machineKey' | 'repoRoot'> & {
   readonly fetch: Fetch;
-  /** Per request, before any long-poll wait. A hook with its own short budget passes less. */
-  readonly timeoutMs?: number;
+  /**
+   * When everything this runtime is asked to do must be over, in ms since the
+   * epoch: a hook runs inside its harness's own limit, retries included.
+   * Without one, each request has the usual timeout.
+   */
+  readonly deadline?: number;
 };
 
 /** A drain waits at most this long; the cloud allows 25 seconds. */
@@ -49,7 +53,11 @@ async function call<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   // A cold Cloud Run start is the slow case; a long-poll adds its wait.
-  const timeout = AbortSignal.timeout((runtime.timeoutMs ?? TIMEOUT_MS) + waitSeconds * 1000);
+  const budget =
+    runtime.deadline === undefined
+      ? TIMEOUT_MS + waitSeconds * 1000
+      : Math.max(0, runtime.deadline - Date.now());
+  const timeout = AbortSignal.timeout(budget);
   const response = await runtime.fetch(url(runtime.apiUrl, path), {
     method,
     headers: {
