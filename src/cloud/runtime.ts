@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdirSync, readdirSync, rmSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -22,6 +22,8 @@ import type { CloudSession } from './proxy.js';
 
 export type CloudRuntime = Pick<CloudSession, 'apiUrl' | 'bearer' | 'machineKey' | 'repoRoot'> & {
   readonly fetch: Fetch;
+  /** Per request, before any long-poll wait. A hook with its own short budget passes less. */
+  readonly timeoutMs?: number;
 };
 
 /** A drain waits at most this long; the cloud allows 25 seconds. */
@@ -47,7 +49,7 @@ async function call<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   // A cold Cloud Run start is the slow case; a long-poll adds its wait.
-  const timeout = AbortSignal.timeout(TIMEOUT_MS + waitSeconds * 1000);
+  const timeout = AbortSignal.timeout((runtime.timeoutMs ?? TIMEOUT_MS) + waitSeconds * 1000);
   const response = await runtime.fetch(url(runtime.apiUrl, path), {
     method,
     headers: {
@@ -74,7 +76,13 @@ const empty = z.object({});
 const cachedAgent = z.object({ agentId: z.string(), machineId: z.string() });
 export type CloudAgentRef = z.infer<typeof cachedAgent>;
 
-const cacheSchema = cachedAgent.extend({ apiUrl: z.string(), machineKey: z.string() });
+const cacheSchema = cachedAgent.extend({
+  apiUrl: z.string(),
+  machineKey: z.string(),
+  /** Until when a running `inbox watch` holds this agent's receiver, in ms. */
+  watchingUntil: z.number().optional(),
+});
+export type CloudAgentState = z.infer<typeof cacheSchema>;
 
 /**
  * One file per agent, so sessions registering at once never overwrite each
@@ -86,8 +94,11 @@ export function agentCachePath(repoRoot: string, agentKey: string): string {
   return join(repoRoot, '.concord', 'cloud-agents', `${name}.json`);
 }
 
-/** The cached ids, when they were cached for this API and machine; anyone else's are not ours. */
-function readCache(runtime: CloudRuntime, agentKey: string): CloudAgentRef | undefined {
+/** What this machine knows of the agent, when it was recorded for this API and machine. */
+export function readAgentState(
+  runtime: CloudRuntime,
+  agentKey: string,
+): CloudAgentState | undefined {
   try {
     const raw: unknown = JSON.parse(
       readFileSync(agentCachePath(runtime.repoRoot, agentKey), 'utf8'),
@@ -96,20 +107,83 @@ function readCache(runtime: CloudRuntime, agentKey: string): CloudAgentRef | und
     return parsed.success &&
       sameApi(parsed.data.apiUrl, runtime.apiUrl) &&
       parsed.data.machineKey === runtime.machineKey
-      ? { agentId: parsed.data.agentId, machineId: parsed.data.machineId }
+      ? parsed.data
       : undefined;
   } catch {
     return undefined;
   }
 }
 
-function writeCache(runtime: CloudRuntime, agentKey: string, ref: CloudAgentRef): void {
+/** Records the agent's ids, or changes what is known of it; a no-op before its ids are known. */
+export function updateAgentState(
+  runtime: CloudRuntime,
+  agentKey: string,
+  change: { readonly [K in keyof CloudAgentState]?: CloudAgentState[K] | undefined },
+): void {
+  const current = readAgentState(runtime, agentKey);
+  const next = { ...current, ...change, apiUrl: runtime.apiUrl, machineKey: runtime.machineKey };
+  const parsed = cacheSchema.safeParse(next);
+  if (!parsed.success) return;
   const path = agentCachePath(runtime.repoRoot, agentKey);
   mkdirSync(dirname(path), { recursive: true });
   const temp = `${path}.${String(process.pid)}.tmp`;
-  const cache = { apiUrl: runtime.apiUrl, machineKey: runtime.machineKey, ...ref };
-  writeFileSync(temp, `${JSON.stringify(cache, null, 2)}\n`);
+  writeFileSync(temp, `${JSON.stringify(parsed.data, null, 2)}\n`);
   renameSync(temp, path);
+}
+
+/** A drain's key, held from before it asks until its answer has arrived. */
+export interface DrainTicket {
+  readonly key: string;
+  /** True when this key's drain may already have happened, so the cloud replays it. */
+  readonly replay: boolean;
+  /** The answer arrived: nothing left to replay. */
+  readonly finish: () => void;
+}
+
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: it exists, and belongs to someone else.
+    return error instanceof Error && 'code' in error && error.code === 'EPERM';
+  }
+}
+
+/**
+ * A key for the agent's next drain. Each drain in flight is a file named for
+ * its key and its process, removed once answered; one left by a process that
+ * has ended had its answer lost, and is taken over (by an atomic rename) so
+ * the cloud replays its batch. A key another running process holds is never
+ * reused, so two drains can never share one and see one batch twice.
+ */
+export function takeDrainKey(runtime: CloudRuntime, agentKey: string): DrainTicket {
+  const dir = agentCachePath(runtime.repoRoot, agentKey).replace(/\.json$/, '.drains');
+  mkdirSync(dir, { recursive: true });
+  const ticket = (key: string, replay: boolean): DrainTicket => {
+    const path = join(dir, `${key}.${String(process.pid)}`);
+    return {
+      key,
+      replay,
+      finish: () => {
+        rmSync(path, { force: true });
+      },
+    };
+  };
+  for (const name of readdirSync(dir)) {
+    const [key, owner] = name.split('.');
+    const pid = Number(owner);
+    if (key === undefined || (pid !== process.pid && running(pid))) continue;
+    try {
+      renameSync(join(dir, name), join(dir, `${key}.${String(process.pid)}`));
+      return ticket(key, true);
+    } catch {
+      // Taken over by another process first.
+    }
+  }
+  const key = randomUUID();
+  writeFileSync(join(dir, `${key}.${String(process.pid)}`), '');
+  return ticket(key, false);
 }
 
 export interface AgentRegistration {
@@ -139,7 +213,7 @@ export async function registerCloudAgent(
     ...(registration.cwd === undefined ? {} : { cwd: registration.cwd }),
   });
   const ref = { agentId: agent.id, machineId: machine.id };
-  writeCache(runtime, registration.agentKey, ref);
+  updateAgentState(runtime, registration.agentKey, ref);
   return ref;
 }
 
@@ -152,15 +226,28 @@ export async function asCloudAgent<T>(
   runtime: CloudRuntime,
   registration: AgentRegistration,
   work: (agent: CloudAgentRef) => Promise<T>,
+  onRegistered: (agent: CloudAgentRef) => Promise<void> = () => Promise.resolve(),
 ): Promise<T> {
-  const cached = readCache(runtime, registration.agentKey);
-  if (cached === undefined) return work(await registerCloudAgent(runtime, registration));
+  const register = async (): Promise<CloudAgentRef> => {
+    const agent = await registerCloudAgent(runtime, registration);
+    try {
+      await onRegistered(agent);
+    } catch (error) {
+      // Not cached until finished, so the next call registers it again.
+      rmSync(agentCachePath(runtime.repoRoot, registration.agentKey), { force: true });
+      throw error;
+    }
+    return agent;
+  };
+  const state = readAgentState(runtime, registration.agentKey);
+  if (state === undefined) return work(await register());
+  const cached = { agentId: state.agentId, machineId: state.machineId };
   try {
     return await work(cached);
   } catch (error) {
     if (!(error instanceof CloudApiError) || ![403, 404].includes(error.status)) throw error;
     if (await agentExists(runtime, cached)) throw error;
-    return work(await registerCloudAgent(runtime, registration));
+    return work(await register());
   }
 }
 
