@@ -38,6 +38,7 @@ export interface SessionSource {
 export const SESSION_SOURCES: readonly SessionSource[] = [
   { kind: 'claude-code', envVar: 'CLAUDE_CODE_SESSION_ID' },
   { kind: 'grok', envVar: 'GROK_SESSION_ID' },
+  { kind: 'goose', envVar: 'AGENT_SESSION_ID' },
 ];
 
 /** How an identity was established, for diagnostics and error messages. */
