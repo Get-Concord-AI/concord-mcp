@@ -4,14 +4,18 @@ import type { Command } from '@commander-js/extra-typings';
 import { z } from 'zod';
 
 import type { Repositories } from '../../db/index.js';
-import { UNRESOLVED_IDENTITY_MESSAGE } from '../../domain/identity.js';
+import { resolveIdentity, UNRESOLVED_IDENTITY_MESSAGE } from '../../domain/identity.js';
 import { buildRoster } from '../../domain/presence.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { sessionStartIdentity } from '../agent-identity.js';
 import { openContext } from '../context.js';
 import { checkFileOverlaps } from './check.js';
+import { decideCloudPreToolUse, handleCloudSessionStart } from './cloud-hooks.js';
+import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
 import { registerPullEndpoint } from './inbox.js';
+import { sessionStartMessage } from './session-start-message.js';
+import type { CloudRuntime } from '../../cloud/runtime.js';
 
 /** The subset of Claude Code's PreToolUse payload we need: the edited file path.
  * Everything else is passed through and ignored. */
@@ -129,24 +133,7 @@ export function handleSessionStart(
   const others = buildRoster(repos.agents.list(), Date.now()).filter(
     (entry) => entry.agentId !== agentId,
   );
-  const lines = [
-    `Concord: this session is agent \`${agentId}\`. Concord resolves that identity from your ` +
-      'session on every tool call, so start_work, update_work, finish_work attribute your work ' +
-      'and keep your presence live without you passing an id.',
-    'You can receive live messages from other agents in this workspace; they arrive on their own ' +
-      'as relayed context, so you never need to poll for them.',
-  ];
-  if (others.length === 0) {
-    lines.push('No other agents are currently registered.');
-  } else {
-    lines.push('Who else is here:');
-    for (const entry of others) {
-      lines.push(
-        `  - ${entry.agentId} [${entry.liveness}/${entry.status}]: ${entry.summary ?? '-'}`,
-      );
-    }
-  }
-  return { agentId, message: lines.join('\n') };
+  return { agentId, message: sessionStartMessage(agentId, others) };
 }
 
 /** Read piped stdin to a string. Returns '' when attached to a TTY (no input). */
@@ -169,7 +156,17 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
         'session-start (SessionStart presence auto-register); both read a Claude Code JSON ' +
         'payload on stdin.',
     )
-    .action((event) => {
+    .action(async (event) => {
+      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
+      if (access.kind === 'unusable') {
+        // Never a local workspace in its place, and never a blocked edit or session.
+        process.stderr.write(`Concord Cloud could not be reached: ${access.reason}\n`);
+        return;
+      }
+      if (access.kind === 'cloud') {
+        await runCloudHook(access.runtime, event);
+        return;
+      }
       if (event === 'session-start') {
         const result = handleSessionStart(openContext(process.cwd()).repos, readStdin());
         process.stdout.write(`${result.message}\n`);
@@ -202,4 +199,35 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
         process.exitCode = 2;
       }
     });
+}
+
+/**
+ * A hook in a repository linked to Concord Cloud. Neither may break the
+ * session: a cloud that cannot be reached is said once, and the edit or the
+ * session goes ahead.
+ */
+async function runCloudHook(runtime: CloudRuntime, event: string): Promise<void> {
+  if (event === 'session-start') {
+    const message = await handleCloudSessionStart(runtime, readStdin()).then(
+      (result) => result.message,
+      (error: unknown) =>
+        `Concord Cloud could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.stdout.write(`${message}\n`);
+    return;
+  }
+  if (event !== 'pre-tool-use') {
+    process.stderr.write(`Unknown hook event: ${event}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  const decision = await decideCloudPreToolUse(
+    runtime,
+    readStdin(),
+    process.env['CONCORD_TASK'],
+    resolveIdentity(process.env, { kind: 'claude-code' })?.agentId,
+  );
+  if (decision.message !== '') process.stderr.write(`${decision.message}\n`);
+  // Claude Code treats PreToolUse exit code 2 as "deny the tool call".
+  if (decision.block) process.exitCode = 2;
 }

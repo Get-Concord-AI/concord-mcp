@@ -37,7 +37,9 @@ describe('cloud runtime', () => {
       apiUrl: 'https://api.example.test',
       bearer: () => Promise.resolve('token'),
       machineKey,
+      projectKey: 'github.com/acme/app',
       repoRoot,
+      checkoutRoot: repoRoot,
       fetch,
     };
   }

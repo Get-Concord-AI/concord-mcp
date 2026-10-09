@@ -54,7 +54,9 @@ describe('cloud inbox', () => {
       apiUrl: 'https://api.example.test',
       bearer: () => Promise.resolve('token'),
       machineKey: 'machine-1',
+      projectKey: 'github.com/acme/app',
       repoRoot,
+      checkoutRoot: repoRoot,
       fetch,
     };
   }

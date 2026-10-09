@@ -20,7 +20,10 @@ import type { CloudSession } from './proxy.js';
  * cloud no longer knows is registered again and the call retried once.
  */
 
-export type CloudRuntime = Pick<CloudSession, 'apiUrl' | 'bearer' | 'machineKey' | 'repoRoot'> & {
+export type CloudRuntime = Pick<
+  CloudSession,
+  'apiUrl' | 'bearer' | 'machineKey' | 'projectKey' | 'repoRoot' | 'checkoutRoot'
+> & {
   readonly fetch: Fetch;
   /**
    * When everything this runtime is asked to do must be over, in ms since the
@@ -396,4 +399,33 @@ export function toDeliverables(messages: readonly CloudMessage[]): DeliverableMe
       deliveredAt: message.deliveredAt,
     }),
   );
+}
+
+const claimSchema = z.object({
+  file: z.string(),
+  taskKey: z.string(),
+  title: z.string(),
+  status: z.string(),
+  agentKey: z.string().nullable(),
+});
+export type CloudClaim = z.infer<typeof claimSchema>;
+
+/** Who holds these repository files in the linked project, by the cloud's live claims. */
+export async function listClaims(
+  runtime: CloudRuntime,
+  files: readonly string[],
+  signal?: AbortSignal,
+): Promise<readonly CloudClaim[]> {
+  const query = new URLSearchParams({ projectKey: runtime.projectKey });
+  for (const file of files) query.append('file', file);
+  const { claims } = await call(
+    runtime,
+    'GET',
+    `/v1/claims?${query.toString()}`,
+    z.object({ claims: z.array(claimSchema) }),
+    undefined,
+    0,
+    signal,
+  );
+  return claims;
 }

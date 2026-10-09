@@ -17,7 +17,7 @@ import {
   type CloudRuntime,
 } from '../../cloud/runtime.js';
 import { readLink } from '../../cloud/settings.js';
-import { resolveRepoRoot } from '../../config/paths.js';
+import { resolveCheckoutRoot, resolveRepoRoot } from '../../config/paths.js';
 import { capabilityFor, encodeCapabilities, monitorCapabilityFor } from '../../domain/delivery.js';
 import type { DeliverableMessage } from '../../domain/pull-inbox.js';
 
@@ -57,7 +57,14 @@ export function cloudAccess(
 ): CloudAccess {
   if (!cloudLinked(cwd, env)) return { kind: 'local' };
   try {
-    const session = cloudSessionFor(resolveRepoRoot(cwd, env), env, undefined);
+    // The checkout this command runs in, which in a linked worktree is not the
+    // primary one holding the link: paths are made relative to it.
+    const session = cloudSessionFor(
+      resolveRepoRoot(cwd, env),
+      env,
+      undefined,
+      resolveCheckoutRoot(cwd, env),
+    );
     if (session === undefined) return { kind: 'local' };
     const deadline =
       options.timeoutMs === undefined ? {} : { deadline: Date.now() + options.timeoutMs };
