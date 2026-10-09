@@ -107,7 +107,7 @@ function inside(root: string, path: string): string | undefined {
  * one, made relative; anything else as given. Tried as written and resolved,
  * so a path through a symlink (`/tmp` on macOS) still matches.
  */
-function repoRelative(
+export function repoRelative(
   session: Pick<CloudSession, 'repoRoot' | 'checkoutRoot'>,
   path: string,
 ): string {
