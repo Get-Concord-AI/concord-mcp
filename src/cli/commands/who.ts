@@ -3,6 +3,7 @@ import type { Command } from '@commander-js/extra-typings';
 import { renderRosterLines } from '../../artifacts/work-state-view.js';
 import { buildRoster } from '../../domain/presence.js';
 import { openContext } from '../context.js';
+import { inCloud, runCloudWho } from './cloud-views.js';
 
 /** Render the presence roster: who is registered and how live they are. */
 export function runWho(cwd: string, now: number = Date.now()): string {
@@ -19,7 +20,8 @@ export function registerWhoCommand(program: Command): void {
   program
     .command('who')
     .description('Show which agents are present and what they are working on')
-    .action(() => {
-      process.stdout.write(`${runWho(process.cwd())}\n`);
+    .action(async () => {
+      const cloud = await inCloud(process.cwd(), (runtime) => runCloudWho(runtime));
+      process.stdout.write(`${cloud ?? runWho(process.cwd())}\n`);
     });
 }

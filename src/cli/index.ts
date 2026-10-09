@@ -28,6 +28,8 @@ const program = new Command();
 let workspaceRoot = resolveRepoRoot(process.cwd(), process.env);
 let activeCommand: { name: string; startedAt: number } | undefined;
 const backgroundCommands = new Set(['drain', 'watch', 'hook']);
+/** Top-level commands a linked repository answers from Concord Cloud: not local, so not recorded. */
+const CLOUD_SERVED = new Set(['status', 'who', 'tasks', 'export']);
 const telemetry = createTelemetryClient({
   surface: 'cli',
   workspaceRoot: () => workspaceRoot,
@@ -52,7 +54,9 @@ program.hook('preAction', (command, actionCommand) => {
   // the local `status`. The inbox in a cloud-linked repository is the cloud's
   // too.
   const parent = actionCommand.parent?.name();
-  const nonLocal = parent === 'cloud' || (parent === 'inbox' && cloudLinked(workspaceRoot));
+  const nonLocal =
+    parent === 'cloud' ||
+    ((parent === 'inbox' || CLOUD_SERVED.has(actionCommand.name())) && cloudLinked(workspaceRoot));
   activeCommand = nonLocal
     ? undefined
     : { name: actionCommand.name(), startedAt: performance.now() };
