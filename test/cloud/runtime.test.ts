@@ -87,8 +87,10 @@ describe('cloud runtime', () => {
       kind: 'claude-code',
       machineId: 'm-uuid',
     });
-    const cached = z.json().parse(JSON.parse(readFileSync(agentCachePath(repoRoot), 'utf8')));
-    expect(cached).toMatchObject({ agents: { [REGISTRATION.agentKey]: ref } });
+    const cached = z
+      .json()
+      .parse(JSON.parse(readFileSync(agentCachePath(repoRoot, REGISTRATION.agentKey), 'utf8')));
+    expect(cached).toMatchObject(ref);
   });
 
   it('acts from the cache without registering again', async () => {

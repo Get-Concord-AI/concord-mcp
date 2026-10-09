@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -14,7 +15,7 @@ import type { CloudSession } from './proxy.js';
  * session-start hook do locally over SQLite, done over the cloud's REST API.
  *
  * Agents are named by the runtime's own key; the cloud's ids for this machine
- * and its agents are kept in `.concord/cloud-agents.json`, so a hook that runs
+ * and its agents are kept in `.concord/cloud-agents/`, one file each, so a hook that runs
  * after every tool call costs one request rather than four. A cached id the
  * cloud no longer knows is registered again and the call retried once.
  */
@@ -73,37 +74,40 @@ const empty = z.object({});
 const cachedAgent = z.object({ agentId: z.string(), machineId: z.string() });
 export type CloudAgentRef = z.infer<typeof cachedAgent>;
 
-const cacheSchema = z.object({
-  apiUrl: z.string(),
-  machineKey: z.string(),
-  agents: z.record(z.string(), cachedAgent),
-});
-type Cache = z.infer<typeof cacheSchema>;
+const cacheSchema = cachedAgent.extend({ apiUrl: z.string(), machineKey: z.string() });
 
-export function agentCachePath(repoRoot: string): string {
-  return join(repoRoot, '.concord', 'cloud-agents.json');
+/**
+ * One file per agent, so sessions registering at once never overwrite each
+ * other's ids. The key is hashed into the name: agent keys hold `:` and are
+ * chosen by the runtime, never fit to be a path as written.
+ */
+export function agentCachePath(repoRoot: string, agentKey: string): string {
+  const name = createHash('sha256').update(agentKey).digest('hex').slice(0, 16);
+  return join(repoRoot, '.concord', 'cloud-agents', `${name}.json`);
 }
 
-/** The cache for this API and machine; anything else is someone else's ids. */
-function readCache(runtime: CloudRuntime): Cache {
-  const fresh: Cache = { apiUrl: runtime.apiUrl, machineKey: runtime.machineKey, agents: {} };
+/** The cached ids, when they were cached for this API and machine; anyone else's are not ours. */
+function readCache(runtime: CloudRuntime, agentKey: string): CloudAgentRef | undefined {
   try {
-    const raw: unknown = JSON.parse(readFileSync(agentCachePath(runtime.repoRoot), 'utf8'));
+    const raw: unknown = JSON.parse(
+      readFileSync(agentCachePath(runtime.repoRoot, agentKey), 'utf8'),
+    );
     const parsed = cacheSchema.safeParse(raw);
     return parsed.success &&
       sameApi(parsed.data.apiUrl, runtime.apiUrl) &&
       parsed.data.machineKey === runtime.machineKey
-      ? parsed.data
-      : fresh;
+      ? { agentId: parsed.data.agentId, machineId: parsed.data.machineId }
+      : undefined;
   } catch {
-    return fresh;
+    return undefined;
   }
 }
 
-function writeCache(runtime: CloudRuntime, cache: Cache): void {
-  const path = agentCachePath(runtime.repoRoot);
+function writeCache(runtime: CloudRuntime, agentKey: string, ref: CloudAgentRef): void {
+  const path = agentCachePath(runtime.repoRoot, agentKey);
   mkdirSync(dirname(path), { recursive: true });
   const temp = `${path}.${String(process.pid)}.tmp`;
+  const cache = { apiUrl: runtime.apiUrl, machineKey: runtime.machineKey, ...ref };
   writeFileSync(temp, `${JSON.stringify(cache, null, 2)}\n`);
   renameSync(temp, path);
 }
@@ -135,8 +139,7 @@ export async function registerCloudAgent(
     ...(registration.cwd === undefined ? {} : { cwd: registration.cwd }),
   });
   const ref = { agentId: agent.id, machineId: machine.id };
-  const cache = readCache(runtime);
-  writeCache(runtime, { ...cache, agents: { ...cache.agents, [registration.agentKey]: ref } });
+  writeCache(runtime, registration.agentKey, ref);
   return ref;
 }
 
@@ -150,7 +153,7 @@ export async function asCloudAgent<T>(
   registration: AgentRegistration,
   work: (agent: CloudAgentRef) => Promise<T>,
 ): Promise<T> {
-  const cached = readCache(runtime).agents[registration.agentKey];
+  const cached = readCache(runtime, registration.agentKey);
   if (cached === undefined) return work(await registerCloudAgent(runtime, registration));
   try {
     return await work(cached);
