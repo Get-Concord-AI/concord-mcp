@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   readAgentState,
@@ -271,8 +272,8 @@ describe('cloud inbox', () => {
       new Promise((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => {
           // The timeout's own reason, so the drain sees a timeout and retries.
-          const reason: unknown = init.signal?.reason;
-          reject(reason instanceof Error ? reason : new Error('aborted'));
+          const reason = z.instanceof(Error).safeParse(init.signal?.reason);
+          reject(reason.success ? reason.data : new Error('aborted'));
         });
       });
     const runtime: CloudRuntime = { ...runtimeWith(hanging), deadline: Date.now() + 300 };
