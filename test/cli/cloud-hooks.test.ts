@@ -1,4 +1,5 @@
-import { mkdtempSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,6 +10,8 @@ import {
   decideCloudPreToolUse,
   handleCloudSessionStart,
 } from '../../src/cli/commands/cloud-hooks.js';
+import { cloudAccess } from '../../src/cli/commands/cloud-inbox.js';
+import { ensureMachineKey, writeCredentials, writeLink } from '../../src/cloud/settings.js';
 import { fakeCloud, ok, type Route } from '../cloud/fake-cloud.js';
 
 const SELF = 'claude-code:aaaa1111';
@@ -159,5 +162,46 @@ describe('cloud hooks', () => {
     expect(result.message).toContain('codex:bbbb2222 [live/active]: busy');
     expect(result.message).not.toContain(`  - ${SELF}`);
     expect(result.message).not.toContain('gemini:cccc3333');
+  });
+
+  it('checks an edit made in a linked worktree against the project’s claims', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'concord-worktree-')));
+    const primary = join(base, 'primary');
+    const worktree = join(base, 'feature');
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync('git', args, { cwd, stdio: 'ignore' });
+    mkdirSync(primary);
+    git(primary, 'init', '-q');
+    git(
+      primary,
+      '-c',
+      'user.email=t@example.test',
+      '-c',
+      'user.name=t',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'init',
+    );
+    git(primary, 'worktree', 'add', '-q', worktree);
+    writeLink(primary, { apiUrl: 'https://api.example.test', projectKey: 'github.com/acme/app' });
+    const home = mkdtempSync(join(tmpdir(), 'concord-home-'));
+    const env = { HOME: home };
+    writeCredentials(env, { apiUrl: 'https://api.example.test', apiKey: 'cc_test' });
+    ensureMachineKey(env, () => 'machine-1');
+
+    const access = cloudAccess(worktree, {}, env);
+    if (access.kind !== 'cloud') throw new Error(`expected a cloud runtime, got ${access.kind}`);
+    const decision = await decideCloudPreToolUse(
+      { ...access.runtime, fetch: fakeCloud(claims(claim('OTHER-1', 'codex:bbbb2222'))).fetch },
+      editing(join(worktree, 'src', 'a.ts')),
+      'MINE-1',
+      SELF,
+    );
+
+    expect(access.runtime.checkoutRoot).toBe(worktree);
+    expect(decision.result).toBe('blocked');
+    expect(asked[0]?.searchParams.getAll('file')).toEqual(['src/a.ts']);
   });
 });
