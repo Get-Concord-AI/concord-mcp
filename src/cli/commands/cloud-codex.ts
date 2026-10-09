@@ -156,8 +156,16 @@ export async function hostCodexInCloud(
   const adapter = new CodexAppServerAdapter(client, threadId, () => client.currentTurnId());
   // Reports saved while the cloud was unreachable are made now and every
   // minute, not only when the next message happens to arrive.
+  // One pass at a time: a slow cloud must not stack passes sending the same reports.
+  let flushing = false;
   const flush = (): void => {
-    void reportUndelivered(runtime, agentKey, []).catch(() => undefined);
+    if (flushing) return;
+    flushing = true;
+    void reportUndelivered(runtime, agentKey, [])
+      .catch(() => undefined)
+      .finally(() => {
+        flushing = false;
+      });
   };
   flush();
   const retrying = setInterval(flush, REPORT_RETRY_MS);
