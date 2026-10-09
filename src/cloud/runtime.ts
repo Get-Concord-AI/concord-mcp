@@ -75,8 +75,9 @@ async function call<T>(
       ? TIMEOUT_MS + waitSeconds * 1000
       : Math.max(0, runtime.deadline - Date.now());
   const timeout = AbortSignal.timeout(budget);
-  // Within the same budget: a browser login refreshing its token is a request too.
-  const token = await before(runtime.bearer(), timeout);
+  // Within the same budget: a browser login refreshing its token is a request
+  // too, and ends with it rather than keeping a hook's process alive.
+  const token = await before(runtime.bearer(timeout), timeout);
   const response = await runtime.fetch(url(runtime.apiUrl, path), {
     method,
     headers: {

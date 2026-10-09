@@ -152,4 +152,21 @@ describe('bearerFor', () => {
     await expect(bearerFor(env, API, endpoint.fetch, () => NOW)()).rejects.toThrow(/not https/);
     expect(endpoint.bodies).toEqual([]);
   });
+
+  it('ends a refresh with the caller’s deadline, rather than keeping the process waiting', async () => {
+    writeCredentials(env, { apiUrl: API, oauth: tokens({ expiresAt: NOW }) });
+    let aborted = false;
+    const hanging: Fetch = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          aborted = true;
+          reject(new Error('aborted'));
+        });
+      });
+
+    await expect(bearerFor(env, API, hanging, () => NOW)(AbortSignal.timeout(50))).rejects.toThrow(
+      'aborted',
+    );
+    expect(aborted).toBe(true);
+  });
 });
