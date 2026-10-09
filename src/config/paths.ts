@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
@@ -65,6 +66,35 @@ export function findRepoRoot(startDir: string): string {
     }
     dir = parent;
   }
+}
+
+/**
+ * The checkout `startDir` is in: a linked worktree's own root, where
+ * `findRepoRoot` would follow it to the primary checkout. File paths an agent
+ * passes are inside the checkout it works in.
+ */
+export function findCheckoutRoot(startDir: string): string {
+  const start = canonicalPath(startDir);
+  let dir = start;
+  for (;;) {
+    if (existsSync(join(dir, '.git'))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      return start;
+    }
+    dir = parent;
+  }
+}
+
+/** The checkout the MCP server works in, chosen as `resolveRepoRoot` chooses. */
+export function resolveCheckoutRoot(cwd: string, env: NodeJS.ProcessEnv): string {
+  for (const name of ['CONCORD_REPO_ROOT', 'CLAUDE_PROJECT_DIR']) {
+    const configured = env[name]?.trim();
+    if (configured !== undefined && configured !== '') return findCheckoutRoot(configured);
+  }
+  return findCheckoutRoot(cwd);
 }
 
 /**
@@ -138,4 +168,15 @@ export function concordDir(repoRoot: string): string {
 /** Absolute path to the SQLite database for a given repo root. */
 export function databasePath(repoRoot: string): string {
   return join(concordDir(repoRoot), DB_FILENAME);
+}
+
+/**
+ * The user's home directory, honouring `HOME` and then `USERPROFILE` before
+ * the OS default, so tests and unusual shells can point it elsewhere.
+ */
+export function userHome(env: NodeJS.ProcessEnv): string {
+  const configured = env['HOME']?.trim();
+  if (configured !== undefined && configured !== '') return configured;
+  const profile = env['USERPROFILE']?.trim();
+  return profile === undefined || profile === '' ? homedir() : profile;
 }

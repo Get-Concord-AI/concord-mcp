@@ -2,8 +2,9 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import { writeArtifacts } from './artifacts/index.js';
+import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/proxy.js';
 import { startBackgroundUpdateCheck } from './update-notifier.js';
-import { resolveRepoRoot } from './config/paths.js';
+import { resolveCheckoutRoot, resolveRepoRoot } from './config/paths.js';
 import { resolveIdentity } from './domain/identity.js';
 import { createServer } from './server.js';
 import { ensureAgentRegistered } from './tools/register-agent.js';
@@ -14,11 +15,26 @@ import { WorkspaceManager } from './workspaces/manager.js';
 
 async function main(): Promise<void> {
   const repoRoot = resolveRepoRoot(process.cwd(), process.env);
-  const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, process.env);
   // One server process per session, with the session id in its environment, so
   // this agent's identity is known before the transport connects — and it is the
   // same id the relay CLI derives for the same session.
   const identity = resolveIdentity(process.env);
+
+  // A repository linked to Concord Cloud works through it: no local database,
+  // and no telemetry from this package for operations that are not local.
+  const cloud = cloudSessionFor(
+    repoRoot,
+    process.env,
+    identity,
+    resolveCheckoutRoot(process.cwd(), process.env),
+  );
+  if (cloud !== undefined) {
+    const proxy = createCloudProxyServer(cloud, () => connectCloud(cloud));
+    await proxy.connect(new StdioServerTransport());
+    return;
+  }
+
+  const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, process.env);
   if (identity !== undefined) {
     ensureAgentRegistered(workspaceManager.current().repos, identity, repoRoot);
   }

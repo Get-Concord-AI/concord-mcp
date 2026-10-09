@@ -6,6 +6,8 @@ import { resolveRepoRoot } from '../config/paths.js';
 import { createTelemetryClient } from '../telemetry/client.js';
 import { VERSION } from '../version.js';
 import { registerCheckCommand } from './commands/check.js';
+import { cloudLinked } from './commands/cloud-inbox.js';
+import { registerCloudCommand } from './commands/cloud.js';
 import { registerAdaptersCommand } from './commands/adapters.js';
 import { registerDashboardCommand } from './commands/dashboard.js';
 import { registerDoctorCommand } from './commands/doctor.js';
@@ -26,6 +28,8 @@ const program = new Command();
 let workspaceRoot = resolveRepoRoot(process.cwd(), process.env);
 let activeCommand: { name: string; startedAt: number } | undefined;
 const backgroundCommands = new Set(['drain', 'watch', 'hook']);
+/** Top-level commands a linked repository answers from Concord Cloud: not local, so not recorded. */
+const CLOUD_SERVED = new Set(['status', 'who', 'tasks', 'export']);
 const telemetry = createTelemetryClient({
   surface: 'cli',
   workspaceRoot: () => workspaceRoot,
@@ -44,7 +48,18 @@ program.hook('preAction', (command, actionCommand) => {
     workspaceRoot = selected.repoRoot;
     process.stderr.write(`Concord workspace: ${selected.workspaceId} (${selected.repoRoot})\n`);
   }
-  activeCommand = { name: actionCommand.name(), startedAt: performance.now() };
+  // `concord cloud …` acts on Concord Cloud, which records its own usage; the
+  // open-source CLI emits no telemetry, success or error, for non-local
+  // operations. Checked by parent, since `cloud status` shares its name with
+  // the local `status`. The inbox in a cloud-linked repository is the cloud's
+  // too.
+  const parent = actionCommand.parent?.name();
+  const nonLocal =
+    parent === 'cloud' ||
+    ((parent === 'inbox' || CLOUD_SERVED.has(actionCommand.name())) && cloudLinked(workspaceRoot));
+  activeCommand = nonLocal
+    ? undefined
+    : { name: actionCommand.name(), startedAt: performance.now() };
 });
 
 program.hook('postAction', (_command, actionCommand) => {
@@ -74,6 +89,7 @@ registerHandoffCommand(program);
 registerReviewPacketCommand(program);
 registerExportCommand(program);
 registerDoctorCommand(program);
+registerCloudCommand(program);
 
 try {
   await notifyIfUpdateAvailable(VERSION);

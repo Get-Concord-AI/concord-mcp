@@ -6,6 +6,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-09
+
+### Added
+
+- **Concord Cloud mode.** A repository linked to Concord Cloud shares its work
+  state with agents on every machine in your organization, instead of the local
+  `.concord/concord.db`. Unlinked repositories behave exactly as before.
+  - `concord cloud login` signs in through the browser (or takes an API key on
+    stdin or `CONCORD_CLOUD_API_KEY`); `logout`, `link`, `unlink` and `status`
+    manage the machine's login and the repository's link (#154, #155, #157,
+    #159).
+  - The MCP server forwards the five tools to Concord Cloud in a linked
+    repository, acting as the session's own agent and sending
+    repository-relative paths (#153, #156).
+  - The inbox runs against the cloud: `inbox register`, `drain` and `watch` keep
+    their output, the Claude relay monitor long-polls instead of spawning a
+    process every two seconds, and the Cursor hook recognises linked
+    repositories, including from a subfolder or worktree. Hooks keep to a
+    single four-second deadline and never fail a session's turn (#160–#163).
+  - The session-start hook registers the session and names everyone in the
+    organization; the edit guard checks the cloud's claims, never counting the
+    session's own, and lets an edit through with a warning if the cloud does
+    not answer in time (#164).
+  - `who`, `tasks` and `status` read the cloud; `export`, which writes from the
+    local database, says so (#165).
+  - Codex receives messages live: the `host-codex` adapter long-polls the cloud
+    and steers or starts Codex turns through its app-server; a message Codex
+    does not take is reported to its sender as not delivered (#169).
+  - Nothing served by Concord Cloud records this package's telemetry; the cloud
+    records its own usage.
+
+## [0.11.0] - 2026-10-06
+
+### Changed
+
+- `concord setup` now writes a self-ignoring `.concord/.gitignore` (`*`) instead
+  of appending `.concord/` to the repository's root `.gitignore`. Existing rules
+  in `.concord/.gitignore` are kept so teams can add negations; a symlinked file
+  is replaced rather than written through (#145).
+- `concord status` and work-state rendering no longer load completed/closed
+  task history, and fetch the latest review packets in batches instead of one
+  query per task. Thanks @AdrianLipa90 (#131).
+- Relay heartbeat refreshes are phase-spread per endpoint so many sessions do
+  not refresh in lockstep. Thanks @AdrianLipa90 (#132).
+- Bumped `@modelcontextprotocol/sdk` to 1.31.0 and refreshed development
+  dependencies (#151, #152).
+
 ## [0.10.5] - 2026-09-23
 
 ### Changed
@@ -351,7 +398,9 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.5...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.5...v0.11.0
 [0.10.5]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.4...v0.10.5
 [0.10.4]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.2...v0.10.3

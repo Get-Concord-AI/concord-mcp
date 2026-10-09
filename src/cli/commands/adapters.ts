@@ -15,6 +15,8 @@ import {
   uninstallGlobalAdapters,
 } from '../../install/adapters/index.js';
 import { openContext } from '../context.js';
+import { hostCodexInCloud } from './cloud-codex.js';
+import { cloudAccess } from './cloud-inbox.js';
 
 async function hostCodex(agentId: string, threadId: string): Promise<void> {
   const context = openContext(process.cwd());
@@ -172,5 +174,13 @@ export function registerAdaptersCommand(program: Command): void {
     .command('host-codex', { hidden: true })
     .requiredOption('--agent <id>')
     .requiredOption('--thread <id>')
-    .action(async (options) => hostCodex(options.agent, options.thread));
+    .action(async (options) => {
+      const access = cloudAccess(process.cwd());
+      if (access.kind === 'unusable') throw new Error(`Concord Cloud: ${access.reason}`);
+      if (access.kind === 'cloud') {
+        await hostCodexInCloud(access.runtime, options.agent, options.thread);
+        return;
+      }
+      await hostCodex(options.agent, options.thread);
+    });
 }

@@ -22,6 +22,17 @@ if ! "${CONCORD_BIN}" inbox status >/dev/null 2>&1; then
   exit 0
 fi
 
+# Linked to Concord Cloud: one long-lived receiver long-polls the cloud, so a
+# message arrives within moments and the monitor costs one request per round,
+# not a new process every couple of seconds. Restarted after any failure it
+# cannot ride out itself (a lapsed login, say), slowly.
+if "${CONCORD_BIN}" inbox status --cloud >/dev/null 2>&1; then
+  while true; do
+    "${CONCORD_BIN}" inbox watch --provider claude-code --format monitor 2>/dev/null || true
+    sleep 30
+  done
+fi
+
 while true; do
   # Never let a transient failure (a locked database, a mid-write config) kill
   # the monitor: a dead monitor silently stops delivering messages.

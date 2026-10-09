@@ -1,28 +1,22 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { z } from 'zod';
 import { dump, load } from 'js-yaml';
+
+import { userHome } from '../config/paths.js';
 
 const EXTENSIONS_KEY = 'extensions';
 const CONCORD_EXTENSION_KEY = 'concord-relay';
 const CONCORD_SERVER_COMMAND = 'npx';
 const CONCORD_SERVER_ARGS = ['-y', '@concord-ai/concord-mcp'];
 
-function homeFor(env: NodeJS.ProcessEnv): string {
-  const home = env['HOME']?.trim();
-  if (home !== undefined && home !== '') return home;
-  const userProfile = env['USERPROFILE']?.trim();
-  return userProfile === undefined || userProfile === '' ? homedir() : userProfile;
-}
-
 export function gooseConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   const appData = env['APPDATA']?.trim();
   if (appData !== undefined && appData !== '') {
     return join(appData, 'Block', 'goose', 'config', 'config.yaml');
   }
-  return join(homeFor(env), '.config', 'goose', 'config.yaml');
+  return join(userHome(env), '.config', 'goose', 'config.yaml');
 }
 
 const looseObjectSchema = z.record(z.string(), z.unknown());
@@ -57,9 +51,7 @@ export function gooseConfigInstalled(env: NodeJS.ProcessEnv = process.env): bool
   }
 }
 
-export function installGooseMcpConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): void {
+export function installGooseMcpConfig(env: NodeJS.ProcessEnv = process.env): void {
   const path = gooseConfigPath(env);
   const config = readConfig(path);
   const currentExtensions = config[EXTENSIONS_KEY];
