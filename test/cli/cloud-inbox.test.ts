@@ -4,7 +4,12 @@ import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { takeDrainKey, updateAgentState, type CloudRuntime } from '../../src/cloud/runtime.js';
+import {
+  readAgentState,
+  takeDrainKey,
+  updateAgentState,
+  type CloudRuntime,
+} from '../../src/cloud/runtime.js';
 import {
   cloudAccess,
   cloudLinked,
@@ -243,5 +248,38 @@ describe('cloud inbox', () => {
       'PUT /v1/agents/a-uuid/endpoint',
       'POST /v1/messages/drain',
     ]);
+  });
+
+  it('keeps no ids from a registration it could not advertise', async () => {
+    const cloud = fakeCloud([
+      ['POST /v1/machines', () => ok({ machine: { id: 'm-uuid' } })],
+      ['POST /v1/agents', () => ok({ agent: { id: 'a-uuid' } })],
+      ['PUT /v1/agents/a-uuid/endpoint', () => ({ status: 503, json: { error: 'down' } })],
+    ]);
+    const runtime = runtimeWith(cloud.fetch);
+
+    await expect(registerInCloud(runtime, AGENT, 'claude-code', repoRoot)).rejects.toMatchObject({
+      status: 503,
+    });
+
+    expect(readAgentState(runtime, AGENT)).toBeUndefined();
+  });
+
+  it('gives a hook one deadline for everything, retries included', async () => {
+    // A cloud that never answers until the request is abandoned.
+    const hanging = (_input: string, init?: RequestInit): Promise<Response> =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          // The timeout's own reason, so the drain sees a timeout and retries.
+          const reason: unknown = init.signal?.reason;
+          reject(reason instanceof Error ? reason : new Error('aborted'));
+        });
+      });
+    const runtime: CloudRuntime = { ...runtimeWith(hanging), deadline: Date.now() + 300 };
+    const started = Date.now();
+
+    await expect(drainFromCloud(runtime, AGENT, 'claude-code')).rejects.toThrow();
+
+    expect(Date.now() - started).toBeLessThan(1_500);
   });
 });

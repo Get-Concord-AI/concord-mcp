@@ -46,7 +46,7 @@ export type CloudAccess =
 
 /**
  * A hook runs inside the harness's own time limit (Cursor allows 15 s, Grok
- * 5 s), so its requests give up sooner than a command a person runs.
+ * 5 s), so all its requests, retries included, are over within this.
  */
 export const HOOK_TIMEOUT_MS = 4_000;
 
@@ -59,7 +59,9 @@ export function cloudAccess(
   try {
     const session = cloudSessionFor(resolveRepoRoot(cwd, env), env, undefined);
     if (session === undefined) return { kind: 'local' };
-    return { kind: 'cloud', runtime: { ...session, fetch, ...options } };
+    const deadline =
+      options.timeoutMs === undefined ? {} : { deadline: Date.now() + options.timeoutMs };
+    return { kind: 'cloud', runtime: { ...session, fetch, ...deadline } };
   } catch (error) {
     // Linked, but not logged in, or logged in elsewhere: say so, never fall
     // back to a local inbox no other agent would see.
@@ -96,7 +98,11 @@ async function advertise(
   if (monitor && !asMonitor) await renewReceiver(runtime, agent, RECEIVER_TTL_SECONDS);
 }
 
-/** Registers the session (from the cached ids when known) and advertises its endpoint. */
+/**
+ * Registers the session (from the cached ids when known) and advertises its
+ * endpoint. A fresh registration advertises before its ids are kept, so one
+ * that could not be advertised is registered again next time.
+ */
 export function registerInCloud(
   runtime: CloudRuntime,
   agentKey: string,
@@ -104,18 +110,26 @@ export function registerInCloud(
   cwd: string,
   asMonitor = false,
 ): Promise<CloudAgentRef> {
-  return asCloudAgent(runtime, { agentKey, kind: provider, cwd }, async (agent) => {
+  let advertised = false;
+  const advertiseOnce = async (agent: CloudAgentRef): Promise<void> => {
     await advertise(runtime, agent, agentKey, provider, asMonitor);
-    return agent;
-  });
+    advertised = true;
+  };
+  return asCloudAgent(
+    runtime,
+    { agentKey, kind: provider, cwd },
+    async (agent) => {
+      if (!advertised) await advertiseOnce(agent);
+      return agent;
+    },
+    advertiseOnce,
+  );
 }
 
 /** A failure worth repeating: the network, a timeout, or the cloud briefly unwell. */
-function transient(error: unknown): boolean {
+function transient(error: Error): boolean {
   if (error instanceof CloudApiError) return error.status === 429 || error.status >= 500;
-  return (
-    error instanceof TypeError || (error instanceof DOMException && error.name === 'TimeoutError')
-  );
+  return error instanceof TypeError || error.name === 'TimeoutError';
 }
 
 /**
@@ -142,7 +156,7 @@ async function drainOnce(
       signal,
     );
   } catch (error) {
-    if (signal?.aborted === true || !transient(error)) throw error;
+    if (signal?.aborted === true || !(error instanceof Error) || !transient(error)) throw error;
     messages = await drainCloud(runtime, agent, ticket.key, 0, signal);
   }
   ticket.finish();
@@ -200,7 +214,7 @@ export async function watchCloud(
         if (once && messages.length > 0) return;
       } catch (error) {
         if (stopped()) return;
-        if (!transient(error)) throw error;
+        if (!(error instanceof Error) || !transient(error)) throw error;
         await delay(RETRY_DELAY_MS, undefined, { signal: stop.signal }).catch(() => undefined);
       }
     }
