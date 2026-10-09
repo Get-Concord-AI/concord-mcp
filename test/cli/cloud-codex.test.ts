@@ -1,10 +1,10 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { readAgentState, updateAgentState, type CloudRuntime } from '../../src/cloud/runtime.js';
+import { agentCachePath, updateAgentState, type CloudRuntime } from '../../src/cloud/runtime.js';
 import { deliverToSession } from '../../src/cli/commands/cloud-codex.js';
 import type { DeliverableMessage } from '../../src/domain/pull-inbox.js';
 import type { AgentSessionAdapter, AgentSessionDelivery } from '../../src/relay/server.js';
@@ -164,11 +164,12 @@ describe('Codex in a linked repository', () => {
     updateAgentState(runtime, AGENT, { agentId: 'a-uuid', machineId: 'm-uuid' });
 
     await deliverToSession(runtime, AGENT, session(true, true).adapter, [message('m-1', 'hi')]);
-    expect(readAgentState(runtime, AGENT)?.unreported).toHaveLength(1);
+    const saved = agentCachePath(runtime.repoRoot, AGENT).replace(/\.json$/, '.unreported');
+    expect(readdirSync(saved)).toHaveLength(1);
     down = false;
     await deliverToSession(runtime, AGENT, session(false).adapter, []);
 
-    expect(readAgentState(runtime, AGENT)?.unreported).toBeUndefined();
+    expect(readdirSync(saved)).toHaveLength(0);
     expect(cloud.requests).toHaveLength(2);
   });
 });

@@ -1,9 +1,15 @@
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { z } from 'zod';
+
 import {
   before,
   CloudApiError,
+  agentCachePath,
   readAgentState,
   reportDeliveryFailure,
-  updateAgentState,
   type CloudRuntime,
 } from '../../cloud/runtime.js';
 import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
@@ -26,10 +32,30 @@ interface Undelivered {
   readonly detail: string;
 }
 
+const undeliveredSchema = z.object({ messageId: z.string(), detail: z.string() });
+
+/** One file per report not yet made, so hosts never rewrite each other's. */
+function unreportedDir(runtime: CloudRuntime, agentKey: string): string {
+  return agentCachePath(runtime.repoRoot, agentKey).replace(/\.json$/, '.unreported');
+}
+
+function savedReports(dir: string): (Undelivered & { readonly file: string })[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).flatMap((name) => {
+    try {
+      const raw: unknown = JSON.parse(readFileSync(join(dir, name), 'utf8'));
+      const parsed = undeliveredSchema.safeParse(raw);
+      return parsed.success ? [{ ...parsed.data, file: join(dir, name) }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 /**
  * Tells the cloud these messages were not delivered, so their senders do not
  * take silence for delivery. The batch was drained, so a report that cannot be
- * made now is kept with the agent's state and made on a later round.
+ * made now is saved and made on a later round, with any saved before.
  */
 async function reportUndelivered(
   runtime: CloudRuntime,
@@ -38,18 +64,30 @@ async function reportUndelivered(
 ): Promise<void> {
   const state = readAgentState(runtime, agentKey);
   if (state === undefined) return;
-  const pending = [...(state.unreported ?? []), ...failures];
-  const kept: Undelivered[] = [];
+  const dir = unreportedDir(runtime, agentKey);
+  const pending = [
+    ...savedReports(dir),
+    ...failures.map((failure) => ({ ...failure, file: undefined })),
+  ];
   for (const failure of pending) {
+    let keep = false;
     try {
       await reportDeliveryFailure(runtime, state, failure.messageId, failure.detail);
     } catch (error) {
       // Refused for good (the message moved on): nothing a retry would change.
-      const lasting = error instanceof CloudApiError && error.status < 500 && error.status !== 429;
-      if (!lasting) kept.push(failure);
+      keep = !(error instanceof CloudApiError && error.status < 500 && error.status !== 429);
+    }
+    if (keep && failure.file === undefined) {
+      mkdirSync(dir, { recursive: true });
+      const file = join(
+        dir,
+        `${createHash('sha256').update(failure.messageId).digest('hex').slice(0, 16)}.json`,
+      );
+      writeFileSync(file, JSON.stringify({ messageId: failure.messageId, detail: failure.detail }));
+    } else if (!keep && failure.file !== undefined) {
+      rmSync(failure.file, { force: true });
     }
   }
-  updateAgentState(runtime, agentKey, { unreported: kept.length === 0 ? undefined : kept });
 }
 
 /**
