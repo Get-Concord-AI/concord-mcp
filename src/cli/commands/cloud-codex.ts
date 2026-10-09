@@ -27,6 +27,9 @@ import { watchCloud } from './cloud-inbox.js';
  * way, or starting one when Codex is idle — as the local relay does.
  */
 
+/** How often saved failure reports are tried again while the host runs. */
+const REPORT_RETRY_MS = 60_000;
+
 interface Undelivered {
   readonly messageId: string;
   readonly detail: string;
@@ -151,11 +154,20 @@ export async function hostCodexInCloud(
   await client.connect();
   await client.resumeThread(threadId);
   const adapter = new CodexAppServerAdapter(client, threadId, () => client.currentTurnId());
+  // Reports saved while the cloud was unreachable are made now and every
+  // minute, not only when the next message happens to arrive.
+  const flush = (): void => {
+    void reportUndelivered(runtime, agentKey, []).catch(() => undefined);
+  };
+  flush();
+  const retrying = setInterval(flush, REPORT_RETRY_MS);
+  retrying.unref();
   try {
     await watchCloud(runtime, agentKey, 'codex', false, (messages, stop) =>
       deliverToSession(runtime, agentKey, adapter, messages, stop),
     );
   } finally {
+    clearInterval(retrying);
     client.close();
   }
 }
