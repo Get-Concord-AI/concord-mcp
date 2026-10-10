@@ -2,7 +2,8 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+
+import { spawnCommandSync } from '../../../spawn-command.mjs';
 
 function concordExecutable() {
   return process.env.CONCORD_EXECUTABLE?.trim() || 'concord';
@@ -23,7 +24,7 @@ function agentIdForSession(sessionId) {
 }
 
 function runConcord(args, options = {}) {
-  return spawnSync(concordExecutable(), args, {
+  return spawnCommandSync(concordExecutable(), args, {
     cwd: options.cwd ?? process.cwd(),
     env: process.env,
     encoding: 'utf8',
