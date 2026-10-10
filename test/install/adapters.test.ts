@@ -1,3 +1,4 @@
+import { installGooseMcpConfig } from '../../src/install/goose-config.js';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -105,6 +106,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'harness-monitor',
+      'harness-monitor',
     ]);
   });
 
@@ -193,5 +195,83 @@ describe('global harness adapters', () => {
 
     expect(report.find((entry) => entry.harness === 'cursor')?.status).toBe('error');
     expect(report.find((entry) => entry.harness === 'gemini')?.status).toBe('installed');
+  });
+  it('installs Goose config idempotently and preserves other extensions', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-goose-home-'));
+
+    const gooseDir = join(home, '.config', 'goose');
+    mkdirSync(gooseDir, { recursive: true });
+    const configPath = join(gooseDir, 'config.yaml');
+
+    writeFileSync(
+      configPath,
+      `extensions:
+  developer:
+    enabled: true
+    type: builtin
+    name: developer
+`,
+    );
+
+    const env = { HOME: home };
+    const repoRoot = join(home, 'project');
+
+    installGooseMcpConfig(env);
+
+    const installed = readFileSync(configPath, 'utf8');
+    expect(installed).toContain('concord-relay');
+    expect(installed).toContain('developer');
+    expect(installed).not.toContain('CONCORD_REPO_ROOT');
+    expect(installed).not.toContain(repoRoot);
+
+    installGooseMcpConfig(env);
+
+    const secondRun = readFileSync(configPath, 'utf8');
+    const occurrences = secondRun.match(/concord-relay/g) ?? [];
+    expect(occurrences).toHaveLength(2);
+  });
+
+  it('does not install Goose config below the supported version', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-goose-old-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+
+    const goose = join(bin, 'goose');
+    writeFileSync(goose, '#!/bin/sh\necho 1.51.0\n');
+    chmodSync(goose, 0o755);
+
+    const env = { HOME: home, PATH: bin };
+
+    const report = installGlobalAdapters(import.meta.url, env);
+
+    expect(report.find((entry) => entry.harness === 'goose')).toMatchObject({
+      status: 'unsupported_version',
+      capabilities: [],
+    });
+
+    expect(existsSync(join(home, '.config', 'goose', 'config.yaml'))).toBe(false);
+  });
+  it('does not overwrite a non-mapping extensions value', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-goose-invalid-'));
+
+    const gooseDir = join(home, '.config', 'goose');
+    mkdirSync(gooseDir, { recursive: true });
+    const configPath = join(gooseDir, 'config.yaml');
+
+    writeFileSync(
+      configPath,
+      `extensions:
+  - existing-extension
+`,
+    );
+
+    const env = { HOME: home };
+
+    expect(() => {
+      installGooseMcpConfig(env);
+    }).toThrow('Goose extensions configuration must be a mapping.');
+
+    const config = readFileSync(configPath, 'utf8');
+    expect(config).toContain('- existing-extension');
   });
 });

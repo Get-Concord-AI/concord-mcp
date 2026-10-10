@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, and Grok Build talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, and Goose talk to each other.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -86,6 +86,7 @@ registration yourself.
 | Cursor                             | [Setup and delivery](./docs/cursor.md)       |
 | Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)   |
 | Grok Build                         | [Setup and delivery](./docs/grok-build.md)   |
+| Goose                              | [Setup and delivery](./docs/goose.md)        |
 | Any other MCP-capable coding agent | Shared work-state through the five MCP tools |
 
 > There is no universal `/concord` slash command — commands are client-specific.

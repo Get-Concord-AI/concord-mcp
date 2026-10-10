@@ -48,6 +48,13 @@ describe('resolveIdentity', () => {
     expect(identity?.origin).toBe('hook');
   });
 
+  it('derives a Goose identity from the session id Goose exports to extensions', () => {
+    const identity = resolveIdentity({ AGENT_SESSION_ID: '20261009_4' });
+
+    expect(identity?.agentId).toBe(agentIdForSession('goose', '20261009_4'));
+    expect(identity?.kind).toBe('goose');
+  });
+
   it('never lets one client borrow another client session id', () => {
     // A Codex hook whose payload is missing must not fall through to the Claude
     // Code environment and register codex:<hash of a Claude session>.
