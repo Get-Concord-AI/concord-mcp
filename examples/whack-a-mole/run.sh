@@ -46,9 +46,8 @@ git -C "$DEMO_DIR" config user.email "demo@getconcord.ai"
 git -C "$DEMO_DIR" add .
 git -C "$DEMO_DIR" commit -qm "Initial holding screen"
 
-# Register the actual MCP server and live-provider integrations. No simulated
-# agent path or reviewer fallback exists in this mode.
-CONCORD_NO_UPDATE_CHECK=1 node "$CLI" --repo "$DEMO_DIR" setup --agent-comms >/dev/null
+# live-provider integrations
+CONCORD_NO_UPDATE_CHECK=1 node "$CLI" --repo "$DEMO_DIR" setup >/dev/null
 if [[ ! -x "$DEMO_DIR/node_modules/.bin/next" ]]; then
   echo "Installing the demo app once (the cache is reused on later runs)…"
   npm --prefix "$DEMO_DIR" install --no-audit --no-fund
