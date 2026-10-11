@@ -63,6 +63,16 @@ export function upsertMcpServer(existing: string | undefined, repoRoot?: string)
   return `${JSON.stringify(next, null, 2)}\n`;
 }
 
+/** Whether an `mcpServers` config string already registers Concord. */
+export function hasMcpServer(existing: string): boolean {
+  return CONCORD_SERVER_KEY in (mcpConfigSchema.parse(JSON.parse(existing)).mcpServers ?? {});
+}
+
+/** Whether Grok TOML already registers Concord, inside Concord's fence or not. */
+export function hasGrokMcpServer(existing: string): boolean {
+  return /^\s*\[mcp_servers\.concord\]/mu.test(existing);
+}
+
 /** Remove Concord's entry from an `mcpServers` config string, keeping the rest. */
 export function removeMcpServer(existing: string): string {
   const config = mcpConfigSchema.parse(JSON.parse(existing));

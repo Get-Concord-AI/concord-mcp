@@ -80,11 +80,13 @@ describe('applyGlobalMode', () => {
     const env = machine();
     mkdirSync(join(env.HOME, '.claude'));
     writeFileSync(join(env.HOME, '.claude', 'CLAUDE.md'), '# My rules\n');
-    applyGlobalMode(env, true);
+    const on = applyGlobalMode(env, true);
+    expect(on.registrations).toEqual(['claude', 'gemini', 'grok']);
 
-    const report = applyGlobalMode(env, false);
+    const report = applyGlobalMode(env, false, { registrations: on.registrations });
 
     expect(report.warnings).toEqual([]);
+    expect(report.registrations).toEqual([]);
     expect(read(join(env.HOME, '.claude', 'CLAUDE.md'))).toBe('# My rules\n');
     expect(existsSync(join(env.HOME, '.codex', 'AGENTS.md'))).toBe(false);
     expect(read(join(env.HOME, '.gemini', 'settings.json'))).not.toContain('concord-mcp');
@@ -110,12 +112,36 @@ describe('applyGlobalMode', () => {
       writeFileSync(join(env.HOME, 'bin', 'claude'), `#!/bin/sh\necho '${output}'\nexit 1\n`);
       chmodSync(join(env.HOME, 'bin', 'claude'), 0o755);
     };
+    const registrations = ['claude'];
     claude('No MCP server named "concord" in user scope');
-    expect(applyGlobalMode(env, false).warnings).toEqual([]);
+    expect(applyGlobalMode(env, false, { registrations }).warnings).toEqual([]);
     claude('could not write config');
-    expect(applyGlobalMode(env, false).warnings).toEqual([
+    expect(applyGlobalMode(env, false, { registrations }).warnings).toEqual([
       'claude mcp remove --scope user concord: could not write config',
     ]);
+  });
+});
+
+describe('registrations the user made', () => {
+  it('are neither replaced when global mode turns on nor removed when it is declined', () => {
+    const env = machine();
+    const gemini = join(env.HOME, '.gemini', 'settings.json');
+    const grok = join(env.HOME, '.grok', 'config.toml');
+    mkdirSync(join(env.HOME, '.gemini'));
+    mkdirSync(join(env.HOME, '.grok'));
+    writeFileSync(gemini, '{"mcpServers":{"concord":{"command":"my-concord","args":["--x"]}}}\n');
+    writeFileSync(grok, '[mcp_servers.concord]\ncommand = "my-concord"\n');
+    const before = [read(gemini), read(grok)];
+
+    expect(applyGlobalMode(env, false).written).toEqual([]);
+    expect(existsSync(join(env.HOME, 'claude-calls'))).toBe(false);
+
+    const on = applyGlobalMode(env, true);
+    expect([read(gemini), read(grok)]).toEqual(before);
+    expect(on.registrations).toEqual(['claude']);
+
+    applyGlobalMode(env, false, { registrations: on.registrations });
+    expect([read(gemini), read(grok)]).toEqual(before);
   });
 });
 
@@ -157,8 +183,8 @@ describe('runSetup with global mode', () => {
       global: true,
     });
 
-    expect(readUserConfig(env)).toEqual({ globalMode: true });
-    expect(result.globalMode).toEqual({ written: [], warnings: [] });
+    expect(readUserConfig(env)).toEqual({ globalMode: true, globalRegistrations: [] });
+    expect(result.globalMode).toEqual({ written: [], warnings: [], registrations: [] });
     expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(true);
     expect(read(join(repo, 'CLAUDE.md'))).toContain(BLOCK_START);
   });

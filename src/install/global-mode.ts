@@ -11,6 +11,8 @@ import { CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
 import {
   CONCORD_SERVER_COMMAND,
   CONCORD_SERVER_KEY,
+  hasGrokMcpServer,
+  hasMcpServer,
   removeGrokMcpServer,
   removeMcpServer,
   upsertGeminiSettings,
@@ -21,14 +23,23 @@ import {
 export interface GlobalModeReport {
   written: string[];
   warnings: string[];
+  /** The user-level registrations global mode now owns, to remember for turning it off. */
+  registrations: string[];
+}
+
+/** A user-level MCP registration global mode may add, and so later remove. */
+interface Registration {
+  readonly id: string;
+  /** Whether the file already registers Concord, by global mode or by the user. */
+  readonly present: (existing: string) => boolean;
 }
 
 /** A user-level file global mode owns part of, for one harness. */
 interface UserFile {
   /** The harness's command: nothing is written for a harness that is not installed. */
   readonly executable: string;
-  /** An MCP registration, which `--no-mcp` leaves to the user. */
-  readonly registersMcp: boolean;
+  /** Set for an MCP registration, which `--no-mcp` leaves to the user. */
+  readonly registration?: Registration;
   readonly path: (env: NodeJS.ProcessEnv) => string;
   readonly install: (existing: string | undefined) => string;
   readonly uninstall: (existing: string) => string;
@@ -43,7 +54,6 @@ function grokHome(env: NodeJS.ProcessEnv): string {
 function instructionFile(executable: string, path: (env: NodeJS.ProcessEnv) => string): UserFile {
   return {
     executable,
-    registersMcp: false,
     path,
     install: (existing) => upsertBlock(existing ?? '', CONCORD_GLOBAL_INSTRUCTIONS),
     uninstall: removeBlock,
@@ -63,7 +73,7 @@ const USER_FILES: readonly UserFile[] = [
   instructionFile('goose', (env) => join(dirname(gooseConfigPath(env)), '.goosehints')),
   {
     executable: 'gemini',
-    registersMcp: true,
+    registration: { id: 'gemini', present: hasMcpServer },
     path: (env) => join(userHome(env), '.gemini', 'settings.json'),
     install: (existing) => upsertGeminiSettings(existing),
     // Only the server goes: the shell settings may serve other tools by now.
@@ -71,7 +81,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     executable: 'grok',
-    registersMcp: true,
+    registration: { id: 'grok', present: hasGrokMcpServer },
     path: (env) => join(grokHome(env), 'config.toml'),
     install: (existing) => upsertGrokMcpServer(existing),
     uninstall: (existing) => {
@@ -81,10 +91,25 @@ const USER_FILES: readonly UserFile[] = [
   },
 ];
 
+/**
+ * Whether global mode may change this file's registration: one it added, or
+ * none yet. A registration the user made themselves is never touched.
+ */
+function mayChange(
+  registration: Registration,
+  enable: boolean,
+  existing: string | undefined,
+  owned: ReadonlySet<string>,
+): boolean {
+  if (owned.has(registration.id)) return true;
+  return enable && (existing === undefined || !registration.present(existing));
+}
+
 function applyFile(
   env: NodeJS.ProcessEnv,
   file: UserFile,
   enable: boolean,
+  owned: Set<string>,
   report: GlobalModeReport,
 ): void {
   const path = file.path(env);
@@ -92,33 +117,50 @@ function applyFile(
   if (enable ? executablePath(file.executable, env) === undefined : !exists) return;
   try {
     const existing = exists ? readFileSync(path, 'utf8') : undefined;
+    const { registration } = file;
+    if (registration !== undefined && !mayChange(registration, enable, existing, owned)) return;
     const next = enable ? file.install(existing) : file.uninstall(existing ?? '');
-    if (next === existing) return;
-    if (next === '') {
-      rmSync(path);
-    } else {
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, next);
+    if (next !== existing) {
+      if (next === '') {
+        rmSync(path);
+      } else {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, next);
+      }
+      report.written.push(path);
     }
-    report.written.push(path);
+    if (registration !== undefined) {
+      if (enable) owned.add(registration.id);
+      else owned.delete(registration.id);
+    }
   } catch (error) {
     report.warnings.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-/** Register Concord at Claude Code's user scope, through its own CLI. */
-function applyClaude(env: NodeJS.ProcessEnv, enable: boolean, report: GlobalModeReport): void {
+/**
+ * Register Concord at Claude Code's user scope, through its own CLI. A server
+ * the CLI says already exists is the user's own unless global mode added it.
+ */
+function applyClaude(
+  env: NodeJS.ProcessEnv,
+  enable: boolean,
+  owned: Set<string>,
+  report: GlobalModeReport,
+): void {
   const claude = executablePath('claude', env);
-  if (claude === undefined) return;
+  if (claude === undefined || (!enable && !owned.has('claude'))) return;
   const args = enable
     ? ['mcp', 'add', '--scope', 'user', CONCORD_SERVER_KEY, CONCORD_SERVER_COMMAND]
     : ['mcp', 'remove', '--scope', 'user', CONCORD_SERVER_KEY];
   const result = run(claude, args, env);
-  // Already in the wanted state is not a failure: added before, or never added.
-  const settled = enable ? /already exists/iu : /no mcp server named/iu;
   if (result.ok) {
     report.written.push(`claude ${args.join(' ')}`);
-  } else if (!settled.test(result.output)) {
+    if (enable) owned.add('claude');
+    else owned.delete('claude');
+  } else if (!enable && /no mcp server named/iu.test(result.output)) {
+    owned.delete('claude');
+  } else if (!(enable && /already exists/iu.test(result.output))) {
     report.warnings.push(`claude ${args.join(' ')}: ${result.output || 'failed'}`);
   }
 }
@@ -126,19 +168,22 @@ function applyClaude(env: NodeJS.ProcessEnv, enable: boolean, report: GlobalMode
 /**
  * Turn global mode on or off for every installed harness: user-level MCP
  * registration plus a short instruction block, so agents use Concord in
- * repositories where `concord setup` was never run. Each harness succeeds or
- * fails on its own; failures are reported rather than thrown.
+ * repositories where `concord setup` was never run. Only registrations it
+ * added (`registrations`, from the last run) are ever changed or removed.
+ * Each harness succeeds or fails on its own; failures are reported.
  */
 export function applyGlobalMode(
   env: NodeJS.ProcessEnv,
   enable: boolean,
-  options: { mcp?: boolean } = {},
+  options: { mcp?: boolean; registrations?: readonly string[] } = {},
 ): GlobalModeReport {
-  const report: GlobalModeReport = { written: [], warnings: [] };
+  const owned = new Set(options.registrations);
+  const report: GlobalModeReport = { written: [], warnings: [], registrations: [] };
   const mcp = options.mcp !== false;
   for (const file of USER_FILES) {
-    if (mcp || !file.registersMcp) applyFile(env, file, enable, report);
+    if (mcp || file.registration === undefined) applyFile(env, file, enable, owned, report);
   }
-  if (mcp) applyClaude(env, enable, report);
+  if (mcp) applyClaude(env, enable, owned, report);
+  report.registrations = [...owned].sort();
   return report;
 }

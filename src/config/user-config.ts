@@ -13,7 +13,12 @@ import { CONCORD_DIR, userHome } from './paths.js';
 const GLOBAL_DB_FILENAME = 'global.db';
 const USER_CONFIG_FILENAME = 'config.json';
 
-const userConfigSchema = z.object({ globalMode: z.boolean().optional() }).loose();
+const userConfigSchema = z
+  .object({
+    globalMode: z.boolean().optional(),
+    globalRegistrations: z.array(z.string()).optional(),
+  })
+  .loose();
 /** The whole file as JSON, so settings this version does not know survive a write. */
 const storedConfigSchema = z.record(z.string(), z.json());
 
@@ -21,6 +26,8 @@ const storedConfigSchema = z.record(z.string(), z.json());
 export interface UserConfig {
   /** Use the machine-wide store outside set-up repositories; undefined until asked. */
   readonly globalMode?: boolean;
+  /** The user-level MCP registrations global mode added: the only ones it removes. */
+  readonly globalRegistrations?: readonly string[];
 }
 
 /** `~/.concord/`, home to the machine-wide store and the user's settings. */
@@ -44,7 +51,12 @@ export function readUserConfig(env: NodeJS.ProcessEnv): UserConfig {
   try {
     const raw: unknown = JSON.parse(readFileSync(userConfigPath(env), 'utf8'));
     const parsed = userConfigSchema.parse(raw);
-    return parsed.globalMode === undefined ? {} : { globalMode: parsed.globalMode };
+    return {
+      ...(parsed.globalMode === undefined ? {} : { globalMode: parsed.globalMode }),
+      ...(parsed.globalRegistrations === undefined
+        ? {}
+        : { globalRegistrations: parsed.globalRegistrations }),
+    };
   } catch {
     return {};
   }

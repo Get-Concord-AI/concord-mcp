@@ -216,8 +216,16 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   }
   let globalMode: GlobalModeReport | undefined;
   if (options.global !== undefined) {
-    written.push(writeUserConfig(env, { globalMode: options.global }));
-    globalMode = applyGlobalMode(env, options.global, { mcp: options.mcp !== false });
+    globalMode = applyGlobalMode(env, options.global, {
+      mcp: options.mcp !== false,
+      registrations: readUserConfig(env).globalRegistrations ?? [],
+    });
+    written.push(
+      writeUserConfig(env, {
+        globalMode: options.global,
+        globalRegistrations: globalMode.registrations,
+      }),
+    );
     written.push(...globalMode.written);
   }
   return {
