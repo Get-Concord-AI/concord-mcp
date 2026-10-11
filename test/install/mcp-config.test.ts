@@ -18,7 +18,7 @@ import {
 
 describe('upsertMcpServer', () => {
   it('registers the concord server in an empty config', () => {
-    const out = upsertMcpServer(undefined, '/tmp/project');
+    const out = upsertMcpServer(undefined, '/tmp/project', 'claude-code');
     expect(out).toContain('mcpServers');
     expect(out).toContain(CONCORD_SERVER_KEY);
     expect(out).toContain(CONCORD_SERVER_COMMAND);
@@ -27,8 +27,8 @@ describe('upsertMcpServer', () => {
   });
 
   it('is idempotent: re-running produces identical output', () => {
-    const once = upsertMcpServer(undefined, '/tmp/project');
-    const twice = upsertMcpServer(once, '/tmp/project');
+    const once = upsertMcpServer(undefined, '/tmp/project', 'claude-code');
+    const twice = upsertMcpServer(once, '/tmp/project', 'claude-code');
     expect(twice).toBe(once);
   });
 
@@ -37,7 +37,7 @@ describe('upsertMcpServer', () => {
       $schema: 'https://example.test/schema.json',
       mcpServers: { other: { command: 'other-server', args: ['--flag'] } },
     });
-    const out = upsertMcpServer(existing, '/tmp/project');
+    const out = upsertMcpServer(existing, '/tmp/project', 'claude-code');
     expect(out).toContain('"$schema"');
     expect(out).toContain('other-server');
     expect(out).toContain('--flag');
@@ -45,12 +45,16 @@ describe('upsertMcpServer', () => {
   });
 
   it('does not duplicate the server when it is already present', () => {
-    const twice = upsertMcpServer(upsertMcpServer(undefined, '/tmp/project'), '/tmp/project');
+    const twice = upsertMcpServer(
+      upsertMcpServer(undefined, '/tmp/project', 'claude-code'),
+      '/tmp/project',
+      'claude-code',
+    );
     expect(twice.split(CONCORD_SERVER_COMMAND).length - 1).toBe(1);
   });
 
   it('throws on malformed JSON rather than discarding it', () => {
-    expect(() => upsertMcpServer('{ not json', '/tmp/project')).toThrow();
+    expect(() => upsertMcpServer('{ not json', '/tmp/project', 'claude-code')).toThrow();
   });
 });
 
@@ -62,6 +66,7 @@ describe('installMcpConfigs', () => {
     expect(written).toEqual([
       '.mcp.json',
       join('.cursor', 'mcp.json'),
+      join('.github', 'mcp.json'),
       join('.gemini', 'settings.json'),
       join('.grok', 'config.toml'),
     ]);
@@ -116,8 +121,8 @@ describe('upsertGeminiSettings', () => {
       experimental: { customFeature: true },
       mcpServers: { other: { command: 'other' } },
     });
-    const once = upsertGeminiSettings(existing, '/tmp/project');
-    const twice = upsertGeminiSettings(once, '/tmp/project');
+    const once = upsertGeminiSettings(existing, '/tmp/project', 'gemini');
+    const twice = upsertGeminiSettings(once, '/tmp/project', 'gemini');
     const parsed = z
       .object({
         theme: z.string(),

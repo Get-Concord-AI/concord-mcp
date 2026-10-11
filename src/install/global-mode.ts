@@ -73,7 +73,7 @@ const USER_FILES: readonly UserFile[] = [
     executable: 'gemini',
     registration: { id: 'gemini', present: hasMcpServer },
     path: (env) => join(userHome(env), '.gemini', 'settings.json'),
-    install: (existing) => upsertGeminiSettings(existing),
+    install: (existing) => upsertGeminiSettings(existing, undefined),
     // Only the server goes: the shell settings may serve other tools by now.
     uninstall: removeMcpServer,
   },
@@ -81,7 +81,7 @@ const USER_FILES: readonly UserFile[] = [
     executable: 'cursor',
     registration: { id: 'cursor', present: hasMcpServer },
     path: (env) => join(userHome(env), '.cursor', 'mcp.json'),
-    install: (existing) => upsertMcpServer(existing),
+    install: (existing) => upsertMcpServer(existing, undefined),
     uninstall: removeMcpServer,
   },
   {

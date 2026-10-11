@@ -16,6 +16,7 @@ const TARGETS: readonly InstallTarget[] = [
   { relPath: 'AGENTS.md' },
   { relPath: join('.codex', 'concord.md') },
   { relPath: join('.cursor', 'rules', 'concord.mdc'), header: CURSOR_MDC_HEADER },
+  { relPath: join('.github', 'copilot-instructions.md') },
 ];
 
 function writeTarget(repoRoot: string, target: InstallTarget): string {
