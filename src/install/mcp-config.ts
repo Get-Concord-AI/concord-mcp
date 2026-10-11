@@ -197,9 +197,7 @@ function writeGeminiConfig(repoRoot: string, harnessKind: string): string {
  */
 export function installMcpConfigs(repoRoot: string): string[] {
   return [
-    ...JSON_TARGETS.map((relPath) =>
-      writeMcpConfig(repoRoot, relPath, 'claude-code'),
-    ),
+    ...JSON_TARGETS.map((relPath) => writeMcpConfig(repoRoot, relPath, 'claude-code')),
     writeGeminiConfig(repoRoot, 'gemini'),
     writeGrokMcpConfig(repoRoot, 'grok'),
   ];
