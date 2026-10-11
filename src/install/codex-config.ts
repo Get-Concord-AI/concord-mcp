@@ -16,9 +16,13 @@ const TABLE_HEADER = /^\s*\[/u;
  * Codex itself respects it and because it lets tests target a temp directory.
  */
 export function codexConfigFile(env: NodeJS.ProcessEnv = process.env): string {
+  return join(codexHome(env), 'config.toml');
+}
+
+/** Codex's user directory: `CODEX_HOME`, or `~/.codex`. */
+export function codexHome(env: NodeJS.ProcessEnv = process.env): string {
   const home = env['CODEX_HOME'];
-  const base = home !== undefined && home.trim() !== '' ? home : join(homedir(), '.codex');
-  return join(base, 'config.toml');
+  return home !== undefined && home.trim() !== '' ? home : join(homedir(), '.codex');
 }
 
 /** Normalize preceding content so exactly one blank line precedes our table. */

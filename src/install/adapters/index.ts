@@ -41,7 +41,7 @@ export interface AdapterReport {
   installedPath?: string | undefined;
 }
 
-function executablePath(name: string, env: NodeJS.ProcessEnv): string | undefined {
+export function executablePath(name: string, env: NodeJS.ProcessEnv): string | undefined {
   const path = env['PATH'];
   if (path === undefined) return undefined;
   const extensions = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
@@ -100,7 +100,7 @@ function hasConcordManifest(path: string): boolean {
   });
 }
 
-function run(
+export function run(
   command: string,
   args: readonly string[],
   env: NodeJS.ProcessEnv,

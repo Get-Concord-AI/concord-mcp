@@ -32,12 +32,15 @@ export function packagedPluginPath(moduleUrl: string): string | undefined {
  * manifest loads on the next session.
  */
 export function claudeSkillsPluginPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(claudeConfigDir(env), 'skills', RELAY_PLUGIN_NAME);
+}
+
+/** Claude Code's user directory: `CLAUDE_CONFIG_DIR`, or `~/.claude`. */
+export function claudeConfigDir(env: NodeJS.ProcessEnv = process.env): string {
   const configDir = env['CLAUDE_CONFIG_DIR'];
-  const base =
-    configDir !== undefined && configDir.trim() !== ''
-      ? configDir
-      : join(env['HOME'] ?? homedir(), '.claude');
-  return join(base, 'skills', RELAY_PLUGIN_NAME);
+  return configDir !== undefined && configDir.trim() !== ''
+    ? configDir
+    : join(env['HOME'] ?? homedir(), '.claude');
 }
 
 /**

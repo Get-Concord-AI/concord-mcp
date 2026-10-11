@@ -41,9 +41,10 @@ function configuredHome(env: NodeJS.ProcessEnv): string | undefined {
 /**
  * Idempotently add Concord's server entry to an `mcpServers` config string.
  * Every other server and every unrelated top-level key is preserved, and
- * passing the previous output back in is a no-op.
+ * passing the previous output back in is a no-op. Without `repoRoot` the entry
+ * is a user-level one, which finds the repository from where it is started.
  */
-export function upsertMcpServer(existing: string | undefined, repoRoot: string): string {
+export function upsertMcpServer(existing: string | undefined, repoRoot?: string): string {
   const source: unknown =
     existing === undefined || existing.trim() === '' ? {} : JSON.parse(existing);
   const config = mcpConfigSchema.parse(source);
@@ -55,11 +56,20 @@ export function upsertMcpServer(existing: string | undefined, repoRoot: string):
       ...servers,
       [CONCORD_SERVER_KEY]: {
         command: CONCORD_SERVER_COMMAND,
-        env: { CONCORD_REPO_ROOT: repoRoot },
+        ...(repoRoot === undefined ? {} : { env: { CONCORD_REPO_ROOT: repoRoot } }),
       },
     },
   };
   return `${JSON.stringify(next, null, 2)}\n`;
+}
+
+/** Remove Concord's entry from an `mcpServers` config string, keeping the rest. */
+export function removeMcpServer(existing: string): string {
+  const config = mcpConfigSchema.parse(JSON.parse(existing));
+  const servers = Object.fromEntries(
+    Object.entries(config.mcpServers ?? {}).filter(([key]) => key !== CONCORD_SERVER_KEY),
+  );
+  return `${JSON.stringify({ ...config, mcpServers: servers }, null, 2)}\n`;
 }
 
 /**
@@ -69,7 +79,7 @@ export function upsertMcpServer(existing: string | undefined, repoRoot: string):
  * watch into a new Gemini turn while the session is otherwise idle. Gemini's
  * idle injection effect is gated separately by experimental model steering.
  */
-export function upsertGeminiSettings(existing: string | undefined, repoRoot: string): string {
+export function upsertGeminiSettings(existing: string | undefined, repoRoot?: string): string {
   const withServer = looseObjectSchema.parse(JSON.parse(upsertMcpServer(existing, repoRoot)));
   const currentTools = looseObjectSchema.safeParse(withServer['tools']);
   const tools = currentTools.success ? currentTools.data : {};
@@ -97,8 +107,25 @@ export function upsertGeminiSettings(existing: string | undefined, repoRoot: str
  * harnesses, so setup preserves every unrelated line and replaces either a
  * previous Concord fence or Grok CLI-generated Concord tables.
  */
-export function upsertGrokMcpServer(existing: string | undefined, repoRoot: string): string {
-  const lines = (existing ?? '').split(/\r?\n/u);
+export function upsertGrokMcpServer(existing: string | undefined, repoRoot?: string): string {
+  const base = removeGrokMcpServer(existing ?? '');
+  const block = [
+    GROK_FENCE_START,
+    '[mcp_servers.concord]',
+    `command = ${JSON.stringify(CONCORD_SERVER_COMMAND)}`,
+    'args = []',
+    'enabled = true',
+    ...(repoRoot === undefined
+      ? []
+      : ['', '[mcp_servers.concord.env]', `CONCORD_REPO_ROOT = ${JSON.stringify(repoRoot)}`]),
+    GROK_FENCE_END,
+  ].join('\n');
+  return `${base}${base === '' ? '' : '\n\n'}${block}\n`;
+}
+
+/** Grok TOML without Concord's fence or tables, every other line kept. */
+export function removeGrokMcpServer(existing: string): string {
+  const lines = existing.split(/\r?\n/u);
   const preserved: string[] = [];
   let inOwnedFence = false;
   let inConcordTable = false;
@@ -122,19 +149,7 @@ export function upsertGrokMcpServer(existing: string | undefined, repoRoot: stri
     if (!inConcordTable) preserved.push(line);
   }
 
-  const base = preserved.join('\n').trimEnd();
-  const block = [
-    GROK_FENCE_START,
-    '[mcp_servers.concord]',
-    `command = ${JSON.stringify(CONCORD_SERVER_COMMAND)}`,
-    'args = []',
-    'enabled = true',
-    '',
-    '[mcp_servers.concord.env]',
-    `CONCORD_REPO_ROOT = ${JSON.stringify(repoRoot)}`,
-    GROK_FENCE_END,
-  ].join('\n');
-  return `${base}${base === '' ? '' : '\n\n'}${block}\n`;
+  return preserved.join('\n').trimEnd();
 }
 
 function writeMcpConfig(repoRoot: string, relPath: string): string {

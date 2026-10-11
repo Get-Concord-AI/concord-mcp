@@ -47,3 +47,30 @@ description: Concord shared work-state tools for coding agents
 alwaysApply: true
 ---
 `;
+
+/** Version of the user-level block written by global mode. */
+export const CONCORD_GLOBAL_INSTRUCTION_VERSION = '1';
+
+/**
+ * The user-level block global mode writes into each harness's own instruction
+ * file. Short, because it loads into every session on the machine, and it
+ * defers to a repository's own Concord section where one exists.
+ */
+export const CONCORD_GLOBAL_INSTRUCTIONS = `## Concord — shared work-state for coding agents
+
+<!-- concord:global-version=${CONCORD_GLOBAL_INSTRUCTION_VERSION} -->
+
+Concord MCP is available in every repository on this machine, including ones
+where \`concord setup\` was never run. If the project's own instructions have a
+Concord section, follow that instead of this one.
+
+- **Before editing**, call \`start_work\` with the task and the files or modules
+  you expect to touch. It registers you, claims them, and reports overlaps with
+  other agents; resolve overlaps before editing.
+- Use \`inspect_work\` to see who else is here, \`update_work\` for progress and
+  messages to other agents, and \`transfer_work\` for handoffs.
+- **Before finishing**, call \`finish_work\` with the outcome, changed files,
+  and tests.
+
+Outside any repository, work is recorded in the shared \`general\` workspace.
+Concord needs no files in the repository: do not run \`concord setup\` yourself.`;

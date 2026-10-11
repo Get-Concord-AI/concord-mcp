@@ -7,6 +7,8 @@ import { createInterface } from 'node:readline/promises';
 import { writeArtifacts } from '../../artifacts/index.js';
 import { installClaudeHook } from '../../install/claude-hooks.js';
 import { installCodexMcpConfig } from '../../install/codex-config.js';
+import { applyGlobalMode, type GlobalModeReport } from '../../install/global-mode.js';
+import { readUserConfig, writeUserConfig } from '../../config/user-config.js';
 import { installConcord } from '../../install/index.js';
 import {
   installGlobalAdapters,
@@ -31,6 +33,8 @@ export interface SetupOptions {
   mcp?: boolean;
   adapters?: boolean;
   requireAdapters?: boolean;
+  /** Turn global mode on or off, as `resolveGlobalChoice` decided; undefined leaves it. */
+  global?: boolean;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -40,6 +44,7 @@ export interface SetupResult {
   concordPath: string;
   written: string[];
   adapters: AdapterReport[];
+  globalMode?: GlobalModeReport;
 }
 
 export interface SetupUpgradeDependencies {
@@ -52,6 +57,42 @@ export interface SetupUpgradeDependencies {
   askToUpgrade?: (update: AvailableUpdate) => Promise<boolean>;
   installUpdate?: (env: NodeJS.ProcessEnv) => Promise<number>;
   write?: (message: string) => void;
+}
+
+export interface GlobalChoiceDependencies {
+  /** `--global` or `--no-global`, when given. */
+  flag?: boolean;
+  env: NodeJS.ProcessEnv;
+  interactive: boolean;
+  ask?: () => Promise<boolean>;
+}
+
+async function askGlobalMode(): Promise<boolean> {
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await prompt.question(
+      'Let your agents use Concord in repositories where you have not run concord setup? [Y/n] ',
+    );
+    return !/^(?:n|no)$/iu.test(answer.trim());
+  } finally {
+    prompt.close();
+  }
+}
+
+/**
+ * Whether this setup turns global mode on or off. A flag decides; otherwise a
+ * choice already made is re-applied when on (refreshing the instructions) and
+ * left alone when off. The question is asked once, interactively, defaulting
+ * to yes; a script that never answered it changes nothing.
+ */
+export async function resolveGlobalChoice(
+  dependencies: GlobalChoiceDependencies,
+): Promise<boolean | undefined> {
+  if (dependencies.flag !== undefined) return dependencies.flag;
+  const current = readUserConfig(dependencies.env).globalMode;
+  if (current !== undefined) return current ? true : undefined;
+  if (!dependencies.interactive) return undefined;
+  return (dependencies.ask ?? askGlobalMode)();
 }
 
 async function askToUpgrade(update: AvailableUpdate): Promise<boolean> {
@@ -173,6 +214,12 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
       throw new Error(`Required harness adapters are incomplete: ${incomplete}`);
     }
   }
+  let globalMode: GlobalModeReport | undefined;
+  if (options.global !== undefined) {
+    written.push(writeUserConfig(env, { globalMode: options.global }));
+    globalMode = applyGlobalMode(env, options.global);
+    written.push(...globalMode.written);
+  }
   return {
     repoRoot: ctx.repoRoot,
     workspaceId: ctx.workspaceId,
@@ -180,6 +227,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
     // A file touched by two installers is still one file to the reader.
     written: [...new Set(written)],
     adapters,
+    ...(globalMode === undefined ? {} : { globalMode }),
   };
 }
 
@@ -194,14 +242,22 @@ export function registerSetupCommand(program: Command): void {
     .option('--no-mcp', 'skip MCP client registration; write local state and instructions only')
     .option('--no-adapters', 'skip global harness adapter installation')
     .option('--require-adapters', 'fail unless every detected harness adapter is ready')
+    .option('--global', 'let agents use Concord in repositories that were not set up')
+    .option('--no-global', 'turn that off and remove its user-level instructions')
     .action(async (options) => {
       try {
         if (await maybeUpgradeBeforeSetup()) return;
 
+        const global = await resolveGlobalChoice({
+          ...(options.global === undefined ? {} : { flag: options.global }),
+          env: process.env,
+          interactive: process.stdin.isTTY && process.stdout.isTTY,
+        });
         const setupOptions: SetupOptions = {
           mcp: options.mcp,
           adapters: options.adapters,
           ...(options.requireAdapters === true ? { requireAdapters: true } : {}),
+          ...(global === undefined ? {} : { global }),
         };
         if (options.claudeHooks === true) {
           setupOptions.claudeHooks = true;
@@ -219,6 +275,17 @@ export function registerSetupCommand(program: Command): void {
         }
         if (result.adapters.length > 0) {
           process.stdout.write(`\n${renderAdapterReport(result.adapters)}\n`);
+        }
+        if (result.globalMode !== undefined) {
+          process.stdout.write(
+            global === true
+              ? '\nGlobal mode on: agents use Concord in repositories without concord setup, ' +
+                  'recorded in ~/.concord/global.db.\n'
+              : '\nGlobal mode off.\n',
+          );
+          for (const warning of result.globalMode.warnings) {
+            process.stdout.write(`  could not update ${warning}\n`);
+          }
         }
         if (options.claudeHooks === true) {
           process.stdout.write(
