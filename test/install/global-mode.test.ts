@@ -16,7 +16,7 @@ import { resolveGlobalChoice, runSetup } from '../../src/cli/commands/setup.js';
 import { BLOCK_START, removeBlock, upsertBlock } from '../../src/install/block.js';
 import { applyGlobalMode } from '../../src/install/global-mode.js';
 
-const HARNESSES = ['claude', 'codex', 'gemini', 'grok', 'goose'] as const;
+const HARNESSES = ['claude', 'codex', 'cursor', 'gemini', 'grok', 'goose'] as const;
 
 /** A home with fake harness executables; `claude` logs the arguments it gets. */
 function machine(harnesses: readonly string[] = HARNESSES): NodeJS.ProcessEnv & { HOME: string } {
@@ -43,7 +43,7 @@ describe('applyGlobalMode', () => {
     const on = applyGlobalMode(env, true);
 
     expect(on.warnings).toEqual([]);
-    expect(on.registrations).toEqual(['claude', 'gemini', 'grok']);
+    expect(on.registrations).toEqual(['claude', 'cursor', 'gemini', 'grok']);
     expect(read(join(env.HOME, '.claude', 'CLAUDE.md'))).toMatch(/^# My rules\n\n<!-- concord/u);
     for (const path of [
       join(env.HOME, '.codex', 'AGENTS.md'),
@@ -55,6 +55,7 @@ describe('applyGlobalMode', () => {
     for (const path of [
       join(env.HOME, '.gemini', 'settings.json'),
       join(env.HOME, '.grok', 'config.toml'),
+      join(env.HOME, '.cursor', 'mcp.json'),
     ]) {
       expect(read(path)).toMatch(/concord-mcp/u);
       expect(read(path)).not.toContain('CONCORD_REPO_ROOT');
@@ -72,6 +73,7 @@ describe('applyGlobalMode', () => {
     expect(existsSync(join(env.HOME, '.codex', 'AGENTS.md'))).toBe(false);
     expect(read(join(env.HOME, '.gemini', 'settings.json'))).not.toContain('concord-mcp');
     expect(existsSync(join(env.HOME, '.grok', 'config.toml'))).toBe(false);
+    expect(read(join(env.HOME, '.cursor', 'mcp.json'))).not.toContain('concord-mcp');
     expect(read(join(env.HOME, 'claude-calls'))).toContain('mcp remove --scope user concord');
   });
 
@@ -107,20 +109,22 @@ describe('registrations the user made', () => {
     const env = machine();
     const gemini = join(env.HOME, '.gemini', 'settings.json');
     const grok = join(env.HOME, '.grok', 'config.toml');
-    for (const dir of ['.gemini', '.grok']) mkdirSync(join(env.HOME, dir));
+    const cursor = join(env.HOME, '.cursor', 'mcp.json');
+    for (const dir of ['.gemini', '.grok', '.cursor']) mkdirSync(join(env.HOME, dir));
+    writeFileSync(cursor, '{"mcpServers":{"concord":{"command":"my-concord"}}}\n');
     writeFileSync(gemini, '{"mcpServers":{"concord":{"command":"my-concord","args":["--x"]}}}\n');
     writeFileSync(grok, '[mcp_servers]\nconcord = { command = "my-concord" }\n');
-    const before = [read(gemini), read(grok)];
+    const before = [read(gemini), read(grok), read(cursor)];
 
     expect(applyGlobalMode(env, false).written).toEqual([]);
     expect(existsSync(join(env.HOME, 'claude-calls'))).toBe(false);
 
     const on = applyGlobalMode(env, true);
-    expect([read(gemini), read(grok)]).toEqual(before);
+    expect([read(gemini), read(grok), read(cursor)]).toEqual(before);
     expect(on.registrations).toEqual(['claude']);
 
     applyGlobalMode(env, false, { registrations: on.registrations });
-    expect([read(gemini), read(grok)]).toEqual(before);
+    expect([read(gemini), read(grok), read(cursor)]).toEqual(before);
   });
 });
 

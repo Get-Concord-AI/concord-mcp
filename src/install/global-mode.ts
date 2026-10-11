@@ -17,6 +17,7 @@ import {
   removeMcpServer,
   upsertGeminiSettings,
   upsertGrokMcpServer,
+  upsertMcpServer,
 } from './mcp-config.js';
 
 /** What turning global mode on or off changed, and what it could not. */
@@ -58,7 +59,11 @@ function instructionFile(executable: string, path: (env: NodeJS.ProcessEnv) => s
   };
 }
 
-/** User-level instructions, and MCP registrations edited directly (Codex and Goose adapters register themselves). */
+/**
+ * User-level instructions, and MCP registrations edited directly (Codex and
+ * Goose adapters register themselves). Cursor's instructions come from its
+ * sessionStart hook, as its user rules are not a file.
+ */
 const USER_FILES: readonly UserFile[] = [
   instructionFile('claude', (env) => join(claudeConfigDir(env), 'CLAUDE.md')),
   instructionFile('codex', (env) => join(codexHome(env), 'AGENTS.md')),
@@ -70,6 +75,13 @@ const USER_FILES: readonly UserFile[] = [
     path: (env) => join(userHome(env), '.gemini', 'settings.json'),
     install: (existing) => upsertGeminiSettings(existing),
     // Only the server goes: the shell settings may serve other tools by now.
+    uninstall: removeMcpServer,
+  },
+  {
+    executable: 'cursor',
+    registration: { id: 'cursor', present: hasMcpServer },
+    path: (env) => join(userHome(env), '.cursor', 'mcp.json'),
+    install: (existing) => upsertMcpServer(existing),
     uninstall: removeMcpServer,
   },
   {

@@ -11,6 +11,7 @@ import { ensureAgentRegistered } from './tools/register-agent.js';
 import { createTelemetryClient } from './telemetry/client.js';
 import { TelemetryTransport } from './telemetry/transport.js';
 import { VERSION } from './version.js';
+import { hasExplicitRepoRoot, joinClientRoot } from './workspaces/client-roots.js';
 import { WorkspaceManager } from './workspaces/manager.js';
 
 async function main(): Promise<void> {
@@ -55,6 +56,21 @@ async function main(): Promise<void> {
       }
     },
   });
+  if (!hasExplicitRepoRoot(process.env)) {
+    // Nothing names the repository, so this server may have been started far
+    // from it; ask the client which folder it has open.
+    server.server.oninitialized = () => {
+      joinClientRoot(server.server, workspaceManager)
+        .then((joined) => {
+          if (joined !== undefined && identity !== undefined) {
+            ensureAgentRegistered(workspaceManager.current().repos, identity, joined.repoRoot);
+          }
+        })
+        .catch(() => {
+          // The working directory stays the workspace, as before.
+        });
+    };
+  }
   const stdio = new StdioServerTransport();
   const transport = telemetry === undefined ? stdio : new TelemetryTransport(stdio, telemetry);
   process.once('beforeExit', () => {

@@ -63,6 +63,35 @@ function inboxStatus(root) {
   }
 }
 
+/**
+ * The workspace id and, for a repository in the machine-wide store, the
+ * instructions it has no rule file for. Undefined from a CLI too old to say.
+ */
+function workspaceStatus(root) {
+  try {
+    return JSON.parse(runConcord(root, ['inbox', 'status', '--json'], true));
+  } catch {
+    return undefined;
+  }
+}
+
+function sessionContext(agentId, status) {
+  // A user-level Cursor server may run far from this folder; the id routes it.
+  const workspace =
+    typeof status?.workspace_id === 'string'
+      ? ` Pass workspace_id "${status.workspace_id}" to Concord tools so they act on this ` +
+        `folder.`
+      : '';
+  const instructions = typeof status?.instructions === 'string' ? `\n\n${status.instructions}` : '';
+  return (
+    `Concord: this Cursor session is agent ${agentId}.${workspace} To receive peer messages ` +
+    `while idle, start exactly one Cursor background Shell task with: ` +
+    `concord inbox watch --provider cursor --once. Leave it active when the turn ends so ` +
+    `Cursor's background-task completion resumes you. When it completes, answer the emitted ` +
+    `peer message, then immediately start a fresh monitor.${instructions}`
+  );
+}
+
 function register(root, agentId) {
   runConcord(root, ['inbox', 'register', '--agent', agentId, '--provider', 'cursor']);
 }
@@ -100,12 +129,7 @@ async function main() {
     register(root, agentId);
     writeResult({
       env: { CONCORD_AGENT_ID: agentId },
-      additional_context:
-        `Concord: this Cursor session is agent ${agentId}. To receive peer messages while ` +
-        `idle, start exactly one Cursor background Shell task with: ` +
-        `concord inbox watch --provider cursor --once. Leave it active when the turn ends so ` +
-        `Cursor's background-task completion resumes you. When it completes, answer the emitted ` +
-        `peer message, then immediately start a fresh monitor.`,
+      additional_context: sessionContext(agentId, workspaceStatus(root)),
     });
     return;
   }

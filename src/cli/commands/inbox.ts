@@ -4,7 +4,8 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import type { Command } from '@commander-js/extra-typings';
 
-import { resolveRepoRoot } from '../../config/paths.js';
+import { resolveRepoRoot, workspaceIdForRoot } from '../../config/paths.js';
+import { CONCORD_GLOBAL_INSTRUCTIONS } from '../../install/instructions.js';
 import type { Repositories } from '../../db/index.js';
 import {
   capabilityFor,
@@ -207,6 +208,23 @@ function registeredLine(agentId: string): string {
 }
 
 /**
+ * What a hook needs to point its session at this workspace: the id to pass to
+ * Concord's tools, and, for a repository in the machine-wide store, the
+ * instructions it has no file of its own for.
+ */
+export function workspaceStatus(cwd: string, env: NodeJS.ProcessEnv): Record<string, string> {
+  const repoRoot = resolveRepoRoot(cwd, env);
+  const store = resolveStore(repoRoot, env);
+  return {
+    workspace_id: workspaceIdForRoot(repoRoot),
+    store: store.kind,
+    ...(store.kind === 'global'
+      ? { project: store.project, instructions: CONCORD_GLOBAL_INSTRUCTIONS }
+      : {}),
+  };
+}
+
+/**
  * Whether hooks here have a workspace to serve. A repository's own store must
  * already exist; the machine-wide store counts as soon as global mode chooses
  * it, since a session's first hook can run before its MCP server creates it.
@@ -307,6 +325,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     .command('status')
     .description('Exit 0 when this directory is a Concord workspace, 1 otherwise')
     .option('--cloud', 'Exit 0 only when the repository is linked to Concord Cloud')
+    .option('--json', 'Print the workspace id and the store it uses, for hooks')
     .action((options) => {
       // Lets the relay monitor bail out of a project that does not use Concord
       // instead of polling for the life of the session.
@@ -318,14 +337,20 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         return;
       }
       if (access.kind === 'cloud') {
-        process.stdout.write('Concord Cloud workspace linked.\n');
+        process.stdout.write(
+          options.json === true ? '{"store":"cloud"}\n' : 'Concord Cloud workspace linked.\n',
+        );
         return;
       }
       if (options.cloud === true || !workspaceExists(process.cwd())) {
         process.exitCode = 1;
         return;
       }
-      process.stdout.write('Concord workspace present.\n');
+      process.stdout.write(
+        options.json === true
+          ? `${JSON.stringify(workspaceStatus(process.cwd(), process.env))}\n`
+          : 'Concord workspace present.\n',
+      );
     });
 
   inbox

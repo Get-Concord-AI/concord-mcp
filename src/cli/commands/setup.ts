@@ -188,7 +188,10 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   }
   if (options.mcp !== false) {
     written.push(...installMcpConfigs(ctx.repoRoot));
-    const migratedCursorConfig = removeGlobalCursorConcord(env);
+    // Global mode owns a user-level Cursor entry; without it, one is a stale
+    // registration that would shadow this repository's pinned one.
+    const migratedCursorConfig =
+      options.global === true ? undefined : removeGlobalCursorConcord(env);
     if (migratedCursorConfig !== undefined) written.push(migratedCursorConfig);
     written.push(installCodexMcpConfig(env));
   }

@@ -77,6 +77,26 @@ registration yourself.
 
 </details>
 
+<details>
+<summary>Using Concord in repositories you have not set up</summary>
+
+The first time you run `concord setup` interactively, it asks whether your agents
+should use Concord in repositories where setup was never run (default yes). Your
+answer is saved in `~/.concord/config.json`; `concord setup --global` or
+`--no-global` changes it.
+
+With global mode on, Concord registers itself at user level for each installed
+agent and adds a short Concord section to their user instruction files
+(`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, Goose's
+`.goosehints`; Cursor receives it from its global session hook). Nothing is
+written into those repositories: their work is kept in `~/.concord/global.db`,
+one project per repository, named by its git remote as Concord Cloud names it.
+Sessions outside any repository share the `general` project. A repository you
+did set up keeps everything in its own `.concord/`. Turning global mode off
+removes exactly what it added.
+
+</details>
+
 ## Supported agents
 
 | Agent                              | Integration guide                            |
