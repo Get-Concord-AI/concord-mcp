@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
 import { writeArtifacts } from './artifacts/index.js';
 import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/proxy.js';
+import { readLink } from './cloud/settings.js';
 import { startBackgroundUpdateCheck } from './update-notifier.js';
 import { resolveCheckoutRoot, resolveRepoRoot } from './config/paths.js';
 import { resolveIdentity } from './domain/identity.js';
@@ -60,7 +61,9 @@ async function main(): Promise<void> {
     // Nothing names the repository, so this server may have been started far
     // from it; ask the client which folder it has open.
     server.server.oninitialized = () => {
-      joinClientRoot(server.server, workspaceManager)
+      joinClientRoot(server.server, workspaceManager, {
+        isCloudLinked: (root) => readLink(root) !== undefined,
+      })
         .then((joined) => {
           if (joined !== undefined && identity !== undefined) {
             ensureAgentRegistered(workspaceManager.current().repos, identity, joined.repoRoot);

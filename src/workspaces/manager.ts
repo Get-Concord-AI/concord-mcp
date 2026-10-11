@@ -41,6 +41,8 @@ export class WorkspaceManager {
   readonly #open: (databaseFilename: string, project: string) => Repositories;
   readonly #resolveStore: (repoRoot: string) => StoreLocation;
   #activeWorkspaceId: string;
+  #selections = 0;
+  #refusal: string | undefined;
 
   constructor(initialRoot: string, options: WorkspaceManagerOptions = {}) {
     this.#open = options.open ?? openRepositories;
@@ -74,8 +76,19 @@ export class WorkspaceManager {
     );
   }
 
+  /** How many times a workspace has been chosen, by a tool call or a join. */
+  get selections(): number {
+    return this.#selections;
+  }
+
+  /** Refuse every operation from now on, with `reason` as the error. */
+  refuse(reason: string): void {
+    this.#refusal = reason;
+  }
+
   /** The active/default context used when an operation omits `workspace_id`. */
   current(): WorkspaceContext {
+    if (this.#refusal !== undefined) throw new Error(this.#refusal);
     const context = this.#contexts.get(this.#activeWorkspaceId);
     if (context === undefined) {
       throw new Error('Concord has no active workspace.');
@@ -85,6 +98,7 @@ export class WorkspaceManager {
 
   /** Validate, open (once), and make a repository root active. */
   join(root: string): WorkspaceSelection {
+    this.#selections += 1;
     const repoRoot = resolveExplicitRepoRoot(root);
     this.#assertAllowed(repoRoot);
     const workspaceId = workspaceIdForRoot(repoRoot);
@@ -109,6 +123,7 @@ export class WorkspaceManager {
    * the current selection for backward-compatible clients.
    */
   select(workspaceId?: string): WorkspaceContext {
+    this.#selections += 1;
     if (workspaceId === undefined) {
       return this.current();
     }
