@@ -43,7 +43,11 @@ function configuredHome(env: NodeJS.ProcessEnv): string | undefined {
  * Every other server and every unrelated top-level key is preserved, and
  * passing the previous output back in is a no-op.
  */
-export function upsertMcpServer(existing: string | undefined, repoRoot: string): string {
+export function upsertMcpServer(
+  existing: string | undefined,
+  repoRoot: string,
+  harnessKind: string,
+): string {
   const source: unknown =
     existing === undefined || existing.trim() === '' ? {} : JSON.parse(existing);
   const config = mcpConfigSchema.parse(source);
@@ -55,7 +59,7 @@ export function upsertMcpServer(existing: string | undefined, repoRoot: string):
       ...servers,
       [CONCORD_SERVER_KEY]: {
         command: CONCORD_SERVER_COMMAND,
-        env: { CONCORD_REPO_ROOT: repoRoot },
+        env: { CONCORD_REPO_ROOT: repoRoot, CONCORD_AGENT_KIND: harnessKind },
       },
     },
   };
@@ -69,8 +73,14 @@ export function upsertMcpServer(existing: string | undefined, repoRoot: string):
  * watch into a new Gemini turn while the session is otherwise idle. Gemini's
  * idle injection effect is gated separately by experimental model steering.
  */
-export function upsertGeminiSettings(existing: string | undefined, repoRoot: string): string {
-  const withServer = looseObjectSchema.parse(JSON.parse(upsertMcpServer(existing, repoRoot)));
+export function upsertGeminiSettings(
+  existing: string | undefined,
+  repoRoot: string,
+  harnessKind: string,
+): string {
+  const withServer = looseObjectSchema.parse(
+    JSON.parse(upsertMcpServer(existing, repoRoot, harnessKind)),
+  );
   const currentTools = looseObjectSchema.safeParse(withServer['tools']);
   const tools = currentTools.success ? currentTools.data : {};
   const currentShell = looseObjectSchema.safeParse(tools['shell']);
@@ -97,7 +107,11 @@ export function upsertGeminiSettings(existing: string | undefined, repoRoot: str
  * harnesses, so setup preserves every unrelated line and replaces either a
  * previous Concord fence or Grok CLI-generated Concord tables.
  */
-export function upsertGrokMcpServer(existing: string | undefined, repoRoot: string): string {
+export function upsertGrokMcpServer(
+  existing: string | undefined,
+  repoRoot: string,
+  harnessKind: string,
+): string {
   const lines = (existing ?? '').split(/\r?\n/u);
   const preserved: string[] = [];
   let inOwnedFence = false;
@@ -132,18 +146,19 @@ export function upsertGrokMcpServer(existing: string | undefined, repoRoot: stri
     '',
     '[mcp_servers.concord.env]',
     `CONCORD_REPO_ROOT = ${JSON.stringify(repoRoot)}`,
+    `CONCORD_AGENT_KIND = ${JSON.stringify(harnessKind)}`,
     GROK_FENCE_END,
   ].join('\n');
   return `${base}${base === '' ? '' : '\n\n'}${block}\n`;
 }
 
-function writeMcpConfig(repoRoot: string, relPath: string): string {
+function writeMcpConfig(repoRoot: string, relPath: string, harnessKind: string): string {
   const fullPath = join(repoRoot, relPath);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
 
   let updated: string;
   try {
-    updated = upsertMcpServer(existing, repoRoot);
+    updated = upsertMcpServer(existing, repoRoot, harnessKind);
   } catch {
     throw new McpConfigParseError(relPath);
   }
@@ -153,20 +168,20 @@ function writeMcpConfig(repoRoot: string, relPath: string): string {
   return relPath;
 }
 
-function writeGrokMcpConfig(repoRoot: string): string {
+function writeGrokMcpConfig(repoRoot: string, harnessKind: string): string {
   const fullPath = join(repoRoot, GROK_CONFIG_PATH);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
   mkdirSync(dirname(fullPath), { recursive: true });
-  writeFileSync(fullPath, upsertGrokMcpServer(existing, repoRoot));
+  writeFileSync(fullPath, upsertGrokMcpServer(existing, repoRoot, harnessKind));
   return GROK_CONFIG_PATH;
 }
 
-function writeGeminiConfig(repoRoot: string): string {
+function writeGeminiConfig(repoRoot: string, harnessKind: string): string {
   const fullPath = join(repoRoot, GEMINI_CONFIG_PATH);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
   let updated: string;
   try {
-    updated = upsertGeminiSettings(existing, repoRoot);
+    updated = upsertGeminiSettings(existing, repoRoot, harnessKind);
   } catch {
     throw new McpConfigParseError(GEMINI_CONFIG_PATH);
   }
@@ -182,9 +197,11 @@ function writeGeminiConfig(repoRoot: string): string {
  */
 export function installMcpConfigs(repoRoot: string): string[] {
   return [
-    ...JSON_TARGETS.map((relPath) => writeMcpConfig(repoRoot, relPath)),
-    writeGeminiConfig(repoRoot),
-    writeGrokMcpConfig(repoRoot),
+    ...JSON_TARGETS.map((relPath) =>
+      writeMcpConfig(repoRoot, relPath, 'claude-code'),
+    ),
+    writeGeminiConfig(repoRoot, 'gemini'),
+    writeGrokMcpConfig(repoRoot, 'grok'),
   ];
 }
 

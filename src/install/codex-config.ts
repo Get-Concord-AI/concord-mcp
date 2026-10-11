@@ -36,7 +36,7 @@ function withTrailingBlankLine(lines: readonly string[]): string {
  * them, which a round-trip through a parser would discard — survive verbatim.
  */
 export function upsertCodexMcpServer(existing: string | undefined): string {
-  const section = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"\n`;
+  const section = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"\nenv.CONCORD_AGENT_KIND = "codex"\n`;
   const source = existing ?? '';
   if (source.trim() === '') {
     return section;
