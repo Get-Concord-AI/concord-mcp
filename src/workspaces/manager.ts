@@ -81,6 +81,15 @@ export class WorkspaceManager {
     return this.#selections;
   }
 
+  /**
+   * The active workspace's root without throwing: undefined once refused.
+   * For diagnostics such as telemetry, which must never block a reply.
+   */
+  get activeRoot(): string | undefined {
+    if (this.#refusal !== undefined) return undefined;
+    return this.#contexts.get(this.#activeWorkspaceId)?.repoRoot;
+  }
+
   /** Refuse every operation from now on, with `reason` as the error. */
   refuse(reason: string): void {
     this.#refusal = reason;

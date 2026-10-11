@@ -81,6 +81,8 @@ describe('joinClientRoot', () => {
 
     expect(joined).toBeUndefined();
     expect(() => manager.select()).toThrow(/linked to Concord Cloud/u);
+    // Telemetry still reads a root without throwing, so the refusal reaches the client.
+    expect(manager.activeRoot).toBeUndefined();
   });
 
   it('does not second-guess a repository the environment names', () => {

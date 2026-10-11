@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   const updateCheck = startBackgroundUpdateCheck(VERSION, process.env);
   const telemetry = createTelemetryClient({
     surface: 'mcp',
-    workspaceRoot: () => workspaceManager.current().repoRoot,
+    workspaceRoot: () => workspaceManager.activeRoot,
     recordSessionStarted: true,
   });
   const server = createServer(workspaceManager.current().repos, {
