@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-11
+
+### Added
+
+- **Goose support.** `concord setup` registers Concord's MCP server in Goose's
+  `config.yaml` when `goose` is installed, keeping any existing extensions and
+  settings, and `concord adapters uninstall` removes it again. A Goose agent's
+  identity comes from `AGENT_SESSION_ID`. Goose sessions can use the work-state
+  tools, but cannot receive inbox messages yet; see
+  [`docs/goose.md`](./docs/goose.md) (#147).
+
+### Fixed
+
+- **Relay hooks on Windows.** Hooks now launch the `concord.cmd` wrapper that
+  npm and pnpm install on Windows, instead of failing with
+  `spawn concord ENOENT`. They also work when the Concord install path contains
+  spaces, and pass `%` in arguments through unchanged instead of letting
+  `cmd.exe` expand it (#138).
+- The whack-a-mole demo no longer passes the removed `--agent-comms` flag, so
+  `pnpm demo` runs again (#174).
+
 ## [0.12.0] - 2026-10-09
 
 ### Added
@@ -398,7 +419,8 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.5...v0.11.0
 [0.10.5]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.10.4...v0.10.5
