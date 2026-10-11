@@ -72,8 +72,34 @@ it and is safe to re-run.
 Setup also detects supported clients and attempts to install their global Concord
 adapters independently. Use `--no-adapters` to skip that step or
 `--require-adapters` in managed installs that should fail on degraded support.
-Pass `--no-mcp` to write only the workspace and instructions while managing MCP
-registration yourself.
+Setup also installs personal Concord instructions for all five supported clients,
+including clients installed later. These tell agents to run setup in new or cloned
+repos that lack Concord instructions, then use the Concord workflow. Existing
+personal instructions are preserved in managed `<!-- concord:start -->` blocks.
+
+| Client      | Personal instruction file                                  |
+| ----------- | ---------------------------------------------------------- |
+| Codex       | `~/.codex/AGENTS.md` (or a non-empty `AGENTS.override.md`) |
+| Claude Code | `~/.claude/CLAUDE.md`                                      |
+| Cursor      | `~/.cursor/rules/concord.mdc` (`alwaysApply: true`)        |
+| Gemini CLI  | `~/.gemini/GEMINI.md`                                      |
+| Grok Build  | `~/.grok/AGENTS.md`                                        |
+
+`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and `GROK_HOME` overrides are honored.
+These locations follow the clients' instruction documentation:
+[Codex](https://developers.openai.com/codex/guides/agents-md),
+[Claude Code](https://code.claude.com/docs/en/memory),
+[Cursor](https://prod.cursor.com/help/customization/rules),
+[Gemini CLI](https://geminicli.com/docs/cli/gemini-md/), and
+[Grok Build](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md).
+Restart existing client sessions to load them. Use `--no-global-instructions` to
+skip these writes; `--no-adapters` only skips adapters. To remove an installed
+preference, delete its managed block (including both markers) from the files above.
+Skipping installation does not remove existing blocks.
+
+Pass `--no-mcp` to write only the workspace and repository instructions while
+managing MCP registration yourself; this also skips personal instructions and
+adapters by default.
 
 </details>
 
