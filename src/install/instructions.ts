@@ -51,11 +51,7 @@ alwaysApply: true
 /** Version of the user-level block written by global mode. */
 export const CONCORD_GLOBAL_INSTRUCTION_VERSION = '1';
 
-/**
- * The user-level block global mode writes into each harness's own instruction
- * file. Short, because it loads into every session on the machine, and it
- * defers to a repository's own Concord section where one exists.
- */
+/** The user-level block for every session on the machine: short, and deferring to a repo's own section. */
 export const CONCORD_GLOBAL_INSTRUCTIONS = `## Concord — shared work-state for coding agents
 
 <!-- concord:global-version=${CONCORD_GLOBAL_INSTRUCTION_VERSION} -->

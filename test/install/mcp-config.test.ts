@@ -13,6 +13,7 @@ import {
   upsertGeminiSettings,
   upsertGrokMcpServer,
   upsertMcpServer,
+  hasGrokMcpServer,
 } from '../../src/install/mcp-config.js';
 
 describe('upsertMcpServer', () => {
@@ -205,5 +206,27 @@ describe('removeGlobalCursorConcord', () => {
 
     expect(() => removeGlobalCursorConcord({ HOME: home })).toThrow(McpConfigParseError);
     expect(readFileSync(path, 'utf8')).toBe('{ broken\n');
+  });
+});
+
+describe('hasGrokMcpServer', () => {
+  it('recognises every TOML spelling of a Concord registration, and nothing else', () => {
+    for (const toml of [
+      '[mcp_servers.concord]\ncommand = "x"',
+      "[ mcp_servers . 'concord' ]\ncommand = 'x'",
+      '[mcp_servers.concord.env]\nA = "1"',
+      '[mcp_servers]\nconcord = { command = "x" }',
+      'mcp_servers.concord.command = "x"',
+    ]) {
+      expect(hasGrokMcpServer(toml)).toBe(true);
+    }
+    for (const toml of [
+      '[mcp_servers.concordx]\ncommand = "x"',
+      '[mcp_servers]\nconcord_x = { command = "x" }',
+      '[other]\nconcord = { command = "x" }',
+      '# [mcp_servers.concord]',
+    ]) {
+      expect(hasGrokMcpServer(toml)).toBe(false);
+    }
   });
 });

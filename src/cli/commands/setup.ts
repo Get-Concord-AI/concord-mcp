@@ -60,7 +60,6 @@ export interface SetupUpgradeDependencies {
 }
 
 export interface GlobalChoiceDependencies {
-  /** `--global` or `--no-global`, when given. */
   flag?: boolean;
   env: NodeJS.ProcessEnv;
   interactive: boolean;
@@ -80,10 +79,8 @@ async function askGlobalMode(): Promise<boolean> {
 }
 
 /**
- * Whether this setup turns global mode on or off. A flag decides; otherwise a
- * choice already made is re-applied when on (refreshing the instructions) and
- * left alone when off. The question is asked once, interactively, defaulting
- * to yes; a script that never answered it changes nothing.
+ * Whether setup turns global mode on or off: a flag decides, a saved "on" is
+ * re-applied, and otherwise the question is asked once, interactively (yes by default).
  */
 export async function resolveGlobalChoice(
   dependencies: GlobalChoiceDependencies,

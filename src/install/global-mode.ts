@@ -23,22 +23,20 @@ import {
 export interface GlobalModeReport {
   written: string[];
   warnings: string[];
-  /** The user-level registrations global mode now owns, to remember for turning it off. */
   registrations: string[];
 }
 
-/** A user-level MCP registration global mode may add, and so later remove. */
+/** A user-level MCP registration; `present` says whether a file already has one, anyone's. */
 interface Registration {
   readonly id: string;
-  /** Whether the file already registers Concord, by global mode or by the user. */
   readonly present: (existing: string) => boolean;
 }
 
 /** A user-level file global mode owns part of, for one harness. */
 interface UserFile {
-  /** The harness's command: nothing is written for a harness that is not installed. */
+  /** Nothing is written unless this harness command is installed. */
   readonly executable: string;
-  /** Set for an MCP registration, which `--no-mcp` leaves to the user. */
+  /** Set for an MCP registration, which `--no-mcp` skips. */
   readonly registration?: Registration;
   readonly path: (env: NodeJS.ProcessEnv) => string;
   readonly install: (existing: string | undefined) => string;
@@ -60,12 +58,7 @@ function instructionFile(executable: string, path: (env: NodeJS.ProcessEnv) => s
   };
 }
 
-/**
- * Each harness's user-level instructions, and the MCP registration for the
- * harnesses whose user config Concord edits directly. Codex and Goose are
- * registered machine-wide by their adapters already; Claude Code through its
- * own CLI, below. Cursor's user rules are not a file, so it is not here.
- */
+/** User-level instructions, and MCP registrations edited directly (Codex and Goose adapters register themselves). */
 const USER_FILES: readonly UserFile[] = [
   instructionFile('claude', (env) => join(claudeConfigDir(env), 'CLAUDE.md')),
   instructionFile('codex', (env) => join(codexHome(env), 'AGENTS.md')),
@@ -91,10 +84,7 @@ const USER_FILES: readonly UserFile[] = [
   },
 ];
 
-/**
- * Whether global mode may change this file's registration: one it added, or
- * none yet. A registration the user made themselves is never touched.
- */
+/** A registration global mode added, or a missing one, may change; the user's own never does. */
 function mayChange(
   registration: Registration,
   enable: boolean,
@@ -138,10 +128,7 @@ function applyFile(
   }
 }
 
-/**
- * Register Concord at Claude Code's user scope, through its own CLI. A server
- * the CLI says already exists is the user's own unless global mode added it.
- */
+/** Claude Code's user-scope registration, through its CLI; an existing one is the user's unless owned. */
 function applyClaude(
   env: NodeJS.ProcessEnv,
   enable: boolean,
@@ -166,11 +153,9 @@ function applyClaude(
 }
 
 /**
- * Turn global mode on or off for every installed harness: user-level MCP
- * registration plus a short instruction block, so agents use Concord in
- * repositories where `concord setup` was never run. Only registrations it
- * added (`registrations`, from the last run) are ever changed or removed.
- * Each harness succeeds or fails on its own; failures are reported.
+ * Turn global mode on or off for each installed harness: user-level MCP
+ * registration and instructions. Only `registrations` it added are ever
+ * changed or removed; each harness's failure is reported, not thrown.
  */
 export function applyGlobalMode(
   env: NodeJS.ProcessEnv,

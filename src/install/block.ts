@@ -24,11 +24,7 @@ export function upsertBlock(existing: string, block: string): string {
   return `${existing}${separator}${wrapped}\n`;
 }
 
-/**
- * Remove Concord's managed block from `existing`, undoing only what
- * `upsertBlock` added around it: the newline after the block and the blank
- * line before it. Everything else is kept byte for byte.
- */
+/** Remove Concord's block and only the separators `upsertBlock` added; the rest stays byte for byte. */
 export function removeBlock(existing: string): string {
   const startIdx = existing.indexOf(BLOCK_START);
   const endIdx = existing.indexOf(BLOCK_END);
