@@ -27,6 +27,8 @@ export interface GlobalModeReport {
 interface UserFile {
   /** The harness's command: nothing is written for a harness that is not installed. */
   readonly executable: string;
+  /** An MCP registration, which `--no-mcp` leaves to the user. */
+  readonly registersMcp: boolean;
   readonly path: (env: NodeJS.ProcessEnv) => string;
   readonly install: (existing: string | undefined) => string;
   readonly uninstall: (existing: string) => string;
@@ -41,6 +43,7 @@ function grokHome(env: NodeJS.ProcessEnv): string {
 function instructionFile(executable: string, path: (env: NodeJS.ProcessEnv) => string): UserFile {
   return {
     executable,
+    registersMcp: false,
     path,
     install: (existing) => upsertBlock(existing ?? '', CONCORD_GLOBAL_INSTRUCTIONS),
     uninstall: removeBlock,
@@ -60,6 +63,7 @@ const USER_FILES: readonly UserFile[] = [
   instructionFile('goose', (env) => join(dirname(gooseConfigPath(env)), '.goosehints')),
   {
     executable: 'gemini',
+    registersMcp: true,
     path: (env) => join(userHome(env), '.gemini', 'settings.json'),
     install: (existing) => upsertGeminiSettings(existing),
     // Only the server goes: the shell settings may serve other tools by now.
@@ -67,6 +71,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     executable: 'grok',
+    registersMcp: true,
     path: (env) => join(grokHome(env), 'config.toml'),
     install: (existing) => upsertGrokMcpServer(existing),
     uninstall: (existing) => {
@@ -75,10 +80,6 @@ const USER_FILES: readonly UserFile[] = [
     },
   },
 ];
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function applyFile(
   env: NodeJS.ProcessEnv,
@@ -101,7 +102,7 @@ function applyFile(
     }
     report.written.push(path);
   } catch (error) {
-    report.warnings.push(`${path}: ${message(error)}`);
+    report.warnings.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -113,9 +114,11 @@ function applyClaude(env: NodeJS.ProcessEnv, enable: boolean, report: GlobalMode
     ? ['mcp', 'add', '--scope', 'user', CONCORD_SERVER_KEY, CONCORD_SERVER_COMMAND]
     : ['mcp', 'remove', '--scope', 'user', CONCORD_SERVER_KEY];
   const result = run(claude, args, env);
+  // Already in the wanted state is not a failure: added before, or never added.
+  const settled = enable ? /already exists/iu : /no mcp server named/iu;
   if (result.ok) {
     report.written.push(`claude ${args.join(' ')}`);
-  } else if (enable && !/already exists/iu.test(result.output)) {
+  } else if (!settled.test(result.output)) {
     report.warnings.push(`claude ${args.join(' ')}: ${result.output || 'failed'}`);
   }
 }
@@ -126,9 +129,16 @@ function applyClaude(env: NodeJS.ProcessEnv, enable: boolean, report: GlobalMode
  * repositories where `concord setup` was never run. Each harness succeeds or
  * fails on its own; failures are reported rather than thrown.
  */
-export function applyGlobalMode(env: NodeJS.ProcessEnv, enable: boolean): GlobalModeReport {
+export function applyGlobalMode(
+  env: NodeJS.ProcessEnv,
+  enable: boolean,
+  options: { mcp?: boolean } = {},
+): GlobalModeReport {
   const report: GlobalModeReport = { written: [], warnings: [] };
-  for (const file of USER_FILES) applyFile(env, file, enable, report);
-  applyClaude(env, enable, report);
+  const mcp = options.mcp !== false;
+  for (const file of USER_FILES) {
+    if (mcp || !file.registersMcp) applyFile(env, file, enable, report);
+  }
+  if (mcp) applyClaude(env, enable, report);
   return report;
 }

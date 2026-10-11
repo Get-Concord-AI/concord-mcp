@@ -217,7 +217,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   let globalMode: GlobalModeReport | undefined;
   if (options.global !== undefined) {
     written.push(writeUserConfig(env, { globalMode: options.global }));
-    globalMode = applyGlobalMode(env, options.global);
+    globalMode = applyGlobalMode(env, options.global, { mcp: options.mcp !== false });
     written.push(...globalMode.written);
   }
   return {

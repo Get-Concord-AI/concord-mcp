@@ -10,10 +10,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { readUserConfig, writeUserConfig } from '../../src/config/user-config.js';
 import { resolveGlobalChoice, runSetup } from '../../src/cli/commands/setup.js';
-import { BLOCK_START } from '../../src/install/block.js';
+import { BLOCK_START, removeBlock, upsertBlock } from '../../src/install/block.js';
 import { applyGlobalMode } from '../../src/install/global-mode.js';
 
 const HARNESSES = ['claude', 'codex', 'gemini', 'grok', 'goose'] as const;
@@ -51,8 +52,11 @@ describe('applyGlobalMode', () => {
     ]) {
       expect(read(path)).toContain('do not run `concord setup` yourself');
     }
-    const gemini: unknown = JSON.parse(read(join(env.HOME, '.gemini', 'settings.json')));
-    expect(gemini).toMatchObject({ mcpServers: { concord: { command: 'concord-mcp' } } });
+    const geminiSchema = z.object({
+      mcpServers: z.object({ concord: z.object({ command: z.string() }) }),
+    });
+    const gemini = geminiSchema.parse(JSON.parse(read(join(env.HOME, '.gemini', 'settings.json'))));
+    expect(gemini.mcpServers.concord.command).toBe('concord-mcp');
     expect(read(join(env.HOME, '.gemini', 'settings.json'))).not.toContain('CONCORD_REPO_ROOT');
     expect(read(join(env.HOME, '.grok', 'config.toml'))).toContain('[mcp_servers.concord]');
     expect(read(join(env.HOME, '.grok', 'config.toml'))).not.toContain('CONCORD_REPO_ROOT');
@@ -86,6 +90,42 @@ describe('applyGlobalMode', () => {
     expect(read(join(env.HOME, '.gemini', 'settings.json'))).not.toContain('concord-mcp');
     expect(existsSync(join(env.HOME, '.grok', 'config.toml'))).toBe(false);
     expect(read(join(env.HOME, 'claude-calls'))).toContain('mcp remove --scope user concord');
+  });
+
+  it('leaves MCP registration alone under --no-mcp, writing only instructions', () => {
+    const env = machine();
+    const report = applyGlobalMode(env, true, { mcp: false });
+    expect(report.written).toEqual([
+      join(env.HOME, '.claude', 'CLAUDE.md'),
+      join(env.HOME, '.codex', 'AGENTS.md'),
+      join(env.HOME, '.gemini', 'GEMINI.md'),
+      join(env.HOME, '.config', 'goose', '.goosehints'),
+    ]);
+    expect(existsSync(join(env.HOME, 'claude-calls'))).toBe(false);
+  });
+
+  it('warns when Claude Code cannot remove the server, but not when it is already gone', () => {
+    const env = machine([]);
+    const claude = (output: string): void => {
+      writeFileSync(join(env.HOME, 'bin', 'claude'), `#!/bin/sh\necho '${output}'\nexit 1\n`);
+      chmodSync(join(env.HOME, 'bin', 'claude'), 0o755);
+    };
+    claude('No MCP server named "concord" in user scope');
+    expect(applyGlobalMode(env, false).warnings).toEqual([]);
+    claude('could not write config');
+    expect(applyGlobalMode(env, false).warnings).toEqual([
+      'claude mcp remove --scope user concord: could not write config',
+    ]);
+  });
+});
+
+describe('removeBlock', () => {
+  it('restores the text around the block exactly', () => {
+    for (const original of ['# Rules\n', 'Line with a break  \n', 'A\n\n\nB\n', '']) {
+      expect(removeBlock(upsertBlock(original, 'block'))).toBe(original);
+    }
+    const edited = `${upsertBlock('A\n', 'block')}\nAdded later  \n`;
+    expect(removeBlock(edited)).toBe('A\n\nAdded later  \n');
   });
 });
 
