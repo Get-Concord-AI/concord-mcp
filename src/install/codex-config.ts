@@ -7,6 +7,9 @@ import { CONCORD_SERVER_COMMAND } from './mcp-config.js';
 /** The TOML table Codex reads Concord's server definition from. */
 export const CODEX_SECTION_HEADER = '[mcp_servers.concord]';
 
+/** The nested env table Concord writes its managed keys into. */
+const CODEX_ENV_HEADER = '[mcp_servers.concord.env]';
+
 /** Matches any TOML table header, which terminates the preceding table. */
 const TABLE_HEADER = /^\s*\[/u;
 
@@ -25,46 +28,72 @@ export function codexHome(env: NodeJS.ProcessEnv = process.env): string {
   return home !== undefined && home.trim() !== '' ? home : join(homedir(), '.codex');
 }
 
-/** Normalize preceding content so exactly one blank line precedes our table. */
-function withTrailingBlankLine(lines: readonly string[]): string {
-  if (lines.length === 0) {
-    return '';
-  }
-  return `${lines.join('\n').replace(/\n*$/u, '')}\n\n`;
-}
-
 /**
  * Idempotently add Concord's `[mcp_servers.concord]` table to a Codex TOML
  * config. This splices the table by line range rather than parsing and
  * re-serializing, so unrelated tables — and the comments and formatting around
  * them, which a round-trip through a parser would discard — survive verbatim.
+ *
+ * The agent kind is written into a `[mcp_servers.concord.env]` table rather
+ * than as a dotted `env.` key: if the user already has that subtable, a dotted
+ * key would define the same table twice and make the whole file invalid TOML,
+ * which stops Codex from loading its config at all.
  */
 export function upsertCodexMcpServer(existing: string | undefined): string {
-  const section = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"\n`;
   const source = existing ?? '';
   if (source.trim() === '') {
-    return section;
+    return `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"\n\n${CODEX_ENV_HEADER}\nCONCORD_AGENT_KIND = "codex"\n`;
   }
 
   const lines = source.split('\n');
-  const found = lines.findIndex((line) => line.trim() === CODEX_SECTION_HEADER);
-  const start = found === -1 ? lines.length : found;
 
-  // Our table runs until the next table header; a nested `[mcp_servers.concord.env]`
-  // is such a header, so any subtable the user added is preserved as trailing content.
-  let end = lines.length;
-  if (found !== -1) {
-    for (let index = found + 1; index < lines.length; index += 1) {
+  // Locate an existing env table anywhere in the file and capture its keys, so
+  // a table separated from the server by another table is still merged rather
+  // than duplicated (a duplicate would be invalid TOML).
+  const envHeaderIndex = lines.findIndex((line) => line.trim() === CODEX_ENV_HEADER);
+  const preservedEnvKeys: string[] = [];
+  const removed = new Set<number>();
+  if (envHeaderIndex !== -1) {
+    removed.add(envHeaderIndex);
+    let envEnd = lines.length;
+    for (let index = envHeaderIndex + 1; index < lines.length; index += 1) {
       if (TABLE_HEADER.test(lines[index] ?? '')) {
-        end = index;
+        envEnd = index;
         break;
+      }
+    }
+    for (let index = envHeaderIndex + 1; index < envEnd; index += 1) {
+      removed.add(index);
+      const line = lines[index] ?? '';
+      if (line.trim() !== '' && !/^\s*"?CONCORD_AGENT_KIND"?\s*=/u.test(line)) {
+        preservedEnvKeys.push(line);
       }
     }
   }
 
-  const head = withTrailingBlankLine(lines.slice(0, start));
-  const tail = lines.slice(end).join('\n');
-  return tail === '' ? `${head}${section}` : `${head}${section}\n${tail}`;
+  // Remove the existing server table (and anything up to the next header) so
+  // it is re-emitted cleanly with its env table adjacent.
+  const serverIndex = lines.findIndex((line) => line.trim() === CODEX_SECTION_HEADER);
+  if (serverIndex !== -1) {
+    removed.add(serverIndex);
+    for (let index = serverIndex + 1; index < lines.length; index += 1) {
+      if (TABLE_HEADER.test(lines[index] ?? '')) break;
+      removed.add(index);
+    }
+  }
+
+  const kept = lines.filter((_, index) => !removed.has(index));
+  // Collapse the blank runs the removals leave behind.
+  const base = kept
+    .join('\n')
+    .replace(/\n{3,}/gu, '\n\n')
+    .replace(/^\n+/u, '')
+    .replace(/\n+$/u, '');
+
+  const serverSection = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"\n`;
+  const envBody = [...preservedEnvKeys, 'CONCORD_AGENT_KIND = "codex"'].join('\n');
+  const block = `${serverSection}\n${CODEX_ENV_HEADER}\n${envBody}\n`;
+  return base === '' ? block : `${base}\n\n${block}`;
 }
 
 const HOOKS_BEGIN = '# >>> concord hooks >>>';
@@ -253,6 +282,9 @@ export function uninstallCodexConfig(env: NodeJS.ProcessEnv = process.env): stri
       (preserved === '' ? '' : `${preserved}\n`) +
       source.slice(end + HOOKS_END.length);
   }
-  writeFileSync(fullPath, removeTable(withoutHooks, CODEX_SECTION_HEADER));
+  writeFileSync(
+    fullPath,
+    removeTable(removeTable(withoutHooks, CODEX_ENV_HEADER), CODEX_SECTION_HEADER),
+  );
   return fullPath;
 }

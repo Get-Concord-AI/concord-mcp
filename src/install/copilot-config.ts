@@ -9,11 +9,40 @@ import { userHome } from '../config/paths.js';
 export const CONCORD_COPILOT_SERVER_KEY = 'concord';
 /** The binary Copilot spawns to run the stdio MCP server. */
 export const CONCORD_SERVER_COMMAND = 'concord-mcp';
+/** The client kind Concord pins into its own MCP registration. */
+const CONCORD_AGENT_KIND = 'copilot-cli';
 
-const looseObjectSchema = z.record(z.string(), z.unknown());
+/**
+ * A JSON value Concord preserves verbatim without interpreting. This is a
+ * concrete recursive type, not `unknown`: every preserved value is narrowed
+ * here at the parse boundary and only ever serialised back to disk.
+ */
+const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([z.string(), z.number(), z.boolean(), z.null(), jsonArraySchema, jsonObjectSchema]),
+);
 
-type UnknownRecord = z.infer<typeof looseObjectSchema>;
+const jsonArraySchema: z.ZodType<readonly JsonValue[]> = z.lazy(() => z.array(jsonValueSchema));
 
+const jsonObjectSchema = z.record(z.string(), jsonValueSchema);
+
+type JsonValue = string | number | boolean | null | readonly JsonValue[] | JsonObject;
+
+interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+/** The exact shape Concord writes for its own server entry. */
+const concordServerSchema = z.object({
+  type: z.literal('local'),
+  command: z.string(),
+  args: z.array(z.string()),
+  env: z.record(z.string(), z.string()),
+  tools: z.array(z.string()),
+});
+
+type ConcordServerEntry = z.infer<typeof concordServerSchema>;
+
+const stringRecordSchema = z.record(z.string(), z.string());
 /**
  * Thrown when the existing Copilot MCP config cannot be parsed. The caller
  * reports this and leaves the file untouched rather than overwriting
@@ -29,7 +58,7 @@ export class CopilotConfigParseError extends Error {
 /**
  * Copilot CLI's user-scoped MCP config, under its config home. `COPILOT_HOME`
  * wins when set; otherwise the platform config directory (`~/.copilot` on
- * macOS/Linux, `%APPDATA%\\copilot` on Windows).
+ * macOS/Linux, `%APPDATA%\copilot` on Windows).
  */
 export function copilotConfigFile(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env['COPILOT_HOME']?.trim();
@@ -43,7 +72,7 @@ export function copilotConfigFile(env: NodeJS.ProcessEnv = process.env): string 
   return join(userHome(env), '.copilot', 'mcp-config.json');
 }
 
-function readConfig(path: string): UnknownRecord {
+function readConfig(path: string): JsonObject {
   if (!existsSync(path)) return {};
   let parsed: unknown;
   try {
@@ -54,24 +83,44 @@ function readConfig(path: string): UnknownRecord {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new CopilotConfigParseError(path);
   }
-  return looseObjectSchema.parse(parsed);
+  return jsonObjectSchema.parse(parsed);
 }
 
-function writeConfig(path: string, config: UnknownRecord): void {
+function writeConfig(path: string, config: JsonObject): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
   if (process.platform !== 'win32') chmodSync(path, 0o600);
 }
 
-/** The Concord server entry Copilot should spawn, in Copilot's own shape. */
-function concordServerEntry(repoRoot: string, kind: string): UnknownRecord {
-  return {
+/** The server entry object Concord serialises into the config. */
+function concordServerEntryObject(repoRoot: string): ConcordServerEntry {
+  return concordServerSchema.parse({
     type: 'local',
     command: CONCORD_SERVER_COMMAND,
     args: [],
-    env: { CONCORD_REPO_ROOT: repoRoot, CONCORD_AGENT_KIND: kind },
+    env: { CONCORD_REPO_ROOT: repoRoot, CONCORD_AGENT_KIND },
     tools: ['*'],
-  };
+  });
+}
+
+/** The `mcpServers` object, or `undefined` when it is absent or not an object. */
+function readServers(config: JsonObject, path: string): JsonObject | undefined {
+  const servers = config['mcpServers'];
+  if (servers === undefined) return undefined;
+  const parsed = jsonObjectSchema.safeParse(servers);
+  if (!parsed.success) throw new CopilotConfigParseError(path);
+  return parsed.data;
+}
+
+/** The env object of an existing entry, narrowed to strings, when present. */
+function readEntryEnv(entry: JsonValue | undefined): Record<string, string> | undefined {
+  if (entry === undefined) return undefined;
+  const entryObject = jsonObjectSchema.safeParse(entry);
+  if (!entryObject.success) return undefined;
+  const env = entryObject.data['env'];
+  if (env === undefined) return undefined;
+  const parsed = stringRecordSchema.safeParse(env);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**
@@ -86,34 +135,29 @@ export function installCopilotMcpConfig(
 ): string {
   const path = copilotConfigFile(env);
   const config = readConfig(path);
-  const currentServers = config['mcpServers'];
-  const parsedServers =
-    currentServers === undefined
-      ? { success: true as const, data: {} }
-      : looseObjectSchema.safeParse(currentServers);
-  if (!parsedServers.success) {
-    throw new CopilotConfigParseError(path);
-  }
+  const existingServers = readServers(config, path) ?? {};
 
-  const servers: UnknownRecord = { ...parsedServers.data };
-  const existingEntry = looseObjectSchema.safeParse(servers[CONCORD_COPILOT_SERVER_KEY]);
-  const existingEnv =
-    existingEntry.success && typeof existingEntry.data['env'] === 'object'
-      ? looseObjectSchema.safeParse(existingEntry.data['env'])
-      : { success: false as const };
   // Preserve a repo root already pinned by a previous setup when the caller
-  // does not supply one (e.g. a plain re-run), and keep any unrelated env.
-  const preservedRepoRoot =
-    existingEnv.success && typeof existingEnv.data['CONCORD_REPO_ROOT'] === 'string'
-      ? existingEnv.data['CONCORD_REPO_ROOT']
-      : repoRoot;
+  // does not supply one (e.g. a plain re-run), keep any unrelated env the
+  // user added (e.g. CONCORD_AGENT_ID), and only refresh the two managed keys.
+  const existingEnv = readEntryEnv(existingServers[CONCORD_COPILOT_SERVER_KEY]);
+  const pinnedRoot = existingEnv?.['CONCORD_REPO_ROOT'];
+  const preservedRepoRoot = typeof pinnedRoot === 'string' ? pinnedRoot : repoRoot;
   if (preservedRepoRoot === undefined) {
     throw new Error(
       'Concord needs a repository root to register with Copilot CLI. Run `concord setup` in a repository, or pass --repo.',
     );
   }
 
-  servers[CONCORD_COPILOT_SERVER_KEY] = concordServerEntry(preservedRepoRoot, 'copilot-cli');
+  const entry = concordServerEntryObject(preservedRepoRoot);
+  const mergedEnv: Record<string, string> = {
+    ...existingEnv,
+    ...entry.env,
+  };
+  const servers: JsonObject = {
+    ...existingServers,
+    [CONCORD_COPILOT_SERVER_KEY]: { ...entry, env: mergedEnv },
+  };
   writeConfig(path, { ...config, mcpServers: servers });
   return path;
 }
@@ -123,10 +167,8 @@ export function copilotConfigInstalled(env: NodeJS.ProcessEnv = process.env): bo
   const path = copilotConfigFile(env);
   if (!existsSync(path)) return false;
   try {
-    const config = readConfig(path);
-    const servers = looseObjectSchema.safeParse(config['mcpServers']);
-    if (!servers.success) return false;
-    const entry = looseObjectSchema.safeParse(servers.data[CONCORD_COPILOT_SERVER_KEY]);
+    const servers = readServers(readConfig(path), path);
+    const entry = jsonObjectSchema.safeParse(servers?.[CONCORD_COPILOT_SERVER_KEY]);
     return entry.success && entry.data['command'] === CONCORD_SERVER_COMMAND;
   } catch {
     return false;
@@ -137,13 +179,19 @@ export function copilotConfigInstalled(env: NodeJS.ProcessEnv = process.env): bo
 export function uninstallCopilotConfig(env: NodeJS.ProcessEnv = process.env): void {
   const path = copilotConfigFile(env);
   if (!existsSync(path)) return;
-  const config = readConfig(path);
-  const servers = looseObjectSchema.safeParse(config['mcpServers']);
-  if (!servers.success) return;
-  if (!(CONCORD_COPILOT_SERVER_KEY in servers.data)) return;
+  let config: JsonObject;
+  try {
+    config = readConfig(path);
+  } catch {
+    // A malformed config is left untouched rather than aborting the whole
+    // adapter uninstall, which must finish cleaning up the other harnesses.
+    return;
+  }
+  const servers = readServers(config, path);
+  if (servers === undefined || !(CONCORD_COPILOT_SERVER_KEY in servers)) return;
 
-  const next: UnknownRecord = {};
-  for (const [key, value] of Object.entries(servers.data)) {
+  const next: JsonObject = {};
+  for (const [key, value] of Object.entries(servers)) {
     if (key === CONCORD_COPILOT_SERVER_KEY) continue;
     next[key] = value;
   }

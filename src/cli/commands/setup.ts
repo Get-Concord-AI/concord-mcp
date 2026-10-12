@@ -204,7 +204,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
     written.push(installClaudeHook(ctx.repoRoot));
   }
   if (options.mcp !== false) {
-    written.push(...installMcpConfigs(ctx.repoRoot));
+    written.push(...installMcpConfigs(ctx.repoRoot, env));
     // Global mode owns a user-level Cursor entry; without it, one is a stale
     // registration that would shadow this repository's pinned one.
     const migratedCursorConfig =

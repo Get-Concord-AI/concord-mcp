@@ -88,7 +88,7 @@ const USER_FILES: readonly UserFile[] = [
     executable: 'grok',
     registration: { id: 'grok', present: hasGrokMcpServer },
     path: (env) => join(grokHome(env), 'config.toml'),
-    install: (existing) => upsertGrokMcpServer(existing),
+    install: (existing) => upsertGrokMcpServer(existing, undefined),
     uninstall: (existing) => {
       const rest = removeGrokMcpServer(existing);
       return rest === '' ? '' : `${rest}\n`;

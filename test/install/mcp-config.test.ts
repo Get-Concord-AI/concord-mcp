@@ -23,6 +23,7 @@ describe('upsertMcpServer', () => {
     expect(out).toContain(CONCORD_SERVER_KEY);
     expect(out).toContain(CONCORD_SERVER_COMMAND);
     expect(out).toContain('"CONCORD_REPO_ROOT": "/tmp/project"');
+    expect(out).toContain('"CONCORD_AGENT_KIND": "claude-code"');
     expect(out.endsWith('\n')).toBe(true);
   });
 
@@ -69,6 +70,7 @@ describe('installMcpConfigs', () => {
       join('.github', 'mcp.json'),
       join('.gemini', 'settings.json'),
       join('.grok', 'config.toml'),
+      'opencode.json',
     ]);
     for (const relPath of written) {
       expect(existsSync(join(root, relPath))).toBe(true);
@@ -76,6 +78,20 @@ describe('installMcpConfigs', () => {
       expect(content).toContain(CONCORD_SERVER_COMMAND);
       expect(content).toContain(root);
     }
+    // Each target is pinned to its own harness kind so shared files never
+    // make one harness borrow another's session identity.
+    const kindIn = (relPath: string): string => {
+      const parsed: unknown = JSON.parse(readFileSync(join(root, relPath), 'utf8'));
+      const env = z
+        .object({
+          mcpServers: z.record(z.string(), z.object({ env: z.record(z.string(), z.string()) })),
+        })
+        .parse(parsed).mcpServers[CONCORD_SERVER_KEY]?.env;
+      return env?.['CONCORD_AGENT_KIND'] ?? '';
+    };
+    expect(kindIn('.mcp.json')).toBe('claude-code');
+    expect(kindIn(join('.cursor', 'mcp.json'))).toBe('cursor');
+    expect(kindIn(join('.github', 'mcp.json'))).toBe('copilot-cli');
     const gemini = z
       .object({
         tools: z.object({ shell: z.object({ backgroundCompletionBehavior: z.string() }) }),
@@ -154,21 +170,22 @@ describe('upsertGeminiSettings', () => {
 describe('upsertGrokMcpServer', () => {
   it('is idempotent and preserves unrelated TOML tables', () => {
     const existing = '[ui]\nscreen_mode = "minimal"\n\n[mcp_servers.other]\ncommand = "other"\n';
-    const once = upsertGrokMcpServer(existing, '/tmp/project');
-    const twice = upsertGrokMcpServer(once, '/tmp/project');
+    const once = upsertGrokMcpServer(existing, '/tmp/project', 'grok');
+    const twice = upsertGrokMcpServer(once, '/tmp/project', 'grok');
 
     expect(twice).toBe(once);
     expect(once).toContain('[ui]');
     expect(once).toContain('[mcp_servers.other]');
     expect(once).toContain('[mcp_servers.concord]');
     expect(once).toContain('CONCORD_REPO_ROOT = "/tmp/project"');
+    expect(once).toContain('CONCORD_AGENT_KIND = "grok"');
   });
 
   it('replaces Grok CLI-generated Concord tables without duplicating them', () => {
     const existing =
       '[mcp_servers.concord]\ncommand = "old"\nargs = []\n\n' +
       '[mcp_servers.concord.env]\nCONCORD_REPO_ROOT = "/old"\n\n[other]\nvalue = true\n';
-    const updated = upsertGrokMcpServer(existing, '/new');
+    const updated = upsertGrokMcpServer(existing, '/new', 'grok');
 
     expect(updated.match(/\[mcp_servers\.concord\]/gu)).toHaveLength(1);
     expect(updated).not.toContain('command = "old"');

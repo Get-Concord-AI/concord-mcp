@@ -14,6 +14,7 @@ export const harnessNames = [
   'grok',
   'goose',
   'copilot-cli',
+  'opencode',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -215,6 +216,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Concord MCP server is registered with Copilot CLI; durable inbox delivery is available.',
     unsupportedDetail: 'Copilot CLI does not meet the verified MCP baseline (1.0.0).',
+  },
+  opencode: {
+    name: 'opencode',
+    executable: 'opencode',
+    minimumVersion: [1, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Concord MCP server is registered with OpenCode; durable inbox delivery is available.',
+    unsupportedDetail: 'OpenCode does not meet the verified MCP baseline (1.0.0).',
   },
 };
 

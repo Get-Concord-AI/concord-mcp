@@ -4,14 +4,14 @@ import { dirname, join } from 'node:path';
 import { upsertBlock } from './block.js';
 import { CONCORD_INSTRUCTIONS, CURSOR_MDC_HEADER } from './instructions.js';
 
-interface InstallTarget {
+export interface InstallTarget {
   /** Path relative to the repo root. */
   relPath: string;
   /** Seed content used only when the file does not yet exist. */
   header?: string;
 }
 
-const TARGETS: readonly InstallTarget[] = [
+export const INSTRUCTION_TARGETS: readonly InstallTarget[] = [
   { relPath: 'CLAUDE.md' },
   { relPath: 'AGENTS.md' },
   { relPath: join('.codex', 'concord.md') },
@@ -34,5 +34,5 @@ function writeTarget(repoRoot: string, target: InstallTarget): string {
  * written.
  */
 export function installConcord(repoRoot: string): string[] {
-  return TARGETS.map((target) => writeTarget(repoRoot, target));
+  return INSTRUCTION_TARGETS.map((target) => writeTarget(repoRoot, target));
 }

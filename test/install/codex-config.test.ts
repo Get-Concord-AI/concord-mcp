@@ -90,6 +90,69 @@ describe('upsertCodexMcpServer', () => {
     expect(out).toContain('[mcp_servers.concord.env]');
     expect(out).toContain('CONCORD_REPO_ROOT = "/tmp/repo"');
   });
+
+  it('merges the agent kind into an existing env table without defining it twice', () => {
+    const existing = [
+      '[mcp_servers.concord]',
+      'command = "concord-mcp"',
+      '',
+      '[mcp_servers.concord.env]',
+      'CONCORD_REPO_ROOT = "/tmp/repo"',
+      '',
+      '[other]',
+      'key = 1',
+      '',
+    ].join('\n');
+    const out = upsertCodexMcpServer(existing);
+
+    // A dotted env key alongside the subtable would define the same table
+    // twice and make the whole file invalid TOML.
+    expect(out).not.toMatch(/env\.CONCORD_AGENT_KIND/u);
+    expect(out.match(/\[mcp_servers\.concord\.env\]/gu)).toHaveLength(1);
+    expect(out).toContain('CONCORD_AGENT_KIND = "codex"');
+    expect(out).toContain('CONCORD_REPO_ROOT = "/tmp/repo"');
+    expect(out).toContain('[other]');
+    expect(out).not.toMatch(/\n\n\n/u);
+    expect(upsertCodexMcpServer(out)).toBe(out);
+  });
+
+  it('merges the env table even when another table separates it from the server', () => {
+    const existing = [
+      '[mcp_servers.concord]',
+      'command = "concord-mcp"',
+      '',
+      '[other]',
+      'key = 1',
+      '',
+      '[mcp_servers.concord.env]',
+      'CONCORD_REPO_ROOT = "/tmp/repo"',
+      '',
+    ].join('\n');
+    const out = upsertCodexMcpServer(existing);
+
+    expect(out.match(/\[mcp_servers\.concord\.env\]/gu)).toHaveLength(1);
+    expect(out).toContain('CONCORD_AGENT_KIND = "codex"');
+    expect(out).toContain('CONCORD_REPO_ROOT = "/tmp/repo"');
+    expect(out).toContain('[other]');
+    expect(out).not.toMatch(/env\.CONCORD_AGENT_KIND/u);
+    expect(upsertCodexMcpServer(out)).toBe(out);
+  });
+
+  it('replaces a quoted CONCORD_AGENT_KIND key without duplicating it', () => {
+    const existing = [
+      '[mcp_servers.concord]',
+      'command = "concord-mcp"',
+      '',
+      '[mcp_servers.concord.env]',
+      '"CONCORD_AGENT_KIND" = "codex"',
+      '',
+    ].join('\n');
+    const out = upsertCodexMcpServer(existing);
+
+    expect(out.match(/CONCORD_AGENT_KIND/gu)).toHaveLength(1);
+    expect(out.match(/\[mcp_servers\.concord\.env\]/gu)).toHaveLength(1);
+    expect(upsertCodexMcpServer(out)).toBe(out);
+  });
 });
 
 describe('installCodexMcpConfig', () => {
@@ -122,5 +185,20 @@ describe('uninstallCodexConfig', () => {
     expect(result).not.toContain(CODEX_SECTION_HEADER);
     expect(result).not.toContain('concord hooks');
     expect(result).toContain('[other]');
+  });
+
+  it('removes the managed env table too, leaving no orphaned concord server', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-env-'));
+    const env = { CODEX_HOME: home };
+    installCodexMcpConfig(env);
+
+    uninstallCodexConfig(env);
+
+    const result = readFileSync(codexConfigFile(env), 'utf8');
+    // An orphaned [mcp_servers.concord.env] still defines a `concord` server
+    // with no command, which Codex can reject.
+    expect(result).not.toContain('[mcp_servers.concord.env]');
+    expect(result).not.toContain('CONCORD_AGENT_KIND');
+    expect(result.trim()).toBe('');
   });
 });

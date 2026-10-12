@@ -114,6 +114,35 @@ describe('installCopilotMcpConfig', () => {
     expect(server?.env?.['CONCORD_REPO_ROOT']).toBe('/tmp/original');
   });
 
+  it('preserves unrelated env values the user added, refreshing only managed keys', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-copilot-'));
+    const env = { COPILOT_HOME: home };
+    installCopilotMcpConfig(env, '/tmp/original');
+    const path = copilotConfigFile(env);
+    const existing = readCopilotConfig(path);
+    const withCustomEnv = {
+      ...existing,
+      mcpServers: {
+        ...existing.mcpServers,
+        [CONCORD_COPILOT_SERVER_KEY]: {
+          ...existing.mcpServers[CONCORD_COPILOT_SERVER_KEY],
+          env: {
+            ...existing.mcpServers[CONCORD_COPILOT_SERVER_KEY]?.env,
+            CONCORD_AGENT_ID: 'reviewer',
+          },
+        },
+      },
+    };
+    writeFileSync(path, `${JSON.stringify(withCustomEnv, null, 2)}\n`);
+
+    installCopilotMcpConfig(env, '/tmp/original');
+
+    const server = readCopilotConfig(path).mcpServers[CONCORD_COPILOT_SERVER_KEY];
+    expect(server?.env?.['CONCORD_AGENT_ID']).toBe('reviewer');
+    expect(server?.env?.['CONCORD_REPO_ROOT']).toBe('/tmp/original');
+    expect(server?.env?.['CONCORD_AGENT_KIND']).toBe('copilot-cli');
+  });
+
   it('throws when no repo root is available and none was pinned', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-copilot-'));
     expect(() => installCopilotMcpConfig({ COPILOT_HOME: home })).toThrow(/repository root/u);

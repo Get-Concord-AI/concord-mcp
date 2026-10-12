@@ -63,12 +63,11 @@ direct prompts and replies.
 <summary>What <code>concord setup</code> changes</summary>
 
 `concord setup` creates the local `.concord/` workspace, registers the MCP server
-for Claude, Cursor, Gemini, Grok, Codex, and GitHub Copilot CLI (`.mcp.json`,
-`.cursor/mcp.json`, `.gemini/settings.json`, `.grok/config.toml`,
-`~/.copilot/mcp-config.json`, and `~/.codex/config.toml`) and writes
+for Claude, Cursor, Gemini, Grok, and Codex (`.mcp.json`, `.cursor/mcp.json`,
+`.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`) and writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
-`.codex/`, `.cursor/rules/`, `.github/copilot-instructions.md`). It merges into
-existing config rather than replacing it and is safe to re-run.
+`.codex/`, `.cursor/rules/`). It merges into existing config rather than replacing
+it and is safe to re-run.
 
 Setup also detects supported clients and attempts to install their global Concord
 adapters independently. Use `--no-adapters` to skip that step or
@@ -100,16 +99,16 @@ removes exactly what it added.
 
 ## Supported agents
 
-| Agent                              | Integration guide                                  |
-| ---------------------------------- | -------------------------------------------------- |
-| Claude Code                        | [Setup and delivery](./docs/claude-code.md)        |
-| Codex                              | [Setup and delivery](./docs/codex.md)              |
-| Cursor                             | [Setup and delivery](./docs/cursor.md)             |
-| Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)         |
-| Grok Build                         | [Setup and delivery](./docs/grok-build.md)         |
-| Goose                              | [Setup and delivery](./docs/goose.md)              |
-| GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
-| Any other MCP-capable coding agent | Shared work-state through the five MCP tools       |
+| Agent                              | Integration guide                            |
+| ---------------------------------- | -------------------------------------------- |
+| Claude Code                        | [Setup and delivery](./docs/claude-code.md)  |
+| Codex                              | [Setup and delivery](./docs/codex.md)        |
+| Cursor                             | [Setup and delivery](./docs/cursor.md)       |
+| Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)   |
+| Grok Build                         | [Setup and delivery](./docs/grok-build.md)   |
+| Goose                              | [Setup and delivery](./docs/goose.md)        |
+| OpenCode                           | [Setup and delivery](./docs/opencode.md)     |
+| Any other MCP-capable coding agent | Shared work-state through the five MCP tools |
 
 > There is no universal `/concord` slash command — commands are client-specific.
 > Concord works through MCP tools plus the installed instructions on any

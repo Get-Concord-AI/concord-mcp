@@ -26,6 +26,7 @@ import {
   installCopilotMcpConfig,
   uninstallCopilotConfig,
 } from '../copilot-config.js';
+import { opencodeConfigInstalled } from '../opencode-config.js';
 import {
   gooseConfigInstalled,
   installGooseMcpConfig,
@@ -533,6 +534,43 @@ function statusCopilot(env: NodeJS.ProcessEnv): AdapterReport {
   };
 }
 
+function statusOpencode(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterReport {
+  const config = HARNESS_CONFIGS.opencode;
+  const executable = executablePath(config.executable, env);
+  if (executable === undefined) {
+    return {
+      harness: config.name,
+      detected: false,
+      status: 'not_detected',
+      monitor: config.monitor.kind,
+      capabilities: [],
+      detail: 'OpenCode was not found on PATH.',
+    };
+  }
+  const version = versionTuple(run(executable, ['--version'], env).output);
+  if (version === undefined || !atLeast(version, config.minimumVersion)) {
+    return {
+      harness: config.name,
+      detected: true,
+      status: 'unsupported_version',
+      monitor: config.monitor.kind,
+      capabilities: [],
+      detail: config.unsupportedDetail,
+    };
+  }
+  const installed = repoRoot !== undefined && opencodeConfigInstalled(repoRoot, env);
+  return {
+    harness: config.name,
+    detected: true,
+    status: installed ? 'installed' : 'action_required',
+    monitor: config.monitor.kind,
+    capabilities: installed ? [...config.installedCapabilities] : ['pull', 'busy'],
+    detail: installed
+      ? config.installedDetail
+      : 'Concord MCP server is not yet registered with OpenCode.',
+  };
+}
+
 export function statusGlobalAdapters(
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
@@ -545,6 +583,7 @@ export function statusGlobalAdapters(
     statusGrok(env),
     statusGoose(env),
     statusCopilot(env),
+    statusOpencode(env, repoRoot),
   ];
 }
 
