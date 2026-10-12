@@ -20,6 +20,7 @@ import {
   readCredentials,
   readLink,
   readLocalChoice,
+  readMachineKey,
   removeCredentials,
   removeLink,
   writeCredentials,
@@ -201,6 +202,9 @@ function workspaceLine(repoRoot: string, deps: CloudDeps): string {
   }
   if (readCredentials(deps.env) === undefined) {
     return `Repository: ${repoRoot} is local (not signed in)`;
+  }
+  if (readMachineKey(deps.env) === undefined) {
+    return `Repository: ${repoRoot} is local: this machine has no Concord Cloud identity; run \`concord cloud login\` again`;
   }
   if (existsSync(databasePath(repoRoot))) {
     return `Repository: ${repoRoot} is local: it holds local Concord state; \`concord cloud link\` moves it to the cloud`;

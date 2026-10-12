@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -278,6 +279,12 @@ describe('concord cloud', () => {
     writeFileSync(join(folder, '.concord', 'concord.db'), '');
     expect(runCloudLink({}, inFolder)).toContain('general workspace again');
     expect(await runCloudStatus(inFolder)).toContain('is linked to general');
+  });
+
+  it('says why a signed-in repository is local when this machine has no identity', async () => {
+    await runCloudLogin({ url: API }, deps);
+    rmSync(join(home, '.concord', 'machine.json'));
+    expect(await runCloudStatus(deps)).toContain('no Concord Cloud identity');
   });
 
   it('keeps a choice to stay local across a logout', async () => {
