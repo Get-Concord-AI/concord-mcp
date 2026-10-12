@@ -21,7 +21,14 @@ export const taskStatusValues = [
 export type TaskStatus = (typeof taskStatusValues)[number];
 const taskStatusSchema = z.enum(taskStatusValues);
 
-/** Tools that can be recorded as events (used for adoption tracking). */
+/**
+ * Tools that can be recorded as events.
+ *
+ * The first group are the task-lifecycle operations; the second are the public
+ * MCP tools, which name the same operations a user invokes. Both are stored in
+ * the same unconstrained TEXT column, so an event can name whichever surface
+ * the caller actually called.
+ */
 export const toolNameValues = [
   'claim_work',
   'update_task',
@@ -38,6 +45,11 @@ export const toolNameValues = [
   'expire_handoff',
   'close_task',
   'reopen_task',
+  'start_work',
+  'inspect_work',
+  'update_work',
+  'transfer_work',
+  'finish_work',
 ] as const;
 export type ToolName = (typeof toolNameValues)[number];
 const toolNameSchema = z.enum(toolNameValues);

@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Repositories, TaskRecord } from '../db/index.js';
 import type { AvailableUpdate } from '../update-notifier.js';
 import { receiverActive } from '../domain/delivery.js';
+import { recordRejectedCall, withRecordedEvents } from './recorded-events.js';
 import { harnessConfigFor } from '../domain/harness-config.js';
 import { resolveActorId, type AgentIdentity } from '../domain/identity.js';
 import type { SemanticTelemetryEvent, TelemetryRecorder } from '../telemetry/events.js';
@@ -449,8 +450,11 @@ export function registerWorkflowTools(
     content: { type: 'text'; text: string }[];
     structuredContent?: Record<string, unknown>;
     isError?: boolean;
+    [key: string]: unknown;
   }
   const warnedInactiveReceivers = new Set<string>();
+  const withEventRecording = withRecordedEvents(repos, onWrite);
+
   let updateNoticeShown = false;
 
   /** Add one neutral recovery hint per inactive period to this MCP session. */
@@ -558,7 +562,7 @@ export function registerWorkflowTools(
         'when needed, claim the declared scope, and return actionable overlap warnings.',
       inputSchema: startWorkInputShape,
     },
-    (args) => {
+    withEventRecording('start_work', (args) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       // The session's kind wins alongside its id: the id embeds the kind, so
       // registering under a different one would describe an agent that is not
@@ -606,7 +610,7 @@ export function registerWorkflowTools(
           breadth_reasons: result.claim.breadthReasons,
         },
       });
-    },
+    }),
   );
 
   server.registerTool(
@@ -624,7 +628,7 @@ export function registerWorkflowTools(
         openWorldHint: false,
       },
     },
-    (args) => {
+    withEventRecording('inspect_work', (args) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleInspectWork(repos, args);
       if (result.scope === 'workspace') {
@@ -717,7 +721,7 @@ export function registerWorkflowTools(
           messages: result.context.messages,
         },
       });
-    },
+    }),
   );
 
   server.registerTool(
@@ -728,7 +732,7 @@ export function registerWorkflowTools(
         'Record task context or deliver a live prompt/reply to another promptable workspace agent.',
       inputSchema: updateWorkInputShape,
     },
-    async (args) => {
+    withEventRecording('update_work', async (args) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const telemetryWorkspaceRoot = workspace?.repoRoot;
       const messageTaskId =
@@ -837,6 +841,10 @@ export function registerWorkflowTools(
             },
             telemetryWorkspaceRoot,
           );
+          // This branch returns a failure instead of throwing, so the
+          // dispatch wrapper never sees it and the audit trail would miss a
+          // failed delivery the caller plainly saw.
+          recordRejectedCall(repos, 'update_work', args, error, onWrite);
           return withSessionAdvisories({
             isError: true,
             content: [
@@ -856,7 +864,7 @@ export function registerWorkflowTools(
         }
         throw error;
       }
-    },
+    }),
   );
 
   server.registerTool(
@@ -868,7 +876,7 @@ export function registerWorkflowTools(
         'offer an evidence-bearing handoff, or reopen terminal work.',
       inputSchema: transferWorkInputShape,
     },
-    (args) => {
+    withEventRecording('transfer_work', (args) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleTransferWork(repos, withActor(args));
       recordTaskTransition(result.task.taskId, args.action, result.task.status);
@@ -890,7 +898,7 @@ export function registerWorkflowTools(
           ...transferFields(result),
         },
       });
-    },
+    }),
   );
 
   server.registerTool(
@@ -902,7 +910,7 @@ export function registerWorkflowTools(
         'review-ready, or close it with a complete/closed outcome.',
       inputSchema: finishWorkInputShape,
     },
-    (args) => {
+    withEventRecording('finish_work', (args) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleFinishWork(repos, withActor(args));
       const finishedTaskFlowId = taskFlowId(result.task.taskId);
@@ -946,6 +954,6 @@ export function registerWorkflowTools(
           review_ready: result.evidence.reviewReady,
         },
       });
-    },
+    }),
   );
 }
