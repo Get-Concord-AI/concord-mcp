@@ -17,6 +17,16 @@ import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleHandoff } from '../../src/tools/handoff.js';
 import { handleReviewReady } from '../../src/tools/review-ready.js';
 
+/**
+ * An environment whose PATH resolves no harness binary and whose HOME is an
+ * empty directory, so `runDoctor`'s adapter probe never spawns a real
+ * `copilot`/`codex`/etc. from the developer's machine.
+ */
+function hermeticEnv(): NodeJS.ProcessEnv {
+  const emptyHome = mkdtempSync(join(tmpdir(), 'concord-doctor-home-'));
+  return { HOME: emptyHome, PATH: join(tmpdir(), 'concord-no-bin') };
+}
+
 function seededRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), 'concord-cli2-'));
   mkdirSync(join(dir, '.git'));
@@ -83,7 +93,7 @@ describe('CLI read/export commands', () => {
   });
 
   it('doctor reports schema version and adoption', () => {
-    const report = runDoctor(dir);
+    const report = runDoctor(dir, hermeticEnv());
     expect(report).toContain('schema v11, expected v11');
     expect(report).toContain('TASK-12');
     expect(report).toContain('start_work: yes');
@@ -98,14 +108,14 @@ describe('CLI read/export commands', () => {
       '<!-- concord:start -->\n## Concord\nOld tool instructions\n<!-- concord:end -->\n',
     );
 
-    expect(runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
+    expect(runDoctor(dir, hermeticEnv())).toContain('instructions stale -> AGENTS.md');
   });
 
   it('doctor ignores generic headings and reports invalid instruction paths', () => {
     writeFileSync(join(dir, 'AGENTS.md'), '## Concord\nHuman-authored project notes\n');
     mkdirSync(join(dir, 'CLAUDE.md'));
 
-    const report = runDoctor(dir);
+    const report = runDoctor(dir, hermeticEnv());
     expect(report).not.toContain('stale -> AGENTS.md');
     expect(report).toContain('instructions unreadable -> CLAUDE.md');
   });
@@ -117,6 +127,6 @@ describe('CLI read/export commands', () => {
         '<!-- concord:start -->\n## Concord\nOld generated instructions\n<!-- concord:end -->\n',
     );
 
-    expect(runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
+    expect(runDoctor(dir, hermeticEnv())).toContain('instructions stale -> AGENTS.md');
   });
 });

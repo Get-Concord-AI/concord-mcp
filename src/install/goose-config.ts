@@ -77,6 +77,7 @@ export function installGooseMcpConfig(env: NodeJS.ProcessEnv = process.env): voi
     cmd: CONCORD_SERVER_COMMAND,
     args: [...CONCORD_SERVER_ARGS],
     timeout: 300,
+    env: { CONCORD_AGENT_KIND: 'goose' },
   };
 
   writeConfig(path, { ...config, [EXTENSIONS_KEY]: nextExtensions });
