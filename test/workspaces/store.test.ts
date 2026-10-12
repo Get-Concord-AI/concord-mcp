@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdirSync,
+  watch,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -14,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { readUserConfig, writeUserConfig } from '../../src/config/user-config.js';
 import { createRepositories, openDatabase, openRepositories } from '../../src/db/index.js';
 import { registerPullEndpoint, workspaceExists } from '../../src/cli/commands/inbox.js';
+import { watchedDirectory } from '../../src/cli/commands/watch.js';
 import { openContext } from '../../src/cli/context.js';
 import { handleSendAgentMessage } from '../../src/tools/agent-messages.js';
 import { WorkspaceManager } from '../../src/workspaces/manager.js';
@@ -180,6 +182,20 @@ describe('global mode end to end', () => {
     const cli = openContext(first, { ...env, CONCORD_REPO_ROOT: first });
     expect(cli.store.kind).toBe('global');
     expect(cli.repos.tasks.get('TASK-1')?.title).toBe('Same id in two repositories');
+  });
+
+  it('lets concord watch follow database writes before any artifact is written', async () => {
+    const root = repoDir('watch');
+    const ctx = openContext(root, { ...globalEnv(), CONCORD_REPO_ROOT: root });
+    expect(existsSync(ctx.concordPath)).toBe(false);
+    const changed = new Promise<void>((resolve) => {
+      const watcher = watch(watchedDirectory(ctx), () => {
+        watcher.close();
+        resolve();
+      });
+    });
+    ctx.repos.tasks.create(task);
+    await changed;
   });
 
   it('opens the repository store when asked to, as setup does', () => {
