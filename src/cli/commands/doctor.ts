@@ -7,22 +7,17 @@ import { z } from 'zod';
 import { migrations } from '../../db/schema.js';
 import { buildAdoption } from '../../domain/adoption.js';
 import { BLOCK_END, BLOCK_START } from '../../install/block.js';
+import { INSTRUCTION_TARGETS } from '../../install/index.js';
 import { renderAdapterReport, statusGlobalAdapters } from '../../install/adapters/index.js';
 import { CONCORD_INSTRUCTION_VERSION } from '../../install/instructions.js';
 import { endpointPromptable } from '../../tools/agent-messages.js';
 import { openContext, type CliContext } from '../context.js';
 
-const instructionTargets = [
-  'CLAUDE.md',
-  'AGENTS.md',
-  join('.codex', 'concord.md'),
-  join('.cursor', 'rules', 'concord.mdc'),
-] as const;
-
 /** Summarize outdated or unreadable generated Concord instruction blocks. */
 function instructionStatus(repoRoot: string): string {
   const marker = `<!-- concord:workflow-version=${CONCORD_INSTRUCTION_VERSION} -->`;
-  const issues = instructionTargets.flatMap((relativePath) => {
+  const issues = INSTRUCTION_TARGETS.flatMap((target) => {
+    const relativePath = target.relPath;
     const path = join(repoRoot, relativePath);
     if (!existsSync(path)) {
       return [];
