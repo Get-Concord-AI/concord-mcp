@@ -274,8 +274,18 @@ describe('concord cloud', () => {
     expect(await runCloudStatus(inFolder)).toContain('uses Concord Cloud as general');
     expect(() => runCloudLink({}, inFolder)).toThrow(/nothing to link/);
     expect(runCloudUnlink(inFolder)).toContain('stays local');
+    // Local state gathered while unlinked does not keep it local once linked.
+    writeFileSync(join(folder, '.concord', 'concord.db'), '');
     expect(runCloudLink({}, inFolder)).toContain('general workspace again');
-    expect(await runCloudStatus(inFolder)).toContain('uses Concord Cloud as general');
+    expect(await runCloudStatus(inFolder)).toContain('is linked to general');
+  });
+
+  it('keeps a choice to stay local across a logout', async () => {
+    await runCloudLogin({ url: API }, deps);
+    runCloudUnlink(deps);
+    runCloudLogout(deps);
+    expect(runCloudUnlink(deps)).toContain('already stays local');
+    expect(readLocalChoice(repo)).toBe(true);
   });
 
   it('needs --project when there is no origin, and rejects a non-remote', async () => {

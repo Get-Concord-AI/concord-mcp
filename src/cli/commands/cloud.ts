@@ -32,7 +32,7 @@ import { cloudTargetFor } from '../../cloud/target.js';
 import { bearerFor } from '../../cloud/tokens.js';
 import { concordDir, databasePath, resolveRepoRoot } from '../../config/paths.js';
 import { normalizeProjectKey } from '../../domain/project-key.js';
-import { gitOriginRemote, isRepository } from '../../workspaces/store.js';
+import { GENERAL_PROJECT, gitOriginRemote, isRepository } from '../../workspaces/store.js';
 import { ensureConcordIgnored } from './setup.js';
 import { VERSION } from '../../version.js';
 
@@ -137,14 +137,18 @@ export function runCloudLink(options: { readonly project?: string }, deps: Cloud
   }
 
   const repoRoot = resolveRepoRoot(deps.cwd, deps.env);
-  // Outside a repository there is no project to name: linking only undoes an
-  // unlink, returning the folder to the cloud's general workspace.
+  // Outside a repository there is no project to name but `general`. Linking
+  // undoes an unlink — explicitly, since local state the folder gathered
+  // meanwhile would otherwise keep it local.
   if (options.project === undefined && !isRepository(repoRoot)) {
-    if (removeLink(repoRoot)) return `${repoRoot} uses Concord Cloud's general workspace again.`;
-    throw new Error(
-      'Outside a repository there is nothing to link: a signed-in Claude Code session here ' +
-        "uses Concord Cloud's general workspace by default.",
-    );
+    if (!readLocalChoice(repoRoot)) {
+      throw new Error(
+        'Outside a repository there is nothing to link: a signed-in Claude Code session here ' +
+          "uses Concord Cloud's general workspace by default.",
+      );
+    }
+    writeLink(repoRoot, { apiUrl: credentials.apiUrl, projectKey: GENERAL_PROJECT });
+    return `${repoRoot} uses Concord Cloud's general workspace again.`;
   }
   const remote = options.project ?? deps.originRemote(repoRoot);
   if (remote === undefined) {
@@ -170,8 +174,9 @@ export function runCloudLink(options: { readonly project?: string }, deps: Cloud
  */
 export function runCloudUnlink(deps: CloudDeps): string {
   const repoRoot = resolveRepoRoot(deps.cwd, deps.env);
+  // Checked first, signed in or not: a saved choice outlives a logout.
+  if (readLocalChoice(repoRoot)) return `${repoRoot} already stays local.`;
   if (readCredentials(deps.env) !== undefined) {
-    if (readLocalChoice(repoRoot)) return `${repoRoot} already stays local.`;
     writeLocalChoice(repoRoot);
     // Never committed: the choice is this machine's, not every clone's.
     ensureConcordIgnored(concordDir(repoRoot));

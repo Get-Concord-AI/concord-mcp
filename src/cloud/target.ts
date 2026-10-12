@@ -9,7 +9,7 @@ import {
   repositoryProjectKey,
   type OriginRemote,
 } from '../workspaces/store.js';
-import { readCredentials, readLink, readLocalChoice } from './settings.js';
+import { readCredentials, readLink, readLocalChoice, readMachineKey } from './settings.js';
 
 /**
  * Whether a workspace works through Concord Cloud, and as which project.
@@ -50,8 +50,10 @@ export function cloudTargetFor(
   if (link !== undefined) return { ...link, source: 'link' };
   if (readLocalChoice(repoRoot) || existsSync(databasePath(repoRoot))) return undefined;
 
+  // A default needs this machine's identity to act on; without one it stays
+  // local, for every caller alike, rather than failing to start.
   const credentials = readCredentials(env);
-  if (credentials === undefined) return undefined;
+  if (credentials === undefined || readMachineKey(env) === undefined) return undefined;
 
   const projectKey = isRepository(repoRoot)
     ? repositoryProjectKey(repoRoot, originRemote)

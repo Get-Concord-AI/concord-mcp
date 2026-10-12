@@ -63,9 +63,6 @@ export function cloudSessionFor(
 
   const credentials = readCredentials(env);
   const machineKey = readMachineKey(env);
-  // Only a link is a promise to work through the cloud; a default this machine
-  // cannot act on (no machine identity) stays local rather than failing.
-  if (link.source === 'default' && machineKey === undefined) return undefined;
   if (credentials === undefined || machineKey === undefined) {
     throw new Error(
       `${repoRoot} is linked to Concord Cloud, but this machine is not logged in. ` +

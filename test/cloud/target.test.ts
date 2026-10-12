@@ -4,7 +4,12 @@ import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { writeCredentials, writeLink, writeLocalChoice } from '../../src/cloud/settings.js';
+import {
+  ensureMachineKey,
+  writeCredentials,
+  writeLink,
+  writeLocalChoice,
+} from '../../src/cloud/settings.js';
 import { cloudSessionFor } from '../../src/cloud/proxy.js';
 import { cloudTargetFor } from '../../src/cloud/target.js';
 
@@ -24,8 +29,9 @@ describe('cloudTargetFor', () => {
     folder = mkdtempSync(join(tmpdir(), 'concord-folder-'));
   });
 
-  const signIn = () => {
+  const signIn = (withMachine = true) => {
     writeCredentials({ HOME: home }, { apiUrl: API, apiKey: 'ck_test' });
+    if (withMachine) ensureMachineKey({ HOME: home }, () => 'machine-1');
   };
 
   it('is local while signed out, unless the repository is linked', () => {
@@ -73,7 +79,8 @@ describe('cloudTargetFor', () => {
   });
 
   it('stays local, rather than failing, when this machine has no identity for a default', () => {
-    signIn();
+    signIn(false);
+    expect(cloudTargetFor(repo, { HOME: home }, ORIGIN)).toBeUndefined();
     expect(cloudSessionFor(repo, { HOME: home }, undefined)).toBeUndefined();
   });
 
