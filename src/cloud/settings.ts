@@ -19,9 +19,10 @@ import { concordDir, userHome } from '../config/paths.js';
  * - **Credentials** (`~/.concord/credentials.json`, mode 0600) — the API URL and
  *   key. Per user, never in a repository: `.mcp.json` and friends are usually
  *   committed, and a key must not ride along.
- * - **Link** (`<repo>/.concord/cloud.json`) — that this repository works through
- *   the cloud, and as which project. Its presence is the switch for cloud mode;
- *   without it everything stays local, exactly as before.
+ * - **Link** (`<repo>/.concord/cloud.json`) — this repository's own choice: to
+ *   work through the cloud as a named project, or (`{ "local": true }`) to stay
+ *   local. Without one, a signed-in machine works through the cloud by default;
+ *   see `cloud/target.ts`.
  */
 
 const oauthTokensSchema = z.object({
@@ -51,6 +52,9 @@ const linkSchema = z.object({
   projectKey: z.string().min(1),
 });
 export type CloudLink = z.infer<typeof linkSchema>;
+
+/** A repository's choice to stay local while this machine is signed in. */
+const localChoiceSchema = z.object({ local: z.literal(true) });
 
 export function credentialsPath(env: NodeJS.ProcessEnv): string {
   return join(userHome(env), '.concord', 'credentials.json');
@@ -168,6 +172,16 @@ export function readLink(repoRoot: string): CloudLink | undefined {
 
 export function writeLink(repoRoot: string, link: CloudLink): void {
   writeJson(linkPath(repoRoot), linkSchema.parse(link));
+}
+
+/** Whether this repository chose to stay local (`concord cloud unlink`). */
+export function readLocalChoice(repoRoot: string): boolean {
+  return readJson(linkPath(repoRoot), localChoiceSchema) !== undefined;
+}
+
+/** Keep this repository local while the machine is signed in, replacing any link. */
+export function writeLocalChoice(repoRoot: string): void {
+  writeJson(linkPath(repoRoot), { local: true });
 }
 
 /** Returns whether a link was there to remove. */

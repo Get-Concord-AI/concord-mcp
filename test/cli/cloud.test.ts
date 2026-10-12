@@ -28,6 +28,7 @@ import {
   ensureMachineKey,
   linkPath,
   readLink,
+  readLocalChoice,
   readMachineKey,
   writeLink,
 } from '../../src/cloud/settings.js';
@@ -245,6 +246,19 @@ describe('concord cloud', () => {
     expect(runCloudLink({}, deps)).toContain('github.com/acme/app');
     expect(readLink(repo)).toEqual({ apiUrl: API, projectKey: 'github.com/acme/app' });
 
+    // Signed in, the cloud is the default: unlinking records the choice to stay local.
+    expect(runCloudUnlink(deps)).toContain('stays local');
+    expect(readLink(repo)).toBeUndefined();
+    expect(readLocalChoice(repo)).toBe(true);
+    expect(runCloudUnlink(deps)).toContain('already stays local');
+    expect(await runCloudStatus(deps)).toContain('is local (`concord cloud unlink`');
+
+    // Linking again replaces the choice.
+    runCloudLink({}, deps);
+    expect(readLocalChoice(repo)).toBe(false);
+
+    // Signed out, unlinking just removes the link.
+    runCloudLogout(deps);
     expect(runCloudUnlink(deps)).toContain('Unlinked');
     expect(existsSync(linkPath(repo))).toBe(false);
     expect(runCloudUnlink(deps)).toContain('was not linked');

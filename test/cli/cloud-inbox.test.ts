@@ -62,13 +62,15 @@ describe('cloud inbox', () => {
   }
 
   it('counts a repository as linked only when it has a cloud link', () => {
-    expect(cloudLinked(repoRoot, { CONCORD_REPO_ROOT: repoRoot })).toBe(false);
+    // A home of its own: never the developer's real sign-in.
+    const env = { CONCORD_REPO_ROOT: repoRoot, HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) };
+    expect(cloudLinked(repoRoot, env)).toBe(false);
     mkdirSync(join(repoRoot, '.concord'), { recursive: true });
     writeFileSync(
       join(repoRoot, '.concord', 'cloud.json'),
       JSON.stringify({ apiUrl: 'https://api.example.test', projectKey: 'github.com/acme/app' }),
     );
-    expect(cloudLinked(repoRoot, { CONCORD_REPO_ROOT: repoRoot })).toBe(true);
+    expect(cloudLinked(repoRoot, env)).toBe(true);
   });
 
   it('drains for a hook in one request once the agent is known', async () => {

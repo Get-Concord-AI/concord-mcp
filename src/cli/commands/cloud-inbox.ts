@@ -16,7 +16,7 @@ import {
   type CloudAgentRef,
   type CloudRuntime,
 } from '../../cloud/runtime.js';
-import { readLink } from '../../cloud/settings.js';
+import { cloudTargetFor } from '../../cloud/target.js';
 import { resolveCheckoutRoot, resolveRepoRoot } from '../../config/paths.js';
 import { capabilityFor, encodeCapabilities, monitorCapabilityFor } from '../../domain/delivery.js';
 import type { DeliverableMessage } from '../../domain/pull-inbox.js';
@@ -29,10 +29,10 @@ import type { DeliverableMessage } from '../../domain/pull-inbox.js';
  * cloud records its own usage.
  */
 
-/** Whether this directory's repository is linked to Concord Cloud. */
+/** Whether this directory works through Concord Cloud, by link or by default. */
 export function cloudLinked(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
   try {
-    return readLink(resolveRepoRoot(cwd, env)) !== undefined;
+    return cloudTargetFor(resolveRepoRoot(cwd, env), env) !== undefined;
   } catch {
     return false;
   }

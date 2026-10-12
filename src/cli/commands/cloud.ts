@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -18,13 +20,16 @@ import {
   ensureMachineKey,
   readCredentials,
   readLink,
+  readLocalChoice,
   removeCredentials,
   removeLink,
   writeCredentials,
   writeLink,
+  writeLocalChoice,
   type CloudCredentials,
 } from '../../cloud/settings.js';
 import { browserLogin, type BrowserLoginDeps } from '../../cloud/browser-login.js';
+import { cloudTargetFor } from '../../cloud/target.js';
 import { bearerFor } from '../../cloud/tokens.js';
 import { resolveRepoRoot } from '../../config/paths.js';
 import { normalizeProjectKey } from '../../domain/project-key.js';
@@ -120,7 +125,8 @@ export async function runCloudLogin(
 
 export function runCloudLogout(deps: CloudDeps): string {
   return removeCredentials(deps.env)
-    ? 'Logged out; linked repositories stay linked but cannot reach the cloud until you log in again.'
+    ? 'Logged out; Concord is local again, except in linked repositories, which cannot reach ' +
+        'the cloud until you log in again.'
     : 'Not logged in.';
 }
 
@@ -148,11 +154,39 @@ export function runCloudLink(options: { readonly project?: string }, deps: Cloud
   return `Linked ${repoRoot} to ${projectKey} on ${credentials.apiUrl}.`;
 }
 
+/**
+ * Return a workspace to local Concord. Signed in, the cloud is the default, so
+ * removing a link is not enough: the workspace records that it stays local.
+ */
 export function runCloudUnlink(deps: CloudDeps): string {
   const repoRoot = resolveRepoRoot(deps.cwd, deps.env);
+  if (readCredentials(deps.env) !== undefined) {
+    if (readLocalChoice(repoRoot)) return `${repoRoot} already stays local.`;
+    writeLocalChoice(repoRoot);
+    return `${repoRoot} stays local, though this machine is signed in; \`concord cloud link\` undoes this.`;
+  }
   return removeLink(repoRoot)
     ? `Unlinked ${repoRoot}; Concord stays local here.`
     : `${repoRoot} was not linked.`;
+}
+
+/** Where a workspace's Concord state is, and why. */
+function workspaceLine(repoRoot: string, deps: CloudDeps): string {
+  const target = cloudTargetFor(repoRoot, deps.env, deps.originRemote);
+  if (target?.source === 'link') {
+    return `Repository: ${repoRoot} is linked to ${target.projectKey} on ${target.apiUrl}`;
+  }
+  if (target !== undefined) {
+    return `Repository: ${repoRoot} uses Concord Cloud as ${target.projectKey} (the default while signed in)`;
+  }
+  if (readLocalChoice(repoRoot)) {
+    return `Repository: ${repoRoot} is local (\`concord cloud unlink\`; \`concord cloud link\` undoes it)`;
+  }
+  if (readCredentials(deps.env) === undefined)
+    return `Repository: ${repoRoot} is local (not signed in)`;
+  return existsSync(join(repoRoot, '.git'))
+    ? `Repository: ${repoRoot} is local: it has no origin remote; name it with \`concord cloud link --project\``
+    : `Repository: ${repoRoot} is local: outside a repository, only a session that names its folder (Claude Code) uses the cloud's general workspace`;
 }
 
 export async function runCloudStatus(deps: CloudDeps): Promise<string> {
@@ -167,9 +201,7 @@ export async function runCloudStatus(deps: CloudDeps): Promise<string> {
             ? `with key ${maskKey(credentials.apiKey)}`
             : 'signed in through the browser'
         }`,
-    link === undefined
-      ? `Repository: ${repoRoot} is local (not linked)`
-      : `Repository: ${repoRoot} is linked to ${link.projectKey} on ${link.apiUrl}`,
+    workspaceLine(repoRoot, deps),
   ];
 
   if (
@@ -301,7 +333,7 @@ export function registerCloudCommand(program: Command): void {
 
   cloud
     .command('unlink')
-    .description('Return this repository to local Concord')
+    .description('Keep this repository on local Concord, even while signed in')
     .action(() => report(() => runCloudUnlink(liveDeps())));
 
   cloud

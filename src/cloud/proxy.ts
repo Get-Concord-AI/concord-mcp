@@ -17,7 +17,8 @@ import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
 import { bearerFor, type Bearer } from './tokens.js';
 import { assertKeySafeUrl, sameApi } from './client.js';
-import { readCredentials, readLink, readMachineKey } from './settings.js';
+import { readCredentials, readMachineKey } from './settings.js';
+import { cloudTargetFor } from './target.js';
 
 /**
  * Cloud mode for the MCP server: in a linked repository, `concord-mcp` forwards
@@ -47,8 +48,8 @@ export interface CloudSession {
 }
 
 /**
- * The cloud session for a repository: undefined when it is not linked, so
- * Concord stays local. A link this machine cannot use is an error rather than a
+ * The cloud session for a workspace: undefined when it works locally (see
+ * `cloudTargetFor`). A link this machine cannot use is an error rather than a
  * silent fall back to local state, which no other agent would see.
  */
 export function cloudSessionFor(
@@ -57,7 +58,7 @@ export function cloudSessionFor(
   identity: AgentIdentity | undefined,
   checkoutRoot: string = repoRoot,
 ): CloudSession | undefined {
-  const link = readLink(repoRoot);
+  const link = cloudTargetFor(repoRoot, env);
   if (link === undefined) return undefined;
 
   const credentials = readCredentials(env);
