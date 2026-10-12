@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -31,9 +30,10 @@ import {
 import { browserLogin, type BrowserLoginDeps } from '../../cloud/browser-login.js';
 import { cloudTargetFor } from '../../cloud/target.js';
 import { bearerFor } from '../../cloud/tokens.js';
-import { resolveRepoRoot } from '../../config/paths.js';
+import { concordDir, databasePath, resolveRepoRoot } from '../../config/paths.js';
 import { normalizeProjectKey } from '../../domain/project-key.js';
-import { gitOriginRemote } from '../../workspaces/store.js';
+import { gitOriginRemote, isRepository } from '../../workspaces/store.js';
+import { ensureConcordIgnored } from './setup.js';
 import { VERSION } from '../../version.js';
 
 /**
@@ -137,6 +137,15 @@ export function runCloudLink(options: { readonly project?: string }, deps: Cloud
   }
 
   const repoRoot = resolveRepoRoot(deps.cwd, deps.env);
+  // Outside a repository there is no project to name: linking only undoes an
+  // unlink, returning the folder to the cloud's general workspace.
+  if (options.project === undefined && !isRepository(repoRoot)) {
+    if (removeLink(repoRoot)) return `${repoRoot} uses Concord Cloud's general workspace again.`;
+    throw new Error(
+      'Outside a repository there is nothing to link: a signed-in Claude Code session here ' +
+        "uses Concord Cloud's general workspace by default.",
+    );
+  }
   const remote = options.project ?? deps.originRemote(repoRoot);
   if (remote === undefined) {
     throw new Error(
@@ -151,6 +160,7 @@ export function runCloudLink(options: { readonly project?: string }, deps: Cloud
   }
 
   writeLink(repoRoot, { apiUrl: credentials.apiUrl, projectKey });
+  ensureConcordIgnored(concordDir(repoRoot));
   return `Linked ${repoRoot} to ${projectKey} on ${credentials.apiUrl}.`;
 }
 
@@ -163,6 +173,8 @@ export function runCloudUnlink(deps: CloudDeps): string {
   if (readCredentials(deps.env) !== undefined) {
     if (readLocalChoice(repoRoot)) return `${repoRoot} already stays local.`;
     writeLocalChoice(repoRoot);
+    // Never committed: the choice is this machine's, not every clone's.
+    ensureConcordIgnored(concordDir(repoRoot));
     return `${repoRoot} stays local, though this machine is signed in; \`concord cloud link\` undoes this.`;
   }
   return removeLink(repoRoot)
@@ -182,9 +194,13 @@ function workspaceLine(repoRoot: string, deps: CloudDeps): string {
   if (readLocalChoice(repoRoot)) {
     return `Repository: ${repoRoot} is local (\`concord cloud unlink\`; \`concord cloud link\` undoes it)`;
   }
-  if (readCredentials(deps.env) === undefined)
+  if (readCredentials(deps.env) === undefined) {
     return `Repository: ${repoRoot} is local (not signed in)`;
-  return existsSync(join(repoRoot, '.git'))
+  }
+  if (existsSync(databasePath(repoRoot))) {
+    return `Repository: ${repoRoot} is local: it holds local Concord state; \`concord cloud link\` moves it to the cloud`;
+  }
+  return isRepository(repoRoot)
     ? `Repository: ${repoRoot} is local: it has no origin remote; name it with \`concord cloud link --project\``
     : `Repository: ${repoRoot} is local: outside a repository, only a session that names its folder (Claude Code) uses the cloud's general workspace`;
 }

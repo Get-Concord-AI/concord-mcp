@@ -250,6 +250,8 @@ describe('concord cloud', () => {
     expect(runCloudUnlink(deps)).toContain('stays local');
     expect(readLink(repo)).toBeUndefined();
     expect(readLocalChoice(repo)).toBe(true);
+    // A machine's choice, never committed: `.concord/` ignores itself.
+    expect(readFileSync(join(repo, '.concord', '.gitignore'), 'utf8')).toContain('*');
     expect(runCloudUnlink(deps)).toContain('already stays local');
     expect(await runCloudStatus(deps)).toContain('is local (`concord cloud unlink`');
 
@@ -262,6 +264,18 @@ describe('concord cloud', () => {
     expect(runCloudUnlink(deps)).toContain('Unlinked');
     expect(existsSync(linkPath(repo))).toBe(false);
     expect(runCloudUnlink(deps)).toContain('was not linked');
+  });
+
+  it('outside a repository, unlinks to local and links back to general', async () => {
+    await runCloudLogin({ url: API }, deps);
+    const folder = mkdtempSync(join(tmpdir(), 'concord-folder-'));
+    const inFolder = { ...deps, cwd: folder, env: { ...deps.env, CONCORD_REPO_ROOT: folder } };
+
+    expect(await runCloudStatus(inFolder)).toContain('uses Concord Cloud as general');
+    expect(() => runCloudLink({}, inFolder)).toThrow(/nothing to link/);
+    expect(runCloudUnlink(inFolder)).toContain('stays local');
+    expect(runCloudLink({}, inFolder)).toContain('general workspace again');
+    expect(await runCloudStatus(inFolder)).toContain('uses Concord Cloud as general');
   });
 
   it('needs --project when there is no origin, and rejects a non-remote', async () => {

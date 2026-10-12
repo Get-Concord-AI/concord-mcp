@@ -21,7 +21,7 @@ export function hasExplicitRepoRoot(env: NodeJS.ProcessEnv): boolean {
 }
 
 export interface ClientRootOptions {
-  /** Whether a repository is linked to Concord Cloud, which a local server cannot serve. */
+  /** Whether a repository works through Concord Cloud (linked, or by default), which a local server cannot serve. */
   readonly isCloudLinked?: (repoRoot: string) => boolean;
 }
 
@@ -48,8 +48,9 @@ export async function joinClientRoot(
   const root = resolveExplicitRepoRoot(fileURLToPath(folder.uri));
   if (options.isCloudLinked?.(root) === true) {
     manager.refuse(
-      `${root} is linked to Concord Cloud, which this user-level Concord server does not ` +
-        "serve. Use the project's own Concord server, which `concord setup` registers.",
+      `${root} works through Concord Cloud, which this user-level Concord server does not ` +
+        "serve. Use the project's own Concord server, which `concord setup` registers, or " +
+        '`concord cloud unlink` there to keep it local.',
     );
     return undefined;
   }

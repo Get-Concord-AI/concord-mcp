@@ -1,9 +1,14 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 
-import { normalizeProjectKey } from '../domain/project-key.js';
+import { databasePath } from '../config/paths.js';
 import { hasExplicitRepoRoot } from '../workspaces/client-roots.js';
-import { GENERAL_PROJECT, gitOriginRemote, type OriginRemote } from '../workspaces/store.js';
+import {
+  GENERAL_PROJECT,
+  gitOriginRemote,
+  isRepository,
+  repositoryProjectKey,
+  type OriginRemote,
+} from '../workspaces/store.js';
 import { readCredentials, readLink, readLocalChoice } from './settings.js';
 
 /**
@@ -14,10 +19,13 @@ import { readCredentials, readLink, readLocalChoice } from './settings.js';
  * `general`, where agents that belong to no repository meet — when the client
  * names that folder (Claude Code's `CLAUDE_PROJECT_DIR`, or `CONCORD_REPO_ROOT`).
  * A server started elsewhere without one may yet learn its repository from MCP
- * roots, so it is not presumed to be outside one. A repository can
- * still choose for itself — `concord cloud link` names its project, `concord
- * cloud unlink` keeps it local. A repository with no remote stays local: the
- * cloud has no name for it that another clone would share.
+ * roots, so it is not presumed to be outside one.
+ *
+ * A repository can still choose for itself — `concord cloud link` names its
+ * project, `concord cloud unlink` keeps it local — and these stay local too:
+ * one already holding local Concord state (its open work must not vanish from
+ * view; linking moves it on purpose), and one with no remote, which the cloud
+ * has no shared name for.
  */
 export interface CloudTarget {
   readonly apiUrl: string;
@@ -26,33 +34,31 @@ export interface CloudTarget {
   readonly source: 'link' | 'default';
 }
 
+/** Each repository's remote, asked of git once per process: hooks resolve this on every edit. */
+const remotes = new Map<string, string | undefined>();
+function cachedOriginRemote(repoRoot: string): string | undefined {
+  if (!remotes.has(repoRoot)) remotes.set(repoRoot, gitOriginRemote(repoRoot));
+  return remotes.get(repoRoot);
+}
+
 export function cloudTargetFor(
   repoRoot: string,
   env: NodeJS.ProcessEnv,
-  originRemote: OriginRemote = gitOriginRemote,
+  originRemote: OriginRemote = cachedOriginRemote,
 ): CloudTarget | undefined {
   const link = readLink(repoRoot);
   if (link !== undefined) return { ...link, source: 'link' };
-  if (readLocalChoice(repoRoot)) return undefined;
+  if (readLocalChoice(repoRoot) || existsSync(databasePath(repoRoot))) return undefined;
 
   const credentials = readCredentials(env);
   if (credentials === undefined) return undefined;
 
-  const projectKey = defaultProjectKey(repoRoot, env, originRemote);
+  const projectKey = isRepository(repoRoot)
+    ? repositoryProjectKey(repoRoot, originRemote)
+    : hasExplicitRepoRoot(env)
+      ? GENERAL_PROJECT
+      : undefined;
   return projectKey === undefined
     ? undefined
     : { apiUrl: credentials.apiUrl, projectKey, source: 'default' };
-}
-
-/** A repository's remote as a project, `general` in a named folder outside one, or none. */
-function defaultProjectKey(
-  repoRoot: string,
-  env: NodeJS.ProcessEnv,
-  originRemote: OriginRemote,
-): string | undefined {
-  if (!existsSync(join(repoRoot, '.git'))) {
-    return hasExplicitRepoRoot(env) ? GENERAL_PROJECT : undefined;
-  }
-  const remote = originRemote(repoRoot);
-  return (remote === undefined ? null : normalizeProjectKey(remote)) ?? undefined;
 }

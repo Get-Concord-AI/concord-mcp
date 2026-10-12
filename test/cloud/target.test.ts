@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { writeCredentials, writeLink, writeLocalChoice } from '../../src/cloud/settings.js';
+import { cloudSessionFor } from '../../src/cloud/proxy.js';
 import { cloudTargetFor } from '../../src/cloud/target.js';
 
 const API = 'https://api.concord.test';
@@ -62,6 +63,18 @@ describe('cloudTargetFor', () => {
     });
     // Started elsewhere, a server may learn its repository from MCP roots.
     expect(cloudTargetFor(folder, { HOME: home }, ORIGIN)).toBeUndefined();
+  });
+
+  it('keeps a repository that already holds local Concord state local', () => {
+    signIn();
+    mkdirSync(join(repo, '.concord'), { recursive: true });
+    writeFileSync(join(repo, '.concord', 'concord.db'), '');
+    expect(cloudTargetFor(repo, { HOME: home }, ORIGIN)).toBeUndefined();
+  });
+
+  it('stays local, rather than failing, when this machine has no identity for a default', () => {
+    signIn();
+    expect(cloudSessionFor(repo, { HOME: home }, undefined)).toBeUndefined();
   });
 
   it('ignores a damaged link file rather than failing', () => {

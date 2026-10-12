@@ -14,8 +14,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (Claude Code) joins the cloud's `general` workspace, where agents that belong
   to no repository can talk. `concord cloud unlink` now keeps a repository local
   even while signed in, and `concord cloud status` says which applies and why.
-  A repository with no remote, and a user-level server that learns its folder
-  from MCP roots, stay local as before.
+  These stay local as before: a repository that already holds local Concord
+  state (`concord cloud link` moves it on purpose), one with no remote, and a
+  user-level server that learns its folder from MCP roots.
 
 ## [0.13.0] - 2026-10-11
 

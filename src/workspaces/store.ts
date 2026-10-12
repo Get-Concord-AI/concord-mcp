@@ -52,9 +52,26 @@ export function localStore(repoRoot: string): StoreLocation {
  * one with no remote by its path. Anything outside a repository is `general`.
  */
 export function globalProjectKey(repoRoot: string, originRemote: OriginRemote): string {
-  if (!existsSync(join(repoRoot, '.git'))) return GENERAL_PROJECT;
+  if (!isRepository(repoRoot)) return GENERAL_PROJECT;
+  return repositoryProjectKey(repoRoot, originRemote) ?? repoRoot;
+}
+
+/** Whether a workspace root is a git repository (or a linked worktree of one). */
+export function isRepository(root: string): boolean {
+  return existsSync(join(root, '.git'));
+}
+
+/**
+ * A repository's project as Concord Cloud names it — its normalised `origin`,
+ * which every clone shares — or undefined when it has none. Shared by the
+ * machine-wide store and the cloud default, so the two never name it apart.
+ */
+export function repositoryProjectKey(
+  repoRoot: string,
+  originRemote: OriginRemote,
+): string | undefined {
   const remote = originRemote(repoRoot);
-  return (remote === undefined ? null : normalizeProjectKey(remote)) ?? repoRoot;
+  return (remote === undefined ? null : normalizeProjectKey(remote)) ?? undefined;
 }
 
 /** Characters of the project key kept in its directory name, well under any name limit. */

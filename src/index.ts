@@ -3,7 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
 import { writeArtifacts } from './artifacts/index.js';
 import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/proxy.js';
-import { readLink } from './cloud/settings.js';
+import { cloudTargetFor } from './cloud/target.js';
 import { startBackgroundUpdateCheck } from './update-notifier.js';
 import { resolveCheckoutRoot, resolveRepoRoot } from './config/paths.js';
 import { resolveIdentity } from './domain/identity.js';
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
     // from it; ask the client which folder it has open.
     server.server.oninitialized = () => {
       joinClientRoot(server.server, workspaceManager, {
-        isCloudLinked: (root) => readLink(root) !== undefined,
+        isCloudLinked: (root) => cloudTargetFor(root, process.env) !== undefined,
       })
         .then((joined) => {
           if (joined !== undefined && identity !== undefined) {
