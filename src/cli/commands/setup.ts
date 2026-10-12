@@ -63,19 +63,41 @@ export interface GlobalChoiceDependencies {
   flag?: boolean;
   env: NodeJS.ProcessEnv;
   interactive: boolean;
-  ask?: () => Promise<boolean>;
+  ask?: () => Promise<boolean | undefined>;
 }
 
-async function askGlobalMode(): Promise<boolean> {
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+/** The terminal a setup question is asked on. */
+export interface PromptStreams {
+  input: NodeJS.ReadableStream;
+  output: NodeJS.WritableStream;
+}
+
+/**
+ * Ask one question. Ctrl+D is no answer (undefined) rather than an unhandled
+ * rejection, so each caller decides what an unanswered question means.
+ */
+export async function askQuestion(
+  question: string,
+  streams: PromptStreams = { input: process.stdin, output: process.stdout },
+): Promise<string | undefined> {
+  const prompt = createInterface(streams);
   try {
-    const answer = await prompt.question(
-      'Let your agents use Concord in repositories where you have not run concord setup? [Y/n] ',
-    );
-    return !/^(?:n|no)$/iu.test(answer.trim());
+    return await prompt.question(question);
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== 'AbortError') throw error;
+    streams.output.write('\n');
+    return undefined;
   } finally {
     prompt.close();
   }
+}
+
+/** Yes by default; no answer leaves global mode as it is. */
+async function askGlobalMode(): Promise<boolean | undefined> {
+  const answer = await askQuestion(
+    'Let your agents use Concord in repositories where you have not run concord setup? [Y/n] ',
+  );
+  return answer === undefined ? undefined : !/^(?:n|no)$/iu.test(answer.trim());
 }
 
 /**
@@ -93,16 +115,11 @@ export async function resolveGlobalChoice(
 }
 
 async function askToUpgrade(update: AvailableUpdate): Promise<boolean> {
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = await prompt.question(
-      `Concord ${update.currentVersion} → ${update.latestVersion} is available. ` +
-        'Upgrade before setup? [y/N] ',
-    );
-    return /^(?:y|yes)$/iu.test(answer.trim());
-  } finally {
-    prompt.close();
-  }
+  const answer = await askQuestion(
+    `Concord ${update.currentVersion} → ${update.latestVersion} is available. ` +
+      'Upgrade before setup? [y/N] ',
+  );
+  return answer !== undefined && /^(?:y|yes)$/iu.test(answer.trim());
 }
 
 function installUpdate(env: NodeJS.ProcessEnv): Promise<number> {
