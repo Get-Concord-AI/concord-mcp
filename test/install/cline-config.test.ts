@@ -131,6 +131,18 @@ describe('Cline adapter setup', () => {
     });
   });
 
+  it('leaves the MCP settings alone under --no-mcp but still writes the rule', () => {
+    const env = homeWithCline('1.2.3');
+    const repo = repoDir();
+
+    const result = runSetup(repo, { env, mcp: false, adapters: true });
+
+    expect(clineConfigInstalled(env)).toBe(false);
+    expect(readFileSync(join(result.repoRoot, '.cline', 'rules', 'concord.md'), 'utf8')).toContain(
+      'concord inbox drain --agent <agent-id> --provider cline',
+    );
+  });
+
   it('does not install below the MCP baseline', () => {
     const env = homeWithCline('0.9.0');
     const report = installGlobalAdapters(import.meta.url, env, repoDir());

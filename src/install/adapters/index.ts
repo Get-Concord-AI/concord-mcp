@@ -567,6 +567,7 @@ export function installGlobalAdapters(
   moduleUrl: string,
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
+  options: { mcp?: boolean } = {},
 ): AdapterReport[] {
   const failures = new Map<HarnessName, string>();
   const attempt = (harness: HarnessName, action: () => void): void => {
@@ -633,7 +634,7 @@ export function installGlobalAdapters(
 
   attempt('cline', () => {
     const cline = executablePath('cline', env);
-    if (cline === undefined || repoRoot === undefined) return;
+    if (cline === undefined || repoRoot === undefined || options.mcp === false) return;
     const version = versionTuple(run(cline, ['version'], env).output);
     if (version === undefined || !atLeast(version, HARNESS_CONFIGS.cline.minimumVersion)) {
       return;

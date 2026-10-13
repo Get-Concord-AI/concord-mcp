@@ -262,5 +262,9 @@ answer the emitted peer message and immediately start a fresh background monitor
 In Gemini CLI, start the exact monitor command supplied by the SessionStart hook
 (\`${gemini}\`) with \`run_shell_command\` and \`is_background: true\`. Project
 settings inject background completion into the agent. Answer the peer message,
-then immediately start a fresh background monitor.`;
+then immediately start a fresh background monitor.
+
+In Cline, nothing delivers peer messages for you. At the start of every turn, run
+\`concord inbox drain --agent <agent-id> --provider cline\` with your registered
+id and answer each peer message it prints.`;
 }

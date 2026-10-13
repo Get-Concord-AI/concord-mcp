@@ -51,5 +51,6 @@ describe('harness configuration', () => {
     expect(guidance).toContain(HARNESS_CONFIGS.cursor.monitor.command);
     expect(guidance).toContain(HARNESS_CONFIGS.gemini.monitor.command);
     expect(guidance).toContain(HARNESS_CONFIGS.grok.monitor.command);
+    expect(guidance).toContain('concord inbox drain --agent <agent-id> --provider cline');
   });
 });

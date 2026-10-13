@@ -216,7 +216,9 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   // real harness homes unless adapter installation was explicitly requested.
   const installAdapters = options.adapters ?? (options.mcp !== false && options.env === undefined);
   if (installAdapters) {
-    adapters = installGlobalAdapters(import.meta.url, env, ctx.repoRoot);
+    adapters = installGlobalAdapters(import.meta.url, env, ctx.repoRoot, {
+      mcp: options.mcp !== false,
+    });
     for (const adapter of adapters) {
       if (adapter.installedPath !== undefined) written.push(adapter.installedPath);
     }
