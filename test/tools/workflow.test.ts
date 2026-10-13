@@ -939,4 +939,42 @@ describe('one identity per session', () => {
       await close(harness);
     }
   });
+
+  it('records a durable event when a call fails, not only when it succeeds', async () => {
+    const harness = await connect(repos);
+    try {
+      const result = await harness.client.callTool({
+        name: 'start_work',
+        arguments: { task_id: 'T1', title: 'Failing call', kind: 'claude-code' },
+      });
+      expect(result.isError).toBe(true);
+
+      // Before this, a failed call reached the client but left no event, so the
+      // dashboard showed nothing for a failure the user plainly saw.
+      const events = repos.events.list();
+      const failures = events.filter((event) => event.status === 'error');
+      expect(failures).toHaveLength(1);
+      expect(failures[0]?.tool).toBe('start_work');
+      expect(failures[0]?.taskId).toBe('T1');
+      expect(failures[0]?.detail).toContain('concord inbox register');
+    } finally {
+      await close(harness);
+    }
+  });
+
+  it('does not let recording an event mask the original error', async () => {
+    const harness = await connect(repos);
+    try {
+      const result = await harness.client.callTool({
+        name: 'start_work',
+        arguments: { task_id: 'T1', title: 'Original message', kind: 'claude-code' },
+      });
+
+      // The caller still sees the real failure, not a recording artifact.
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result)).toContain('concord inbox register');
+    } finally {
+      await close(harness);
+    }
+  });
 });
