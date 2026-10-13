@@ -61,16 +61,9 @@ describe('resolveIdentity', () => {
         { CLAUDE_CODE_SESSION_ID: SESSION },
         { kind: 'cline', hookPayload: JSON.stringify({ taskId: 'task-9' }) },
       ),
-    ).toEqual({
-      agentId: agentIdForSession('cline', 'task-9'),
-      kind: 'cline',
-      origin: 'hook',
-    });
-    expect(resolveIdentity({ CONCORD_AGENT_ID: 'reviewer' }, { kind: 'cline' })).toEqual({
-      agentId: 'reviewer',
-      kind: 'cline',
-      origin: 'operator',
-    });
+    ).toEqual({ agentId: agentIdForSession('cline', 'task-9'), kind: 'cline', origin: 'hook' });
+    const operator = resolveIdentity({ CONCORD_AGENT_ID: 'reviewer' }, { kind: 'cline' });
+    expect(operator).toEqual({ agentId: 'reviewer', kind: 'cline', origin: 'operator' });
     expect(resolveIdentity({ CLAUDE_CODE_SESSION_ID: SESSION }, { kind: 'cline' })).toBeUndefined();
   });
 

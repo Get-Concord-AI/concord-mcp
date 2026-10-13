@@ -38,15 +38,22 @@ function repoDir(): string {
   return dir;
 }
 
+function writeSettings(env: { HOME: string }, contents: string): string {
+  const path = clineMcpSettingsPath(env);
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, contents);
+  return path;
+}
+
+const rule = (root: string) => readFileSync(join(root, '.cline', 'rules', 'concord.md'), 'utf8');
+
 describe('Cline MCP settings', () => {
-  it('merges Concord into the global settings file and is safe to rerun', () => {
+  it('merges Concord into the global settings file, reruns safely and uninstalls only Concord', () => {
     const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-cline-settings-')) };
     const repo = repoDir();
-    const path = clineMcpSettingsPath(env);
-    mkdirSync(join(env.HOME, '.cline', 'data', 'settings'), { recursive: true });
-    writeFileSync(
-      path,
-      `${JSON.stringify({
+    const path = writeSettings(
+      env,
+      JSON.stringify({
         theme: 'dark',
         mcpServers: {
           filesystem: { command: 'npx', args: ['-y', 'server-filesystem'] },
@@ -58,17 +65,15 @@ describe('Cline MCP settings', () => {
             autoApprove: ['start_work'],
           },
         },
-      })}\n`,
+      }),
     );
 
     expect(installClineMcpConfig(repo, env)).toBe(path);
     const first = readFileSync(path, 'utf8');
     installClineMcpConfig(repo, env);
-    const second = readFileSync(path, 'utf8');
 
-    expect(second).toBe(first);
+    expect(readFileSync(path, 'utf8')).toBe(first);
     expect(first).toContain('"theme": "dark"');
-    expect(first).toContain('"filesystem"');
     expect(first).toContain('"--extra"');
     expect(first).toContain('"MY_CUSTOM": "1"');
     expect(first).toContain('"autoApprove"');
@@ -78,30 +83,20 @@ describe('Cline MCP settings', () => {
     expect(first).not.toContain('/old');
     expect(clineConfigInstalled(env)).toBe(true);
     expect(resolveRepoRoot(env.HOME, { CONCORD_REPO_ROOT: repo })).toBe(realpathSync(repo));
+
+    uninstallClineConfig(env);
+    const left = readFileSync(path, 'utf8');
+    expect(left).toContain('"filesystem"');
+    expect(left).not.toContain('concord-mcp');
+    expect(clineConfigInstalled(env)).toBe(false);
   });
 
   it('leaves a malformed settings file untouched', () => {
     const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-cline-bad-')) };
-    const path = clineMcpSettingsPath(env);
-    mkdirSync(join(path, '..'), { recursive: true });
-    writeFileSync(path, '{');
+    const path = writeSettings(env, '{');
 
     expect(() => installClineMcpConfig(repoDir(), env)).toThrow(ClineConfigParseError);
     expect(readFileSync(path, 'utf8')).toBe('{');
-    expect(clineConfigInstalled(env)).toBe(false);
-  });
-
-  it('removes only Concord on uninstall', () => {
-    const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-cline-remove-')) };
-    const path = clineMcpSettingsPath(env);
-    mkdirSync(join(path, '..'), { recursive: true });
-    writeFileSync(path, `${JSON.stringify({ mcpServers: { notes: { command: 'notes' } } })}\n`);
-    installClineMcpConfig(repoDir(), env);
-
-    uninstallClineConfig(env);
-    const left = readFileSync(path, 'utf8');
-    expect(left).toContain('"notes"');
-    expect(left).not.toContain('concord-mcp');
     expect(clineConfigInstalled(env)).toBe(false);
   });
 });
@@ -110,9 +105,7 @@ describe('Cline adapter setup', () => {
   it('installs on setup when Cline is detected and is byte-identical on rerun', () => {
     const env = homeWithCline('1.2.3');
     const repo = repoDir();
-    const path = clineMcpSettingsPath(env);
-    mkdirSync(join(path, '..'), { recursive: true });
-    writeFileSync(path, `${JSON.stringify({ mcpServers: { other: { command: 'echo' } } })}\n`);
+    const path = writeSettings(env, JSON.stringify({ mcpServers: { other: { command: 'echo' } } }));
 
     const result = runSetup(repo, { env, adapters: true });
     const first = readFileSync(path, 'utf8');
@@ -121,9 +114,7 @@ describe('Cline adapter setup', () => {
     expect(readFileSync(path, 'utf8')).toBe(first);
     expect(first).toContain('"other"');
     expect(first).toContain(`"CONCORD_REPO_ROOT": "${result.repoRoot}"`);
-    expect(readFileSync(join(result.repoRoot, '.cline', 'rules', 'concord.md'), 'utf8')).toContain(
-      'start_work',
-    );
+    expect(rule(result.repoRoot)).toContain('start_work');
     expect(statusGlobalAdapters(env).find((entry) => entry.harness === 'cline')).toMatchObject({
       detected: true,
       status: 'installed',
@@ -133,12 +124,10 @@ describe('Cline adapter setup', () => {
 
   it('leaves the MCP settings alone under --no-mcp but still writes the rule', () => {
     const env = homeWithCline('1.2.3');
-    const repo = repoDir();
-
-    const result = runSetup(repo, { env, mcp: false, adapters: true });
+    const result = runSetup(repoDir(), { env, mcp: false, adapters: true });
 
     expect(clineConfigInstalled(env)).toBe(false);
-    expect(readFileSync(join(result.repoRoot, '.cline', 'rules', 'concord.md'), 'utf8')).toContain(
+    expect(rule(result.repoRoot)).toContain(
       'concord inbox drain --agent <agent-id> --provider cline',
     );
   });
