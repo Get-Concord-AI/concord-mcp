@@ -34,6 +34,9 @@ export interface SessionSource {
  * environment (`HOME`, `LANG`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `TMPDIR`,
  * `USER` — no session id, not even `PWD`) and passes its session id on stdin to
  * hooks instead. Codex therefore resolves through `hookPayload`, never here.
+ *
+ * Cline is absent too: MCP children inherit the environment, but Cline exports
+ * no session id. A hook `taskId` counts only when kind is already `cline`.
  */
 export const SESSION_SOURCES: readonly SessionSource[] = [
   { kind: 'claude-code', envVar: 'CLAUDE_CODE_SESSION_ID' },
@@ -54,6 +57,9 @@ export interface AgentIdentity {
 const hookSessionSchema = z
   .object({ session_id: z.string().optional(), sessionId: z.string().optional() })
   .loose();
+
+/** Cline hook payloads identify the task on `taskId`, not `session_id`. */
+const clineHookSchema = z.object({ taskId: z.string().optional() }).loose();
 
 /**
  * A stable agent id for one session of one client, e.g. `claude-code:4f2a91c7`.
@@ -94,6 +100,20 @@ export function hookSessionId(rawJson: string): string | undefined {
   return sessionId === undefined || sessionId === '' ? undefined : sessionId;
 }
 
+/** The task id a Cline hook passes on stdin, when the payload is one. */
+function clineHookTaskId(rawJson: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    return undefined;
+  }
+  const result = clineHookSchema.safeParse(parsed);
+  if (!result.success) return undefined;
+  const taskId = result.data.taskId?.trim();
+  return taskId === undefined || taskId === '' ? undefined : taskId;
+}
+
 export interface ResolveIdentityOptions {
   /** Client the agent runs in. Selects which session source may be read. */
   kind?: string | undefined;
@@ -121,6 +141,13 @@ export function resolveIdentity(
   const operator = env['CONCORD_AGENT_ID']?.trim();
   if (operator !== undefined && operator !== '') {
     return { agentId: operator, kind: kind ?? kindOf(operator), origin: 'operator' };
+  }
+
+  if (kind === 'cline' && options.hookPayload !== undefined) {
+    const taskId = clineHookTaskId(options.hookPayload);
+    if (taskId !== undefined) {
+      return { agentId: agentIdForSession('cline', taskId), kind: 'cline', origin: 'hook' };
+    }
   }
 
   if (options.hookPayload !== undefined) {

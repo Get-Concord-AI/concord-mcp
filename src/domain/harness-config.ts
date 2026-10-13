@@ -6,7 +6,15 @@
  * here rather than teaching each caller its own slightly different version.
  */
 
-export const harnessNames = ['claude-code', 'codex', 'cursor', 'gemini', 'grok', 'goose'] as const;
+export const harnessNames = [
+  'claude-code',
+  'codex',
+  'cursor',
+  'gemini',
+  'grok',
+  'goose',
+  'cline',
+] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
 export const transports = ['pull', 'local-ipc', 'app-server'] as const;
@@ -61,6 +69,13 @@ const busyPull: EndpointCapability = {
   transport: 'pull',
   reach: ['busy'],
   operations: ['pull', 'steer'],
+};
+
+/** Durable inbox only. No steer and no idle wake — the honest Cline contract. */
+const busyInbox: EndpointCapability = {
+  transport: 'pull',
+  reach: ['busy'],
+  operations: ['pull'],
 };
 
 const idlePull: EndpointCapability = {
@@ -189,6 +204,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Concord MCP server is registered with Goose; durable inbox delivery is available.',
     unsupportedDetail: 'Goose does not meet the verified MCP baseline (1.52.0).',
+  },
+  cline: {
+    name: 'cline',
+    executable: 'cline',
+    minimumVersion: [1, 0, 0],
+    defaultCapability: busyInbox,
+    monitorCapability: busyInbox,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Concord MCP server is registered with Cline; durable inbox delivery is available.',
+    unsupportedDetail: 'Cline does not meet the verified MCP baseline (1.0.0).',
   },
 };
 

@@ -82,7 +82,8 @@ function Agents({ snapshot }: { snapshot: DashboardSnapshot }): ReactNode {
   }
   return snapshot.status.presence.map((agent) => (
     <Text key={agent.agentId} wrap="truncate-end">
-      {livenessMarker(agent)} {agent.agentId} · {agent.status} · {ageLabel(agent.ageSeconds)}
+      {livenessMarker(agent)} {agent.agentId} · {agent.kind} · {agent.status} ·{' '}
+      {ageLabel(agent.ageSeconds)}
       {agent.summary === null ? '' : ` · ${agent.summary}`}
     </Text>
   ));

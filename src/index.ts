@@ -20,7 +20,14 @@ async function main(): Promise<void> {
   // One server process per session, with the session id in its environment, so
   // this agent's identity is known before the transport connects — and it is the
   // same id the relay CLI derives for the same session.
-  const identity = resolveIdentity(process.env);
+  // CONCORD_AGENT_KIND is pinned by a harness MCP registration (Cline does this)
+  // so a client launched inside another harness does not borrow that parent's
+  // session id.
+  const pinnedKind = process.env['CONCORD_AGENT_KIND']?.trim();
+  const identity = resolveIdentity(
+    process.env,
+    pinnedKind === undefined || pinnedKind === '' ? {} : { kind: pinnedKind },
+  );
 
   // A repository linked to Concord Cloud works through it: no local database,
   // and no telemetry from this package for operations that are not local.
