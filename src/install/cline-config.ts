@@ -100,11 +100,7 @@ function concordEntry(
     ...(existing ?? {}),
     command: CONCORD_SERVER_COMMAND,
     args: preservedArgs,
-    env: {
-      ...readEnv(existing?.['env'], path),
-      CONCORD_REPO_ROOT: repoRoot,
-      CONCORD_AGENT_KIND,
-    },
+    env: { ...readEnv(existing?.['env'], path), CONCORD_REPO_ROOT: repoRoot, CONCORD_AGENT_KIND },
     disabled: false,
   };
 }
