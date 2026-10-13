@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, and Goose talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, and Cline talk to each other.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -66,10 +66,10 @@ direct prompts and replies.
 for Claude, Cursor, Gemini, Grok, and Codex (`.mcp.json`, `.cursor/mcp.json`,
 `.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`) and writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
-`.codex/`, `.cursor/rules/`). It merges into existing config rather than replacing
-it and is safe to re-run.
+`.codex/`, `.cursor/rules/`, `.cline/rules/`). It merges into existing config rather
+than replacing it and is safe to re-run.
 
-Setup also detects supported clients and attempts to install their global Concord
+Setup also detects supported clients, including Cline, and attempts to install their global Concord
 adapters independently. Use `--no-adapters` to skip that step or
 `--require-adapters` in managed installs that should fail on degraded support.
 Pass `--no-mcp` to write only the workspace and instructions while managing MCP
@@ -107,6 +107,7 @@ removes exactly what it added.
 | Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)   |
 | Grok Build                         | [Setup and delivery](./docs/grok-build.md)   |
 | Goose                              | [Setup and delivery](./docs/goose.md)        |
+| Cline                              | [Setup and delivery](./docs/cline.md)        |
 | Any other MCP-capable coding agent | Shared work-state through the five MCP tools |
 
 > There is no universal `/concord` slash command — commands are client-specific.

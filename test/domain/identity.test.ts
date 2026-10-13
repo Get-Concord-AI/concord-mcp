@@ -55,6 +55,18 @@ describe('resolveIdentity', () => {
     expect(identity?.kind).toBe('goose');
   });
 
+  it('names a Cline session from a hook task id or an operator id, and never invents one', () => {
+    expect(
+      resolveIdentity(
+        { CLAUDE_CODE_SESSION_ID: SESSION },
+        { kind: 'cline', hookPayload: JSON.stringify({ taskId: 'task-9' }) },
+      ),
+    ).toEqual({ agentId: agentIdForSession('cline', 'task-9'), kind: 'cline', origin: 'hook' });
+    const operator = resolveIdentity({ CONCORD_AGENT_ID: 'reviewer' }, { kind: 'cline' });
+    expect(operator).toEqual({ agentId: 'reviewer', kind: 'cline', origin: 'operator' });
+    expect(resolveIdentity({ CLAUDE_CODE_SESSION_ID: SESSION }, { kind: 'cline' })).toBeUndefined();
+  });
+
   it('never lets one client borrow another client session id', () => {
     // A Codex hook whose payload is missing must not fall through to the Claude
     // Code environment and register codex:<hash of a Claude session>.

@@ -22,6 +22,11 @@ import { userHome } from '../../config/paths.js';
 import { claudeSkillsPluginPath } from '../claude-plugin.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import {
+  clineConfigInstalled,
+  installClineMcpConfig,
+  uninstallClineConfig,
+} from '../cline-config.js';
+import {
   gooseConfigInstalled,
   installGooseMcpConfig,
   uninstallGooseConfig,
@@ -454,6 +459,43 @@ function statusGrok(env: NodeJS.ProcessEnv): AdapterReport {
   };
 }
 
+function statusCline(env: NodeJS.ProcessEnv): AdapterReport {
+  const config = HARNESS_CONFIGS.cline;
+  const executable = executablePath(config.executable, env);
+  if (executable === undefined) {
+    return {
+      harness: config.name,
+      detected: false,
+      status: 'not_detected',
+      monitor: config.monitor.kind,
+      capabilities: [],
+      detail: 'Cline was not found on PATH.',
+    };
+  }
+  const version = versionTuple(run(executable, ['version'], env).output);
+  if (version === undefined || !atLeast(version, config.minimumVersion)) {
+    return {
+      harness: config.name,
+      detected: true,
+      status: 'unsupported_version',
+      monitor: config.monitor.kind,
+      capabilities: [],
+      detail: config.unsupportedDetail,
+    };
+  }
+  const installed = clineConfigInstalled(env);
+  return {
+    harness: config.name,
+    detected: true,
+    status: installed ? 'installed' : 'action_required',
+    monitor: config.monitor.kind,
+    capabilities: installed ? [...config.installedCapabilities] : ['pull', 'busy'],
+    detail: installed
+      ? config.installedDetail
+      : 'Concord MCP server is not yet registered with Cline.',
+  };
+}
+
 function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
   const config = HARNESS_CONFIGS.goose;
   const executable = executablePath(config.executable, env);
@@ -502,6 +544,7 @@ export function statusGlobalAdapters(
     statusGemini(env, repoRoot),
     statusGrok(env),
     statusGoose(env),
+    statusCline(env),
   ];
 }
 
@@ -524,6 +567,7 @@ export function installGlobalAdapters(
   moduleUrl: string,
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
+  options: { mcp?: boolean } = {},
 ): AdapterReport[] {
   const failures = new Map<HarnessName, string>();
   const attempt = (harness: HarnessName, action: () => void): void => {
@@ -588,6 +632,16 @@ export function installGlobalAdapters(
     installGooseMcpConfig(env);
   });
 
+  attempt('cline', () => {
+    const cline = executablePath('cline', env);
+    if (cline === undefined || repoRoot === undefined || options.mcp === false) return;
+    const version = versionTuple(run(cline, ['version'], env).output);
+    if (version === undefined || !atLeast(version, HARNESS_CONFIGS.cline.minimumVersion)) {
+      return;
+    }
+    installClineMcpConfig(repoRoot, env);
+  });
+
   const report = statusGlobalAdapters(env, repoRoot).map((entry) => {
     const failure = failures.get(entry.harness);
     return failure === undefined
@@ -624,6 +678,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
+  uninstallClineConfig(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

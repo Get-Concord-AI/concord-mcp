@@ -179,7 +179,7 @@ export function renderRosterLines(roster: readonly PresenceEntry[]): string[] {
   return roster.map((entry) => {
     const state = `${entry.liveness}/${entry.status}`;
     const doing = entry.summary ?? '-';
-    return `  ${entry.agentId.padEnd(18)} ${state.padEnd(20)} ${doing}  (${String(entry.ageSeconds)}s ago)`;
+    return `  ${entry.agentId.padEnd(18)} ${state.padEnd(20)} ${doing}  (${String(entry.ageSeconds)}s ago) · ${entry.kind}`;
   });
 }
 
