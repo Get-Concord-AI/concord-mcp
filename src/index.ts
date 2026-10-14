@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import { startBackgroundAdapterCheck } from './adapter-check.js';
 import { writeArtifacts } from './artifacts/index.js';
 import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/proxy.js';
 import { cloudTargetFor } from './cloud/target.js';
@@ -30,6 +31,8 @@ async function main(): Promise<void> {
     identity,
     resolveCheckoutRoot(process.cwd(), process.env),
   );
+  // Before the cloud branch: adapters are installed on this machine either way.
+  const adapterCheck = startBackgroundAdapterCheck(identity, process.env);
   if (cloud !== undefined) {
     const proxy = createCloudProxyServer(cloud, () => connectCloud(cloud));
     await proxy.connect(new StdioServerTransport());
@@ -50,6 +53,7 @@ async function main(): Promise<void> {
     workspaceManager,
     ...(identity === undefined ? {} : { identity }),
     getAvailableUpdate: updateCheck.getAvailableUpdate,
+    getAdapterNotice: adapterCheck.getNotice,
     ...(telemetry === undefined ? {} : { telemetry }),
     onToolWrite: (workspace) => {
       if (workspace !== undefined) {

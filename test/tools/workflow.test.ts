@@ -93,6 +93,35 @@ describe('simplified workflow MCP contract', () => {
     }
   });
 
+  it("surfaces a missing harness adapter once, with the session's monitor command", async () => {
+    const server = createServer(repos, {
+      getAdapterNotice: () => ({
+        check: { harness: 'grok', outcome: 'needs_install', detail: 'not installed' },
+        monitorCommand: 'concord inbox watch --agent grok:1094f0e0 --provider grok',
+        text: 'Concord adapter notice',
+      }),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'workflow-test', version: '0.0.0' });
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+    const harness = { client, server };
+    try {
+      const first = await client.callTool({ name: 'inspect_work', arguments: {} });
+      expect(first.content).toContainEqual({ type: 'text', text: 'Concord adapter notice' });
+      expect(first.structuredContent).toMatchObject({
+        adapter_advisory: {
+          harness: 'grok',
+          outcome: 'needs_install',
+          monitor_command: 'concord inbox watch --agent grok:1094f0e0 --provider grok',
+        },
+      });
+      const second = await client.callTool({ name: 'inspect_work', arguments: {} });
+      expect(JSON.stringify(second)).not.toContain('adapter_advisory');
+    } finally {
+      await close(harness);
+    }
+  });
+
   it('runs start, inspect, update, review, reopen, and complete through the new surface', async () => {
     const harness = await connect(repos);
     try {
