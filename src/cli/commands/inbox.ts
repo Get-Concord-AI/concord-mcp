@@ -238,6 +238,29 @@ export function workspaceExists(cwd: string, env: NodeJS.ProcessEnv = process.en
   }
 }
 
+/**
+ * Whether hooks here have a workspace to serve, distinguishing a workspace
+ * that is absent from one that exists but cannot be resolved right now
+ * (unreadable worktree metadata, an invalid configured root). Callers that can
+ * retry treat `unknown` as transient rather than final.
+ */
+function workspaceState(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): 'present' | 'absent' | 'unknown' {
+  let store;
+  try {
+    store = resolveStore(resolveRepoRoot(cwd, env), env);
+  } catch {
+    return 'unknown';
+  }
+  try {
+    return store.kind === 'global' || existsSync(store.databasePath) ? 'present' : 'absent';
+  } catch {
+    return 'unknown';
+  }
+}
+
 function launchCodexAdapterHost(repoRoot: string, agentId: string, threadId: string): void {
   const entrypoint = process.argv[1];
   if (entrypoint === undefined) return;
@@ -343,7 +366,9 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         return;
       }
       if (options.cloud === true || !workspaceExists(process.cwd())) {
-        process.exitCode = 1;
+        // 2 is a confirmed "not a workspace"; 1 means the check itself failed,
+        // which the relay monitor retries rather than treating as final.
+        process.exitCode = workspaceState(process.cwd(), process.env) === 'absent' ? 2 : 1;
         return;
       }
       process.stdout.write(
