@@ -16,6 +16,10 @@ const GEMINI_CONFIG_PATH = join('.gemini', 'settings.json');
 const GROK_CONFIG_PATH = join('.grok', 'config.toml');
 const GROK_FENCE_START = '# concord:mcp-start';
 const GROK_FENCE_END = '# concord:mcp-end';
+/** Workspace MCP file only Copilot CLI discovers. `.mcp.json` is shared with
+ * Claude Code, so it stays pinned to `claude-code`; Copilot's own project
+ * file is `.github/mcp.json`. */
+const COPILOT_WORKSPACE_TARGETS: readonly string[] = [join('.github', 'mcp.json')];
 
 const mcpConfigSchema = z
   .object({ mcpServers: z.record(z.string(), z.unknown()).optional() })
@@ -49,7 +53,11 @@ function configuredHome(env: NodeJS.ProcessEnv): string | undefined {
  * passing the previous output back in is a no-op. Without `repoRoot` the entry
  * is a user-level one, which finds the repository from where it is started.
  */
-export function upsertMcpServer(existing: string | undefined, repoRoot?: string): string {
+export function upsertMcpServer(
+  existing: string | undefined,
+  repoRoot: string | undefined,
+  harnessKind?: string,
+): string {
   const source: unknown =
     existing === undefined || existing.trim() === '' ? {} : JSON.parse(existing);
   const config = mcpConfigSchema.parse(source);
@@ -61,7 +69,10 @@ export function upsertMcpServer(existing: string | undefined, repoRoot?: string)
       ...servers,
       [CONCORD_SERVER_KEY]: {
         command: CONCORD_SERVER_COMMAND,
-        ...(repoRoot === undefined ? {} : { env: { CONCORD_REPO_ROOT: repoRoot } }),
+        env: {
+          ...(repoRoot === undefined ? {} : { CONCORD_REPO_ROOT: repoRoot }),
+          ...(harnessKind === undefined ? {} : { CONCORD_AGENT_KIND: harnessKind }),
+        },
       },
     },
   };
@@ -119,8 +130,14 @@ export function removeMcpServer(existing: string): string {
  * watch into a new Gemini turn while the session is otherwise idle. Gemini's
  * idle injection effect is gated separately by experimental model steering.
  */
-export function upsertGeminiSettings(existing: string | undefined, repoRoot?: string): string {
-  const withServer = looseObjectSchema.parse(JSON.parse(upsertMcpServer(existing, repoRoot)));
+export function upsertGeminiSettings(
+  existing: string | undefined,
+  repoRoot: string | undefined,
+  harnessKind?: string,
+): string {
+  const withServer = looseObjectSchema.parse(
+    JSON.parse(upsertMcpServer(existing, repoRoot, harnessKind)),
+  );
   const currentTools = looseObjectSchema.safeParse(withServer['tools']);
   const tools = currentTools.success ? currentTools.data : {};
   const currentShell = looseObjectSchema.safeParse(tools['shell']);
@@ -202,13 +219,13 @@ export function removeGrokMcpServer(existing: string): string {
   return preserved.join('\n').trimEnd();
 }
 
-function writeMcpConfig(repoRoot: string, relPath: string): string {
+function writeMcpConfig(repoRoot: string, relPath: string, harnessKind: string): string {
   const fullPath = join(repoRoot, relPath);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
 
   let updated: string;
   try {
-    updated = upsertMcpServer(existing, repoRoot);
+    updated = upsertMcpServer(existing, repoRoot, harnessKind);
   } catch {
     throw new McpConfigParseError(relPath);
   }
@@ -226,12 +243,12 @@ function writeGrokMcpConfig(repoRoot: string): string {
   return GROK_CONFIG_PATH;
 }
 
-function writeGeminiConfig(repoRoot: string): string {
+function writeGeminiConfig(repoRoot: string, harnessKind: string): string {
   const fullPath = join(repoRoot, GEMINI_CONFIG_PATH);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
   let updated: string;
   try {
-    updated = upsertGeminiSettings(existing, repoRoot);
+    updated = upsertGeminiSettings(existing, repoRoot, harnessKind);
   } catch {
     throw new McpConfigParseError(GEMINI_CONFIG_PATH);
   }
@@ -242,13 +259,16 @@ function writeGeminiConfig(repoRoot: string): string {
 
 /**
  * Register Concord in every project-scoped client config under `repoRoot`:
- * Claude Code, Cursor, Gemini CLI, and Grok Build. Codex uses its user-scoped
- * TOML installer because that harness does not expose a project MCP file.
+ * Claude Code, Cursor, Gemini CLI, Grok Build, and GitHub Copilot CLI
+ * (which reads `.mcp.json` and `.github/mcp.json`). Codex uses its
+ * user-scoped TOML installer because that harness does not expose a
+ * project MCP file; Copilot CLI's user config is written by its adapter.
  */
 export function installMcpConfigs(repoRoot: string): string[] {
   return [
-    ...JSON_TARGETS.map((relPath) => writeMcpConfig(repoRoot, relPath)),
-    writeGeminiConfig(repoRoot),
+    ...JSON_TARGETS.map((relPath) => writeMcpConfig(repoRoot, relPath, 'claude-code')),
+    ...COPILOT_WORKSPACE_TARGETS.map((relPath) => writeMcpConfig(repoRoot, relPath, 'copilot-cli')),
+    writeGeminiConfig(repoRoot, 'gemini'),
     writeGrokMcpConfig(repoRoot),
   ];
 }

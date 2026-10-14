@@ -22,6 +22,11 @@ import { userHome } from '../../config/paths.js';
 import { claudeSkillsPluginPath } from '../claude-plugin.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import {
+  copilotConfigInstalled,
+  installCopilotMcpConfig,
+  uninstallCopilotConfig,
+} from '../copilot-config.js';
+import {
   gooseConfigInstalled,
   installGooseMcpConfig,
   uninstallGooseConfig,
@@ -491,6 +496,43 @@ function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
   };
 }
 
+function statusCopilot(env: NodeJS.ProcessEnv): AdapterReport {
+  const config = HARNESS_CONFIGS['copilot-cli'];
+  const executable = executablePath(config.executable, env);
+  if (executable === undefined) {
+    return {
+      harness: config.name,
+      detected: false,
+      status: 'not_detected',
+      monitor: config.monitor.kind,
+      capabilities: [],
+      detail: 'Copilot CLI was not found on PATH.',
+    };
+  }
+  const version = versionTuple(run(executable, ['--version'], env).output);
+  if (version === undefined || !atLeast(version, config.minimumVersion)) {
+    return {
+      harness: config.name,
+      detected: true,
+      status: 'unsupported_version',
+      monitor: config.monitor.kind,
+      capabilities: [],
+      detail: config.unsupportedDetail,
+    };
+  }
+  const installed = copilotConfigInstalled(env);
+  return {
+    harness: config.name,
+    detected: true,
+    status: installed ? 'installed' : 'action_required',
+    monitor: config.monitor.kind,
+    capabilities: installed ? [...config.installedCapabilities] : ['pull', 'busy'],
+    detail: installed
+      ? config.installedDetail
+      : 'Concord MCP server is not yet registered with Copilot CLI.',
+  };
+}
+
 export function statusGlobalAdapters(
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
@@ -502,6 +544,7 @@ export function statusGlobalAdapters(
     statusGemini(env, repoRoot),
     statusGrok(env),
     statusGoose(env),
+    statusCopilot(env),
   ];
 }
 
@@ -588,6 +631,16 @@ export function installGlobalAdapters(
     installGooseMcpConfig(env);
   });
 
+  attempt('copilot-cli', () => {
+    const copilot = executablePath('copilot', env);
+    if (copilot === undefined) return;
+    const version = versionTuple(run(copilot, ['--version'], env).output);
+    if (version === undefined || !atLeast(version, HARNESS_CONFIGS['copilot-cli'].minimumVersion)) {
+      return;
+    }
+    installCopilotMcpConfig(env, repoRoot);
+  });
+
   const report = statusGlobalAdapters(env, repoRoot).map((entry) => {
     const failure = failures.get(entry.harness);
     return failure === undefined
@@ -624,6 +677,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
+  uninstallCopilotConfig(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);
