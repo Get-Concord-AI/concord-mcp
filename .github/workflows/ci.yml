@@ -12,11 +12,12 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    name: Verify (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         node: ['22.x', '24.x']
     steps:
       - uses: actions/checkout@v7
