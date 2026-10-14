@@ -9,8 +9,12 @@ command becomes a conversation notification and can wake a new turn. Concord's
 generated AGENTS instructions tell Grok to start one persistent monitor for:
 
 ```bash
-concord inbox watch --provider grok
+concord inbox watch --agent grok:<id> --provider grok
 ```
+
+The plugin's SessionStart hook prints this command with the session's id filled
+in. Keep `--agent`: Grok's `monitor` does not pass `GROK_SESSION_ID` to the
+command, so Concord cannot otherwise tell which session is watching.
 
 That is the preferred idle-delivery path. Grok's passive SessionStart hook cannot
 invoke a model tool itself, so the agent starts the monitor once per session;

@@ -63,7 +63,7 @@ the conversation is registered as `cursor:<id>` and Cursor is instructed to
 start one Cursor-owned background Shell task running:
 
 ```bash
-concord inbox watch --provider cursor --once
+concord inbox watch --agent cursor:<id> --provider cursor --once
 ```
 
 The command waits silently until a message arrives, emits it, and exits. Cursor's

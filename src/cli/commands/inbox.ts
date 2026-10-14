@@ -14,6 +14,7 @@ import {
   monitorCapabilityFor,
   type EndpointCapability,
 } from '../../domain/delivery.js';
+import { harnessConfigFor } from '../../domain/harness-config.js';
 import { hookSessionId } from '../../domain/identity.js';
 import {
   renderGeminiAfterAgent,
@@ -199,11 +200,16 @@ function readHookPayload(): string | undefined {
   }
 }
 
-function registeredLine(agentId: string): string {
+export function registeredLine(agentId: string, provider: string): string {
+  // A harness monitor may not inherit the session's environment (Grok's does
+  // not), so hand the agent the exact command with its id already filled in.
+  const monitor = harnessConfigFor(provider)?.monitor.command?.replace('<agent-id>', agentId);
   return (
     `Concord: this session is agent \`${agentId}\` and can receive live messages from other ` +
     `agents. If a Concord tool asks for agent_id, use "${agentId}"; do not invent a ` +
-    'different id.\n'
+    'different id.' +
+    (monitor === undefined ? '' : ` Start its inbox monitor with: \`${monitor}\`.`) +
+    '\n'
   );
 }
 
@@ -388,7 +394,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         ) {
           launchCodexAdapterHost(access.runtime.repoRoot, agentId, threadId);
         }
-        process.stdout.write(registeredLine(agentId));
+        process.stdout.write(registeredLine(agentId, options.provider));
         return;
       }
       const context = openContext(process.cwd());
@@ -406,7 +412,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       // Name the id. Clients whose session Concord can read resolve it on every
       // tool call; clients that scrub their environment (Codex) cannot, and for
       // those this line is the only place the agent learns who it is.
-      process.stdout.write(registeredLine(agentId));
+      process.stdout.write(registeredLine(agentId, options.provider));
     });
 
   inbox

@@ -86,7 +86,7 @@ function sessionContext(agentId, status) {
   return (
     `Concord: this Cursor session is agent ${agentId}.${workspace} To receive peer messages ` +
     `while idle, start exactly one Cursor background Shell task with: ` +
-    `concord inbox watch --provider cursor --once. Leave it active when the turn ends so ` +
+    `concord inbox watch --agent ${agentId} --provider cursor --once. Leave it active when the turn ends so ` +
     `Cursor's background-task completion resumes you. When it completes, answer the emitted ` +
     `peer message, then immediately start a fresh monitor.${instructions}`
   );

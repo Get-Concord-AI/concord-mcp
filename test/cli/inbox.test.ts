@@ -10,7 +10,12 @@ import {
   type DeliverableMessage,
 } from '../../src/domain/pull-inbox.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../../src/install/instructions.js';
-import { drainInbox, registerPullEndpoint, watchInbox } from '../../src/cli/commands/inbox.js';
+import {
+  drainInbox,
+  registeredLine,
+  registerPullEndpoint,
+  watchInbox,
+} from '../../src/cli/commands/inbox.js';
 import { effectiveEndpointCapabilities, monitorCapabilityFor } from '../../src/domain/delivery.js';
 import { agentIdForSession } from '../../src/domain/identity.js';
 import { endpointPromptable, handleSendAgentMessage } from '../../src/tools/agent-messages.js';
@@ -341,5 +346,17 @@ describe('pull-transport inbox', () => {
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(0);
     expect(repos.agentMessages.listEvents(first[0]?.messageId ?? '')).toHaveLength(2);
+  });
+});
+
+describe('registeredLine', () => {
+  it('hands a Grok session its monitor command with the id filled in', () => {
+    expect(registeredLine('grok:1094f0e0', 'grok')).toContain(
+      '`concord inbox watch --agent grok:1094f0e0 --provider grok`',
+    );
+  });
+
+  it('names no monitor for a harness without a monitor command', () => {
+    expect(registeredLine('claude-code:4f2a91c7', 'claude-code')).not.toContain('inbox watch');
   });
 });
