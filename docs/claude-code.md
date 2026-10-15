@@ -67,3 +67,9 @@ notification starts a turn (UserPromptSubmit) or when the blocked turn ends
 (Stop); a reply also counts. If the session is killed before that, a new session
 for the same agent (`CONCORD_AGENT_ID`) receives the message again on startup.
 `claude --resume` restores the held notification instead, so it is not resent.
+
+The same hooks record when a session stops to wait on its user. `concord status`
+and `inspect_work` show it, and a sender's outlook warns that the message will
+not be read until the user responds. Dismissing a prompt with Esc or Deny fires
+no hook, so the flag clears at the session's next prompt, tool call, or turn
+end; it is advisory and never holds delivery.

@@ -13,7 +13,7 @@ describe('openDatabase', () => {
   it('applies all migrations (user_version at head) and creates tables', () => {
     const db = openDatabase(':memory:');
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(13);
+    expect(version).toBe(14);
 
     const raw: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     const names = new Set(
@@ -85,7 +85,7 @@ describe('openDatabase', () => {
     const task = parseTaskRow(
       upgraded.prepare('SELECT * FROM tasks WHERE task_id = ?').get('LEGACY'),
     );
-    expect(upgraded.pragma('user_version', { simple: true })).toBe(13);
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(14);
     expect(task.status).toBe('handed_off');
     expect(task.agentId).toBe('codex:old');
     expect(task.version).toBe(1);

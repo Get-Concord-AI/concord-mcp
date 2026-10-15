@@ -9,6 +9,7 @@ import {
   type TaskRecord,
 } from '../db/index.js';
 import {
+  awaitingUserOutlook,
   deliveryOutlook,
   effectiveEndpointCapabilities,
   supportsImmediateDelivery,
@@ -235,11 +236,15 @@ export function handleSendAgentMessage(
   repos.agents.touch(input.agentId);
   const activityTask =
     !idempotentReplay && task !== undefined ? tasks.touchActivity(task.taskId) : task;
+  const outlook = deliveryOutlook(effectiveEndpointCapabilities(endpoint));
   return {
     message,
     idempotentReplay,
     task: activityTask ?? null,
-    outlook: deliveryOutlook(effectiveEndpointCapabilities(endpoint)),
+    outlook:
+      endpoint.awaitingUserSince === null
+        ? outlook
+        : `${outlook} ${awaitingUserOutlook(endpoint.awaitingUserSince)}`,
     delivery: 'queued_pull',
     immediateMode: null,
   };
@@ -312,6 +317,8 @@ export interface AgentCommunicationView {
   promptable: boolean;
   provider: string | null;
   capabilities: string[];
+  /** When its session last stopped to wait on its user; null once it moved on. */
+  awaitingUserSince: string | null;
   inbox: AgentMessageRecord[];
   outbox: AgentMessageRecord[];
 }
@@ -330,6 +337,7 @@ export function inspectAgentCommunication(
     promptable: endpointPromptable(endpoint),
     provider: endpoint?.provider ?? null,
     capabilities: effectiveEndpointCapabilities(endpoint),
+    awaitingUserSince: endpoint?.awaitingUserSince ?? null,
     inbox: messages.filter((message) => message.recipientAgentId === agentId),
     outbox: messages.filter((message) => message.senderAgentId === agentId),
   };

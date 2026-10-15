@@ -25,6 +25,27 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "concord inbox observe"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "concord inbox observe"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "hooks": [

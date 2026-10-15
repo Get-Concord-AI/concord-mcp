@@ -75,6 +75,18 @@ export function deliveryOutlook(capabilities: readonly string[]): string {
         'will not see this until its next turn.';
 }
 
+/**
+ * Added to a sender's outlook when the recipient's session last reported
+ * stopping for its user. Hedged on purpose: dismissing a prompt reports
+ * nothing, so the flag can outlive the wait it describes.
+ */
+export function awaitingUserOutlook(since: string): string {
+  return (
+    `That agent stopped to wait on its user at ${since} (a question or permission prompt); ` +
+    'if it is still waiting, it will not see this until they respond.'
+  );
+}
+
 /** Whether the endpoint should be contacted instead of waiting for a pull. */
 export function supportsImmediateDelivery(capabilities: readonly string[]): boolean {
   return capabilities.includes('inject') || capabilities.includes('steer');

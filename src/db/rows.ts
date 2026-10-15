@@ -515,6 +515,8 @@ export interface AgentEndpointRecord {
   lastSeen: string;
   expiresAt: string | null;
   receiverExpiresAt: string | null;
+  /** When the session last stopped to wait on its user; null once it moved on. */
+  awaitingUserSince: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -531,6 +533,7 @@ const agentEndpointDbRowSchema = z.object({
   last_seen: z.string(),
   expires_at: z.string().nullable(),
   receiver_expires_at: z.string().nullable(),
+  awaiting_user_since: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -549,6 +552,7 @@ export function parseAgentEndpointRow(raw: unknown): AgentEndpointRecord {
     lastSeen: row.last_seen,
     expiresAt: row.expires_at,
     receiverExpiresAt: row.receiver_expires_at,
+    awaitingUserSince: row.awaiting_user_since,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

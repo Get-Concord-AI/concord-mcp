@@ -47,6 +47,8 @@ interface CommunicationEntry {
   promptable: boolean;
   provider: string | null;
   capabilities: string[];
+  /** When its session last stopped to wait on its user; null once it moved on. */
+  awaitingUserSince: string | null;
 }
 
 /** A read-only snapshot of shared work-state: active claims, overlaps computed
@@ -166,6 +168,7 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
         promptable: endpointPromptable(endpoint, now),
         provider: endpoint?.provider ?? null,
         capabilities: effectiveEndpointCapabilities(endpoint, now),
+        awaitingUserSince: endpoint?.awaitingUserSince ?? null,
       };
     }),
   };
@@ -193,7 +196,10 @@ export function renderStatusText(view: StatusView): string {
   } else {
     for (const entry of view.communications) {
       lines.push(
-        `  ${entry.agentId.padEnd(18)} ${entry.promptable ? 'promptable' : 'unreachable'}${entry.provider === null ? '' : ` via ${entry.provider}`}`,
+        `  ${entry.agentId.padEnd(18)} ${entry.promptable ? 'promptable' : 'unreachable'}${entry.provider === null ? '' : ` via ${entry.provider}`}` +
+          (entry.awaitingUserSince === null
+            ? ''
+            : `, waiting on its user since ${entry.awaitingUserSince}`),
       );
     }
   }

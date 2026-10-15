@@ -21,8 +21,15 @@ const observedHookSchema = z
     source: z.string().optional(),
     /** UserPromptSubmit: the prompt, including a monitor notification that started the turn. */
     prompt: z.string().optional(),
+    /** PreToolUse: the tool about to run. */
+    tool_name: z.string().optional(),
+    /** Notification: why Claude Code is asking for the user's attention. */
+    notification_type: z.string().optional(),
   })
   .loose();
+
+/** Claude Code's tool that blocks the turn on a question for the user. */
+const ASK_USER_TOOL = 'AskUserQuestion';
 
 export interface Observation {
   /** Messages this event proved the agent was shown. */
@@ -34,8 +41,12 @@ export interface Observation {
 const NOTHING: Observation = { seen: [], requeued: [] };
 
 /**
- * Apply one hook event to `agentId`'s messages.
+ * Apply one hook event to `agentId`'s messages and presence.
  *
+ * - `PreToolUse` for `AskUserQuestion`, and a `permission_prompt`
+ *   notification, mean the session is about to block on its user. Recorded so
+ *   a sender can be told; delivery is never held on it, because dismissing a
+ *   prompt with Esc or Deny fires no hook to clear it.
  * - `UserPromptSubmit` carries the text that started the turn. A monitor
  *   notification arrives this way, so any message rendered in it was seen.
  * - `SessionStart` from `startup` is a new session for this agent: anything
@@ -58,15 +69,42 @@ export function observeHookEvent(
   if (!result.success) return NOTHING;
   const event = result.data;
 
-  if (event.hook_event_name === 'UserPromptSubmit' && event.prompt !== undefined) {
-    const seen = repos.agentMessages.markSeen(agentId, renderedMessageIds(event.prompt), 'prompt');
-    return { seen: seen.map((message) => message.messageId), requeued: [] };
+  switch (event.hook_event_name) {
+    case 'PreToolUse':
+      if (event.tool_name === ASK_USER_TOOL) awaitUser(repos, agentId);
+      return NOTHING;
+    case 'Notification':
+      if (event.notification_type === 'permission_prompt') awaitUser(repos, agentId);
+      return NOTHING;
+    case 'UserPromptSubmit': {
+      repos.agentEndpoints.setAwaitingUser(agentId, null);
+      const ids = event.prompt === undefined ? [] : renderedMessageIds(event.prompt);
+      const seen = repos.agentMessages.markSeen(agentId, ids, 'prompt');
+      return { seen: seen.map((message) => message.messageId), requeued: [] };
+    }
+    case 'SessionStart': {
+      repos.agentEndpoints.setAwaitingUser(agentId, null);
+      if (event.source !== 'startup') return NOTHING;
+      const requeued = repos.agentMessages.requeueUnseen(agentId);
+      return { seen: [], requeued: requeued.map((message) => message.messageId) };
+    }
+    default:
+      return NOTHING;
   }
-  if (event.hook_event_name === 'SessionStart' && event.source === 'startup') {
-    const requeued = repos.agentMessages.requeueUnseen(agentId);
-    return { seen: [], requeued: requeued.map((message) => message.messageId) };
-  }
-  return NOTHING;
+}
+
+function awaitUser(repos: Repositories, agentId: string): void {
+  repos.agentEndpoints.setAwaitingUser(agentId, new Date().toISOString());
+}
+
+/**
+ * A tool call in `agentId`'s session finished (its PostToolUse hook), so
+ * whatever it was waiting on its user for has been answered. With parallel
+ * tool calls this can clear early; the flag is advisory, so that only costs a
+ * sender the warning.
+ */
+export function observeToolDone(repos: Repositories, agentId: string): void {
+  repos.agentEndpoints.setAwaitingUser(agentId, null);
 }
 
 /**
@@ -76,6 +114,7 @@ export function observeHookEvent(
  * turn could only end after the user answered.
  */
 export function observeTurnEnd(repos: Repositories, agentId: string, now = new Date()): string[] {
+  repos.agentEndpoints.setAwaitingUser(agentId, null);
   return repos.agentMessages
     .markSeenDeliveredBy(agentId, now.toISOString(), 'stop')
     .map((message) => message.messageId);

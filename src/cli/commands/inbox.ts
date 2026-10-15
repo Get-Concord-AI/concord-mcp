@@ -30,7 +30,7 @@ import { resolveAgentId } from '../agent-identity.js';
 import { resolveStore } from '../../workspaces/store.js';
 import { openContext } from '../context.js';
 import { launchDetachedConcord } from '../detached-host.js';
-import { observeHookEvent, observeTurnEnd } from './inbox-observe.js';
+import { observeHookEvent, observeToolDone, observeTurnEnd } from './inbox-observe.js';
 import {
   cloudAccess,
   drainFromCloud,
@@ -467,6 +467,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       const context = openContext(process.cwd());
       const isMonitor = options.format === 'monitor';
       if (options.format === 'stop') observeTurnEnd(context.repos, agentId);
+      if (options.format === 'post-tool-use') observeToolDone(context.repos, agentId);
       const messages = drainInbox(
         context.repos,
         agentId,

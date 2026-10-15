@@ -2,11 +2,17 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
-import { observeHookEvent, observeTurnEnd } from '../../src/cli/commands/inbox-observe.js';
+import { renderStatusText } from '../../src/artifacts/work-state-view.js';
+import {
+  observeHookEvent,
+  observeToolDone,
+  observeTurnEnd,
+} from '../../src/cli/commands/inbox-observe.js';
 import { drainInbox, registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 import { monitorCapabilityFor } from '../../src/domain/delivery.js';
 import { renderedMessageIds, renderMonitorLines } from '../../src/domain/pull-inbox.js';
 import { handleSendAgentMessage } from '../../src/tools/agent-messages.js';
+import { handleGetWorkState } from '../../src/tools/get-work-state.js';
 
 function registerAgent(repos: Repositories, agentId: string): void {
   repos.agents.upsert({
@@ -214,5 +220,114 @@ describe('renderedMessageIds', () => {
 
   it('finds nothing in an ordinary prompt', () => {
     expect(renderedMessageIds('please fix the concord bug')).toEqual([]);
+  });
+});
+
+describe('waiting on the user', () => {
+  let repos: Repositories;
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'claude-code');
+  });
+
+  function awaitingSince(): string | null | undefined {
+    return repos.agentEndpoints.getByAgent('beta')?.awaitingUserSince;
+  }
+
+  function ask(): void {
+    observeHookEvent(
+      repos,
+      'beta',
+      hook({ hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion' }),
+    );
+  }
+
+  it('tells the sender when the recipient stopped for a question, but still delivers', () => {
+    ask();
+    expect(awaitingSince()).not.toBeNull();
+
+    const result = handleSendAgentMessage(repos, {
+      operation: 'prompt',
+      agentId: 'alpha',
+      toAgentId: 'beta',
+      content: 'ping',
+      idempotencyKey: 'k1',
+    });
+
+    expect(result.outlook).toMatch(/wait on its user/i);
+    expect(monitorDrain(repos)).toHaveLength(1);
+  });
+
+  it('records a permission prompt, and nothing for other tools or notifications', () => {
+    observeHookEvent(repos, 'beta', hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash' }));
+    observeHookEvent(
+      repos,
+      'beta',
+      hook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' }),
+    );
+    expect(awaitingSince()).toBeNull();
+
+    observeHookEvent(
+      repos,
+      'beta',
+      hook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' }),
+    );
+    expect(awaitingSince()).not.toBeNull();
+  });
+
+  it('keeps the start of an ongoing wait', () => {
+    ask();
+    const first = awaitingSince();
+    observeHookEvent(
+      repos,
+      'beta',
+      hook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' }),
+    );
+
+    expect(awaitingSince()).toBe(first);
+  });
+
+  it.each([
+    [
+      'a tool finishing',
+      () => {
+        observeToolDone(repos, 'beta');
+      },
+    ],
+    ['the turn ending', () => observeTurnEnd(repos, 'beta')],
+    [
+      'a new prompt',
+      () =>
+        observeHookEvent(
+          repos,
+          'beta',
+          hook({ hook_event_name: 'UserPromptSubmit', prompt: 'hi' }),
+        ),
+    ],
+    [
+      'a resumed session',
+      () =>
+        observeHookEvent(
+          repos,
+          'beta',
+          hook({ hook_event_name: 'SessionStart', source: 'resume' }),
+        ),
+    ],
+  ])('clears on %s', (_label, moveOn) => {
+    ask();
+    moveOn();
+
+    expect(awaitingSince()).toBeNull();
+  });
+
+  it('shows the wait in workspace status', () => {
+    ask();
+
+    expect(renderStatusText(handleGetWorkState(repos))).toMatch(
+      /beta\s+promptable via claude-code, waiting on its user since /,
+    );
   });
 });

@@ -258,4 +258,11 @@ export const migrations: readonly string[] = [
   CREATE INDEX idx_agent_message_events_message
     ON agent_message_events(message_id, id);
   `,
+  // 014 — when the session behind an endpoint last stopped to wait on its user
+  // (a question or permission prompt), as reported by its own hooks. Shown to
+  // senders; never used to hold delivery, since dismissing a prompt fires no
+  // hook and a stale flag must not cost the agent its messages.
+  `
+  ALTER TABLE agent_endpoints ADD COLUMN awaiting_user_since TEXT;
+  `,
 ];

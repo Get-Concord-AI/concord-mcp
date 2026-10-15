@@ -686,7 +686,10 @@ export function registerWorkflowTools(
               text: withWorkspaceText(
                 `${result.communication.agentId}; promptable ${String(result.communication.promptable)}, ` +
                   `${String(result.communication.inbox.length)} inbox message(s), ` +
-                  `${String(result.communication.outbox.length)} outbox message(s).`,
+                  `${String(result.communication.outbox.length)} outbox message(s)` +
+                  (result.communication.awaitingUserSince === null
+                    ? '.'
+                    : `; waiting on its user since ${result.communication.awaitingUserSince}.`),
                 workspace,
               ),
             },
