@@ -23,6 +23,15 @@ export interface NewAgentMessage {
   idempotencyKey: string;
 }
 
+export interface ClaimOptions {
+  /**
+   * The claimer only queues messages for the agent (a harness monitor) rather
+   * than putting them in front of it, so they stay unseen until the session
+   * confirms it showed them. Otherwise delivery counts as seeing.
+   */
+  awaitSeen?: boolean;
+}
+
 export interface AgentMessageRepository {
   create(message: NewAgentMessage): AgentMessageRecord;
   get(messageId: string): AgentMessageRecord | undefined;
@@ -34,7 +43,24 @@ export interface AgentMessageRepository {
    * Atomically take every pending message for `agentId`, marking each
    * delivered and returning only the ones this call actually claimed.
    */
-  claimPendingForRecipient(agentId: string, provider: string): AgentMessageRecord[];
+  claimPendingForRecipient(
+    agentId: string,
+    provider: string,
+    options?: ClaimOptions,
+  ): AgentMessageRecord[];
+  /**
+   * Record that `agentId` was shown these messages. Ids it did not receive, or
+   * has already seen, are ignored. `via` names the evidence.
+   */
+  markSeen(agentId: string, messageIds: readonly string[], via: string): AgentMessageRecord[];
+  /** Mark every message delivered to `agentId` by `cutoff` and still unseen as seen. */
+  markSeenDeliveredBy(agentId: string, cutoff: string, via: string): AgentMessageRecord[];
+  /**
+   * Return every message delivered to `agentId` but never seen to the queue,
+   * so the next session for that agent receives it instead of losing it with
+   * the session it was handed to.
+   */
+  requeueUnseen(agentId: string): AgentMessageRecord[];
   listByTask(taskId: string): AgentMessageRecord[];
   listThread(messageId: string): AgentMessageRecord[];
   markDelivered(messageId: string, provider: string, receipt: string | null): AgentMessageRecord;
@@ -85,7 +111,8 @@ export function createAgentMessageRepository(
   const markDeliveredStmt = db.prepare(`
     UPDATE agent_messages
     SET status = 'delivered', provider = @provider, provider_receipt = @receipt,
-        delivered_at = @now, error_code = NULL, error_detail = NULL, failed_at = NULL
+        delivered_at = @now, seen_at = @seen_at,
+        error_code = NULL, error_detail = NULL, failed_at = NULL
     WHERE message_id = @message_id AND status = 'pending'
   `);
   const markFailedStmt = db.prepare(`
@@ -94,8 +121,23 @@ export function createAgentMessageRepository(
     WHERE message_id = @message_id AND status = 'pending'
   `);
   const markRepliedStmt = db.prepare(`
-    UPDATE agent_messages SET status = 'replied', replied_at = @now
+    UPDATE agent_messages SET status = 'replied', replied_at = @now, seen_at = COALESCE(seen_at, @now)
     WHERE message_id = @message_id AND status = 'delivered'
+  `);
+  const markSeenStmt = db.prepare(`
+    UPDATE agent_messages SET seen_at = @now
+    WHERE message_id = @message_id AND recipient_agent_id = @agent_id
+      AND status IN ('delivered', 'replied') AND seen_at IS NULL
+  `);
+  const listUnseenStmt = db.prepare(`
+    SELECT * FROM agent_messages
+    WHERE recipient_agent_id = ? AND status = 'delivered' AND seen_at IS NULL AND delivered_at <= ?
+    ORDER BY created_at, message_id
+  `);
+  const requeueStmt = db.prepare(`
+    UPDATE agent_messages
+    SET status = 'pending', provider = NULL, provider_receipt = NULL, delivered_at = NULL
+    WHERE message_id = @message_id AND status = 'delivered' AND seen_at IS NULL
   `);
   const eventStmt = db.prepare(`
     INSERT INTO agent_message_events (message_id, event, detail, created_at)
@@ -118,15 +160,21 @@ export function createAgentMessageRepository(
     return message;
   }
 
-  function claimPending(agentId: string, provider: string): AgentMessageRecord[] {
+  function claimPending(
+    agentId: string,
+    provider: string,
+    options: ClaimOptions,
+  ): AgentMessageRecord[] {
     const raw: unknown = listPendingStmt.all(agentId);
     const claimed: AgentMessageRecord[] = [];
     for (const row of rawListSchema.parse(raw).map(parseAgentMessageRow)) {
+      const now = new Date().toISOString();
       const result = markDeliveredStmt.run({
         message_id: row.messageId,
         provider,
         receipt: null,
-        now: new Date().toISOString(),
+        now,
+        seen_at: options.awaitSeen === true ? null : now,
       });
       if (result.changes === 0) continue;
       recordEvent(row.messageId, 'delivered', provider);
@@ -143,10 +191,55 @@ export function createAgentMessageRepository(
     eventStmt.run({ message_id: messageId, event, detail, created_at: new Date().toISOString() });
   }
 
+  function markSeen(
+    agentId: string,
+    messageIds: readonly string[],
+    via: string,
+  ): AgentMessageRecord[] {
+    const seen: AgentMessageRecord[] = [];
+    for (const messageId of new Set(messageIds)) {
+      const result = markSeenStmt.run({
+        message_id: messageId,
+        agent_id: agentId,
+        now: new Date().toISOString(),
+      });
+      if (result.changes === 0) continue;
+      recordEvent(messageId, 'seen', via);
+      seen.push(requireMessage(messageId));
+    }
+    return seen;
+  }
+
+  function listUnseen(agentId: string, cutoff: string): AgentMessageRecord[] {
+    const raw: unknown = listUnseenStmt.all(agentId, cutoff);
+    return rawListSchema.parse(raw).map(parseAgentMessageRow);
+  }
+
+  function markSeenDeliveredBy(agentId: string, cutoff: string, via: string): AgentMessageRecord[] {
+    return markSeen(
+      agentId,
+      listUnseen(agentId, cutoff).map((message) => message.messageId),
+      via,
+    );
+  }
+
+  function requeueUnseen(agentId: string): AgentMessageRecord[] {
+    const requeued: AgentMessageRecord[] = [];
+    for (const message of listUnseen(agentId, new Date().toISOString())) {
+      if (requeueStmt.run({ message_id: message.messageId }).changes === 0) continue;
+      recordEvent(message.messageId, 'requeued');
+      requeued.push(requireMessage(message.messageId));
+    }
+    return requeued;
+  }
+
   // Acquire the write reservation before listPendingStmt reads. A deferred
   // transaction can otherwise read an old WAL snapshot, lose a race to a
   // sender, and fail its write upgrade with SQLITE_BUSY_SNAPSHOT.
   const claimTransaction = db.transaction(claimPending);
+  const markSeenTransaction = db.transaction(markSeen);
+  const markSeenDeliveredByTransaction = db.transaction(markSeenDeliveredBy);
+  const requeueTransaction = db.transaction(requeueUnseen);
 
   return {
     create(message) {
@@ -178,12 +271,21 @@ export function createAgentMessageRepository(
       const raw: unknown = listPendingStmt.all(agentId);
       return rawListSchema.parse(raw).map(parseAgentMessageRow);
     },
-    claimPendingForRecipient(agentId, provider) {
+    claimPendingForRecipient(agentId, provider, options = {}) {
       // A Claude Code session drains from both a 2s monitor poll and a
       // PostToolUse hook, so two drains overlap routinely. The UPDATE is the
       // claim: whoever flips the row out of 'pending' owns the message, and
       // the loser emits nothing rather than showing the agent a duplicate.
-      return claimTransaction.immediate(agentId, provider);
+      return claimTransaction.immediate(agentId, provider, options);
+    },
+    markSeen(agentId, messageIds, via) {
+      return markSeenTransaction.immediate(agentId, messageIds, via);
+    },
+    markSeenDeliveredBy(agentId, cutoff, via) {
+      return markSeenDeliveredByTransaction.immediate(agentId, cutoff, via);
+    },
+    requeueUnseen(agentId) {
+      return requeueTransaction.immediate(agentId);
     },
     listByTask(taskId) {
       const raw: unknown = listByTaskStmt.all(project, taskId);
@@ -211,11 +313,14 @@ export function createAgentMessageRepository(
       return messages;
     },
     markDelivered(messageId, provider, receipt) {
+      // A push the recipient accepted was injected into its session directly.
+      const now = new Date().toISOString();
       const result = markDeliveredStmt.run({
         message_id: messageId,
         provider,
         receipt,
-        now: new Date().toISOString(),
+        now,
+        seen_at: now,
       });
       const stored = requireMessage(messageId);
       if (result.changes > 0) recordEvent(messageId, 'delivered', provider);

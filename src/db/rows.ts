@@ -586,6 +586,8 @@ export interface AgentMessageRecord {
   idempotencyKey: string;
   createdAt: string;
   deliveredAt: string | null;
+  /** When the agent was shown it; null while delivered to a harness but unseen. */
+  seenAt: string | null;
   repliedAt: string | null;
   failedAt: string | null;
 }
@@ -607,6 +609,7 @@ const agentMessageDbRowSchema = z.object({
   idempotency_key: z.string(),
   created_at: z.string(),
   delivered_at: z.string().nullable(),
+  seen_at: z.string().nullable(),
   replied_at: z.string().nullable(),
   failed_at: z.string().nullable(),
 });
@@ -630,12 +633,20 @@ export function parseAgentMessageRow(raw: unknown): AgentMessageRecord {
     idempotencyKey: row.idempotency_key,
     createdAt: row.created_at,
     deliveredAt: row.delivered_at,
+    seenAt: row.seen_at,
     repliedAt: row.replied_at,
     failedAt: row.failed_at,
   };
 }
 
-export const agentMessageEventValues = ['accepted', 'delivered', 'replied', 'failed'] as const;
+export const agentMessageEventValues = [
+  'accepted',
+  'delivered',
+  'seen',
+  'requeued',
+  'replied',
+  'failed',
+] as const;
 export type AgentMessageEvent = (typeof agentMessageEventValues)[number];
 const agentMessageEventSchema = z.enum(agentMessageEventValues);
 

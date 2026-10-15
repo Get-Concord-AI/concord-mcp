@@ -13,7 +13,7 @@ describe('openDatabase', () => {
   it('applies all migrations (user_version at head) and creates tables', () => {
     const db = openDatabase(':memory:');
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(12);
+    expect(version).toBe(13);
 
     const raw: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     const names = new Set(
@@ -85,11 +85,61 @@ describe('openDatabase', () => {
     const task = parseTaskRow(
       upgraded.prepare('SELECT * FROM tasks WHERE task_id = ?').get('LEGACY'),
     );
-    expect(upgraded.pragma('user_version', { simple: true })).toBe(12);
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(13);
     expect(task.status).toBe('handed_off');
     expect(task.agentId).toBe('codex:old');
     expect(task.version).toBe(1);
     expect(task.assignedAgentId).toBeNull();
+  });
+});
+
+describe('message seen-state migration', () => {
+  it('counts messages delivered before it as seen and keeps their event history', () => {
+    const filename = join(mkdtempSync(join(tmpdir(), 'concord-seen-')), 'v12.db');
+    const legacy = new Database(filename);
+    for (let index = 0; index < 12; index += 1) {
+      legacy.exec(migrations[index] ?? '');
+      legacy.pragma(`user_version = ${String(index + 1)}`);
+    }
+    const at = '2026-01-01T00:00:00.000Z';
+    const agent = legacy.prepare(
+      "INSERT INTO agents (agent_id, kind, first_seen, last_seen) VALUES (?, 'claude-code', ?, ?)",
+    );
+    agent.run('alpha', at, at);
+    agent.run('beta', at, at);
+    const message = legacy.prepare(
+      `INSERT INTO agent_messages (
+        message_id, sender_agent_id, recipient_agent_id, content, status,
+        idempotency_key, created_at, delivered_at
+      ) VALUES (?, 'alpha', 'beta', 'hi', ?, ?, ?, ?)`,
+    );
+    message.run('m-delivered', 'delivered', 'k1', at, at);
+    message.run('m-pending', 'pending', 'k2', at, null);
+    legacy
+      .prepare(
+        "INSERT INTO agent_message_events (message_id, event, created_at) VALUES ('m-delivered', 'delivered', ?)",
+      )
+      .run(at);
+    legacy.close();
+
+    const upgraded = openDatabase(filename);
+    const seen = z
+      .array(z.object({ message_id: z.string(), seen_at: z.string().nullable() }))
+      .parse(upgraded.prepare('SELECT message_id, seen_at FROM agent_messages ORDER BY 1').all());
+    expect(seen).toEqual([
+      { message_id: 'm-delivered', seen_at: at },
+      { message_id: 'm-pending', seen_at: null },
+    ]);
+    const events: unknown = upgraded
+      .prepare("SELECT event FROM agent_message_events WHERE message_id = 'm-delivered'")
+      .all();
+    expect(events).toEqual([{ event: 'delivered' }]);
+    // The widened CHECK accepts the new lifecycle events.
+    upgraded
+      .prepare(
+        "INSERT INTO agent_message_events (message_id, event, created_at) VALUES ('m-delivered', 'seen', ?)",
+      )
+      .run(at);
   });
 });
 

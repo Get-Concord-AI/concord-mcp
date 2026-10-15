@@ -36,6 +36,9 @@ fi
 while true; do
   # Never let a transient failure (a locked database, a mid-write config) kill
   # the monitor: a dead monitor silently stops delivering messages.
-  "${CONCORD_BIN}" inbox drain --format monitor 2>/dev/null || true
+  # --await-seen: Claude Code holds a notification while the agent is blocked
+  # on its user, so a drained message only counts as seen once this plugin's
+  # UserPromptSubmit or Stop hook confirms the session showed it.
+  "${CONCORD_BIN}" inbox drain --format monitor --await-seen 2>/dev/null || true
   sleep "${CONCORD_INBOX_POLL_SECONDS}"
 done

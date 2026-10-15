@@ -5,7 +5,7 @@ import type { Command } from '@commander-js/extra-typings';
 
 import { resolveRepoRoot, workspaceIdForRoot } from '../../config/paths.js';
 import { CONCORD_GLOBAL_INSTRUCTIONS } from '../../install/instructions.js';
-import type { Repositories } from '../../db/index.js';
+import type { ClaimOptions, Repositories } from '../../db/index.js';
 import {
   capabilityFor,
   effectiveEndpointCapabilities,
@@ -30,6 +30,7 @@ import { resolveAgentId } from '../agent-identity.js';
 import { resolveStore } from '../../workspaces/store.js';
 import { openContext } from '../context.js';
 import { launchDetachedConcord } from '../detached-host.js';
+import { observeHookEvent, observeTurnEnd } from './inbox-observe.js';
 import {
   cloudAccess,
   drainFromCloud,
@@ -93,16 +94,18 @@ export function registerPullEndpoint(
 /**
  * Take every pending message for `agentId` and mark it delivered. Draining is
  * what records delivery, so a message is only ever counted as delivered once
- * the recipient has actually been handed it.
+ * the recipient has actually been handed it. Pass `awaitSeen` when the caller
+ * only queues them in the harness and the session confirms what it showed.
  */
 export function drainInbox(
   repos: Repositories,
   agentId: string,
   provider: string,
   capability: EndpointCapability = capabilityFor(provider),
+  options: ClaimOptions = {},
 ): DeliverableMessage[] {
   registerPullEndpoint(repos, agentId, provider, Date.now(), capability);
-  const claimed = repos.agentMessages.claimPendingForRecipient(agentId, provider);
+  const claimed = repos.agentMessages.claimPendingForRecipient(agentId, provider, options);
   repos.agents.touch(agentId);
   return claimed.map(toDeliverable);
 }
@@ -422,12 +425,19 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       'post-tool-use and stop emit hook JSON; monitor emits one line per message; json emits raw records',
       'json',
     )
+    .option(
+      '--await-seen',
+      'Monitor only: count messages as seen when the session confirms it, not on drain',
+    )
     .action(async (options) => {
       const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
       if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
       // Checked before anything is taken: a format typo must not cost a batch.
       if (!DRAIN_FORMATS.includes(options.format)) {
         throw new Error(`Unknown --format: ${options.format}`);
+      }
+      if (options.awaitSeen === true && options.format !== 'monitor') {
+        throw new Error('--await-seen only applies to --format monitor.');
       }
       if (access.kind === 'unusable') {
         reportCloudFailure(access.reason);
@@ -456,11 +466,13 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       }
       const context = openContext(process.cwd());
       const isMonitor = options.format === 'monitor';
+      if (options.format === 'stop') observeTurnEnd(context.repos, agentId);
       const messages = drainInbox(
         context.repos,
         agentId,
         options.provider,
         isMonitor ? monitorCapabilityFor(options.provider) : capabilityFor(options.provider),
+        { awaitSeen: options.awaitSeen === true },
       );
       if (isMonitor) heartbeatReceiver(context.repos, agentId, 2_000);
       // Silence matters: a hook that prints on an empty inbox would inject
@@ -471,6 +483,31 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       }
       recordDeliveredMessages(telemetry, messages);
       writeMessages(options.format, messages);
+    });
+
+  inbox
+    .command('observe')
+    .description('Record what a session hook saw: messages shown to the agent, or a fresh start')
+    .option('--agent <id>', 'Agent id; defaults to CONCORD_AGENT_ID, then to the hook payload')
+    .option('--provider <name>', 'Client the agent runs in', 'claude-code')
+    .action((options) => {
+      // Seen-tracking lives in the local store; Concord Cloud keeps its own
+      // delivery record. Prints nothing: UserPromptSubmit output becomes context.
+      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
+      if (access.kind !== 'local' || !workspaceExists(process.cwd())) return;
+      try {
+        const payload = readHookPayload() ?? '';
+        const agentId = resolveAgentId(options.agent, process.env, {
+          kind: options.provider,
+          hookPayload: payload,
+        });
+        observeHookEvent(openContext(process.cwd()).repos, agentId, payload);
+      } catch (error) {
+        // Never fail the hook: a missed observation only leaves a message unseen.
+        process.stderr.write(
+          `Concord: could not record hook event: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
     });
 
   inbox

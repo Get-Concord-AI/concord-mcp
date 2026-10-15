@@ -63,6 +63,16 @@ export function renderInboxBody(messages: readonly DeliverableMessage[]): string
   return messages.map(renderPeerMessage).join('\n\n');
 }
 
+const RENDERED_MESSAGE_ID = /\[concord from \S+ id=([^\s\]]+)/gu;
+
+/**
+ * The ids of every message rendered in `text` by any channel above — read back
+ * from what a session was actually shown, to record that it saw them.
+ */
+export function renderedMessageIds(text: string): string[] {
+  return [...new Set([...text.matchAll(RENDERED_MESSAGE_ID)].flatMap((match) => match[1] ?? []))];
+}
+
 /** One line per message, for a plugin monitor's stdout. */
 export function renderMonitorLines(messages: readonly DeliverableMessage[]): string[] {
   return messages.map(
