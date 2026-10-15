@@ -75,6 +75,14 @@ export function endpointPromptable(
   );
 }
 
+/** A retried send of a message that already left the queue: say where it got to. */
+function replayOutlook(message: AgentMessageRecord): string {
+  if (message.status === 'replied') return 'This message was already delivered and answered.';
+  return message.seenAt === null
+    ? 'This message was already handed to that agent, which has not seen it yet.'
+    : 'This message was already delivered, and that agent has seen it.';
+}
+
 function required(value: string | undefined, field: string, operation: string): string {
   if (value === undefined) {
     throw new Error(`${field} is required when update_work operation is ${operation}.`);
@@ -186,12 +194,11 @@ export function handleSendAgentMessage(
       );
     }
     if (replay.status !== 'pending') {
-      const known = repos.agentEndpoints.getByAgent(recipientAgentId);
       return {
         message: replay,
         idempotentReplay: true,
         task: task ?? null,
-        outlook: deliveryOutlook(effectiveEndpointCapabilities(known)),
+        outlook: replayOutlook(replay),
         delivery: 'delivered',
         immediateMode: null,
       };

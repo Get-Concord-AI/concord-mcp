@@ -229,6 +229,9 @@ describe('pull-transport inbox', () => {
     }).outlook;
 
     expect(outlook).toMatch(/working or idle/i);
+    // Nothing was pushed: the sender must not be told it was injected.
+    expect(outlook).toMatch(/queued/i);
+    expect(outlook).not.toMatch(/injected now/i);
   });
 
   it('blocks the Stop hook so a finished turn reopens to read the message', () => {

@@ -202,6 +202,23 @@ describe('seen versus delivered', () => {
     expect(message?.seenAt).not.toBeNull();
   });
 
+  it('tells a retrying sender where the message actually got to', () => {
+    const retry = () =>
+      handleSendAgentMessage(repos, {
+        operation: 'prompt',
+        agentId: 'alpha',
+        toAgentId: 'beta',
+        content: 'ping',
+        idempotencyKey: 'k1',
+      });
+    retry();
+    monitorDrain(repos);
+    expect(retry().outlook).toMatch(/has not seen it yet/i);
+
+    observeTurnEnd(repos, 'beta');
+    expect(retry().outlook).toMatch(/has seen it/i);
+  });
+
   it('ignores a payload it cannot read', () => {
     expect(observeHookEvent(repos, 'beta', 'not json')).toEqual({ seen: [], requeued: [] });
     expect(observeHookEvent(repos, 'beta', '{}')).toEqual({ seen: [], requeued: [] });

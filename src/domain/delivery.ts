@@ -67,7 +67,11 @@ function decodeReach(capabilities: readonly string[]): Reach[] {
  */
 export function deliveryOutlook(capabilities: readonly string[]): string {
   if (capabilities.includes('inject') && capabilities.includes('steer')) {
-    return 'It can be injected now, whether working or idle: a busy turn is steered and an idle session starts a turn.';
+    // Queued, not pushed: a receiver in that session pulls it within seconds.
+    return (
+      "It is queued, and that agent's live receiver picks it up within seconds whether it is " +
+      'working or idle: a busy turn is steered and an idle session starts a turn.'
+    );
   }
   return decodeReach(capabilities).includes('idle')
     ? 'It will arrive on its own, whether that agent is working or idle.'
