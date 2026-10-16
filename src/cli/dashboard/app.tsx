@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Box, Text, useApp, useInput, useStdout } from 'ink';
+import { Box, Text, useApp, useInput, useWindowSize } from 'ink';
 
 import type { AvailableUpdate } from '../../update-notifier.js';
 import type { PresenceEntry } from '../../domain/presence.js';
@@ -351,9 +351,7 @@ export function DashboardApp({
   loadAvailableUpdate,
 }: DashboardAppProps): ReactNode {
   const { exit } = useApp();
-  const { stdout } = useStdout();
-  const [terminalWidth, setTerminalWidth] = useState(width ?? stdout.columns);
-  const [terminalHeight, setTerminalHeight] = useState(height ?? Math.max(8, stdout.rows));
+  const windowSize = useWindowSize();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [paneIndex, setPaneIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -363,8 +361,8 @@ export function DashboardApp({
   const [error, setError] = useState<string | undefined>();
   const [availableUpdate, setAvailableUpdate] = useState(initialAvailableUpdate);
 
-  const layout = layoutFor(width ?? terminalWidth);
-  const viewportHeight = height ?? terminalHeight;
+  const layout = layoutFor(width ?? windowSize.columns);
+  const viewportHeight = height ?? Math.max(8, windowSize.rows);
   const chromeHeight = availableUpdate === undefined ? 2 : 3;
   const panes = panesFor(layout);
   const pane = panes[paneIndex % panes.length] ?? 'tasks';
@@ -391,24 +389,6 @@ export function DashboardApp({
       clearInterval(timer);
     };
   }, [refresh, refreshMs]);
-
-  useEffect(() => {
-    if (width !== undefined && height !== undefined) {
-      return;
-    }
-    const resize = (): void => {
-      if (width === undefined) {
-        setTerminalWidth(stdout.columns);
-      }
-      if (height === undefined) {
-        setTerminalHeight(Math.max(8, stdout.rows));
-      }
-    };
-    stdout.on('resize', resize);
-    return () => {
-      stdout.off('resize', resize);
-    };
-  }, [height, stdout, width]);
 
   useEffect(() => {
     setSelectedIndex((current) => Math.min(current, Math.max(0, tasks.length - 1)));
