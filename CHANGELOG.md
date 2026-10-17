@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-17
+
+### Fixed
+
+- **`concord doctor` repairs dangling adapter links.** A harness adapter link
+  that points nowhere, or into a temporary or `npx` checkout, is reported with
+  its target and the expected packaged path. `doctor --fix` (or the prompt on a
+  terminal) re-points it, `setup` no longer moves a working link into a
+  throwaway checkout, and `uninstall` removes a dangling Concord link (#202,
+  #203).
+- **Overlap warnings cover every claimed task.** `start_work` now warns about
+  overlap with assigned, blocked and handed-off tasks, not only active ones,
+  matching `concord check` (#185).
+- **Grok config editing is safe.** A Grok config with inline
+  `mcp_servers = { ... }` is left untouched (with a warning naming the file)
+  instead of having a table appended that Grok could not load. Reading and
+  removing Concord's tables now skip single- and multi-line TOML strings and
+  comments, and a quoted key such as `[mcp_servers."concord.env"]` is no longer
+  mistaken for Concord's (#191).
+- **The Cursor migration keeps your own server.** `concord setup` no longer
+  removes a `concord` entry from `~/.cursor/mcp.json` that the user wrote
+  themselves (#194).
+- **Workspace selection.** An early tool call that names no workspace no longer
+  discards the client's MCP roots answer, and `update_work` records delivery in
+  the workspace it started in, even if another workspace becomes active or
+  Concord Cloud refuses a request while the message is delivered.
+- **`concord watch` in global mode** works on a fresh project before any
+  artifacts exist.
+
+### Changed
+
+- Dependency updates, including `ink` 8 and `js-yaml` 5 (#217, #218).
+
 ## [0.14.0] - 2026-10-12
 
 ### Added
@@ -470,7 +503,8 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.11.0...v0.12.0
