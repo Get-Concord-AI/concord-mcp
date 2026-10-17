@@ -164,6 +164,7 @@ function runDevinHook(event: string): void {
     const message = sessionStartMessage(
       identity.agentId,
       buildRoster(repos.agents.list(), Date.now()),
+      true,
     );
     process.stdout.write(
       JSON.stringify({
@@ -185,13 +186,17 @@ function runDevinHook(event: string): void {
     return;
   }
   if (event === 'devin-session-end') {
-    const endpoint = repos.agentEndpoints.getByAgent(identity.agentId);
-    if (endpoint !== undefined) repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+    endDevinSession(repos, identity.agentId);
     process.stdout.write('{}\n');
     return;
   }
   process.stderr.write(`Unknown Devin hook event: ${event}\n`);
   process.exitCode = 1;
+}
+
+export function endDevinSession(repos: Repositories, agentId: string): void {
+  const endpoint = repos.agentEndpoints.getByAgent(agentId);
+  if (endpoint !== undefined) repos.agentEndpoints.disconnect(endpoint.endpointId);
 }
 
 export function registerHookCommand(program: Command, telemetry?: TelemetryRecorder): void {
