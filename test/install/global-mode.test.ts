@@ -24,10 +24,20 @@ function machine(harnesses: readonly string[] = HARNESSES): NodeJS.ProcessEnv & 
   const bin = join(home, 'bin');
   mkdirSync(bin);
   for (const name of harnesses) {
+    const executable =
+      ['claude', 'devin'].includes(name) && process.platform === 'win32' ? `${name}.cmd` : name;
     const script =
-      name === 'claude' ? '#!/bin/sh\necho "$@" >> "$HOME/claude-calls"\n' : '#!/bin/sh\n';
-    writeFileSync(join(bin, name), script);
-    chmodSync(join(bin, name), 0o755);
+      name === 'claude'
+        ? process.platform === 'win32'
+          ? '@echo off\r\necho %*>>"%HOME%\\claude-calls"\r\n'
+          : '#!/bin/sh\necho "$@" >> "$HOME/claude-calls"\n'
+        : name === 'devin' && process.platform === 'win32'
+          ? '@echo off\r\necho Devin CLI v3000.3.0\r\n'
+          : name === 'devin'
+            ? '#!/bin/sh\necho Devin CLI v3000.3.0\n'
+            : '#!/bin/sh\n';
+    writeFileSync(join(bin, executable), script);
+    chmodSync(join(bin, executable), 0o755);
   }
   return { HOME: home, PATH: bin, CODEX_HOME: join(home, '.codex') };
 }
@@ -35,6 +45,62 @@ function machine(harnesses: readonly string[] = HARNESSES): NodeJS.ProcessEnv & 
 const read = (path: string): string => readFileSync(path, 'utf8');
 
 describe('applyGlobalMode', () => {
+  it('installs and removes Devin user MCP config and instructions', () => {
+    const env = machine(['devin']);
+    const on = applyGlobalMode(env, true);
+    expect(on.registrations).toEqual(['devin']);
+    expect(read(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).toContain('concord-mcp');
+    expect(read(join(env.HOME, '.config', 'devin', 'AGENTS.md'))).toContain('start_work');
+    const off = applyGlobalMode(env, false, { registrations: on.registrations });
+    expect(off.registrations).toEqual([]);
+    expect(existsSync(join(env.HOME, '.config', 'devin', 'AGENTS.md'))).toBe(false);
+    expect(read(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).not.toContain(
+      'concord-mcp',
+    );
+    const userConfig = read(join(env.HOME, '.config', 'devin', 'config.json'));
+    expect(userConfig).not.toContain('concord hook devin-');
+    expect(userConfig).not.toContain('"hooks"');
+  });
+
+  it('adds global Devin hooks while preserving existing user config, then removes Concord hooks', () => {
+    const env = machine(['devin']);
+    const config = join(env.HOME, '.config', 'devin', 'config.json');
+    mkdirSync(join(env.HOME, '.config', 'devin'), { recursive: true });
+    writeFileSync(config, '{\n  // User setting\n  "theme_mode": "dark"\n}\n');
+
+    const on = applyGlobalMode(env, true);
+    const installed = read(config);
+    expect(installed).toContain('// User setting');
+    expect(installed).toContain('"theme_mode": "dark"');
+    expect(installed).toContain('concord hook devin-session-start');
+    expect(installed).toContain('concord hook devin-user-prompt-submit');
+    expect(installed).toContain('concord hook devin-session-end');
+
+    applyGlobalMode(env, false, { registrations: on.registrations });
+    const removed = read(config);
+    expect(removed).toContain('// User setting');
+    expect(removed).toContain('"theme_mode": "dark"');
+    expect(removed).not.toContain('"hooks"');
+    expect(removed).not.toContain('concord hook devin-');
+  });
+
+  it('does not register the dedicated Devin MCP file on an older CLI', () => {
+    const env = machine(['devin']);
+    const path = join(env.HOME, 'bin', process.platform === 'win32' ? 'devin.cmd' : 'devin');
+    writeFileSync(
+      path,
+      process.platform === 'win32'
+        ? '@echo off\r\necho Devin CLI v3000.2.9\r\n'
+        : '#!/bin/sh\necho Devin CLI v3000.2.9\n',
+    );
+    chmodSync(path, 0o755);
+
+    const report = applyGlobalMode(env, true);
+
+    expect(report.registrations).toEqual([]);
+    expect(existsSync(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).toBe(false);
+  });
+
   it('registers and instructs each installed harness, then removes only its own additions', () => {
     const env = machine();
     mkdirSync(join(env.HOME, '.claude'));
@@ -60,7 +126,9 @@ describe('applyGlobalMode', () => {
       expect(read(path)).toMatch(/concord-mcp/u);
       expect(read(path)).not.toContain('CONCORD_REPO_ROOT');
     }
-    expect(read(join(env.HOME, 'claude-calls'))).toBe('mcp add --scope user concord concord-mcp\n');
+    expect(read(join(env.HOME, 'claude-calls')).trim()).toBe(
+      'mcp add --scope user concord concord-mcp',
+    );
     expect(applyGlobalMode(env, true, on).written).toEqual([
       'claude mcp add --scope user concord concord-mcp',
     ]);
@@ -91,8 +159,14 @@ describe('applyGlobalMode', () => {
   it('warns when Claude Code cannot remove the server, but not when it is already gone', () => {
     const env = machine([]);
     const claude = (output: string): void => {
-      writeFileSync(join(env.HOME, 'bin', 'claude'), `#!/bin/sh\necho '${output}'\nexit 1\n`);
-      chmodSync(join(env.HOME, 'bin', 'claude'), 0o755);
+      const path = join(env.HOME, 'bin', process.platform === 'win32' ? 'claude.cmd' : 'claude');
+      writeFileSync(
+        path,
+        process.platform === 'win32'
+          ? `@echo off\r\necho ${output}\r\nexit /b 1\r\n`
+          : `#!/bin/sh\necho '${output}'\nexit 1\n`,
+      );
+      chmodSync(path, 0o755);
     };
     const registrations = ['claude'];
     claude('No MCP server named "concord" in user scope');
