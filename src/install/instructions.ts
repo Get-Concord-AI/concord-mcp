@@ -32,6 +32,8 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
 - **Before finishing**, call \`finish_work\` once with the outcome, changed
   files, tests, assumptions, decisions, risks, guardrails, and provenance. It
   records evidence and can mark work review-ready or terminal.
+- Before handing work to cloud Devin, use \`transfer_work\` to hand off or
+  release your local claim; cloud Devin cannot access this local Concord state.
 
 Keep each claim small and resolve reported overlaps before editing. Concord
 regenerates human-readable review artifacts in \`.concord/\`.
@@ -67,6 +69,8 @@ Concord section, follow that instead of this one.
   messages to other agents, and \`transfer_work\` for handoffs.
 - **Before finishing**, call \`finish_work\` with the outcome, changed files,
   and tests.
+- Before handing work to cloud Devin, use \`transfer_work\` to hand off or
+  release your local claim; cloud Devin cannot access this local Concord state.
 
 Outside any repository, work is recorded in the shared \`general\` workspace.
 Concord needs no files in the repository: do not run \`concord setup\` yourself.`;
