@@ -6,10 +6,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
-
-- Devin CLI project and user MCP registration, lifecycle hooks, and setup guide (#214).
-
 ## [0.14.1] - 2026-10-17
 
 ### Fixed

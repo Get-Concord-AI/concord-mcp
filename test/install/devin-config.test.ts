@@ -7,14 +7,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   devinMcpConfigPath,
   installDevinMcpConfig,
+  removeDevinMcpConfig,
+  upsertDevinMcpConfig,
   uninstallDevinMcpConfig,
 } from '../../src/install/devin-config.js';
-import {
-  installDevinHooks,
-  removeDevinHooks,
-  removeDevinUserHooksConfig,
-  upsertDevinUserHooksConfig,
-} from '../../src/install/devin-hooks.js';
+import { installDevinHooks, removeDevinHooks } from '../../src/install/devin-hooks.js';
 
 const roots: string[] = [];
 function tempRoot(): string {
@@ -53,6 +50,27 @@ describe('Devin MCP config', () => {
     expect(readFileSync(path, 'utf8')).not.toContain('"concord"');
   });
 
+  it('parses escaped Windows paths and removes the Concord property by its key position', () => {
+    const original = JSON.stringify({
+      mcpServers: {
+        other: { command: 'concord', args: ['C:\\Users\\test\\'] },
+        concord: { command: 'concord-mcp' },
+      },
+    });
+
+    const installed = upsertDevinMcpConfig(original);
+    expect(JSON.parse(installed)).toMatchObject({
+      mcpServers: {
+        other: { command: 'concord', args: ['C:\\Users\\test\\'] },
+        concord: { command: 'concord-mcp' },
+      },
+    });
+    const removed = removeDevinMcpConfig(installed);
+    expect(JSON.parse(removed)).toEqual({
+      mcpServers: { other: { command: 'concord', args: ['C:\\Users\\test\\'] } },
+    });
+  });
+
   it('adds lifecycle hooks idempotently and removes only Concord hooks', () => {
     const root = tempRoot();
     const dir = join(root, '.devin');
@@ -61,7 +79,15 @@ describe('Devin MCP config', () => {
     writeFileSync(
       path,
       JSON.stringify({
-        UserPromptSubmit: [{ matcher: '', hooks: [{ type: 'command', command: 'echo user' }] }],
+        UserPromptSubmit: [
+          {
+            matcher: '',
+            hooks: [
+              { type: 'command', command: 'echo user' },
+              { type: 'command', command: 'concord hook devin-user-prompt-submit' },
+            ],
+          },
+        ],
       }),
     );
 
@@ -84,22 +110,6 @@ describe('Devin MCP config', () => {
       join('C:\\repo', '.devin', 'mcp_config.json'),
     );
     expect(devinMcpConfigPath({}, 'C:\\repo')).not.toContain('mcp_config.local.json');
-  });
-
-  it('merges user hooks into Devin config JSONC and removes only Concord hooks', () => {
-    const original =
-      '{\n  // Keep this user setting\n  "theme_mode": "dark",\n  "hooks": {\n    "PreToolUse": [{ "matcher": "exec", "hooks": [{ "type": "command", "command": "echo user" }] }]\n  }\n}\n';
-    const installed = upsertDevinUserHooksConfig(original);
-    expect(installed).toContain('// Keep this user setting');
-    expect(installed).toContain('"theme_mode": "dark"');
-    expect(installed).toContain('echo user');
-    expect(installed).toContain('concord hook devin-user-prompt-submit');
-    expect(upsertDevinUserHooksConfig(installed)).toBe(installed);
-
-    const removed = removeDevinUserHooksConfig(installed);
-    expect(removed).toContain('// Keep this user setting');
-    expect(removed).toContain('echo user');
-    expect(removed).not.toContain('concord hook devin-');
   });
 
   it('leaves malformed config untouched', () => {

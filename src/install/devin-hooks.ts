@@ -3,10 +3,32 @@ import { dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
-import { devinMcpConfigPath } from './devin-config.js';
-
 const EVENTS = ['SessionStart', 'UserPromptSubmit', 'SessionEnd'] as const;
-const objectSchema = z.record(z.string(), z.unknown());
+type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
+interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+interface DevinCommandHook extends JsonObject {
+  type: 'command';
+  command: string;
+}
+
+interface DevinHookEntry extends JsonObject {
+  matcher: string;
+  hooks: DevinCommandHook[];
+}
+
+const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(z.string(), jsonValueSchema),
+  ]),
+);
 
 function commandFor(event: (typeof EVENTS)[number]): string {
   return `concord hook devin-${event
@@ -15,162 +37,56 @@ function commandFor(event: (typeof EVENTS)[number]): string {
     .replace(/^-/, '')}`;
 }
 
-function entriesForEvent(event: (typeof EVENTS)[number]): unknown[] {
-  return [{ matcher: '', hooks: [{ type: 'command', command: commandFor(event) }] }];
+function isJsonObject(value: JsonValue): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function uncomment(text: string): string {
-  return text.replace(
-    /("(?:\\.|[^"\\])*")|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//gu,
-    (part, quoted: string | undefined) => quoted ?? part.replace(/[^\r\n]/gu, ' '),
+function entryContainsCommand(entry: JsonValue, command: string): boolean {
+  if (!isJsonObject(entry) || !Array.isArray(entry['hooks'])) return false;
+  return entry['hooks'].some(
+    (hook) => isJsonObject(hook) && hook['type'] === 'command' && hook['command'] === command,
   );
 }
 
-function objectRange(text: string, key: string): { open: number; close: number } | undefined {
-  const clean = uncomment(text);
-  const match = new RegExp(`"${key}"\\s*:\\s*\\{`, 'u').exec(clean);
-  if (match === null) return undefined;
-  const open = match.index + match[0].lastIndexOf('{');
-  let depth = 0;
-  let inString = false;
-  for (let index = open; index < clean.length; index += 1) {
-    const char = clean[index];
-    if (char === '"' && clean[index - 1] !== '\\') inString = !inString;
-    if (inString) continue;
-    if (char === '{') depth += 1;
-    if (char === '}' && --depth === 0) return { open, close: index };
+function removeConcordCommands(entry: JsonValue): {
+  value: JsonValue | undefined;
+  changed: boolean;
+} {
+  if (!isJsonObject(entry) || !Array.isArray(entry['hooks'])) {
+    return { value: entry, changed: false };
   }
-  throw new Error(`Unclosed ${key} object`);
-}
-
-function parsedObject(text: string): Record<string, unknown> {
-  const value: unknown = JSON.parse(uncomment(text));
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error('Devin config must contain a JSON object.');
-  }
-  return objectSchema.parse(value);
-}
-
-function formatNestedObject(value: Record<string, unknown>): string {
-  return JSON.stringify(value, null, 2)
-    .split('\n')
-    .map((line, index) => (index === 0 ? line : `  ${line}`))
-    .join('\n');
-}
-
-function userConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(dirname(devinMcpConfigPath(env)), 'config.json');
-}
-
-export function upsertDevinUserHooksConfig(existing: string | undefined): string {
-  const source = existing ?? '{}';
-  const config = parsedObject(source);
-  const previous = config['hooks'];
-  if (
-    previous !== undefined &&
-    (typeof previous !== 'object' || previous === null || Array.isArray(previous))
-  ) {
-    throw new Error('Devin config hooks must be an object.');
-  }
-  const hooks = objectSchema.parse(previous ?? {});
-  const nextHooks = { ...hooks };
-  for (const event of EVENTS) {
-    const current = z.array(z.unknown()).safeParse(hooks[event]);
-    const entries = current.success ? current.data : [];
-    const command = commandFor(event);
-    if (!entries.some((entry) => JSON.stringify(entry).includes(command))) {
-      nextHooks[event] = [...entries, ...entriesForEvent(event)];
-    }
-  }
-  if (JSON.stringify(nextHooks) === JSON.stringify(hooks)) return source;
-
-  const range = objectRange(source, 'hooks');
-  const next = formatNestedObject(nextHooks);
-  if (range !== undefined)
-    return `${source.slice(0, range.open)}${next}${source.slice(range.close + 1)}`;
-  const rootClose = objectRange(source, '__concord_missing__');
-  const clean = uncomment(source);
-  const close = rootClose?.close ?? clean.lastIndexOf('}');
-  if (close < 0) throw new Error('Devin config must contain a JSON object.');
-  const hasEntries = Object.keys(config).length > 0;
-  const formatted = formatNestedObject(nextHooks);
-  return `${source.slice(0, close)}${hasEntries ? ',' : ''}\n  "hooks": ${formatted}\n${source.slice(close)}`;
-}
-
-export function removeDevinUserHooksConfig(existing: string): string {
-  const config = parsedObject(existing);
-  const current: unknown = config['hooks'];
-  if (typeof current !== 'object' || current === null || Array.isArray(current)) return existing;
-  const hooks = objectSchema.parse(current);
-  const nextHooks = { ...hooks };
-  let changed = false;
-  for (const event of EVENTS) {
-    const entries: unknown = hooks[event];
-    if (!Array.isArray(entries)) continue;
-    const kept = entries.filter((entry) => !JSON.stringify(entry).includes('concord hook devin-'));
-    if (kept.length !== entries.length) {
-      changed = true;
-      if (kept.length === 0) Reflect.deleteProperty(nextHooks, event);
-      else nextHooks[event] = kept;
-    }
-  }
-  if (!changed) return existing;
-  const range = objectRange(existing, 'hooks');
-  if (range === undefined) return existing;
-  if (Object.keys(nextHooks).length > 0) {
-    const formatted = formatNestedObject(nextHooks);
-    return `${existing.slice(0, range.open)}${formatted}${existing.slice(range.close + 1)}`;
-  }
-  const clean = uncomment(existing);
-  let start = clean.lastIndexOf('"hooks"', range.open);
-  let end = range.close + 1;
-  let after = end;
-  while (/\s/u.test(clean[after] ?? '')) after += 1;
-  if (clean[after] === ',') end = after + 1;
-  else {
-    let before = start - 1;
-    while (/\s/u.test(clean[before] ?? '')) before -= 1;
-    if (clean[before] === ',') start = before;
-  }
-  return `${existing.slice(0, start)}${existing.slice(end)}`;
-}
-
-export function installDevinUserHooks(env: NodeJS.ProcessEnv = process.env): string {
-  const path = userConfigPath(env);
-  const existing = existsSync(path) ? readFileSync(path, 'utf8') : undefined;
-  const next = upsertDevinUserHooksConfig(existing);
-  if (next !== existing) {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, next, { mode: 0o600 });
-  }
-  return path;
-}
-
-export function removeDevinUserHooks(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const path = userConfigPath(env);
-  if (!existsSync(path)) return undefined;
-  const existing = readFileSync(path, 'utf8');
-  const next = removeDevinUserHooksConfig(existing);
-  if (next === existing) return undefined;
-  writeFileSync(path, next);
-  return path;
+  const hooks = entry['hooks'];
+  const kept = hooks.filter(
+    (hook) =>
+      !(
+        isJsonObject(hook) &&
+        hook['type'] === 'command' &&
+        typeof hook['command'] === 'string' &&
+        hook['command'].startsWith('concord hook devin-')
+      ),
+  );
+  if (kept.length === hooks.length) return { value: entry, changed: false };
+  return { value: kept.length === 0 ? undefined : { ...entry, hooks: kept }, changed: true };
 }
 
 export function installDevinHooks(repoRoot: string): string {
   const relative = join('.devin', 'hooks.v1.json');
   const path = join(repoRoot, relative);
-  const current: unknown = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
-  if (typeof current !== 'object' || current === null || Array.isArray(current)) {
-    throw new Error(`${relative} must contain a JSON object.`);
-  }
-  const hooks = { ...current };
+  const current = existsSync(path)
+    ? jsonValueSchema.parse(JSON.parse(readFileSync(path, 'utf8')))
+    : {};
+  if (!isJsonObject(current)) throw new Error(`${relative} must contain a JSON object.`);
+  const hooks: JsonObject = { ...current };
   for (const event of EVENTS) {
-    const hook = { type: 'command', command: commandFor(event) };
-    const values: unknown = Reflect.get(hooks, event);
-    const parsed = z.array(z.unknown()).safeParse(values);
-    const entries = parsed.success ? parsed.data : [];
-    if (!entries.some((entry) => JSON.stringify(entry).includes(hook.command))) {
-      Reflect.set(hooks, event, [...entries, { matcher: '', hooks: [hook] }]);
+    const values = hooks[event];
+    const entries = Array.isArray(values) ? values : [];
+    const command = commandFor(event);
+    if (!entries.some((entry) => entryContainsCommand(entry, command))) {
+      const generated: DevinHookEntry = {
+        matcher: '',
+        hooks: [{ type: 'command', command }],
+      };
+      hooks[event] = [...entries, generated];
     }
   }
   mkdirSync(dirname(path), { recursive: true });
@@ -182,17 +98,19 @@ export function removeDevinHooks(repoRoot: string): string | undefined {
   const relative = join('.devin', 'hooks.v1.json');
   const path = join(repoRoot, relative);
   if (!existsSync(path)) return undefined;
-  const hooks: unknown = JSON.parse(readFileSync(path, 'utf8'));
-  if (typeof hooks !== 'object' || hooks === null || Array.isArray(hooks)) return undefined;
+  const parsed = jsonValueSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+  if (!isJsonObject(parsed)) return undefined;
+  const hooks: JsonObject = { ...parsed };
   let changed = false;
   for (const event of EVENTS) {
-    const entries: unknown = Reflect.get(hooks, event);
+    const entries = hooks[event];
     if (!Array.isArray(entries)) continue;
-    const kept = entries.filter((entry) => !JSON.stringify(entry).includes('concord hook devin-'));
-    if (kept.length !== entries.length) {
-      changed = true;
-      Reflect.set(hooks, event, kept);
-    }
+    const results = entries.map(removeConcordCommands);
+    if (!results.some((result) => result.changed)) continue;
+    changed = true;
+    const kept = results.flatMap((result) => (result.value === undefined ? [] : [result.value]));
+    if (kept.length === 0) Reflect.deleteProperty(hooks, event);
+    else hooks[event] = kept;
   }
   if (!changed) return undefined;
   writeFileSync(path, `${JSON.stringify(hooks, null, 2)}\n`);

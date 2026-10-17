@@ -6,7 +6,22 @@ import { z } from 'zod';
 import { userHome } from '../config/paths.js';
 
 const SERVER = 'concord';
-const objectSchema = z.record(z.string(), z.unknown());
+type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
+interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(z.string(), jsonValueSchema),
+  ]),
+);
+const objectSchema = z.record(z.string(), jsonValueSchema);
 
 export function devinMcpConfigPath(
   env: NodeJS.ProcessEnv = process.env,
@@ -26,9 +41,17 @@ function uncomment(text: string): string {
   );
 }
 
-function parsed(text: string): Record<string, unknown> {
+function parsed(text: string): JsonObject {
   const value: unknown = JSON.parse(uncomment(text));
   return objectSchema.parse(value);
+}
+
+function isEscaped(text: string, index: number): boolean {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
 }
 
 function objectEnd(text: string, open: number): number {
@@ -37,7 +60,7 @@ function objectEnd(text: string, open: number): number {
   let inString = false;
   for (let index = open; index < clean.length; index += 1) {
     const char = clean[index];
-    if (char === '"' && clean[index - 1] !== '\\') inString = !inString;
+    if (char === '"' && !isEscaped(clean, index)) inString = !inString;
     if (inString) continue;
     if (char === '{') depth += 1;
     if (char === '}' && --depth === 0) return index;
@@ -45,12 +68,53 @@ function objectEnd(text: string, open: number): number {
   throw new Error('Unclosed JSON object');
 }
 
-function propertyObject(text: string, key: string): { open: number; close: number } | undefined {
+interface PropertyObjectRange {
+  key: number;
+  open: number;
+  close: number;
+}
+
+function propertyObject(text: string, key: string): PropertyObjectRange | undefined {
   const clean = uncomment(text);
   const match = new RegExp(`"${key}"\\s*:\\s*\\{`, 'u').exec(clean);
   if (match === null) return undefined;
   const open = match.index + match[0].lastIndexOf('{');
-  return { open, close: objectEnd(clean, open) };
+  return { key: match.index, open, close: objectEnd(clean, open) };
+}
+
+function directCommas(text: string, range: Pick<PropertyObjectRange, 'open' | 'close'>): number[] {
+  const clean = uncomment(text);
+  const commas: number[] = [];
+  let objectDepth = 0;
+  let arrayDepth = 0;
+  let inString = false;
+  for (let index = range.open + 1; index < range.close; index += 1) {
+    const char = clean[index];
+    if (char === '"' && !isEscaped(clean, index)) inString = !inString;
+    if (inString) continue;
+    if (char === '{') objectDepth += 1;
+    else if (char === '}') objectDepth -= 1;
+    else if (char === '[') arrayDepth += 1;
+    else if (char === ']') arrayDepth -= 1;
+    else if (char === ',' && objectDepth === 0 && arrayDepth === 0) commas.push(index);
+  }
+  return commas;
+}
+
+function removeProperty(
+  text: string,
+  parent: PropertyObjectRange,
+  property: Pick<PropertyObjectRange, 'key' | 'close'>,
+): string {
+  const clean = uncomment(text);
+  const commas = directCommas(clean, parent);
+  const nextComma = commas.find((comma) => comma > property.close);
+  if (nextComma !== undefined) {
+    return `${text.slice(0, property.key)}${text.slice(nextComma + 1)}`;
+  }
+  const previousComma = commas.filter((comma) => comma < property.key).at(-1);
+  const start = previousComma ?? property.key;
+  return `${text.slice(0, start)}${text.slice(property.close + 1)}`;
 }
 
 export function upsertDevinMcpConfig(text: string | undefined): string {
@@ -92,15 +156,10 @@ export function removeDevinMcpConfig(text: string): string {
   if (range === undefined) return text;
   const child = propertyObject(text.slice(range.open, range.close + 1), SERVER);
   if (child === undefined) return text;
-  let start = uncomment(text).indexOf(`"${SERVER}"`, range.open);
-  let end = range.open + child.close + 1;
-  const clean = uncomment(text);
-  if (clean[end] === ',') end += 1;
-  else {
-    const precedingComma = clean.lastIndexOf(',', start);
-    if (precedingComma > range.open) start = precedingComma;
-  }
-  return `${text.slice(0, start)}${text.slice(end)}`;
+  return removeProperty(text, range, {
+    key: range.open + child.key,
+    close: range.open + child.close,
+  });
 }
 
 export function installDevinMcpConfig(
