@@ -48,6 +48,15 @@ alwaysApply: true
 ---
 `;
 
+/** YAML frontmatter used when creating a fresh Antigravity rules file. */
+export const ANTIGRAVITY_RULE_HEADER = [
+  '---',
+  'trigger: always_on',
+  'description: Concord multi-agent coordination workflow',
+  '---',
+  '',
+].join('\n');
+
 /** Version of the user-level block written by global mode. */
 export const CONCORD_GLOBAL_INSTRUCTION_VERSION = '1';
 

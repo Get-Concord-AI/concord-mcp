@@ -107,6 +107,7 @@ removes exactly what it added.
 | Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)   |
 | Grok Build                         | [Setup and delivery](./docs/grok-build.md)   |
 | Goose                              | [Setup and delivery](./docs/goose.md)        |
+| Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)  |
 | Any other MCP-capable coding agent | Shared work-state through the five MCP tools |
 
 > There is no universal `/concord` slash command — commands are client-specific.

@@ -63,6 +63,7 @@ describe('installMcpConfigs', () => {
     expect(written).toEqual([
       '.mcp.json',
       join('.cursor', 'mcp.json'),
+      join('.agents', 'mcp_config.json'),
       join('.gemini', 'settings.json'),
       join('.grok', 'config.toml'),
     ]);
@@ -70,7 +71,8 @@ describe('installMcpConfigs', () => {
       expect(existsSync(join(root, relPath))).toBe(true);
       const content = readFileSync(join(root, relPath), 'utf8');
       expect(content).toContain(CONCORD_SERVER_COMMAND);
-      expect(content).toContain(root);
+      const escapedRoot = JSON.stringify(root).slice(1, -1);
+      expect(content.includes(root) || content.includes(escapedRoot)).toBe(true);
     }
     const gemini = z
       .object({

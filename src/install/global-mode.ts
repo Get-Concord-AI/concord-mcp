@@ -7,7 +7,7 @@ import { removeBlock, upsertBlock } from './block.js';
 import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
 import { gooseConfigPath } from './goose-config.js';
-import { CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
+import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
 import {
   CONCORD_SERVER_COMMAND,
   CONCORD_SERVER_KEY,
@@ -36,10 +36,12 @@ interface Registration {
 
 /** A user-level file global mode owns part of, for one harness. */
 interface UserFile {
-  /** Nothing is written unless this harness command is installed. */
-  readonly executable: string;
+  /** If provided, this harness command must be installed unless isDetected is provided. */
+  readonly executable?: string | undefined;
+  /** Custom detection function for harnesses that can be detected without CLI on PATH. */
+  readonly isDetected?: ((env: NodeJS.ProcessEnv) => boolean) | undefined;
   /** Set for an MCP registration, which `--no-mcp` skips. */
-  readonly registration?: Registration;
+  readonly registration?: Registration | undefined;
   readonly path: (env: NodeJS.ProcessEnv) => string;
   readonly install: (existing: string | undefined, path: string) => string;
   readonly uninstall: (existing: string) => string;
@@ -51,12 +53,36 @@ function grokHome(env: NodeJS.ProcessEnv): string {
   return configured === undefined || configured === '' ? join(userHome(env), '.grok') : configured;
 }
 
-function instructionFile(executable: string, path: (env: NodeJS.ProcessEnv) => string): UserFile {
+function antigravityConfigDir(env: NodeJS.ProcessEnv): string {
+  return join(userHome(env), '.gemini', 'config');
+}
+
+function isAntigravityDetected(env: NodeJS.ProcessEnv): boolean {
+  return (
+    executablePath('agy', env) !== undefined ||
+    env['ANTIGRAVITY_AGENT'] === '1' ||
+    existsSync(antigravityConfigDir(env))
+  );
+}
+
+function instructionFile(
+  executable: string,
+  path: (env: NodeJS.ProcessEnv) => string,
+  header?: string,
+  isDetected?: (env: NodeJS.ProcessEnv) => boolean,
+): UserFile {
   return {
     executable,
+    ...(isDetected !== undefined ? { isDetected } : {}),
     path,
-    install: (existing) => upsertBlock(existing ?? '', CONCORD_GLOBAL_INSTRUCTIONS),
-    uninstall: removeBlock,
+    install: (existing) => upsertBlock(existing ?? header ?? '', CONCORD_GLOBAL_INSTRUCTIONS),
+    uninstall: (existing) => {
+      const rest = removeBlock(existing);
+      if (rest.trim() === header?.trim()) {
+        return '';
+      }
+      return rest;
+    },
   };
 }
 
@@ -70,6 +96,12 @@ const USER_FILES: readonly UserFile[] = [
   instructionFile('codex', (env) => join(codexHome(env), 'AGENTS.md')),
   instructionFile('gemini', (env) => join(userHome(env), '.gemini', 'GEMINI.md')),
   instructionFile('goose', (env) => join(dirname(gooseConfigPath(env)), '.goosehints')),
+  instructionFile(
+    'agy',
+    (env) => join(antigravityConfigDir(env), 'rules', 'concord.md'),
+    ANTIGRAVITY_RULE_HEADER,
+    isAntigravityDetected,
+  ),
   {
     executable: 'gemini',
     registration: { id: 'gemini', present: hasMcpServer },
@@ -95,6 +127,14 @@ const USER_FILES: readonly UserFile[] = [
       return rest === '' ? '' : `${rest}\n`;
     },
   },
+  {
+    executable: 'agy',
+    isDetected: isAntigravityDetected,
+    registration: { id: 'antigravity', present: hasMcpServer },
+    path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
+    install: (existing) => upsertMcpServer(existing),
+    uninstall: removeMcpServer,
+  },
 ];
 
 /** A registration global mode added, or a missing one, may change; the user's own never does. */
@@ -108,6 +148,12 @@ function mayChange(
   return enable && (existing === undefined || !registration.present(existing));
 }
 
+function isFileDetected(file: UserFile, env: NodeJS.ProcessEnv): boolean {
+  if (file.isDetected !== undefined) return file.isDetected(env);
+  if (file.executable !== undefined) return executablePath(file.executable, env) !== undefined;
+  return false;
+}
+
 function applyFile(
   env: NodeJS.ProcessEnv,
   file: UserFile,
@@ -117,7 +163,7 @@ function applyFile(
 ): void {
   const path = file.path(env);
   const exists = existsSync(path);
-  if (enable ? executablePath(file.executable, env) === undefined : !exists) return;
+  if (enable ? !isFileDetected(file, env) : !exists) return;
   try {
     const existing = exists ? readFileSync(path, 'utf8') : undefined;
     const { registration } = file;
