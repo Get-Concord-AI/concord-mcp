@@ -110,7 +110,10 @@ function removeProperty(
   const commas = directCommas(clean, parent);
   const nextComma = commas.find((comma) => comma > property.close);
   if (nextComma !== undefined) {
-    return `${text.slice(0, property.key)}${text.slice(nextComma + 1)}`;
+    const between = text.slice(property.close + 1, nextComma);
+    const comments = between.match(/\/\/[^\r\n]*|\/\*[\s\S]*?\*\//gu) ?? [];
+    const retained = comments.length === 0 ? '' : `\n${comments.join('\n')}\n`;
+    return `${text.slice(0, property.key)}${retained}${text.slice(nextComma + 1)}`;
   }
   const previousComma = commas.filter((comma) => comma < property.key).at(-1);
   const start = previousComma ?? property.key;

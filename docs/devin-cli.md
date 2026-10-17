@@ -53,4 +53,7 @@ schema, JSON comment support, AGENTS.md discovery, the hook event names,
 
 The exact runtime hook invocation and non-interactive behavior should be checked
 against the installed Devin CLI version before relying on automatic delivery in
-CI. Use `concord inbox inspect` if a session needs to retrieve a message manually.
+CI. If a session needs to retrieve a message manually, copy the `agent_id` from
+the SessionStart context and run `concord inbox drain --agent <agent-id> --provider devin`
+from the repository. The prompt submission hook normally drains this same local
+or cloud-linked inbox automatically.

@@ -11,8 +11,12 @@ import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { sessionStartIdentity } from '../agent-identity.js';
 import { openContext } from '../context.js';
 import { checkFileOverlaps } from './check.js';
-import { decideCloudPreToolUse, handleCloudSessionStart } from './cloud-hooks.js';
-import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
+import {
+  decideCloudPreToolUse,
+  handleCloudDevinSessionStart,
+  handleCloudSessionStart,
+} from './cloud-hooks.js';
+import { cloudAccess, drainFromCloud, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
 import { renderInboxBody } from '../../domain/pull-inbox.js';
 import { sessionStartMessage } from './session-start-message.js';
@@ -149,7 +153,7 @@ function readStdin(): string {
   }
 }
 
-function runDevinHook(event: string): void {
+async function runDevinHook(event: string): Promise<void> {
   const raw = readStdin();
   const identity = resolveIdentity(process.env, { kind: 'devin', hookPayload: raw });
   if (identity === undefined) {
@@ -157,6 +161,58 @@ function runDevinHook(event: string): void {
     return;
   }
   const repoRoot = process.env['DEVIN_PROJECT_DIR'] ?? process.cwd();
+  const access = cloudAccess(repoRoot, { timeoutMs: HOOK_TIMEOUT_MS });
+  if (access.kind === 'unusable') {
+    process.stderr.write(`Concord Cloud could not be reached: ${access.reason}\n`);
+    return;
+  }
+  if (access.kind === 'cloud') {
+    if (event === 'devin-session-start') {
+      try {
+        const result = await handleCloudDevinSessionStart(
+          access.runtime,
+          identity.agentId,
+          repoRoot,
+        );
+        process.stdout.write(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'SessionStart',
+              additionalContext: result.message,
+            },
+          }) + '\n',
+        );
+      } catch (error) {
+        process.stderr.write(
+          `Concord Cloud could not register Devin: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+        return;
+      }
+      return;
+    }
+    if (event === 'devin-user-prompt-submit') {
+      try {
+        const messages = await drainFromCloud(access.runtime, identity.agentId, 'devin');
+        process.stdout.write(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'UserPromptSubmit',
+              additionalContext: renderInboxBody(messages),
+            },
+          }) + '\n',
+        );
+      } catch (error) {
+        process.stderr.write(
+          `Concord Cloud inbox could not be drained: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
+      return;
+    }
+    if (event === 'devin-session-end') {
+      process.stdout.write('{}\n');
+      return;
+    }
+  }
   const repos = openContext(repoRoot).repos;
   if (event === 'devin-session-start') {
     ensureAgentRegistered(repos, identity, repoRoot);
@@ -209,7 +265,7 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     )
     .action(async (event) => {
       if (event.startsWith('devin-')) {
-        runDevinHook(event);
+        await runDevinHook(event);
         return;
       }
       const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });

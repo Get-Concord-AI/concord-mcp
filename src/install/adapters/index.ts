@@ -13,6 +13,11 @@ import {
   installDevinMcpConfig,
   uninstallDevinMcpConfig,
 } from '../devin-config.js';
+import {
+  devinUserHooksInstalled,
+  installDevinUserHooks,
+  removeDevinUserHooks,
+} from '../devin-user-hooks.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import {
   gooseConfigInstalled,
@@ -72,17 +77,30 @@ export function run(
   ok: boolean;
   output: string;
 } {
-  const result = spawnSync(command, [...args], {
-    env,
-    encoding: 'utf8',
-    timeout: 15_000,
-    windowsHide: true,
-    ...(process.platform === 'win32' && /\.(?:cmd|bat)$/iu.test(command) ? { shell: true } : {}),
-  });
+  const isWindowsShim = process.platform === 'win32' && /\.(?:cmd|bat)$/iu.test(command);
+  const result = spawnSync(
+    isWindowsShim ? windowsShimCommand(command, args) : command,
+    isWindowsShim ? [] : [...args],
+    {
+      env,
+      encoding: 'utf8',
+      timeout: 15_000,
+      windowsHide: true,
+      ...(isWindowsShim ? { shell: true } : {}),
+    },
+  );
   return {
     ok: result.status === 0,
-    output: `${result.stdout}${result.stderr}`.trim(),
+    output: result.error?.message ?? `${result.stdout}${result.stderr}`.trim(),
   };
+}
+
+/** Build the quoted command line required by cmd.exe's /s /c parsing. */
+export function windowsShimCommand(command: string, args: readonly string[]): string {
+  const quote = (value: string): string => `"${value.replace(/"/gu, '""')}"`;
+  return [quote(command), ...args.map((arg) => (/^[\w./:-]+$/u.test(arg) ? arg : quote(arg)))].join(
+    ' ',
+  );
 }
 
 function versionTuple(output: string): number[] | undefined {
@@ -539,7 +557,7 @@ function statusDevin(env: NodeJS.ProcessEnv): AdapterReport {
   const config = HARNESS_CONFIGS.devin;
   const executable = executablePath(config.executable, env);
   const supported = executable !== undefined && devinCliSupportsDedicatedMcpConfig(env);
-  const installed = supported && devinMcpInstalled(env);
+  const installed = supported && devinMcpInstalled(env) && devinUserHooksInstalled(env);
   if (executable !== undefined && !supported) {
     return {
       harness: config.name,
@@ -561,7 +579,7 @@ function statusDevin(env: NodeJS.ProcessEnv): AdapterReport {
         ? 'Devin CLI was not found on PATH.'
         : installed
           ? config.installedDetail
-          : 'Devin CLI does not have the Concord MCP server registered.',
+          : 'Devin CLI needs the Concord MCP server and lifecycle hooks installed.',
   };
 }
 
@@ -668,6 +686,7 @@ export function installGlobalAdapters(
   attempt('devin', () => {
     if (devinCliSupportsDedicatedMcpConfig(env)) {
       installDevinMcpConfig(env);
+      installDevinUserHooks(env);
     }
   });
 
@@ -709,6 +728,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
   uninstallDevinMcpConfig(env);
+  removeDevinUserHooks(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

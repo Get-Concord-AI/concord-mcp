@@ -71,6 +71,17 @@ describe('Devin MCP config', () => {
     });
   });
 
+  it('removes Concord with whitespace and comments before the following comma', () => {
+    const source =
+      '{\n  "mcpServers": {\n    "concord": { "command": "concord-mcp" } /* user note */ ,\n    "other": { "command": "x" }\n  }\n}';
+    const removed = removeDevinMcpConfig(source);
+
+    expect(JSON.parse(removed.replace('/* user note */', ''))).toEqual({
+      mcpServers: { other: { command: 'x' } },
+    });
+    expect(removed).toContain('/* user note */');
+  });
+
   it('adds lifecycle hooks idempotently and removes only Concord hooks', () => {
     const root = tempRoot();
     const dir = join(root, '.devin');

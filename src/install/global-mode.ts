@@ -13,7 +13,7 @@ import {
   removeDevinMcpConfig,
   upsertDevinMcpConfig,
 } from './devin-config.js';
-import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-hooks.js';
+import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-user-hooks.js';
 import { CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
 import {
   CONCORD_SERVER_COMMAND,

@@ -17,6 +17,7 @@ import {
   devinSupportsDedicatedMcpConfig,
   installGlobalAdapters,
   statusGlobalAdapters,
+  windowsShimCommand,
 } from '../../src/install/adapters/index.js';
 
 // Links into this checkout count as lasting even when it lives under /tmp.
@@ -82,6 +83,37 @@ describe('global harness adapters', () => {
     expect(readFileSync(join(home, '.config', 'devin', 'mcp_config.json'), 'utf8')).toContain(
       'concord-mcp',
     );
+    expect(readFileSync(join(home, '.config', 'devin', 'config.json'), 'utf8')).toContain(
+      'concord hook devin-session-start',
+    );
+    writeFileSync(join(home, '.config', 'devin', 'config.json'), '{}');
+    expect(
+      statusGlobalAdapters({ HOME: home, PATH: bin }).find((entry) => entry.harness === 'devin'),
+    ).toMatchObject({ status: 'action_required', capabilities: [] });
+  });
+
+  it('quotes Windows Devin shim paths with spaces', () => {
+    expect(windowsShimCommand('C:\\Users\\Jane Doe\\AppData\\npm\\devin.cmd', ['--version'])).toBe(
+      '"C:\\Users\\Jane Doe\\AppData\\npm\\devin.cmd" --version',
+    );
+  });
+
+  it('runs Devin shims from paths containing spaces when checking the version', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-devin-spaces-'));
+    const bin = join(home, 'Jane Doe bin');
+    mkdirSync(bin);
+    fakeCommand(bin, 'devin', 'Devin CLI v3000.3');
+
+    const report = installGlobalAdapters(
+      import.meta.url,
+      { HOME: home, PATH: bin },
+      undefined,
+      LASTING,
+    );
+
+    const devin = report.find((entry) => entry.harness === 'devin');
+    expect(devin?.status).toBe('installed');
+    expect(devin?.capabilities).toContain('pull');
   });
 
   it('installs every detected file-based adapter independently', () => {
