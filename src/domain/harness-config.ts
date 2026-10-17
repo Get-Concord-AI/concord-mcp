@@ -163,7 +163,7 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
       kind: 'harness-monitor',
       lifecycle: 'persistent',
       completion: 'native',
-      command: 'concord inbox watch --provider grok',
+      command: 'concord inbox watch --provider grok --agent <agent-id>',
       background: true,
       verified: true,
       backgroundShell: { supported: true, completionStartsTurn: true },

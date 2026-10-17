@@ -33,7 +33,7 @@ describe('harness configuration', () => {
     expect(HARNESS_CONFIGS.grok.monitor).toMatchObject({
       lifecycle: 'persistent',
       background: true,
-      command: 'concord inbox watch --provider grok',
+      command: 'concord inbox watch --provider grok --agent <agent-id>',
     });
   });
 

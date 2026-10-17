@@ -14,6 +14,7 @@ import {
   monitorCapabilityFor,
   type EndpointCapability,
 } from '../../domain/delivery.js';
+import { grokMonitorNudge } from '../../domain/grok-monitor.js';
 import { hookSessionId } from '../../domain/identity.js';
 import {
   renderGeminiAfterAgent,
@@ -311,6 +312,11 @@ function writeMessages(format: string, messages: readonly DeliverableMessage[]):
   throw new Error(`Unknown --format: ${format}`);
 }
 
+/** Keeps a Grok turn open once so the agent starts the monitor its plugin cannot. */
+function writeMonitorNudge(reason: string): void {
+  process.stdout.write(JSON.stringify({ decision: 'block', reason }));
+}
+
 /** A cloud failure in a hook: said once on stderr, never failing the session's turn. */
 function reportCloudFailure(detail: string): void {
   process.stderr.write(`Concord Cloud could not be reached: ${detail}\n`);
@@ -431,10 +437,15 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         reportCloudFailure(access.reason);
         return;
       }
+      const grokStop = options.provider === 'grok' && options.format === 'stop';
+      const hookPayload =
+        options.fromHook === true || grokStop ? (readHookPayload() ?? '') : undefined;
       const agentId = resolveAgentId(options.agent, process.env, {
         kind: options.provider,
-        ...(options.fromHook === true ? { hookPayload: readHookPayload() ?? '' } : {}),
+        ...(options.fromHook === true ? { hookPayload } : {}),
       });
+      const nudge =
+        grokStop && hookPayload !== undefined ? grokMonitorNudge(hookPayload, agentId) : undefined;
       if (access.kind === 'cloud') {
         let messages: DeliverableMessage[];
         try {
@@ -444,6 +455,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
           return;
         }
         if (messages.length > 0) writeMessages(options.format, messages);
+        else if (nudge !== undefined) writeMonitorNudge(nudge);
         return;
       }
       const context = openContext(process.cwd());
@@ -457,7 +469,10 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       if (isMonitor) heartbeatReceiver(context.repos, agentId, 2_000);
       // Silence matters: a hook that prints on an empty inbox would inject
       // noise into the session on every single tool call.
-      if (messages.length === 0) return;
+      if (messages.length === 0) {
+        if (nudge !== undefined) writeMonitorNudge(nudge);
+        return;
+      }
       recordDeliveredMessages(telemetry, messages);
       writeMessages(options.format, messages);
     });
