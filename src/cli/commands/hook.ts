@@ -13,7 +13,8 @@ import { openContext } from '../context.js';
 import { checkFileOverlaps } from './check.js';
 import { decideCloudPreToolUse, handleCloudSessionStart } from './cloud-hooks.js';
 import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
-import { registerPullEndpoint } from './inbox.js';
+import { drainInbox, registerPullEndpoint } from './inbox.js';
+import { renderInboxBody } from '../../domain/pull-inbox.js';
 import { sessionStartMessage } from './session-start-message.js';
 import type { CloudRuntime } from '../../cloud/runtime.js';
 
@@ -148,6 +149,51 @@ function readStdin(): string {
   }
 }
 
+function runDevinHook(event: string): void {
+  const raw = readStdin();
+  const identity = resolveIdentity(process.env, { kind: 'devin', hookPayload: raw });
+  if (identity === undefined) {
+    process.stdout.write('{}\n');
+    return;
+  }
+  const repoRoot = process.env['DEVIN_PROJECT_DIR'] ?? process.cwd();
+  const repos = openContext(repoRoot).repos;
+  if (event === 'devin-session-start') {
+    ensureAgentRegistered(repos, identity, repoRoot);
+    registerPullEndpoint(repos, identity.agentId, 'devin');
+    const message = sessionStartMessage(
+      identity.agentId,
+      buildRoster(repos.agents.list(), Date.now()),
+    );
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: message },
+      }) + '\n',
+    );
+    return;
+  }
+  if (event === 'devin-user-prompt-submit') {
+    const messages = drainInbox(repos, identity.agentId, 'devin');
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: renderInboxBody(messages),
+        },
+      }) + '\n',
+    );
+    return;
+  }
+  if (event === 'devin-session-end') {
+    const endpoint = repos.agentEndpoints.getByAgent(identity.agentId);
+    if (endpoint !== undefined) repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+    process.stdout.write('{}\n');
+    return;
+  }
+  process.stderr.write(`Unknown Devin hook event: ${event}\n`);
+  process.exitCode = 1;
+}
+
 export function registerHookCommand(program: Command, telemetry?: TelemetryRecorder): void {
   program
     .command('hook <event>')
@@ -157,6 +203,10 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
         'payload on stdin.',
     )
     .action(async (event) => {
+      if (event.startsWith('devin-')) {
+        runDevinHook(event);
+        return;
+      }
       const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
       if (access.kind === 'unusable') {
         // Never a local workspace in its place, and never a blocked edit or session.

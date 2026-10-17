@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { resolveAgentId, sessionStartIdentity } from '../../src/cli/agent-identity.js';
-import { UNRESOLVED_IDENTITY_MESSAGE } from '../../src/domain/identity.js';
+import { resolveIdentity, UNRESOLVED_IDENTITY_MESSAGE } from '../../src/domain/identity.js';
 
 const SESSION = 'a1b2c3d4-e5f6-7890';
 
@@ -43,6 +43,15 @@ describe('resolveAgentId', () => {
     expect(resolveAgentId(undefined, { GROK_SESSION_ID: SESSION }, { kind: 'grok' })).toMatch(
       /^grok:[0-9a-f]{8}$/,
     );
+  });
+
+  it('derives the same Devin identity from every lifecycle hook payload', () => {
+    const payload = JSON.stringify({ session_id: SESSION });
+    const first = resolveIdentity({}, { kind: 'devin', hookPayload: payload });
+    const nextTurn = resolveIdentity({}, { kind: 'devin', hookPayload: payload });
+
+    expect(first?.agentId).toMatch(/^devin:[0-9a-f]{8}$/);
+    expect(nextTurn?.agentId).toBe(first?.agentId);
   });
 });
 
