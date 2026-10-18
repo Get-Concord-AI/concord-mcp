@@ -25,6 +25,11 @@ const observedHookSchema = z
     tool_name: z.string().optional(),
     /** Notification: why Claude Code is asking for the user's attention. */
     notification_type: z.string().optional(),
+    /**
+     * Set when the hook fired inside a subagent or a background agent forked
+     * from the session, rather than in the session's own conversation.
+     */
+    agent_id: z.string().optional(),
   })
   .loose();
 
@@ -46,7 +51,10 @@ const NOTHING: Observation = { seen: [], requeued: [] };
  * - `PreToolUse` for `AskUserQuestion`, and a `permission_prompt`
  *   notification, mean the session is about to block on its user. Recorded so
  *   a sender can be told; delivery is never held on it, because dismissing a
- *   prompt with Esc or Deny fires no hook to clear it.
+ *   prompt with Esc or Deny fires no hook to clear it. A question asked
+ *   inside a subagent or a forked background agent (`agent_id` set) is not
+ *   the session blocking: Claude Code forks one after a turn ends, and its
+ *   tool calls still fire the session's hooks.
  * - `UserPromptSubmit` carries the text that started the turn. A monitor
  *   notification arrives this way, so any message rendered in it was seen.
  * - `SessionStart` from `startup` is a new session for this agent: anything
@@ -71,7 +79,9 @@ export function observeHookEvent(
 
   switch (event.hook_event_name) {
     case 'PreToolUse':
-      if (event.tool_name === ASK_USER_TOOL) awaitUser(repos, agentId);
+      if (event.tool_name === ASK_USER_TOOL && event.agent_id === undefined) {
+        awaitUser(repos, agentId);
+      }
       return NOTHING;
     case 'Notification':
       if (event.notification_type === 'permission_prompt') awaitUser(repos, agentId);

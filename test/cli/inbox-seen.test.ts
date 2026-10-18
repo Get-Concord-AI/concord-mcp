@@ -295,6 +295,20 @@ describe('waiting on the user', () => {
     expect(awaitingSince()).not.toBeNull();
   });
 
+  it('ignores a question asked by a background agent forked from the session', () => {
+    observeHookEvent(
+      repos,
+      'beta',
+      hook({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'AskUserQuestion',
+        agent_id: 'background-agent-1',
+      }),
+    );
+
+    expect(awaitingSince()).toBeNull();
+  });
+
   it('keeps the start of an ongoing wait', () => {
     ask();
     const first = awaitingSince();
