@@ -14,7 +14,7 @@ import { deriveLiveness } from '../../domain/presence.js';
 import { sessionStartIdentity } from '../agent-identity.js';
 import { registerInCloud } from './cloud-inbox.js';
 import type { HookDecision, SessionStartResult } from './hook.js';
-import { sessionStartMessage } from './session-start-message.js';
+import { sessionStartMessage, type RosterLine } from './session-start-message.js';
 
 /**
  * The Claude Code hooks in a repository linked to Concord Cloud: the edit
@@ -141,4 +141,24 @@ export async function handleCloudSessionStart(
     }))
     .filter((peer) => peer.liveness !== 'archived');
   return { agentId: identity.agentId, message: sessionStartMessage(identity.agentId, others) };
+}
+
+/** Devin hooks use the identity from their own payload, including in a linked cloud workspace. */
+export async function handleCloudDevinSessionStart(
+  runtime: CloudRuntime,
+  agentId: string,
+  cwd: string,
+): Promise<SessionStartResult> {
+  await registerInCloud(runtime, agentId, 'devin', cwd);
+  const now = Date.now();
+  const others: RosterLine[] = (await listCloudAgents(runtime))
+    .filter((agent) => agent.agentKey !== agentId)
+    .map((agent) => ({
+      agentId: agent.agentKey,
+      liveness: deriveLiveness(agent.lastSeenAt, now),
+      status: agent.status,
+      summary: agent.summary,
+    }))
+    .filter((peer) => peer.liveness !== 'archived');
+  return { agentId, message: sessionStartMessage(agentId, others, true) };
 }

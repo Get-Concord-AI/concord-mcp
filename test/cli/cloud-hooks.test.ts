@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { CloudRuntime } from '../../src/cloud/runtime.js';
 import {
   decideCloudPreToolUse,
+  handleCloudDevinSessionStart,
   handleCloudSessionStart,
 } from '../../src/cli/commands/cloud-hooks.js';
 import { cloudAccess } from '../../src/cli/commands/cloud-inbox.js';
@@ -164,6 +165,24 @@ describe('cloud hooks', () => {
     expect(result.message).not.toContain('gemini:cccc3333');
   });
 
+  it('registers Devin by its hook identity in the cloud and includes the explicit tool id', async () => {
+    const agentId = 'devin:deadbeef';
+    const result = await handleCloudDevinSessionStart(
+      runtimeWith([
+        ['POST /v1/machines', () => ok({ machine: { id: 'm-uuid' } })],
+        ['POST /v1/agents', () => ok({ agent: { id: 'a-uuid' } })],
+        ['PUT /v1/agents/a-uuid/endpoint', () => ok({ endpoint: {} })],
+        ['GET /v1/agents', () => ok({ agents: [peer(agentId, NOW), peer(SELF, NOW)] })],
+      ]),
+      agentId,
+      repoRoot,
+    );
+
+    expect(result.agentId).toBe(agentId);
+    expect(result.message).toContain(`agent \`${agentId}\``);
+    expect(result.message).toContain(`agent_id: "${agentId}"`);
+  });
+
   it('checks an edit made in a linked worktree against the project’s claims', async () => {
     const base = realpathSync(mkdtempSync(join(tmpdir(), 'concord-worktree-')));
     const primary = join(base, 'primary');
@@ -178,6 +197,8 @@ describe('cloud hooks', () => {
       'user.email=t@example.test',
       '-c',
       'user.name=t',
+      '-c',
+      'commit.gpgsign=false',
       'commit',
       '-q',
       '--allow-empty',

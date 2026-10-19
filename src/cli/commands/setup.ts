@@ -7,6 +7,8 @@ import { createInterface } from 'node:readline/promises';
 import { writeArtifacts } from '../../artifacts/index.js';
 import { installClaudeHook } from '../../install/claude-hooks.js';
 import { installCodexMcpConfig } from '../../install/codex-config.js';
+import { installDevinMcpConfig } from '../../install/devin-config.js';
+import { installDevinHooks } from '../../install/devin-hooks.js';
 import { applyGlobalMode, type GlobalModeReport } from '../../install/global-mode.js';
 import { readUserConfig, writeUserConfig } from '../../config/user-config.js';
 import { installConcord } from '../../install/index.js';
@@ -228,6 +230,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
     written.push(installClaudeHook(ctx.repoRoot));
   }
   if (options.mcp !== false) {
+    written.push(installDevinHooks(ctx.repoRoot));
     written.push(...installMcpConfigs(ctx.repoRoot));
     // Global mode owns a user-level Cursor entry; without it, one is a stale
     // registration that would shadow this repository's pinned one.
@@ -235,6 +238,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
       options.global === true ? undefined : removeGlobalCursorConcord(env);
     if (migratedCursorConfig !== undefined) written.push(migratedCursorConfig);
     written.push(installCodexMcpConfig(env));
+    written.push(installDevinMcpConfig(env, ctx.repoRoot));
   }
   // `env` is also the unit-test/config-path seam. Avoid touching unrelated
   // real harness homes unless adapter installation was explicitly requested.

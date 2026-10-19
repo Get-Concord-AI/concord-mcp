@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   decidePreToolUse,
+  endDevinSession,
   handleSessionStart,
   sessionStartIdentity,
 } from '../../src/cli/commands/hook.js';
@@ -9,6 +10,7 @@ import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
+import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 
 function preToolUse(filePath: string): string {
   return JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: filePath } });
@@ -125,5 +127,18 @@ describe('handleSessionStart', () => {
     expect(result.agentId).toBeUndefined();
     expect(result.message).toContain('concord inbox register');
     expect(repos.agents.list()).toHaveLength(0);
+  });
+});
+
+describe('endDevinSession', () => {
+  it('disconnects the Devin endpoint so new messages are not queued to an ended session', () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    registerPullEndpoint(repos, 'devin:1234abcd', 'devin');
+    const endpoint = repos.agentEndpoints.getByAgent('devin:1234abcd');
+    expect(endpoint?.status).toBe('connected');
+
+    endDevinSession(repos, 'devin:1234abcd');
+
+    expect(repos.agentEndpoints.getByAgent('devin:1234abcd')?.status).toBe('disconnected');
   });
 });

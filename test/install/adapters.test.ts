@@ -13,12 +13,109 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { installGlobalAdapters, statusGlobalAdapters } from '../../src/install/adapters/index.js';
+import {
+  devinSupportsDedicatedMcpConfig,
+  installGlobalAdapters,
+  statusGlobalAdapters,
+  windowsShimCommand,
+} from '../../src/install/adapters/index.js';
 
 // Links into this checkout count as lasting even when it lives under /tmp.
 const LASTING = (): boolean => false;
 
+function fakeCommand(dir: string, name: string, output: string): void {
+  const path = join(dir, `${name}${process.platform === 'win32' ? '.cmd' : ''}`);
+  writeFileSync(
+    path,
+    process.platform === 'win32'
+      ? `@echo off\r\necho ${output}\r\n`
+      : `#!/bin/sh\necho ${output}\n`,
+  );
+  chmodSync(path, 0o755);
+}
+
 describe('global harness adapters', () => {
+  it('accepts Devin versions with dedicated MCP config support only', () => {
+    expect(devinSupportsDedicatedMcpConfig('Devin CLI v3000.3')).toBe(true);
+    expect(devinSupportsDedicatedMcpConfig('Devin CLI v3000.3.1')).toBe(true);
+    expect(devinSupportsDedicatedMcpConfig('Devin CLI v3000.2.99')).toBe(false);
+    expect(devinSupportsDedicatedMcpConfig('unknown version')).toBe(false);
+  });
+
+  it('reports older Devin CLI versions as unsupported and skips their MCP config', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-devin-old-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    fakeCommand(bin, 'devin', 'Devin CLI v3000.2.9');
+
+    const report = installGlobalAdapters(
+      import.meta.url,
+      { HOME: home, PATH: bin },
+      undefined,
+      LASTING,
+    );
+
+    expect(report.find((entry) => entry.harness === 'devin')).toMatchObject({
+      detected: true,
+      status: 'unsupported_version',
+      capabilities: [],
+    });
+    expect(existsSync(join(home, '.config', 'devin', 'mcp_config.json'))).toBe(false);
+  });
+
+  it('installs Devin MCP config and reports supported CLI versions as ready', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-devin-current-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    fakeCommand(bin, 'devin', 'Devin CLI v3000.3');
+
+    const report = installGlobalAdapters(
+      import.meta.url,
+      { HOME: home, PATH: bin },
+      undefined,
+      LASTING,
+    );
+
+    expect(report.find((entry) => entry.harness === 'devin')).toMatchObject({
+      detected: true,
+      status: 'installed',
+    });
+    expect(readFileSync(join(home, '.config', 'devin', 'mcp_config.json'), 'utf8')).toContain(
+      'concord-mcp',
+    );
+    expect(readFileSync(join(home, '.config', 'devin', 'config.json'), 'utf8')).toContain(
+      'concord hook devin-session-start',
+    );
+    writeFileSync(join(home, '.config', 'devin', 'config.json'), '{}');
+    expect(
+      statusGlobalAdapters({ HOME: home, PATH: bin }).find((entry) => entry.harness === 'devin'),
+    ).toMatchObject({ status: 'action_required', capabilities: [] });
+  });
+
+  it('quotes Windows Devin shim paths with spaces', () => {
+    expect(windowsShimCommand('C:\\Users\\Jane Doe\\AppData\\npm\\devin.cmd', ['--version'])).toBe(
+      '"C:\\Users\\Jane Doe\\AppData\\npm\\devin.cmd" --version',
+    );
+  });
+
+  it('runs Devin shims from paths containing spaces when checking the version', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-devin-spaces-'));
+    const bin = join(home, 'Jane Doe bin');
+    mkdirSync(bin);
+    fakeCommand(bin, 'devin', 'Devin CLI v3000.3');
+
+    const report = installGlobalAdapters(
+      import.meta.url,
+      { HOME: home, PATH: bin },
+      undefined,
+      LASTING,
+    );
+
+    const devin = report.find((entry) => entry.harness === 'devin');
+    expect(devin?.status).toBe('installed');
+    expect(devin?.capabilities).toContain('pull');
+  });
+
   it('installs every detected file-based adapter independently', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-adapters-home-'));
     const bin = join(home, 'bin');
@@ -28,9 +125,7 @@ describe('global harness adapters', () => {
       ['cursor', '3.13.10'],
       ['gemini', '0.55.1'],
     ]) {
-      const path = join(bin, executable ?? 'missing');
-      writeFileSync(path, `#!/bin/sh\necho ${version ?? '0.0.0'}\n`);
-      chmodSync(path, 0o755);
+      fakeCommand(bin, executable ?? 'missing', version ?? '0.0.0');
     }
     const env = { HOME: home, PATH: bin };
 
@@ -50,9 +145,7 @@ describe('global harness adapters', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-cursor-hooks-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
-    const cursor = join(bin, 'cursor');
-    writeFileSync(cursor, '#!/bin/sh\necho 3.13.10\n');
-    chmodSync(cursor, 0o755);
+    fakeCommand(bin, 'cursor', '3.13.10');
     const configPath = join(home, '.cursor', 'hooks.json');
     mkdirSync(join(home, '.cursor'));
     writeFileSync(
@@ -71,34 +164,37 @@ describe('global harness adapters', () => {
     expect(installedConfig.split('cursor-hook.mjs\\" stop')).toHaveLength(2);
   });
 
-  it('turns a drained Cursor message into a stop follow-up', () => {
-    const root = mkdtempSync(join(tmpdir(), 'concord-cursor-receiver-'));
-    mkdirSync(join(root, '.concord'));
-    writeFileSync(join(root, '.concord', 'concord.db'), '');
-    const fakeConcord = join(root, 'fake-concord');
-    writeFileSync(
-      fakeConcord,
-      '#!/bin/sh\nif [ "$2" = "drain" ]; then printf \'[{"messageId":"msg-1","senderAgentId":"gemini:peer","taskId":"TASK-1","content":"hello cursor"}]\'; fi\n',
-    );
-    chmodSync(fakeConcord, 0o755);
+  it.skipIf(process.platform === 'win32')(
+    'turns a drained Cursor message into a stop follow-up',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'concord-cursor-receiver-'));
+      mkdirSync(join(root, '.concord'));
+      writeFileSync(join(root, '.concord', 'concord.db'), '');
+      const fakeConcord = join(root, 'fake-concord');
+      writeFileSync(
+        fakeConcord,
+        '#!/bin/sh\nif [ "$2" = "drain" ]; then printf \'[{"messageId":"msg-1","senderAgentId":"gemini:peer","taskId":"TASK-1","content":"hello cursor"}]\'; fi\n',
+      );
+      chmodSync(fakeConcord, 0o755);
 
-    const hook = join(process.cwd(), 'plugin', 'cursor', 'concord-relay', 'cursor-hook.mjs');
-    const result = spawnSync(process.execPath, [hook, 'stop'], {
-      cwd: root,
-      env: {
-        ...process.env,
-        CONCORD_EXECUTABLE: fakeConcord,
-        CONCORD_CURSOR_DISABLE_HEARTBEAT: '1',
-      },
-      input: JSON.stringify({ conversation_id: 'cursor-conversation', workspace_roots: [root] }),
-      encoding: 'utf8',
-    });
+      const hook = join(process.cwd(), 'plugin', 'cursor', 'concord-relay', 'cursor-hook.mjs');
+      const result = spawnSync(process.execPath, [hook, 'stop'], {
+        cwd: root,
+        env: {
+          ...process.env,
+          CONCORD_EXECUTABLE: fakeConcord,
+          CONCORD_CURSOR_DISABLE_HEARTBEAT: '1',
+        },
+        input: JSON.stringify({ conversation_id: 'cursor-conversation', workspace_roots: [root] }),
+        encoding: 'utf8',
+      });
 
-    expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({
-      followup_message: '[concord from gemini:peer id=msg-1 task=TASK-1]\nhello cursor',
-    });
-  });
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        followup_message: '[concord from gemini:peer id=msg-1 task=TASK-1]\nhello cursor',
+      });
+    },
+  );
 
   it('reports monitor/controller quality separately from installation', () => {
     const report = statusGlobalAdapters({ HOME: mkdtempSync(join(tmpdir(), 'concord-empty-')) });
@@ -106,6 +202,7 @@ describe('global harness adapters', () => {
     expect(report.map((entry) => entry.monitor)).toEqual([
       'native-monitor',
       'managed-controller',
+      'harness-monitor',
       'harness-monitor',
       'harness-monitor',
       'harness-monitor',
@@ -118,9 +215,7 @@ describe('global harness adapters', () => {
     const project = mkdtempSync(join(tmpdir(), 'concord-gemini-project-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
-    const gemini = join(bin, 'gemini');
-    writeFileSync(gemini, '#!/bin/sh\necho 0.55.1\n');
-    chmodSync(gemini, 0o755);
+    fakeCommand(bin, 'gemini', '0.55.1');
     const env = { HOME: home, PATH: bin };
     installGlobalAdapters(import.meta.url, env, undefined, LASTING);
 
@@ -173,9 +268,7 @@ describe('global harness adapters', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-cursor-old-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
-    const cursor = join(bin, 'cursor');
-    writeFileSync(cursor, '#!/bin/sh\necho 2.9.0\n');
-    chmodSync(cursor, 0o755);
+    fakeCommand(bin, 'cursor', '2.9.0');
 
     const report = statusGlobalAdapters({ HOME: home, PATH: bin });
     expect(report.find((entry) => entry.harness === 'cursor')).toMatchObject({
@@ -192,9 +285,7 @@ describe('global harness adapters', () => {
       ['cursor', '3.13.10'],
       ['gemini', '0.55.1'],
     ]) {
-      const path = join(bin, executable ?? 'missing');
-      writeFileSync(path, `#!/bin/sh\necho ${version ?? '0.0.0'}\n`);
-      chmodSync(path, 0o755);
+      fakeCommand(bin, executable ?? 'missing', version ?? '0.0.0');
     }
     const occupied = join(home, '.cursor', 'extensions', 'get-concord-ai.concord-relay');
     mkdirSync(occupied, { recursive: true });
