@@ -13,10 +13,18 @@ type Require<T, Keys extends keyof T> = Omit<T, Keys> & {
 
 /** `agent_id` is required here, unlike on the tool surface: by this point the
  * caller has resolved the session identity, and nothing may invent one. */
-export type RegisterAgentInput = Pick<
-  StartWorkInput,
-  'kind' | 'owner' | 'model' | 'summary' | 'branch' | 'worktree' | 'cwd' | 'pid'
-> & { agent_id: string; status?: AgentStatus | undefined };
+export type RegisterAgentInput = Pick<StartWorkInput, 'kind'> & {
+  agent_id: string;
+  /** Optional fields patch: omitted keeps the stored value, `null` clears it. */
+  owner?: string | null | undefined;
+  model?: string | null | undefined;
+  summary?: string | null | undefined;
+  branch?: string | null | undefined;
+  worktree?: string | null | undefined;
+  cwd?: string | null | undefined;
+  pid?: number | null | undefined;
+  status?: AgentStatus | undefined;
+};
 
 export type ClaimWorkInput = Pick<
   StartWorkInput,

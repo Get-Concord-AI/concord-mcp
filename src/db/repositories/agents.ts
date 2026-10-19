@@ -3,58 +3,84 @@ import { z } from 'zod';
 import type { ConcordDatabase } from '../connection.js';
 import { type AgentRecord, type AgentStatus, parseAgentRow } from '../rows.js';
 
-/** A registration payload. Optional fields are explicit `null`. `agentId` is
- * supplied by the caller (generated once per session and reused). */
+/** A registration patch: `undefined` keeps the stored value, `null` clears it. */
 export interface NewAgent {
   agentId: string;
   kind: string;
-  owner: string | null;
-  model: string | null;
-  pid: number | null;
-  cwd: string | null;
-  worktree: string | null;
-  branch: string | null;
-  summary: string | null;
-  status: AgentStatus;
+  owner?: string | null | undefined;
+  model?: string | null | undefined;
+  pid?: number | null | undefined;
+  cwd?: string | null | undefined;
+  worktree?: string | null | undefined;
+  branch?: string | null | undefined;
+  summary?: string | null | undefined;
+  status?: AgentStatus | undefined;
 }
 
 export interface AgentRepository {
-  /** Insert or refresh an agent. On re-registration the mutable fields and
-   * `last_seen` are updated while `first_seen` is preserved. */
-  upsert(agent: NewAgent): AgentRecord;
+  upsert(agent: NewAgent, at?: string): AgentRecord;
   get(agentId: string): AgentRecord | undefined;
   list(): AgentRecord[];
-  /** Bump `last_seen` to now so an agent stays present just by doing work.
-   * Returns undefined if the agent has never registered. */
-  touch(agentId: string): AgentRecord | undefined;
+  heartbeat(agentId: string, at?: string): AgentRecord | undefined;
+  /** Never changes the reported status, so a `done` agent that keeps writing stays `done`. */
+  recordActivity(agentId: string, at?: string): AgentRecord | undefined;
 }
 
 const rawListSchema = z.array(z.unknown());
 
-export function createAgentRepository(db: ConcordDatabase): AgentRepository {
-  const upsertStmt = db.prepare(`
+const PATCH_FIELDS = ['owner', 'model', 'pid', 'cwd', 'worktree', 'branch'] as const;
+
+function isSet(value: unknown): number {
+  return value === undefined ? 0 : 1;
+}
+
+function executionFor(status: AgentStatus): 'executing' | 'not_executing' {
+  return status === 'active' ? 'executing' : 'not_executing';
+}
+
+function buildUpsertSql(): string {
+  const columns = PATCH_FIELDS.join(', ');
+  const values = PATCH_FIELDS.map((field) => `@${field}`).join(', ');
+  const patches = PATCH_FIELDS.map(
+    (field) => `${field} = CASE WHEN @${field}_set = 1 THEN @${field} ELSE agents.${field} END`,
+  ).join(',\n      ');
+  return `
     INSERT INTO agents (
-      agent_id, kind, owner, model, pid, cwd, worktree, branch, summary, status,
-      first_seen, last_seen
+      agent_id, kind, ${columns}, summary, summary_updated_at, status, execution_status,
+      first_seen, last_seen, heartbeat_at
     ) VALUES (
-      @agent_id, @kind, @owner, @model, @pid, @cwd, @worktree, @branch, @summary, @status,
-      @now, @now
+      @agent_id, @kind, ${values}, @summary,
+      CASE WHEN @summary IS NULL THEN NULL ELSE @now END, @status, @execution_status,
+      @now, @now, @now
     )
     ON CONFLICT(agent_id) DO UPDATE SET
       kind = excluded.kind,
-      owner = excluded.owner,
-      model = excluded.model,
-      pid = excluded.pid,
-      cwd = excluded.cwd,
-      worktree = excluded.worktree,
-      branch = excluded.branch,
-      summary = excluded.summary,
-      status = excluded.status,
-      last_seen = excluded.last_seen
-  `);
+      ${patches},
+      summary_updated_at = CASE
+        WHEN @summary_set = 1 AND @summary IS NULL THEN NULL
+        WHEN @summary_set = 1 AND agents.summary IS NOT @summary THEN @now
+        ELSE agents.summary_updated_at
+      END,
+      summary = CASE WHEN @summary_set = 1 THEN @summary ELSE agents.summary END,
+      status = CASE WHEN @status_set = 1 THEN @status ELSE agents.status END,
+      execution_status = CASE
+        WHEN @status_set = 1 THEN @execution_status ELSE agents.execution_status
+      END,
+      last_seen = @now,
+      heartbeat_at = @now
+  `;
+}
+
+export function createAgentRepository(db: ConcordDatabase): AgentRepository {
+  const upsertStmt = db.prepare(buildUpsertSql());
   const getStmt = db.prepare('SELECT * FROM agents WHERE agent_id = ?');
   const listStmt = db.prepare('SELECT * FROM agents ORDER BY first_seen ASC, agent_id ASC');
-  const touchStmt = db.prepare('UPDATE agents SET last_seen = @now WHERE agent_id = @agent_id');
+  const heartbeatStmt = db.prepare(
+    'UPDATE agents SET heartbeat_at = @now, last_seen = @now WHERE agent_id = @agent_id',
+  );
+  const activityStmt = db.prepare(
+    'UPDATE agents SET activity_at = @now, last_seen = @now WHERE agent_id = @agent_id',
+  );
 
   function get(agentId: string): AgentRecord | undefined {
     const raw: unknown = getStmt.get(agentId);
@@ -65,20 +91,29 @@ export function createAgentRepository(db: ConcordDatabase): AgentRepository {
   }
 
   return {
-    upsert(agent) {
-      const now = new Date().toISOString();
+    upsert(agent, at = new Date().toISOString()) {
+      const status = agent.status ?? 'active';
       upsertStmt.run({
         agent_id: agent.agentId,
         kind: agent.kind,
-        owner: agent.owner,
-        model: agent.model,
-        pid: agent.pid,
-        cwd: agent.cwd,
-        worktree: agent.worktree,
-        branch: agent.branch,
-        summary: agent.summary,
-        status: agent.status,
-        now,
+        owner: agent.owner ?? null,
+        owner_set: isSet(agent.owner),
+        model: agent.model ?? null,
+        model_set: isSet(agent.model),
+        pid: agent.pid ?? null,
+        pid_set: isSet(agent.pid),
+        cwd: agent.cwd ?? null,
+        cwd_set: isSet(agent.cwd),
+        worktree: agent.worktree ?? null,
+        worktree_set: isSet(agent.worktree),
+        branch: agent.branch ?? null,
+        branch_set: isSet(agent.branch),
+        summary: agent.summary ?? null,
+        summary_set: isSet(agent.summary),
+        status,
+        status_set: isSet(agent.status),
+        execution_status: executionFor(status),
+        now: at,
       });
       const stored = get(agent.agentId);
       if (stored === undefined) {
@@ -91,8 +126,12 @@ export function createAgentRepository(db: ConcordDatabase): AgentRepository {
       const raw: unknown = listStmt.all();
       return rawListSchema.parse(raw).map(parseAgentRow);
     },
-    touch(agentId) {
-      touchStmt.run({ agent_id: agentId, now: new Date().toISOString() });
+    heartbeat(agentId, at = new Date().toISOString()) {
+      heartbeatStmt.run({ agent_id: agentId, now: at });
+      return get(agentId);
+    },
+    recordActivity(agentId, at = new Date().toISOString()) {
+      activityStmt.run({ agent_id: agentId, now: at });
       return get(agentId);
     },
   };

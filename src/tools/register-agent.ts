@@ -17,6 +17,9 @@ export interface RegisterAgentResult {
  * plus the current roster, so the caller learns who else is here immediately —
  * without a task claim (recon and research agents are visible too).
  *
+ * Re-registration is a patch: omitted fields keep their stored value and an
+ * explicit `null` clears one.
+ *
  * `agent_id` is resolved by the caller from the session (`domain/identity.ts`)
  * and is required. Generating one here is what created agents that no delivery
  * endpoint could ever match: the relay registers endpoints under the
@@ -34,27 +37,25 @@ export function handleRegisterAgent(
   const agent = repos.agents.upsert({
     agentId,
     kind: input.kind,
-    owner: input.owner ?? null,
-    model: input.model ?? null,
-    pid: input.pid ?? null,
-    cwd: input.cwd ?? null,
-    worktree: input.worktree ?? null,
-    branch: input.branch ?? null,
-    summary: input.summary ?? null,
-    status: input.status ?? 'active',
+    owner: input.owner,
+    model: input.model,
+    pid: input.pid,
+    cwd: input.cwd,
+    worktree: input.worktree,
+    branch: input.branch,
+    summary: input.summary,
+    status: input.status,
   });
 
   return { agent, firstRegistration, roster: buildRoster(repos.agents.list(), now) };
 }
 
 /**
- * Give a resolved session a presence row, without disturbing one that is
- * already there.
+ * Give a resolved session a presence row, and mark it alive.
  *
  * Called by every channel that knows only who it is and nothing about the work
- * — the MCP server at startup, the relay, the SessionStart hooks. `upsert` is a
- * full replacement, so refreshing here rather than creating would blank the
- * cwd, owner, model, and summary that a later `start_work` recorded (issue #68).
+ * — the MCP server at startup, the relay, the SessionStart hooks. For a known
+ * session it is only a heartbeat, plus a cwd if none is stored.
  */
 export function ensureAgentRegistered(
   repos: Repositories,
@@ -62,17 +63,12 @@ export function ensureAgentRegistered(
   cwd: string | null = null,
 ): AgentRecord {
   const existing = repos.agents.get(identity.agentId);
-  if (existing !== undefined) return existing;
+  if (existing === undefined) {
+    return repos.agents.upsert({ agentId: identity.agentId, kind: identity.kind, cwd });
+  }
   return repos.agents.upsert({
-    agentId: identity.agentId,
-    kind: identity.kind,
-    owner: null,
-    model: null,
-    pid: null,
-    cwd,
-    worktree: null,
-    branch: null,
-    summary: null,
-    status: 'active',
+    agentId: existing.agentId,
+    kind: existing.kind,
+    cwd: existing.cwd === null ? (cwd ?? undefined) : undefined,
   });
 }

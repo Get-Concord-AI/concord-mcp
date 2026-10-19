@@ -232,7 +232,7 @@ export function handleSendAgentMessage(
   if (parent !== undefined) {
     repos.agentMessages.markReplied(parent.messageId);
   }
-  repos.agents.touch(input.agentId);
+  repos.agents.recordActivity(input.agentId);
   const activityTask =
     !idempotentReplay && task !== undefined ? tasks.touchActivity(task.taskId) : task;
   return {
