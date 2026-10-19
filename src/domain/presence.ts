@@ -1,4 +1,4 @@
-import type { AgentRecord, AgentStatus, TaskRecord } from '../db/index.js';
+import type { AgentExecutionStatus, AgentRecord, AgentStatus, TaskRecord } from '../db/index.js';
 
 /**
  * Liveness is *derived* from how long ago an agent was last seen — never stored.
@@ -16,6 +16,7 @@ export interface PresenceThresholds {
   idleAfterMs: number;
   awayAfterMs: number;
   archiveAfterMs: number;
+  assignmentAcceptAfterMs: number;
 }
 
 /** Live under 5 min, idle under 30 min, away under 1 h, archived beyond. */
@@ -23,6 +24,7 @@ export const DEFAULT_PRESENCE_THRESHOLDS: PresenceThresholds = {
   idleAfterMs: 5 * 60 * 1000,
   awayAfterMs: 30 * 60 * 1000,
   archiveAfterMs: 60 * 60 * 1000,
+  assignmentAcceptAfterMs: 30 * 60 * 1000,
 };
 
 /** A single agent's presence for display in a roster. */
@@ -32,10 +34,18 @@ export interface PresenceEntry {
   owner: string | null;
   summary: string | null;
   status: AgentStatus;
+  executionStatus: AgentExecutionStatus;
   liveness: Liveness;
   lastSeen: string;
   /** Whole seconds since `last_seen`, floored at 0. */
   ageSeconds: number;
+  heartbeatAt: string;
+  heartbeatLiveness: Liveness;
+  heartbeatAgeSeconds: number;
+  activityAt: string | null;
+  activityAgeSeconds: number | null;
+  summaryUpdatedAt: string | null;
+  summaryAgeSeconds: number | null;
 }
 
 /** Derive liveness from a `last_seen` ISO timestamp relative to `now` (ms since
@@ -44,7 +54,7 @@ export interface PresenceEntry {
 export function deriveLiveness(
   lastSeen: string,
   now: number,
-  thresholds: PresenceThresholds = DEFAULT_PRESENCE_THRESHOLDS,
+  thresholds: Omit<PresenceThresholds, 'assignmentAcceptAfterMs'> = DEFAULT_PRESENCE_THRESHOLDS,
 ): Liveness {
   const seen = Date.parse(lastSeen);
   if (Number.isNaN(seen)) {
@@ -73,29 +83,116 @@ function ageSecondsOf(lastSeen: string, now: number): number {
   return Math.max(0, Math.floor((now - seen) / 1000));
 }
 
-/**
- * Build the presence roster from registered agents: live agents first, then by
- * most-recently-seen. This is the "who is here and what are they doing" view
- * that other agents read before or while working. Archived agents are omitted
- * — they stay registered forever, they just no longer appear here.
- */
-/** An active claim whose owning agent is no longer reliably present. */
+function optionalAgeSecondsOf(timestamp: string | null, now: number): number | null {
+  return timestamp === null ? null : ageSecondsOf(timestamp, now);
+}
+
+export function presenceEntryOf(
+  agent: AgentRecord,
+  now: number,
+  thresholds: PresenceThresholds = DEFAULT_PRESENCE_THRESHOLDS,
+): PresenceEntry {
+  return {
+    agentId: agent.agentId,
+    kind: agent.kind,
+    owner: agent.owner,
+    summary: agent.summary,
+    status: agent.status,
+    executionStatus: agent.executionStatus,
+    liveness: deriveLiveness(agent.lastSeen, now, thresholds),
+    lastSeen: agent.lastSeen,
+    ageSeconds: ageSecondsOf(agent.lastSeen, now),
+    heartbeatAt: agent.heartbeatAt,
+    heartbeatLiveness: deriveLiveness(agent.heartbeatAt, now, thresholds),
+    heartbeatAgeSeconds: ageSecondsOf(agent.heartbeatAt, now),
+    activityAt: agent.activityAt,
+    activityAgeSeconds: optionalAgeSecondsOf(agent.activityAt, now),
+    summaryUpdatedAt: agent.summaryUpdatedAt,
+    summaryAgeSeconds: optionalAgeSecondsOf(agent.summaryUpdatedAt, now),
+  };
+}
+
 export interface StaleClaim {
   taskId: string;
   title: string;
-  agentId: string;
-  /** Why it is stale: the agent is `away`, or was never seen (unregistered). */
-  reason: 'agent-away' | 'agent-unregistered';
-  /** Seconds since the owning agent was last seen, or null when unregistered. */
+  agentId: string | null;
+  /** `unowned`: in progress with no holder. `assignment-unaccepted`: assigned but not taken up
+   * in time, or the assignee is away or the lease expired. */
+  reason: 'agent-away' | 'agent-unregistered' | 'assignment-unaccepted' | 'unowned';
   ageSeconds: number | null;
 }
 
+const OWNED_STATUSES: readonly string[] = ['active', 'blocked', 'handoff_offered'];
+
+function isPresent(agent: AgentRecord, now: number, thresholds: PresenceThresholds): boolean {
+  return LIVENESS_ORDER[deriveLiveness(agent.lastSeen, now, thresholds)] < LIVENESS_ORDER.away;
+}
+
+function staleAssignment(
+  task: TaskRecord,
+  byId: ReadonlyMap<string, AgentRecord>,
+  now: number,
+  thresholds: PresenceThresholds,
+): StaleClaim | undefined {
+  const base = { taskId: task.taskId, title: task.title };
+  if (task.assignedAgentId === null) {
+    return { ...base, agentId: null, reason: 'unowned', ageSeconds: null };
+  }
+  const assignee = byId.get(task.assignedAgentId);
+  if (assignee === undefined) {
+    return {
+      ...base,
+      agentId: task.assignedAgentId,
+      reason: 'agent-unregistered',
+      ageSeconds: null,
+    };
+  }
+  const waitedMs = now - Date.parse(task.updatedAt);
+  const leaseExpired = task.leaseExpiresAt !== null && Date.parse(task.leaseExpiresAt) <= now;
+  if (
+    leaseExpired ||
+    waitedMs >= thresholds.assignmentAcceptAfterMs ||
+    !isPresent(assignee, now, thresholds)
+  ) {
+    return {
+      ...base,
+      agentId: assignee.agentId,
+      reason: 'assignment-unaccepted',
+      ageSeconds: ageSecondsOf(task.updatedAt, now),
+    };
+  }
+  return undefined;
+}
+
+function staleOwnership(
+  task: TaskRecord,
+  byId: ReadonlyMap<string, AgentRecord>,
+  now: number,
+  thresholds: PresenceThresholds,
+): StaleClaim | undefined {
+  const base = { taskId: task.taskId, title: task.title };
+  if (task.agentId === null) {
+    return { ...base, agentId: null, reason: 'unowned', ageSeconds: null };
+  }
+  const owner = byId.get(task.agentId);
+  if (owner === undefined) {
+    return { ...base, agentId: task.agentId, reason: 'agent-unregistered', ageSeconds: null };
+  }
+  if (isPresent(owner, now, thresholds)) {
+    return undefined;
+  }
+  return {
+    ...base,
+    agentId: owner.agentId,
+    reason: 'agent-away',
+    ageSeconds: ageSecondsOf(owner.lastSeen, now),
+  };
+}
+
 /**
- * Flag active claims whose owning agent has gone away — the "agent walked off
- * without handing off" case a durable claim alone cannot surface. Only claims
- * carrying an `agentId` are assessed; unattributed claims are left alone (they
- * predate presence and would be noise). A claim is stale when its agent is
- * `away` or `archived`, or when the referenced agent never registered.
+ * Flag work whose holder is not reliably there: accepted work whose owner went
+ * away, assigned work nobody accepted, and in-progress work with no `agentId`.
+ * A crashed session stops heartbeating, so it ages into `away` and surfaces here.
  */
 export function detectStaleClaims(
   tasks: readonly TaskRecord[],
@@ -106,49 +203,31 @@ export function detectStaleClaims(
   const byId = new Map(agents.map((agent) => [agent.agentId, agent]));
   const stale: StaleClaim[] = [];
   for (const task of tasks) {
-    if (!['active', 'blocked', 'handoff_offered'].includes(task.status) || task.agentId === null) {
-      continue;
-    }
-    const agent = byId.get(task.agentId);
-    if (agent === undefined) {
-      stale.push({
-        taskId: task.taskId,
-        title: task.title,
-        agentId: task.agentId,
-        reason: 'agent-unregistered',
-        ageSeconds: null,
-      });
-    } else if (
-      LIVENESS_ORDER[deriveLiveness(agent.lastSeen, now, thresholds)] >= LIVENESS_ORDER.away
-    ) {
-      stale.push({
-        taskId: task.taskId,
-        title: task.title,
-        agentId: task.agentId,
-        reason: 'agent-away',
-        ageSeconds: ageSecondsOf(agent.lastSeen, now),
-      });
+    const claim = OWNED_STATUSES.includes(task.status)
+      ? staleOwnership(task, byId, now, thresholds)
+      : task.status === 'assigned'
+        ? staleAssignment(task, byId, now, thresholds)
+        : undefined;
+    if (claim !== undefined) {
+      stale.push(claim);
     }
   }
   return stale;
 }
 
+/**
+ * Build the presence roster from registered agents: live agents first, then by
+ * most-recently-seen. This is the "who is here and what are they doing" view
+ * that other agents read before or while working. Archived agents are omitted
+ * — they stay registered forever, they just no longer appear here.
+ */
 export function buildRoster(
   agents: readonly AgentRecord[],
   now: number,
   thresholds: PresenceThresholds = DEFAULT_PRESENCE_THRESHOLDS,
 ): PresenceEntry[] {
   return agents
-    .map((agent) => ({
-      agentId: agent.agentId,
-      kind: agent.kind,
-      owner: agent.owner,
-      summary: agent.summary,
-      status: agent.status,
-      liveness: deriveLiveness(agent.lastSeen, now, thresholds),
-      lastSeen: agent.lastSeen,
-      ageSeconds: ageSecondsOf(agent.lastSeen, now),
-    }))
+    .map((agent) => presenceEntryOf(agent, now, thresholds))
     .filter((entry) => entry.liveness !== 'archived')
     .sort((a, b) => {
       const byLiveness = LIVENESS_ORDER[a.liveness] - LIVENESS_ORDER[b.liveness];

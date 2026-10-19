@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Agent presence no longer conflates heartbeat, activity, and reported status
+  (#68). Tool writes record activity without changing an agent's reported
+  status, so a `done` agent that keeps working still reads as `done`; the roster,
+  `concord who`, `concord status`, and `WORK_STATE.json` show heartbeat age,
+  activity age, summary age, and reported status separately.
+- Re-registering an agent is now a patch: omitted fields keep their stored
+  values, so a summary- or status-only refresh no longer erases the recorded
+  cwd, worktree, owner, model, branch, or pid. An explicit `null` clears a field.
+- Stale-claim detection now covers assigned-but-never-accepted work and
+  in-progress work with no owning agent, instead of skipping claims without an
+  `agent_id`.
+
+### Changed
+
+- Schema migration 013 adds `heartbeat_at`, `activity_at`, `summary_updated_at`,
+  and `execution_status` to `agents`, backfilled from `last_seen`.
+
 ## [0.14.1] - 2026-10-17
 
 ### Fixed

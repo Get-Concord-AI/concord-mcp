@@ -6,14 +6,19 @@ import { join } from 'node:path';
 
 import Database from 'better-sqlite3';
 import { openDatabase } from '../../src/db/connection.js';
-import { parseStringArray, parseTaskRow, serializeStringArray } from '../../src/db/rows.js';
+import {
+  parseAgentRow,
+  parseStringArray,
+  parseTaskRow,
+  serializeStringArray,
+} from '../../src/db/rows.js';
 import { migrations } from '../../src/db/schema.js';
 
 describe('openDatabase', () => {
   it('applies all migrations (user_version at head) and creates tables', () => {
     const db = openDatabase(':memory:');
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(12);
+    expect(version).toBe(13);
 
     const raw: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     const names = new Set(
@@ -85,11 +90,61 @@ describe('openDatabase', () => {
     const task = parseTaskRow(
       upgraded.prepare('SELECT * FROM tasks WHERE task_id = ?').get('LEGACY'),
     );
-    expect(upgraded.pragma('user_version', { simple: true })).toBe(12);
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(13);
     expect(task.status).toBe('handed_off');
     expect(task.agentId).toBe('codex:old');
     expect(task.version).toBe(1);
     expect(task.assignedAgentId).toBeNull();
+  });
+});
+
+describe('presence signal migration', () => {
+  it('backfills heartbeat, activity and execution status from an older agents row', () => {
+    const filename = join(mkdtempSync(join(tmpdir(), 'concord-upgrade-')), 'presence.db');
+    const legacy = new Database(filename);
+    for (let index = 0; index < 12; index += 1) {
+      legacy.exec(migrations[index] ?? '');
+      legacy.pragma(`user_version = ${String(index + 1)}`);
+    }
+    const insert = legacy.prepare(
+      `INSERT INTO agents (agent_id, kind, cwd, summary, status, first_seen, last_seen)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insert.run(
+      'a:one',
+      'a',
+      '/work',
+      'working',
+      'active',
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-02T00:00:00.000Z',
+    );
+    insert.run(
+      'a:two',
+      'a',
+      null,
+      null,
+      'done',
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-03T00:00:00.000Z',
+    );
+    legacy.close();
+
+    const upgraded = openDatabase(filename);
+    const rows = upgraded
+      .prepare('SELECT * FROM agents ORDER BY agent_id')
+      .all()
+      .map(parseAgentRow);
+    const [one, two] = rows;
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(13);
+    expect(one?.cwd).toBe('/work');
+    expect(one?.heartbeatAt).toBe('2026-01-02T00:00:00.000Z');
+    expect(one?.activityAt).toBe('2026-01-02T00:00:00.000Z');
+    expect(one?.summaryUpdatedAt).toBe('2026-01-02T00:00:00.000Z');
+    expect(one?.executionStatus).toBe('executing');
+    expect(two?.summaryUpdatedAt).toBeNull();
+    expect(two?.executionStatus).toBe('not_executing');
+    expect(two?.status).toBe('done');
   });
 });
 

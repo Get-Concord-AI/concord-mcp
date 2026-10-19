@@ -122,7 +122,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
 
   // Working refreshes presence: a registered agent stays live just by claiming.
   if (input.agent_id !== undefined) {
-    repos.agents.touch(input.agent_id);
+    repos.agents.recordActivity(input.agent_id);
   }
 
   return {

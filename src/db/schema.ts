@@ -235,4 +235,18 @@ export const migrations: readonly string[] = [
   `,
   // 012 — tasks are unique per project, so one store can hold several.
   PROJECT_SCOPE_MIGRATION,
+  // 013 — split presence out of last_seen into heartbeat, activity, summary
+  // change time, and execution status. last_seen stays as the freshest signal.
+  `
+  ALTER TABLE agents ADD COLUMN heartbeat_at TEXT;
+  ALTER TABLE agents ADD COLUMN activity_at TEXT;
+  ALTER TABLE agents ADD COLUMN summary_updated_at TEXT;
+  ALTER TABLE agents ADD COLUMN execution_status TEXT NOT NULL DEFAULT 'not_executing';
+
+  UPDATE agents SET
+    heartbeat_at = last_seen,
+    activity_at = last_seen,
+    summary_updated_at = CASE WHEN summary IS NULL THEN NULL ELSE last_seen END,
+    execution_status = CASE WHEN status = 'active' THEN 'executing' ELSE 'not_executing' END;
+  `,
 ];

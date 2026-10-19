@@ -45,7 +45,7 @@ export function handleUpdateTask(repos: Repositories, input: UpdateTaskInput): U
       detail: input.kind,
     });
     if (input.agent_id !== undefined) {
-      repos.agents.touch(input.agent_id);
+      repos.agents.recordActivity(input.agent_id);
     }
     return { update, task: updatedTask };
   });

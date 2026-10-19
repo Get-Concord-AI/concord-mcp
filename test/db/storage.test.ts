@@ -62,7 +62,7 @@ describe('migrations', () => {
   it('is idempotent when reopening (user_version already at head)', () => {
     const { db } = newRepos();
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(12);
+    expect(version).toBe(13);
   });
 });
 
@@ -343,7 +343,8 @@ describe('agent repository', () => {
 
   it('returns undefined for an unknown agent', () => {
     expect(repos.agents.get('nope')).toBeUndefined();
-    expect(repos.agents.touch('nope')).toBeUndefined();
+    expect(repos.agents.heartbeat('nope')).toBeUndefined();
+    expect(repos.agents.recordActivity('nope')).toBeUndefined();
   });
 
   it('re-registration preserves first_seen but refreshes mutable fields', () => {
@@ -359,11 +360,112 @@ describe('agent repository', () => {
     expect(repos.agents.list()).toHaveLength(1);
   });
 
-  it('touch bumps last_seen without changing first_seen', () => {
-    const first = repos.agents.upsert(baseAgent);
-    const touched = repos.agents.touch('claude-code:7p8v');
-    expect(touched?.firstSeen).toBe(first.firstSeen);
-    expect(Date.parse(touched?.lastSeen ?? '')).toBeGreaterThanOrEqual(Date.parse(first.lastSeen));
+  it('a field-less re-registration keeps every stored field (patch semantics)', () => {
+    repos.agents.upsert({ ...baseAgent, worktree: '/repo-wt' });
+    const refreshed = repos.agents.upsert({ agentId: 'claude-code:7p8v', kind: 'claude-code' });
+    expect(refreshed.owner).toBe('alex');
+    expect(refreshed.model).toBe('opus-4.8');
+    expect(refreshed.pid).toBe(4242);
+    expect(refreshed.cwd).toBe('/repo');
+    expect(refreshed.worktree).toBe('/repo-wt');
+    expect(refreshed.branch).toBe('feat/x');
+    expect(refreshed.summary).toBe('building the todo frontend');
+    expect(refreshed.status).toBe('active');
+  });
+
+  it('a summary-and-status-only refresh preserves cwd, worktree, owner, model and pid', () => {
+    repos.agents.upsert({ ...baseAgent, worktree: '/repo-wt' });
+    const refreshed = repos.agents.upsert({
+      agentId: 'claude-code:7p8v',
+      kind: 'claude-code',
+      summary: 'now reviewing',
+      status: 'waiting_review',
+    });
+    expect(refreshed.summary).toBe('now reviewing');
+    expect(refreshed.status).toBe('waiting_review');
+    expect([refreshed.owner, refreshed.model, refreshed.pid]).toEqual(['alex', 'opus-4.8', 4242]);
+    expect([refreshed.cwd, refreshed.worktree]).toEqual(['/repo', '/repo-wt']);
+  });
+
+  it('an explicit null clears a field while the others stay', () => {
+    repos.agents.upsert({ ...baseAgent, worktree: '/repo-wt' });
+    const cleared = repos.agents.upsert({
+      agentId: 'claude-code:7p8v',
+      kind: 'claude-code',
+      worktree: null,
+      pid: null,
+      summary: null,
+    });
+    expect(cleared.worktree).toBeNull();
+    expect(cleared.pid).toBeNull();
+    expect(cleared.summary).toBeNull();
+    expect(cleared.summaryUpdatedAt).toBeNull();
+    expect([cleared.owner, cleared.cwd, cleared.model]).toEqual(['alex', '/repo', 'opus-4.8']);
+  });
+
+  it('a new agent defaults to active and executing', () => {
+    const created = repos.agents.upsert({ agentId: 'codex:one', kind: 'codex' });
+    expect(created.status).toBe('active');
+    expect(created.executionStatus).toBe('executing');
+    expect(created.owner).toBeNull();
+    expect(created.activityAt).toBeNull();
+    expect(created.summaryUpdatedAt).toBeNull();
+  });
+
+  it('records heartbeat, activity and summary change as separate timestamps', () => {
+    const t0 = '2026-07-24T10:00:00.000Z';
+    const t1 = '2026-07-24T10:05:00.000Z';
+    const t2 = '2026-07-24T10:09:00.000Z';
+    const created = repos.agents.upsert(baseAgent, t0);
+    expect([created.heartbeatAt, created.lastSeen, created.firstSeen]).toEqual([t0, t0, t0]);
+    expect(created.activityAt).toBeNull();
+    expect(created.summaryUpdatedAt).toBe(t0);
+
+    const active = repos.agents.recordActivity('claude-code:7p8v', t1);
+    expect(active?.activityAt).toBe(t1);
+    expect(active?.heartbeatAt).toBe(t0);
+    expect(active?.lastSeen).toBe(t1);
+    expect(active?.summaryUpdatedAt).toBe(t0);
+
+    const beat = repos.agents.heartbeat('claude-code:7p8v', t2);
+    expect(beat?.heartbeatAt).toBe(t2);
+    expect(beat?.activityAt).toBe(t1);
+    expect(beat?.lastSeen).toBe(t2);
+    expect(beat?.firstSeen).toBe(t0);
+  });
+
+  it('activity and heartbeat never change the reported status or summary', () => {
+    repos.agents.upsert({ ...baseAgent, status: 'done', summary: 'shipped' });
+    repos.agents.recordActivity('claude-code:7p8v');
+    const beat = repos.agents.heartbeat('claude-code:7p8v');
+    expect(beat?.status).toBe('done');
+    expect(beat?.executionStatus).toBe('not_executing');
+    expect(beat?.summary).toBe('shipped');
+  });
+
+  it('moves summary_updated_at only when the summary actually changes', () => {
+    const t0 = '2026-07-24T10:00:00.000Z';
+    const t1 = '2026-07-24T10:30:00.000Z';
+    const t2 = '2026-07-24T11:00:00.000Z';
+    repos.agents.upsert(baseAgent, t0);
+    const same = repos.agents.upsert(baseAgent, t1);
+    expect(same.summaryUpdatedAt).toBe(t0);
+    expect(same.heartbeatAt).toBe(t1);
+    const omitted = repos.agents.upsert({ agentId: 'claude-code:7p8v', kind: 'claude-code' }, t1);
+    expect(omitted.summaryUpdatedAt).toBe(t0);
+    const changed = repos.agents.upsert({ ...baseAgent, summary: 'a new task' }, t2);
+    expect(changed.summaryUpdatedAt).toBe(t2);
+  });
+
+  it('only an explicit status transition changes execution_status', () => {
+    repos.agents.upsert({ ...baseAgent, status: 'done' });
+    expect(repos.agents.get('claude-code:7p8v')?.executionStatus).toBe('not_executing');
+    const omitted = repos.agents.upsert({ agentId: 'claude-code:7p8v', kind: 'claude-code' });
+    expect([omitted.status, omitted.executionStatus]).toEqual(['done', 'not_executing']);
+    const reactivated = repos.agents.upsert({ ...baseAgent, status: 'active' });
+    expect([reactivated.status, reactivated.executionStatus]).toEqual(['active', 'executing']);
+    const blocked = repos.agents.upsert({ ...baseAgent, status: 'blocked' });
+    expect([blocked.status, blocked.executionStatus]).toEqual(['blocked', 'not_executing']);
   });
 
   it('lists multiple registered agents', () => {

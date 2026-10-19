@@ -74,7 +74,7 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
       throw new Error(`Task ${input.task_id} disappeared while evidence was recorded.`);
     }
     if (input.agent_id !== undefined) {
-      repos.agents.touch(input.agent_id);
+      repos.agents.recordActivity(input.agent_id);
     }
     if (reviewReady) {
       handleReviewReady(repos, {

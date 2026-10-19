@@ -145,8 +145,11 @@ review state through one small MCP server.
 | `finish_work`   | records evidence and optionally marks a task review-ready, complete, or closed              |
 
 Writes accept an `agent_id`, which keeps presence live just by working.
-`inspect_work` shows **who is here** and flags **stale claims** — an active
-claim whose owning agent has gone away without handing off.
+`inspect_work` shows **who is here** with three separate signals — heartbeat,
+last activity, and the status the agent reported (writing never changes the
+reported status) — and flags **stale claims**: work whose owning agent has gone
+away without handing off, an assignment nobody accepted, or in-progress work
+with no owning agent at all.
 
 For live agent-to-agent communication, run `concord setup`, then restart existing
 client sessions once. A prompt uses `update_work` with `operation: "prompt"`, the

@@ -51,6 +51,7 @@ export type {
   TaskUpdateRecord,
   AgentRecord,
   AgentStatus,
+  AgentExecutionStatus,
   OwnershipEventRecord,
   HandoffDeliveryStatus,
   AgentEndpointRecord,

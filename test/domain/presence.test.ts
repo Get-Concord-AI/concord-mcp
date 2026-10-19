@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AgentRecord, TaskRecord } from '../../src/db/index.js';
-import { buildRoster, detectStaleClaims, deriveLiveness } from '../../src/domain/presence.js';
+import {
+  buildRoster,
+  DEFAULT_PRESENCE_THRESHOLDS,
+  detectStaleClaims,
+  deriveLiveness,
+} from '../../src/domain/presence.js';
 
 const NOW = Date.parse('2026-07-24T12:00:00.000Z');
 
@@ -22,8 +27,14 @@ function agent(partial: Partial<AgentRecord> & { agentId: string }): AgentRecord
     branch: partial.branch ?? null,
     summary: partial.summary ?? null,
     status: partial.status ?? 'active',
+    executionStatus:
+      partial.executionStatus ??
+      ((partial.status ?? 'active') === 'active' ? 'executing' : 'not_executing'),
     firstSeen: partial.firstSeen ?? ago(60 * 60 * 1000),
     lastSeen: partial.lastSeen ?? ago(0),
+    heartbeatAt: partial.heartbeatAt ?? partial.lastSeen ?? ago(0),
+    activityAt: partial.activityAt ?? null,
+    summaryUpdatedAt: partial.summaryUpdatedAt ?? null,
   };
 }
 
@@ -75,6 +86,37 @@ describe('buildRoster', () => {
     expect(entry?.summary).toBe('building frontend');
     expect(entry?.liveness).toBe('live');
     expect(entry?.ageSeconds).toBe(90);
+  });
+
+  it('keeps heartbeat, activity, summary age and reported status separate', () => {
+    const [entry] = buildRoster(
+      [
+        agent({
+          agentId: 'claude-code:7p8v',
+          summary: 'finished earlier task',
+          status: 'done',
+          heartbeatAt: ago(40 * 60 * 1000),
+          activityAt: ago(10_000),
+          lastSeen: ago(10_000),
+          summaryUpdatedAt: ago(3 * 60 * 60 * 1000),
+        }),
+      ],
+      NOW,
+    );
+    expect(entry?.status).toBe('done');
+    expect(entry?.executionStatus).toBe('not_executing');
+    expect(entry?.liveness).toBe('live');
+    expect(entry?.heartbeatLiveness).toBe('away');
+    expect(entry?.heartbeatAgeSeconds).toBe(2400);
+    expect(entry?.activityAgeSeconds).toBe(10);
+    expect(entry?.summaryAgeSeconds).toBe(10_800);
+  });
+
+  it('reports no activity or summary age when none was recorded', () => {
+    const [entry] = buildRoster([agent({ agentId: 'claude-code:7p8v' })], NOW);
+    expect(entry?.activityAt).toBeNull();
+    expect(entry?.activityAgeSeconds).toBeNull();
+    expect(entry?.summaryAgeSeconds).toBeNull();
   });
 
   it('orders live agents first, then most-recently-seen', () => {
@@ -129,7 +171,7 @@ function task(partial: Partial<TaskRecord> & { taskId: string }): TaskRecord {
     assignedAgentId: partial.assignedAgentId ?? null,
     leaseExpiresAt: partial.leaseExpiresAt ?? null,
     createdAt: '2026-07-24T00:00:00.000Z',
-    updatedAt: '2026-07-24T00:00:00.000Z',
+    updatedAt: partial.updatedAt ?? '2026-07-24T00:00:00.000Z',
   };
 }
 
@@ -173,15 +215,138 @@ describe('detectStaleClaims', () => {
     expect(stale).toEqual([]);
   });
 
-  it('ignores unattributed claims (no agent_id) and non-active tasks', () => {
+  it('ignores tasks that are no longer in progress', () => {
     const stale = detectStaleClaims(
       [
-        task({ taskId: 'T-1', agentId: null }),
-        task({ taskId: 'T-2', agentId: 'ghost:zzzz', status: 'handed_off' }),
+        task({ taskId: 'T-1', agentId: 'ghost:zzzz', status: 'handed_off' }),
+        task({ taskId: 'T-2', agentId: 'ghost:zzzz', status: 'complete' }),
+        task({ taskId: 'T-3', agentId: 'ghost:zzzz', status: 'review_ready' }),
       ],
       [],
       NOW,
     );
     expect(stale).toEqual([]);
+  });
+
+  it('flags an in-progress claim with no owning agent instead of skipping it', () => {
+    const stale = detectStaleClaims(
+      [
+        task({ taskId: 'T-1', agentId: null }),
+        task({ taskId: 'T-2', agentId: null, status: 'blocked' }),
+      ],
+      [],
+      NOW,
+    );
+    expect(stale.map((claim) => [claim.taskId, claim.reason, claim.agentId])).toEqual([
+      ['T-1', 'unowned', null],
+      ['T-2', 'unowned', null],
+    ]);
+  });
+
+  it('does not treat the agent kind string as a holder', () => {
+    const anonymous = { ...task({ taskId: 'T-1', agentId: null }), agent: 'claude-code' };
+    const live = agent({ agentId: 'claude-code:7p8v', kind: 'claude-code' });
+    const stale = detectStaleClaims([anonymous], [live], NOW);
+    expect(stale.map((claim) => claim.reason)).toEqual(['unowned']);
+  });
+
+  it('flags a crashed session: executing, but heartbeat and activity both stopped', () => {
+    const crashed = agent({
+      agentId: 'claude-code:7p8v',
+      status: 'active',
+      executionStatus: 'executing',
+      heartbeatAt: ago(50 * 60 * 1000),
+      activityAt: ago(40 * 60 * 1000),
+      lastSeen: ago(40 * 60 * 1000),
+    });
+    const stale = detectStaleClaims(
+      [task({ taskId: 'T-1', agentId: 'claude-code:7p8v' })],
+      [crashed],
+      NOW,
+    );
+    expect(stale.map((claim) => [claim.reason, claim.ageSeconds])).toEqual([['agent-away', 2400]]);
+  });
+
+  it('keeps an owner present while it is still writing, even without a heartbeat', () => {
+    const writing = agent({
+      agentId: 'codex:one',
+      heartbeatAt: ago(50 * 60 * 1000),
+      activityAt: ago(60 * 1000),
+      lastSeen: ago(60 * 1000),
+    });
+    const stale = detectStaleClaims(
+      [task({ taskId: 'T-1', agentId: 'codex:one' })],
+      [writing],
+      NOW,
+    );
+    expect(stale).toEqual([]);
+  });
+});
+
+describe('detectStaleClaims for assigned tasks', () => {
+  const assignee = agent({ agentId: 'codex:two', lastSeen: ago(60 * 1000) });
+  const assigned = (partial: Partial<TaskRecord> = {}): TaskRecord =>
+    task({
+      taskId: 'T-9',
+      status: 'assigned',
+      assignedAgentId: 'codex:two',
+      updatedAt: ago(60 * 1000),
+      ...partial,
+    });
+
+  it('does not flag a fresh assignment to a present assignee', () => {
+    expect(detectStaleClaims([assigned()], [assignee], NOW)).toEqual([]);
+  });
+
+  it('flags an assignment nobody accepted within the threshold', () => {
+    const stale = detectStaleClaims(
+      [assigned({ updatedAt: ago(31 * 60 * 1000) })],
+      [assignee],
+      NOW,
+    );
+    expect(stale.map((claim) => [claim.reason, claim.agentId, claim.ageSeconds])).toEqual([
+      ['assignment-unaccepted', 'codex:two', 1860],
+    ]);
+  });
+
+  it('treats the acceptance threshold boundary as the later state (>=)', () => {
+    const justUnder = assigned({ updatedAt: ago(30 * 60 * 1000 - 1) });
+    const exactly = assigned({ updatedAt: ago(30 * 60 * 1000) });
+    expect(detectStaleClaims([justUnder], [assignee], NOW)).toEqual([]);
+    expect(detectStaleClaims([exactly], [assignee], NOW)).toHaveLength(1);
+  });
+
+  it('honours a custom acceptance threshold', () => {
+    const thresholds = { ...DEFAULT_PRESENCE_THRESHOLDS, assignmentAcceptAfterMs: 1000 };
+    const stale = detectStaleClaims(
+      [assigned({ updatedAt: ago(2000) })],
+      [assignee],
+      NOW,
+      thresholds,
+    );
+    expect(stale).toHaveLength(1);
+  });
+
+  it('flags an assignment whose assignee has gone away, even if recent', () => {
+    const away = agent({ agentId: 'codex:two', lastSeen: ago(45 * 60 * 1000) });
+    const stale = detectStaleClaims([assigned()], [away], NOW);
+    expect(stale.map((claim) => claim.reason)).toEqual(['assignment-unaccepted']);
+  });
+
+  it('flags an assignment whose lease has expired', () => {
+    const stale = detectStaleClaims([assigned({ leaseExpiresAt: ago(1000) })], [assignee], NOW);
+    expect(stale.map((claim) => claim.reason)).toEqual(['assignment-unaccepted']);
+  });
+
+  it('flags an assignee that never registered', () => {
+    const stale = detectStaleClaims([assigned()], [], NOW);
+    expect(stale.map((claim) => [claim.reason, claim.agentId])).toEqual([
+      ['agent-unregistered', 'codex:two'],
+    ]);
+  });
+
+  it('flags an assigned task that names no assignee', () => {
+    const stale = detectStaleClaims([assigned({ assignedAgentId: null })], [assignee], NOW);
+    expect(stale.map((claim) => [claim.reason, claim.agentId])).toEqual([['unowned', null]]);
   });
 });
