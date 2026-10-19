@@ -17,8 +17,11 @@ export function sessionStartMessage(
       : `Concord: this session is agent \`${agentId}\`. Concord resolves that identity from your ` +
         'session on every tool call, so start_work, update_work, finish_work attribute your work ' +
         'and keep your presence live without you passing an id.',
-    'You can receive live messages from other agents in this workspace; they arrive on their own ' +
-      'as relayed context, so you never need to poll for them.',
+    explicitAgentId
+      ? `Other agents' messages are delivered when you send your next user prompt. ` +
+        `To check sooner, run \`concord inbox drain --agent ${agentId} --provider devin\` from this repository.`
+      : 'You can receive live messages from other agents in this workspace; they arrive on their own ' +
+        'as relayed context, so you never need to poll for them.',
   ];
   if (others.length === 0) {
     lines.push('No other agents are currently registered.');

@@ -19,6 +19,7 @@ import {
   installDevinUserHooks,
   removeDevinUserHooks,
 } from '../devin-user-hooks.js';
+import { devinHooksInstalled } from '../devin-hooks.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import {
   gooseConfigInstalled,
@@ -554,11 +555,15 @@ function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
   };
 }
 
-function statusDevin(env: NodeJS.ProcessEnv): AdapterReport {
+function statusDevin(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterReport {
   const config = HARNESS_CONFIGS.devin;
   const executable = executablePath(config.executable, env);
   const supported = executable !== undefined && devinCliSupportsDedicatedMcpConfig(env);
-  const installed = supported && devinMcpInstalled(env) && devinUserHooksInstalled(env);
+  const mcpInstalled =
+    devinMcpInstalled(env) || (repoRoot !== undefined && devinMcpInstalled(env, repoRoot));
+  const hooksInstalled =
+    devinUserHooksInstalled(env) || (repoRoot !== undefined && devinHooksInstalled(repoRoot));
+  const installed = supported && mcpInstalled && hooksInstalled;
   if (executable !== undefined && !supported) {
     return {
       harness: config.name,
@@ -618,7 +623,7 @@ export function statusAdapter(
     case 'goose':
       return statusGoose(env);
     case 'devin':
-      return statusDevin(env);
+      return statusDevin(env, repoRoot);
   }
 }
 
