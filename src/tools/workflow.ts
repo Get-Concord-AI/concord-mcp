@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { Repositories, TaskRecord } from '../db/index.js';
+import type { AdapterNotice } from '../adapter-check.js';
 import type { AvailableUpdate } from '../update-notifier.js';
 import { receiverActive } from '../domain/delivery.js';
 import { harnessConfigFor } from '../domain/harness-config.js';
@@ -446,6 +447,7 @@ export function registerWorkflowTools(
   getAvailableUpdate?: () => AvailableUpdate | undefined,
   dispatcher: AgentMessageDispatcher = new SocketAgentMessageDispatcher(),
   telemetry?: TelemetryRecorder,
+  getAdapterNotice?: () => AdapterNotice | undefined,
 ): void {
   interface WorkflowToolResponse {
     content: { type: 'text'; text: string }[];
@@ -454,6 +456,7 @@ export function registerWorkflowTools(
   }
   const warnedInactiveReceivers = new Set<string>();
   let updateNoticeShown = false;
+  let adapterNoticeShown = false;
 
   /** Add one neutral recovery hint per inactive period to this MCP session. */
   const withReceiverAdvisory = <T extends WorkflowToolResponse>(
@@ -522,10 +525,25 @@ export function registerWorkflowTools(
     };
   };
 
+  /** Once per session: this harness's adapter was missing, so say who we are and how to listen. */
+  const withAdapterAdvisory = <T extends WorkflowToolResponse>(result: T): T => {
+    const notice = getAdapterNotice?.();
+    if (notice === undefined || adapterNoticeShown) return result;
+    adapterNoticeShown = true;
+    return {
+      ...result,
+      content: [...result.content, { type: 'text', text: notice.text }],
+      structuredContent: {
+        ...result.structuredContent,
+        adapter_advisory: { ...notice.check, monitor_command: notice.monitorCommand },
+      },
+    };
+  };
+
   const withSessionAdvisories = <T extends WorkflowToolResponse>(
     result: T,
     callRepos: Repositories = repos,
-  ): T => withUpdateAdvisory(withReceiverAdvisory(result, callRepos));
+  ): T => withAdapterAdvisory(withUpdateAdvisory(withReceiverAdvisory(result, callRepos)));
 
   type TaskTransition = Extract<
     SemanticTelemetryEvent,

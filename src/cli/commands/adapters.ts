@@ -2,7 +2,12 @@ import type { Command } from '@commander-js/extra-typings';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 
+import { z } from 'zod';
+
 import { resolveRepoRoot } from '../../config/paths.js';
+import { readUserConfig } from '../../config/user-config.js';
+import { harnessNames } from '../../domain/harness-config.js';
+import { ensureHarnessAdapter } from '../../install/adapters/self-heal.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { relayAddress } from '../../relay/address.js';
 import { CodexAppServerAdapter } from '../../relay/adapters.js';
@@ -164,6 +169,21 @@ export function registerAdaptersCommand(program: Command): void {
     .description('Remove only globally installed Concord adapter artifacts')
     .action(() => {
       process.stdout.write(`${renderAdapterReport(uninstallGlobalAdapters(process.env))}\n`);
+    });
+  adapters
+    .command('ensure', { hidden: true })
+    .description("Check one harness's adapter; install or repair it if the user opted in")
+    .argument('<harness>', 'Harness to check')
+    .action((harness) => {
+      const parsed = z.enum(harnessNames).safeParse(harness);
+      if (!parsed.success) throw new Error(`Unknown harness: ${harness}`);
+      const result = ensureHarnessAdapter(parsed.data, {
+        moduleUrl: import.meta.url,
+        env: process.env,
+        autoAdapters: readUserConfig(process.env).autoAdapters === true,
+        repoRoot: repoRoot(),
+      });
+      process.stdout.write(`${JSON.stringify(result)}\n`);
     });
   adapters
     .command('codex')

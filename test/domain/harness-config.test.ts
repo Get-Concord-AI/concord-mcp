@@ -23,7 +23,7 @@ describe('harness configuration', () => {
     expect(HARNESS_CONFIGS.cursor.monitor).toMatchObject({
       lifecycle: 'one-shot',
       background: true,
-      command: 'concord inbox watch --provider cursor --once',
+      command: 'concord inbox watch --agent <agent-id> --provider cursor --once',
     });
     expect(HARNESS_CONFIGS.gemini.monitor).toMatchObject({
       lifecycle: 'one-shot',
@@ -33,7 +33,7 @@ describe('harness configuration', () => {
     expect(HARNESS_CONFIGS.grok.monitor).toMatchObject({
       lifecycle: 'persistent',
       background: true,
-      command: 'concord inbox watch --provider grok',
+      command: 'concord inbox watch --agent <agent-id> --provider grok',
     });
   });
 

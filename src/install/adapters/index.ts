@@ -4,6 +4,7 @@ import { delimiter, dirname, join } from 'node:path';
 
 import {
   HARNESS_CONFIGS,
+  harnessNames,
   type HarnessName,
   type MonitorKind,
 } from '../../domain/harness-config.js';
@@ -589,16 +590,36 @@ export function statusGlobalAdapters(
   moduleUrl: string = import.meta.url,
   isEphemeral: EphemeralTest = isEphemeralPath,
 ): AdapterReport[] {
+  return harnessNames.map((harness) =>
+    statusAdapter(harness, env, repoRoot, moduleUrl, isEphemeral),
+  );
+}
+
+/** One harness's adapter health, without probing the others. */
+export function statusAdapter(
+  harness: HarnessName,
+  env: NodeJS.ProcessEnv = process.env,
+  repoRoot?: string,
+  moduleUrl: string = import.meta.url,
+  isEphemeral: EphemeralTest = isEphemeralPath,
+): AdapterReport {
   const links = { moduleUrl, isEphemeral };
-  return [
-    statusClaude(env, links),
-    statusCodex(env),
-    statusCursor(env, links),
-    statusGemini(env, links, repoRoot),
-    statusGrok(env),
-    statusGoose(env),
-    statusDevin(env),
-  ];
+  switch (harness) {
+    case 'claude-code':
+      return statusClaude(env, links);
+    case 'codex':
+      return statusCodex(env);
+    case 'cursor':
+      return statusCursor(env, links);
+    case 'gemini':
+      return statusGemini(env, links, repoRoot);
+    case 'grok':
+      return statusGrok(env);
+    case 'goose':
+      return statusGoose(env);
+    case 'devin':
+      return statusDevin(env);
+  }
 }
 
 function requirePackagedLink(
@@ -615,6 +636,63 @@ function requirePackagedLink(
   }
 }
 
+/** Install one harness's adapter when the harness is on PATH; throws on failure. */
+export function installAdapter(
+  harness: HarnessName,
+  moduleUrl: string,
+  env: NodeJS.ProcessEnv = process.env,
+  isEphemeral: EphemeralTest = isEphemeralPath,
+): void {
+  const executable = executablePath(HARNESS_CONFIGS[harness].executable, env);
+  if (executable === undefined) return;
+  switch (harness) {
+    case 'claude-code':
+    case 'gemini':
+      requirePackagedLink(moduleUrl, harness, env, isEphemeral);
+      return;
+    case 'cursor':
+      requirePackagedLink(moduleUrl, 'cursor', env, isEphemeral);
+      installCursorHooks(env);
+      return;
+    case 'codex': {
+      installCodexMcpConfig(env);
+      installCodexHooks(env);
+      const version = versionTuple(run(executable, ['--version'], env).output);
+      if (version !== undefined && atLeast(version, HARNESS_CONFIGS.codex.minimumVersion)) {
+        run(executable, ['app-server', 'daemon', 'bootstrap'], env);
+        run(executable, ['app-server', 'daemon', 'start'], env);
+        run(executable, ['app-server', 'daemon', 'enable-remote-control'], env);
+      }
+      return;
+    }
+    case 'grok': {
+      const source = packagedPath(moduleUrl, ['plugin', 'grok', 'concord-relay']);
+      if (source === undefined) throw new Error('Packaged Grok adapter is missing.');
+      const current = run(executable, ['plugin', 'list', '--json'], env);
+      if (!current.output.includes('concord-relay')) {
+        const installed = run(executable, ['plugin', 'install', source, '--trust'], env);
+        if (!installed.ok) throw new Error(installed.output || 'Grok plugin installation failed.');
+      }
+      return;
+    }
+    case 'goose': {
+      const version = versionTuple(run(executable, ['--version'], env).output);
+      if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
+        return;
+      }
+      installGooseMcpConfig(env);
+      return;
+    }
+    case 'devin': {
+      if (devinCliSupportsDedicatedMcpConfig(env)) {
+        installDevinMcpConfig(env);
+        installDevinUserHooks(env);
+      }
+      return;
+    }
+  }
+}
+
 export function installGlobalAdapters(
   moduleUrl: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -622,73 +700,13 @@ export function installGlobalAdapters(
   isEphemeral: EphemeralTest = isEphemeralPath,
 ): AdapterReport[] {
   const failures = new Map<HarnessName, string>();
-  const attempt = (harness: HarnessName, action: () => void): void => {
+  for (const harness of harnessNames) {
     try {
-      action();
+      installAdapter(harness, moduleUrl, env, isEphemeral);
     } catch (error) {
       failures.set(harness, error instanceof Error ? error.message : String(error));
     }
-  };
-
-  attempt('claude-code', () => {
-    if (executablePath('claude', env) !== undefined) {
-      requirePackagedLink(moduleUrl, 'claude-code', env, isEphemeral);
-    }
-  });
-
-  const codex = executablePath('codex', env);
-  attempt('codex', () => {
-    if (codex !== undefined) {
-      installCodexMcpConfig(env);
-      installCodexHooks(env);
-      const version = versionTuple(run(codex, ['--version'], env).output);
-      if (version !== undefined && atLeast(version, HARNESS_CONFIGS.codex.minimumVersion)) {
-        run(codex, ['app-server', 'daemon', 'bootstrap'], env);
-        run(codex, ['app-server', 'daemon', 'start'], env);
-        run(codex, ['app-server', 'daemon', 'enable-remote-control'], env);
-      }
-    }
-  });
-
-  attempt('gemini', () => {
-    if (executablePath('gemini', env) !== undefined) {
-      requirePackagedLink(moduleUrl, 'gemini', env, isEphemeral);
-    }
-  });
-  attempt('cursor', () => {
-    if (executablePath('cursor', env) !== undefined) {
-      requirePackagedLink(moduleUrl, 'cursor', env, isEphemeral);
-      installCursorHooks(env);
-    }
-  });
-  const grok = executablePath('grok', env);
-  attempt('grok', () => {
-    if (grok !== undefined) {
-      const source = packagedPath(moduleUrl, ['plugin', 'grok', 'concord-relay']);
-      if (source === undefined) throw new Error('Packaged Grok adapter is missing.');
-      const current = run(grok, ['plugin', 'list', '--json'], env);
-      if (!current.output.includes('concord-relay')) {
-        const installed = run(grok, ['plugin', 'install', source, '--trust'], env);
-        if (!installed.ok) throw new Error(installed.output || 'Grok plugin installation failed.');
-      }
-    }
-  });
-
-  attempt('goose', () => {
-    const goose = executablePath('goose', env);
-    if (goose === undefined) return;
-    const version = versionTuple(run(goose, ['--version'], env).output);
-    if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
-      return;
-    }
-    installGooseMcpConfig(env);
-  });
-  attempt('devin', () => {
-    if (devinCliSupportsDedicatedMcpConfig(env)) {
-      installDevinMcpConfig(env);
-      installDevinUserHooks(env);
-    }
-  });
+  }
 
   const report = statusGlobalAdapters(env, repoRoot, moduleUrl, isEphemeral).map((entry) => {
     const failure = failures.get(entry.harness);

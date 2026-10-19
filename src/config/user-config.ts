@@ -17,6 +17,7 @@ const userConfigSchema = z
   .object({
     globalMode: z.boolean().optional(),
     globalRegistrations: z.array(z.string()).optional(),
+    autoAdapters: z.boolean().optional(),
   })
   .loose();
 /** The whole file as JSON, so settings this version does not know survive a write. */
@@ -28,6 +29,8 @@ export interface UserConfig {
   readonly globalMode?: boolean;
   /** The user-level MCP registrations global mode added: the only ones it removes. */
   readonly globalRegistrations?: readonly string[];
+  /** Install or repair a harness's adapter when a session finds it missing; undefined until asked. */
+  readonly autoAdapters?: boolean;
 }
 
 /** `~/.concord/`, home to the machine-wide store and the user's settings. */
@@ -56,6 +59,7 @@ export function readUserConfig(env: NodeJS.ProcessEnv): UserConfig {
       ...(parsed.globalRegistrations === undefined
         ? {}
         : { globalRegistrations: parsed.globalRegistrations }),
+      ...(parsed.autoAdapters === undefined ? {} : { autoAdapters: parsed.autoAdapters }),
     };
   } catch {
     return {};
