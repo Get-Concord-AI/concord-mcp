@@ -50,11 +50,25 @@ sha256_of() {
   fi
 }
 
+# Single-quote a value for a generated script, so `$`, quotes and backslashes in
+# a path stay literal when the launcher runs.
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+absolute_path() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *) printf '%s/%s' "$PWD" "$1" ;;
+  esac
+}
+
 write_launcher() {
   # $1: launcher path, $2: entry point relative to the package root
+  current="$(shell_quote "${install_dir}/current")"
   cat > "$1.tmp" <<EOF
 #!/bin/sh
-exec "${install_dir}/current/node/bin/node" "${install_dir}/current/lib/$2" "\$@"
+exec ${current}/node/bin/node ${current}/lib/$2 "\$@"
 EOF
   chmod 755 "$1.tmp"
   mv -f "$1.tmp" "$1"
@@ -65,8 +79,9 @@ main() {
   command -v tar >/dev/null 2>&1 || fail "tar is required"
   [ -n "${HOME:-}" ] || fail "HOME is not set"
 
-  install_dir="${CONCORD_INSTALL_DIR:-$HOME/.concord/standalone}"
-  bin_dir="${CONCORD_BIN_DIR:-$HOME/.local/bin}"
+  # Launchers and the marker outlive this shell, so they need absolute paths.
+  install_dir="$(absolute_path "${CONCORD_INSTALL_DIR:-$HOME/.concord/standalone}")"
+  bin_dir="$(absolute_path "${CONCORD_BIN_DIR:-$HOME/.local/bin}")"
   detect_target
 
   archive="concord-${os}-${arch}.tar.gz"
@@ -94,8 +109,12 @@ main() {
   [ -n "$version" ] || fail "release archive has no VERSION"
 
   # The marker tells Concord it was installed this way, so updates and client
-  # configs never reach for npm.
-  printf '{"binDir":"%s"}\n' "$bin_dir" > "${tmp}/concord/lib/standalone.json"
+  # configs never reach for npm, and upgrades reuse these locations. The
+  # bundled Node writes it so any path is encoded as valid JSON.
+  "${tmp}/concord/node/bin/node" -e '
+    const [file, binDir, installDir] = process.argv.slice(1);
+    require("fs").writeFileSync(file, JSON.stringify({ binDir, installDir }) + "\n");
+  ' "${tmp}/concord/lib/standalone.json" "$bin_dir" "$install_dir"
 
   mkdir -p "${install_dir}/versions" "$bin_dir"
   previous=""

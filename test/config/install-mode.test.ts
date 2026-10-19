@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,6 +11,8 @@ import {
   STANDALONE_MARKER,
   STANDALONE_UPDATE_COMMAND,
   standaloneInstall,
+  standaloneUpdateCommand,
+  standaloneUpgrade,
   updateCommand,
 } from '../../src/config/install-mode.js';
 
@@ -28,15 +31,52 @@ describe('install mode', () => {
     expect(updateCommand(moduleUrl)).toBe(NPM_UPDATE_COMMAND);
   });
 
-  it('reads a standalone install and its launcher directory from the marker', () => {
-    const moduleUrl = packageModuleUrl('{"binDir":"/home/me/.local/bin"}\n');
-    expect(standaloneInstall(moduleUrl)).toEqual({ binDir: '/home/me/.local/bin' });
-    expect(updateCommand(moduleUrl)).toBe(STANDALONE_UPDATE_COMMAND);
+  it('reads a standalone install and its locations from the marker', () => {
+    const moduleUrl = packageModuleUrl(
+      '{"binDir":"/home/me/.local/bin","installDir":"/home/me/.concord/standalone"}\n',
+    );
+    expect(standaloneInstall(moduleUrl)).toEqual({
+      binDir: '/home/me/.local/bin',
+      installDir: '/home/me/.concord/standalone',
+    });
+  });
+
+  it('suggests the plain installer command for the default locations', () => {
+    const install = { binDir: '/home/me/.local/bin', installDir: '/home/me/.concord/standalone' };
+    expect(standaloneUpdateCommand(install, '/home/me')).toBe(STANDALONE_UPDATE_COMMAND);
+  });
+
+  it('keeps custom locations in the suggested command', () => {
+    const install = { binDir: '/opt/bin', installDir: "/opt/it's concord" };
+    expect(standaloneUpdateCommand(install, '/home/me')).toBe(
+      `${STANDALONE_UPDATE_COMMAND.replace('| sh', '|')} ` +
+        "CONCORD_INSTALL_DIR='/opt/it'\\''s concord' CONCORD_BIN_DIR=/opt/bin sh",
+    );
+  });
+
+  it('passes the install locations to the installer on upgrade', () => {
+    const upgrade = standaloneUpgrade({ binDir: '/opt/bin', installDir: '/opt/concord' });
+    expect(upgrade.env).toEqual({
+      CONCORD_INSTALL_DIR: '/opt/concord',
+      CONCORD_BIN_DIR: '/opt/bin',
+    });
+  });
+
+  it('fails the upgrade when the installer download fails', () => {
+    const bin = mkdtempSync(join(tmpdir(), 'concord-fake-curl-'));
+    writeFileSync(join(bin, 'curl'), '#!/bin/sh\nexit 22\n');
+    chmodSync(join(bin, 'curl'), 0o755);
+    const upgrade = standaloneUpgrade({ binDir: '/opt/bin', installDir: '/opt/concord' });
+    const result = spawnSync(upgrade.command, upgrade.args, {
+      env: { PATH: `${bin}:/usr/bin:/bin` },
+    });
+    expect(result.status).toBe(22);
   });
 
   it('falls back to npm for a malformed marker', () => {
     expect(standaloneInstall(packageModuleUrl('not json'))).toBeUndefined();
-    expect(standaloneInstall(packageModuleUrl('{"binDir":""}'))).toBeUndefined();
+    expect(standaloneInstall(packageModuleUrl('{"binDir":"","installDir":"/x"}'))).toBeUndefined();
+    expect(standaloneInstall(packageModuleUrl('{"binDir":"/x"}'))).toBeUndefined();
   });
 
   it('treats this checkout as an npm install', () => {

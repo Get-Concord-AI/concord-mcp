@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,10 +17,20 @@ export const STANDALONE_UPDATE_COMMAND = `curl -fsSL ${INSTALL_SCRIPT_URL} | sh`
 const standaloneMarkerSchema = z.object({
   /** Directory holding the `concord` and `concord-mcp` launchers. */
   binDir: z.string().min(1),
+  /** Directory the installer unpacks releases into. */
+  installDir: z.string().min(1),
 });
 
 export interface StandaloneInstall {
   readonly binDir: string;
+  readonly installDir: string;
+}
+
+/** How to rerun the installer so it replaces this install in place. */
+export interface StandaloneUpgrade {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
 }
 
 /** The package root: `dist/config/` (or `src/config/`) sits two levels below it. */
@@ -39,15 +50,64 @@ export function standaloneInstall(
       readFileSync(join(packageRoot(moduleUrl), STANDALONE_MARKER), 'utf8'),
     );
     const parsed = standaloneMarkerSchema.safeParse(raw);
-    return parsed.success ? { binDir: parsed.data.binDir } : undefined;
+    return parsed.success
+      ? { binDir: parsed.data.binDir, installDir: parsed.data.installDir }
+      : undefined;
   } catch {
     return undefined;
   }
 }
 
+/** The installer's settings that keep an upgrade in this install's locations. */
+function locationEnv(install: StandaloneInstall): Record<string, string> {
+  return { CONCORD_INSTALL_DIR: install.installDir, CONCORD_BIN_DIR: install.binDir };
+}
+
+function shellQuote(value: string): string {
+  return /^[\w@%+=:,./-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/** The command a person runs to upgrade a standalone install. */
+export function standaloneUpdateCommand(
+  install: StandaloneInstall,
+  home: string = homedir(),
+): string {
+  const defaults = {
+    installDir: join(home, '.concord', 'standalone'),
+    binDir: join(home, '.local', 'bin'),
+  };
+  if (install.installDir === defaults.installDir && install.binDir === defaults.binDir) {
+    return STANDALONE_UPDATE_COMMAND;
+  }
+  const settings = Object.entries(locationEnv(install))
+    .map(([name, value]) => `${name}=${shellQuote(value)}`)
+    .join(' ');
+  return `curl -fsSL ${INSTALL_SCRIPT_URL} | ${settings} sh`;
+}
+
+/**
+ * Rerun the installer for an upgrade. The script is downloaded before it runs,
+ * so a failed download fails the upgrade instead of piping nothing into `sh`.
+ */
+export function standaloneUpgrade(install: StandaloneInstall): StandaloneUpgrade {
+  return {
+    command: 'sh',
+    args: [
+      '-c',
+      'script="$(mktemp)" || exit 1\n' +
+        'curl -fsSL "$1" -o "$script" && sh "$script"\n' +
+        'status=$?\n' +
+        'rm -f "$script"\n' +
+        'exit "$status"',
+      'concord-upgrade',
+      INSTALL_SCRIPT_URL,
+    ],
+    env: locationEnv(install),
+  };
+}
+
 /** The command that upgrades Concord the way it was installed. */
 export function updateCommand(moduleUrl: string = import.meta.url): string {
-  return standaloneInstall(moduleUrl) === undefined
-    ? NPM_UPDATE_COMMAND
-    : STANDALONE_UPDATE_COMMAND;
+  const install = standaloneInstall(moduleUrl);
+  return install === undefined ? NPM_UPDATE_COMMAND : standaloneUpdateCommand(install);
 }
