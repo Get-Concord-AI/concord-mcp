@@ -81,10 +81,25 @@ function Agents({ snapshot }: { snapshot: DashboardSnapshot }): ReactNode {
     return <Text dimColor>No registered agents</Text>;
   }
   return snapshot.status.presence.map((agent) => (
-    <Text key={agent.agentId} wrap="truncate-end">
-      {livenessMarker(agent)} {agent.agentId} · {agent.status} · {ageLabel(agent.ageSeconds)}
-      {agent.summary === null ? '' : ` · ${agent.summary}`}
-    </Text>
+    <Box key={agent.agentId} flexDirection="column">
+      <Text wrap="truncate-end">
+        {livenessMarker(agent)} {agent.agentId} · {agent.status}
+      </Text>
+      <Text wrap="truncate-end">
+        heartbeat {ageLabel(agent.heartbeatAgeSeconds)}
+        {agent.activityAgeSeconds === null
+          ? ''
+          : ` · activity ${ageLabel(agent.activityAgeSeconds)}`}
+      </Text>
+      {agent.summary === null ? null : (
+        <Text wrap="truncate-end">
+          {agent.summaryAgeSeconds === null
+            ? ''
+            : `summary ${ageLabel(agent.summaryAgeSeconds)} old · `}
+          {agent.summary}
+        </Text>
+      )}
+    </Box>
   ));
 }
 
@@ -138,7 +153,7 @@ function alertLines(snapshot: DashboardSnapshot): ReactNode[] {
   for (const claim of snapshot.status.staleClaims) {
     lines.push(
       <Text key={`stale-${claim.taskId}`} color="red" wrap="truncate-end">
-        ! {claim.taskId}: stale claim by {claim.agentId}
+        ! {claim.taskId}: stale claim by {claim.agentId ?? 'no one'} ({claim.reason})
       </Text>,
     );
   }

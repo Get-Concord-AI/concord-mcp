@@ -85,6 +85,27 @@ describe('dashboard snapshot', () => {
     expect(snapshot.events[0]?.tool).toBe('review_ready');
   });
 
+  it('shows the age of a stale summary beside a fresh heartbeat', async () => {
+    const now = Date.parse('2026-11-08T12:00:00Z');
+    repos.agents.upsert(
+      { agentId: 'codex:old', kind: 'codex', summary: 'old task' },
+      new Date(now - 2 * 60 * 60_000).toISOString(),
+    );
+    repos.agents.heartbeat('codex:old', new Date(now).toISOString());
+    const snapshot = buildDashboardSnapshot('/work/demo', repos, now);
+    const view = render(
+      <DashboardApp
+        initialSnapshot={snapshot}
+        loadSnapshot={() => snapshot}
+        refreshMs={60_000}
+        width={180}
+        height={30}
+      />,
+    );
+    await flushRender();
+    expect(view.lastFrame()).toContain('summary 120m old');
+  });
+
   it('renders a wide overview and task context', async () => {
     seedDashboard();
     const snapshot = buildDashboardSnapshot('/work/concord-demo', repos);

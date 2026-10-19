@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Surface unowned work and overdue assignments. Acceptance age comes from the
+  latest ownership transition, so reminders cannot hide an overdue assignment.
+
+- Show heartbeat, activity, and summary ages separately in the roster, dashboard,
+  and exported work state (#68). Reported agent status stays independent of work.
+
+- Preserve omitted agent registration fields and store heartbeat, activity, and
+  summary timestamps independently (#68). Migration 017 appends to the existing
+  migration history.
+
 ## [0.21.0] - 2026-11-09
 
 ### Added
