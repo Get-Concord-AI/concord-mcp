@@ -6,11 +6,17 @@ export interface RosterLine {
 }
 
 /** What a session is told at start: who it is, and who else is here. */
-export function sessionStartMessage(agentId: string, others: readonly RosterLine[]): string {
+export function sessionStartMessage(
+  agentId: string,
+  others: readonly RosterLine[],
+  explicitAgentId = false,
+): string {
   const lines = [
-    `Concord: this session is agent \`${agentId}\`. Concord resolves that identity from your ` +
-      'session on every tool call, so start_work, update_work, finish_work attribute your work ' +
-      'and keep your presence live without you passing an id.',
+    explicitAgentId
+      ? `Concord: this session is agent \`${agentId}\`. Devin's MCP server cannot see the hook session payload, so include \`agent_id: "${agentId}"\` on start_work, update_work, transfer_work, and finish_work calls. Leave it off inspect_work, where \`agent_id\` selects an agent inbox. Do not invent an id.`
+      : `Concord: this session is agent \`${agentId}\`. Concord resolves that identity from your ` +
+        'session on every tool call, so start_work, update_work, finish_work attribute your work ' +
+        'and keep your presence live without you passing an id.',
     'You can receive live messages from other agents in this workspace; they arrive on their own ' +
       'as relayed context, so you never need to poll for them.',
   ];

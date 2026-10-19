@@ -6,7 +6,15 @@
  * here rather than teaching each caller its own slightly different version.
  */
 
-export const harnessNames = ['claude-code', 'codex', 'cursor', 'gemini', 'grok', 'goose'] as const;
+export const harnessNames = [
+  'claude-code',
+  'codex',
+  'cursor',
+  'gemini',
+  'grok',
+  'goose',
+  'devin',
+] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
 export const transports = ['pull', 'local-ipc', 'app-server'] as const;
@@ -189,6 +197,23 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Concord MCP server is registered with Goose; durable inbox delivery is available.',
     unsupportedDetail: 'Goose does not meet the verified MCP baseline (1.52.0).',
+  },
+  devin: {
+    name: 'devin',
+    executable: 'devin',
+    minimumVersion: [3000, 3, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'steer', 'busy'],
+    installedDetail: 'Devin CLI hooks register sessions and inject inbox messages on user prompts.',
+    unsupportedDetail: 'Devin CLI must be v3000.3 or newer for dedicated MCP config files.',
   },
 };
 
