@@ -55,6 +55,16 @@ cd /path/to/your/repository
 concord setup
 ```
 
+No Node.js? On macOS or Linux, install a self-contained build instead:
+
+```bash
+curl -fsSL https://github.com/Get-Concord-AI/concord-mcp/releases/latest/download/install.sh | sh
+```
+
+It bundles its own Node runtime under `~/.concord/standalone` and puts the
+`concord` and `concord-mcp` launchers in `~/.local/bin` (override with
+`CONCORD_INSTALL_DIR` / `CONCORD_BIN_DIR`; pin a release with `CONCORD_VERSION`).
+
 Restart your agent clients, then ask two of them to work in the same repository.
 Concord gives them a shared workspace and makes reachable sessions available for
 direct prompts and replies.
@@ -246,8 +256,10 @@ npm install -g @concord-ai/concord-mcp@latest
 concord --version
 ```
 
+Rerun the `curl … | sh` installer to upgrade a self-contained install.
+
 Concord checks daily and surfaces available updates in the CLI, MCP tools, and
-dashboard; `concord setup` can install one with confirmation, and
+dashboard; `concord setup` can install one with confirmation (with npm or the installer, whichever you used), and
 `CONCORD_NO_UPDATE_CHECK=1` disables checks.
 
 ## What this is / is not

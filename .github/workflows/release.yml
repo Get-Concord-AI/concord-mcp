@@ -116,8 +116,75 @@ jobs:
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
 
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+
+  # Standalone tarballs for the curl installer (install.sh). Each bundles a
+  # pinned Node runtime and its platform's better-sqlite3 addon, so each is
+  # built and smoke-tested on its own platform.
+  standalone:
+    name: Standalone (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: linux-x64
+            runner: ubuntu-latest
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Package
+        run: bash scripts/build-standalone.sh
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: standalone-${{ matrix.target }}
+          path: release/
+          if-no-files-found: error
+
+  # The release is created only once every tarball exists, so the installer's
+  # releases/latest/download URLs never point at a release missing its assets.
+  github-release:
+    name: GitHub Release
+    needs: [publish, standalone]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: standalone-*
+          path: release/
+          merge-multiple: true
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.release.outputs.tag }}
+          tag_name: ${{ needs.publish.outputs.tag }}
           generate_release_notes: true
+          files: |
+            install.sh
+            release/*

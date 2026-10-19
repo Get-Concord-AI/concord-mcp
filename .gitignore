@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+release/
 *.tsbuildinfo
 
 # Test coverage
