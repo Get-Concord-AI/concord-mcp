@@ -63,6 +63,8 @@ describe('install mode', () => {
   });
 
   it('fails the upgrade when the installer download fails', () => {
+    // The standalone installer, and so this upgrade path, is POSIX-only.
+    if (process.platform === 'win32') return;
     const bin = mkdtempSync(join(tmpdir(), 'concord-fake-curl-'));
     writeFileSync(join(bin, 'curl'), '#!/bin/sh\nexit 22\n');
     chmodSync(join(bin, 'curl'), 0o755);
