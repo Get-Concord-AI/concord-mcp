@@ -1,3 +1,4 @@
+import { deriveLiveness } from '../domain/presence.js';
 import type { Repositories, TaskRecord, TaskUpdateRecord } from '../db/index.js';
 import type { UpdateTaskInput } from '../domain/operations.js';
 
@@ -21,8 +22,15 @@ export function handleUpdateTask(repos: Repositories, input: UpdateTaskInput): U
     }
     const collaborative = input.kind === 'question' || input.kind === 'finding';
     if (!collaborative && input.agent_id !== task.agentId) {
+      const owner = repos.agents.get(task.agentId);
+      const liveness =
+        owner === undefined ? 'unregistered' : deriveLiveness(owner.lastSeen, Date.now());
+      const recovery =
+        liveness === 'away' || liveness === 'archived' || liveness === 'unregistered'
+          ? ` Owner ${task.agentId} is ${liveness}. A registered agent for the same human owner can call transfer_work with action: 'reassign', task_id: '${input.task_id}', to_agent_id: '${input.agent_id}', and force: true, then accept the assignment.`
+          : '';
       throw new Error(
-        `Agent ${input.agent_id} cannot record ${input.kind} for ${input.task_id}; current owner is ${task.agentId}.`,
+        `Agent ${input.agent_id} cannot record ${input.kind} for ${input.task_id}; current owner is ${task.agentId}.${recovery}`,
       );
     }
   }
