@@ -94,13 +94,13 @@ export function run(
   };
 }
 
-function versionTuple(output: string): number[] | undefined {
+export function versionTuple(output: string): number[] | undefined {
   const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
   if (match === null) return undefined;
   return match.slice(1).map((part) => Number.parseInt(part, 10));
 }
 
-function atLeast(actual: readonly number[], required: readonly number[]): boolean {
+export function atLeast(actual: readonly number[], required: readonly number[]): boolean {
   for (let index = 0; index < required.length; index += 1) {
     const left = actual[index] ?? 0;
     const right = required[index] ?? 0;

@@ -114,7 +114,7 @@ export async function deliverToSession(
     if (stopped()) {
       failures.push({
         messageId: message.messageId,
-        detail: 'The Codex host stopped before handing it over.',
+        detail: 'The session host stopped before handing it over.',
       });
       continue;
     }
@@ -133,11 +133,13 @@ export async function deliverToSession(
       await (stop === undefined ? handoff : before(handoff, stop));
     } catch (error) {
       const detail = stopped()
-        ? 'The Codex host stopped before Codex confirmed it; it may not have arrived.'
+        ? 'The session host stopped before the session confirmed it; it may not have arrived.'
         : error instanceof Error
           ? error.message
           : String(error);
-      process.stderr.write(`Concord: could not hand ${message.messageId} to Codex: ${detail}\n`);
+      process.stderr.write(
+        `Concord: could not hand ${message.messageId} to ${adapter.provider}: ${detail}\n`,
+      );
       failures.push({ messageId: message.messageId, detail });
     }
   }
