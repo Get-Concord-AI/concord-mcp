@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { renderEventsJsonl } from '../../src/artifacts/events-jsonl.js';
 import { bulletList, codeBulletList } from '../../src/artifacts/markdown.js';
@@ -42,25 +43,21 @@ describe('renderEventsJsonl', () => {
     ];
     const output = renderEventsJsonl(events);
     expect(output.endsWith('\n')).toBe(true);
-    const lines = output.trimEnd().split('\n');
+    const lines = output.slice(0, -1).split('\n');
     expect(lines).toHaveLength(2);
     const expectedKeys = ['task_id', 'tool', 'status', 'detail', 'created_at'];
     for (const line of lines) {
-      const parsed: unknown = JSON.parse(line);
-      expect(parsed).toBeTypeOf('object');
-      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('Expected an event object');
-      }
+      const parsed = z.record(z.string(), z.unknown()).parse(JSON.parse(line));
       expect(Object.keys(parsed)).toEqual(expectedKeys);
     }
-    expect(JSON.parse(lines[0])).toEqual({
+    expect(z.string().parse(lines[0]) && JSON.parse(z.string().parse(lines[0]))).toEqual({
       task_id: 'TASK-1',
       tool: 'claim_work',
       status: 'success',
       detail: 'started',
       created_at: '2026-10-20T01:00:00Z',
     });
-    expect(JSON.parse(lines[1])).toEqual({
+    expect(z.string().parse(lines[1]) && JSON.parse(z.string().parse(lines[1]))).toEqual({
       task_id: null,
       tool: 'handoff',
       status: 'error',
