@@ -3,26 +3,50 @@
 # fake model (test/e2e/real). No accounts or API keys are needed: every
 # harness is pointed at the local fake model by the suite itself.
 #
-# Bump a version here, run `CONCORD_E2E_REAL_HARNESSES=all pnpm e2e`, and the
-# suite says whether Concord still works with that release.
+# Every download is an exact version from an immutable URL and is checked
+# against its SHA-256, so nothing changes between runs unless a pin does.
+# Bump a version and its checksum here, run
+# `CONCORD_E2E_REAL_HARNESSES=all pnpm e2e test/e2e/real`, and the suite says
+# whether Concord still works with that release. Linux x86_64 (CI) only.
 set -euo pipefail
 
 CLAUDE_CODE_VERSION="2.1.305"
 CODEX_VERSION="0.163.0"
 GROK_VERSION="1.0.60"
+GROK_SHA256="10e6af64b24724fc1074c373e906b9ad121110044dddcbd97ad43c3a25f96d5f"
 GOOSE_VERSION="v1.54.0"
+GOOSE_SHA256="bf01cb6359f7a2b1acb54ca4827e1d059b18aabb3d2b75202e21066cfd3a3396"
 
+if [[ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ]]; then
+  echo "install-e2e-harnesses.sh pins Linux x86_64 builds; install the CLIs yourself elsewhere." >&2
+  exit 1
+fi
+
+BIN_DIR="${E2E_HARNESS_BIN:-${HOME}/.local/bin}"
+WORK="$(mktemp -d)"
+trap 'rm -rf "${WORK}"' EXIT
+mkdir -p "${BIN_DIR}"
+
+fetch() {
+  local url="$1" sha="$2" out="$3"
+  curl -fsSL --retry 3 -o "${out}" "${url}"
+  echo "${sha}  ${out}" | sha256sum --check --quiet
+}
+
+# npm versions are immutable once published.
 npm install --global --no-audit --no-fund \
   "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   "@openai/codex@${CODEX_VERSION}"
 
-curl -fsSL https://x.ai/cli/install.sh | bash -s "${GROK_VERSION}"
+# The binaries Grok's and Goose's install scripts would download, fetched directly.
+fetch "https://x.ai/cli/grok-${GROK_VERSION}-linux-x86_64" "${GROK_SHA256}" "${WORK}/grok"
+install -m 0755 "${WORK}/grok" "${BIN_DIR}/grok"
 
-curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh \
-  | CONFIGURE=false GOOSE_VERSION="${GOOSE_VERSION}" bash
+fetch "https://github.com/block/goose/releases/download/${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.bz2" \
+  "${GOOSE_SHA256}" "${WORK}/goose.tar.bz2"
+tar -xjf "${WORK}/goose.tar.bz2" -C "${WORK}" ./goose
+install -m 0755 "${WORK}/goose" "${BIN_DIR}/goose"
 
-# The Grok and Goose installers put their binaries here.
 if [[ -n "${GITHUB_PATH:-}" ]]; then
-  echo "${HOME}/.grok/bin" >> "${GITHUB_PATH}"
-  echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+  echo "${BIN_DIR}" >> "${GITHUB_PATH}"
 fi

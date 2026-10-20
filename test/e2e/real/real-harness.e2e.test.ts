@@ -28,8 +28,13 @@ const endpointSchema = z
   .object({ promptable: z.boolean(), capabilities: z.array(z.string()) })
   .loose();
 
-/** Wait until the model has had no new turn for `quietMs`: the session is idle. */
-async function untilQuiet(model: FakeModel, quietMs: number): Promise<void> {
+/**
+ * Wait until the session's turn is over: the model's last step was a final
+ * answer, not a tool call, and the harness has not called it again for
+ * `quietMs`. A pending tool or a Stop-hook continuation would call the model
+ * again within moments, so this is the harness sitting idle at its prompt.
+ */
+async function untilTurnEnds(model: FakeModel, quietMs: number): Promise<void> {
   let count = model.turns.length;
   let since = Date.now();
   await eventually(
@@ -38,9 +43,10 @@ async function untilQuiet(model: FakeModel, quietMs: number): Promise<void> {
         count = model.turns.length;
         since = Date.now();
       }
-      return model.turns.length > 0 && Date.now() - since >= quietMs ? true : undefined;
+      const last = model.turns.at(-1);
+      return last?.step.kind === 'text' && Date.now() - since >= quietMs ? true : undefined;
     },
-    'the session to go idle',
+    'the session to finish its turn and sit idle',
     90_000,
   );
 }
@@ -49,26 +55,37 @@ for (const harness of REAL_HARNESSES) {
   const binaryDir = hostBinaryDir(harness.executable);
 
   describe.skipIf(binaryDir === undefined && !required(harness))(`real ${harness.name}`, () => {
-    let sandbox: Sandbox;
-    let model: FakeModel;
-    let probe: Probe;
-    const runs: HarnessRun[] = [];
+    // Each case's fixtures; anything set up is torn down even if a later step failed.
+    let fixtures: { model?: FakeModel; sandbox?: Sandbox; probe?: Probe; runs: HarnessRun[] } = {
+      runs: [],
+    };
+
+    function ready(): { model: FakeModel; sandbox: Sandbox; probe: Probe } {
+      const { model, sandbox, probe } = fixtures;
+      if (model === undefined || sandbox === undefined || probe === undefined) {
+        throw new Error('The case was not set up.');
+      }
+      return { model, sandbox, probe };
+    }
 
     beforeEach(async () => {
+      fixtures = { runs: [] };
       if (binaryDir === undefined) throw new Error(`${harness.executable} is not installed.`);
-      model = await FakeModel.start();
-      sandbox = Sandbox.create(`real-${harness.name}`, inject('concordPrefix'), {
+      const model = await FakeModel.start();
+      fixtures.model = model;
+      const sandbox = Sandbox.create(`real-${harness.name}`, inject('concordPrefix'), {
         realHarnesses: [binaryDir],
       });
+      fixtures.sandbox = sandbox;
       const setup = await sandbox.concord(['setup'], {
         env: harness.env(model),
         timeoutMs: 120_000,
       });
       expect(setup.status, setup.stderr).toBe(0);
       harness.configure(sandbox, model);
-      probe = await Probe.start(sandbox);
+      fixtures.probe = await Probe.start(sandbox);
       onTestFailed(() => {
-        for (const run of runs)
+        for (const run of fixtures.runs)
           console.error(`--- ${harness.name} output ---\n${run.transcript()}`);
         console.error(
           `--- model turns ---\n${model.turns.map((turn) => JSON.stringify(turn.step)).join('\n')}`,
@@ -77,21 +94,30 @@ for (const harness of REAL_HARNESSES) {
     });
 
     afterEach(async () => {
-      for (const run of runs.splice(0)) run.stop();
-      await probe.close();
-      await model.close();
-      sandbox.dispose();
+      const { model, sandbox, probe, runs } = fixtures;
+      try {
+        for (const run of runs) run.stop();
+        await probe?.close();
+      } finally {
+        try {
+          await model?.close();
+        } finally {
+          sandbox?.dispose();
+        }
+      }
     });
 
     function launch(mode: 'headless' | 'interactive', prompt: string): HarnessRun {
+      const { model, sandbox } = ready();
       const run = HarnessRun.start(sandbox, harness, model, mode, prompt);
-      runs.push(run);
+      fixtures.runs.push(run);
       return run;
     }
 
     it.skipIf(harness.name === 'goose')(
       'receives a message mid-turn and replies',
       async () => {
+        const { model, probe } = ready();
         launch('headless', 'begin, then run sleep 12');
         const agentId = await probe.sessionOf(harness.name);
         await eventually(
@@ -119,9 +145,10 @@ for (const harness of REAL_HARNESSES) {
     it.skipIf(harness.idle === 'none')(
       'wakes from idle when a message arrives and replies',
       async () => {
+        const { model, probe } = ready();
         launch('interactive', 'begin');
         const agentId = await probe.sessionOf(harness.name);
-        await untilQuiet(model, 3_000);
+        await untilTurnEnds(model, 3_000);
         await eventually(
           async () => {
             const view = await probe.inspect(agentId, endpointSchema);
@@ -144,8 +171,11 @@ for (const harness of REAL_HARNESSES) {
           `${agentId} to wake and reply`,
         );
         expect(answer).toMatchObject({ senderAgentId: agentId, content: `ACK ${body}` });
-        // The reply came from a turn the message itself started.
-        expect(model.turns.length).toBeGreaterThan(turnsBefore);
+        // The session was woken: the first model call after the send opened a
+        // new turn carrying the message, rather than continuing an old one.
+        const woken = model.turns[turnsBefore];
+        expect(woken?.conversation.opensTurn).toBe(true);
+        expect(woken?.conversation.text).toContain(`id=${sent.message_id}`);
       },
       180_000,
     );
@@ -153,6 +183,7 @@ for (const harness of REAL_HARNESSES) {
     it.skipIf(harness.name !== 'goose')(
       'refuses a message to a session it cannot deliver to, and still sends',
       async () => {
+        const { probe } = ready();
         const body = nonce('from-goose');
         launch('headless', `begin, then tell ${probe.agentId}: ${body}`);
         const agentId = await probe.sessionOf(harness.name);

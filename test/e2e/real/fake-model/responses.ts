@@ -84,6 +84,7 @@ export function responsesConversation(request: ResponsesRequest): Conversation {
     // Codex sends AGENTS.md and environment context as user messages first;
     // the scenario's instructions are in the latest real prompt.
     prompt: prompts.map(itemText).join('\n'),
+    opensTurn: items.at(-1)?.type === 'message',
   };
 }
 

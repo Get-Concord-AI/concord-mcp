@@ -30,8 +30,14 @@ export interface Conversation {
   calls: ToolCall[];
   /** Everything the model has been told: prompts, hook context, tool results. */
   text: string;
-  /** The user's first prompt, which carries the scenario's instructions. */
+  /** Every user prompt, which carries the scenario's instructions. */
   prompt: string;
+  /**
+   * Whether this request starts a new turn: its last message is fresh input
+   * (a prompt, a monitor event, an injected turn) rather than a tool result
+   * continuing a turn already under way.
+   */
+  opensTurn: boolean;
 }
 
 export type Intent =

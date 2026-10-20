@@ -65,6 +65,13 @@ function unwrap(block: Block): ToolCall {
   return { name: block.name ?? '', input };
 }
 
+function opensTurn(last: z.infer<typeof messageSchema> | undefined): boolean {
+  if (last?.role !== 'user') return false;
+  return (
+    typeof last.content === 'string' || !last.content.some((block) => block.type === 'tool_result')
+  );
+}
+
 export function anthropicConversation(request: AnthropicRequest): Conversation {
   const calls = request.messages
     .filter((message) => message.role === 'assistant' && typeof message.content !== 'string')
@@ -81,6 +88,7 @@ export function anthropicConversation(request: AnthropicRequest): Conversation {
     // Harnesses put their own context (environment, rules) before or beside
     // the prompt, so instructions are read from every user message.
     prompt: userMessages.map((message) => contentText(message.content)).join('\n'),
+    opensTurn: opensTurn(request.messages.at(-1)),
   };
 }
 
