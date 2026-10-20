@@ -11,6 +11,11 @@ import {
 import { userHome } from '../../config/paths.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import {
+  hermesConfigInstalled,
+  installHermesMcpConfig,
+  uninstallHermesMcpConfig,
+} from '../hermes-config.js';
+import {
   gooseConfigInstalled,
   installGooseMcpConfig,
   uninstallGooseConfig,
@@ -524,6 +529,24 @@ function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
   };
 }
 
+function statusHermes(env: NodeJS.ProcessEnv): AdapterReport {
+  const config = HARNESS_CONFIGS.hermes;
+  const detected = executablePath(config.executable, env) !== undefined;
+  const installed = hermesConfigInstalled(env);
+  return {
+    harness: config.name,
+    detected,
+    status: !detected ? 'not_detected' : installed ? 'installed' : 'action_required',
+    monitor: config.monitor.kind,
+    capabilities: detected && installed ? [...config.installedCapabilities] : [],
+    detail: !detected
+      ? 'Hermes CLI was not found on PATH.'
+      : installed
+        ? config.installedDetail
+        : 'Concord MCP server is not registered with Hermes.',
+  };
+}
+
 function statusAntigravity(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterReport {
   const config = HARNESS_CONFIGS.antigravity;
   const executable = executablePath(config.executable, env);
@@ -626,6 +649,8 @@ export function statusAdapter(
       return statusGrok(env);
     case 'goose':
       return statusGoose(env);
+    case 'hermes':
+      return statusHermes(env);
     case 'antigravity':
       return statusAntigravity(env, repoRoot);
   }
@@ -713,6 +738,9 @@ export function installAdapter(
       }
       return;
     }
+    case 'hermes':
+      installHermesMcpConfig(env);
+      return;
     case 'goose': {
       const version = versionTuple(run(executable, ['--version'], env).output);
       if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
@@ -776,6 +804,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
+  try {
+    uninstallHermesMcpConfig(env);
+  } catch {
+    // Preserve malformed Hermes settings and continue independent adapter cleanup.
+  }
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
   if (existsSync(antigravityMcp)) {
     try {
