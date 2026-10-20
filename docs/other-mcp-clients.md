@@ -124,8 +124,41 @@ The workflow tools share durable state, but there is no live push delivery
 without a supported harness adapter. An idle agent is not woken merely because
 another agent sent it a message.
 
-Have the agent call `inspect_work` with its own `agent_id` to read its
-communication inbox/outbox, and check it at appropriate points during work.
+`inspect_work` with the session's `agent_id` shows its communication inbox/outbox.
+It is read-only: it does not register a receiving endpoint or acknowledge pending
+messages. Inspecting a message alone is not enough to reply to it.
+
+For peer prompts and replies, the client also needs terminal access. From the
+same repository, register a pull inbox using exactly the `CONCORD_AGENT_ID` set
+in the MCP entry (replace the example id in both places):
+
+```sh
+npx -y --package @concord-ai/concord-mcp@0.14.2 concord inbox register --provider vscode --agent vscode:replace-with-unique-session-id
+npx -y --package @concord-ai/concord-mcp@0.14.2 concord inbox drain --provider vscode --agent vscode:replace-with-unique-session-id
+```
+
+Use the actual client kind instead of `vscode` for another client. With a global
+installation, replace the `npx -y --package @concord-ai/concord-mcp@0.14.2 concord`
+prefix with `concord`. If the shell is outside the repository, set
+`CONCORD_REPO_ROOT` there as well; variables in the MCP entry do not configure the
+terminal environment.
+
+Register before a peer sends a prompt. Have the receiving agent run `drain` and
+read its output between work steps and while waiting for a peer response. Drain
+prints waiting messages, marks them delivered, and refreshes the pull endpoint's
+90-second lease; poll well within that interval while expecting messages. A
+session that stops draining becomes unreachable, and registration alone does
+not wake an idle agent. To reply through `update_work`, use `operation: "reply"`,
+the drained `messageId` as `reply_to_message_id`, and a unique `idempotency_key`.
+The other agent must also register and drain to receive the reply. A client that
+cannot run these CLI steps can inspect shared state, but this setup does not
+provide a complete peer prompt/reply workflow for it.
+
+**Additional verification:** with two isolated SDK stdio clients using the
+published 0.14.2 package, a prompt remained pending after `inspect_work`, became
+delivered after the recipient's CLI drain, and a subsequent reply was received
+by the sender's drain. This was a protocol/CLI test, not a model-driven chat test.
+
 Call `inspect_work` without selectors to inspect the workspace, or with
 `task_id` to inspect one task; use at most one selector per call. Follow
 `start_work` → progress/ownership updates → `finish_work` as described in the
