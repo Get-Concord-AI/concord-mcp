@@ -1,7 +1,15 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { chmodSync } from 'node:fs';
 import {
   installGlobalAdapters,
   statusAdapter,
@@ -25,7 +33,7 @@ afterEach(() => {
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), 'concord-hermes-test-'));
   temporaryHomes.push(home);
-  const env = { HOME: home };
+  const env = { HOME: home, CODEX_HOME: join(home, '.codex') };
   return { env, path: hermesConfigPath(env) };
 }
 
@@ -57,6 +65,25 @@ describe('Hermes MCP config', () => {
     expect(hermesConfigPath({ ...env, HERMES_HOME: join(env.HOME, 'custom') })).toBe(
       join(env.HOME, 'custom', 'config.yaml'),
     );
+  });
+
+  it('treats empty Hermes home overrides as absent', () => {
+    const { env, path } = fixture();
+    expect(hermesConfigPath({ ...env, HERMES_HOME: '' })).toBe(path);
+    expect(hermesConfigPath({ ...env, HERMES_HOME: '   ' })).toBe(path);
+  });
+
+  it('preserves a symlinked config when installing and uninstalling', () => {
+    const { env, path } = fixture();
+    const target = join(env.HOME, 'shared.yaml');
+    seed(target, 'model: original\n');
+    mkdirSync(dirname(path), { recursive: true });
+    symlinkSync(target, path);
+    installHermesMcpConfig(env);
+    expect(readFileSync(target, 'utf8')).toContain('@concord-ai/concord-mcp');
+    uninstallHermesMcpConfig(env);
+    expect(readFileSync(target, 'utf8')).toContain('model: original');
+    expect(readFileSync(path, 'utf8')).toBe(readFileSync(target, 'utf8'));
   });
 
   it('installs, detects, and uninstalls without removing other servers or settings', () => {

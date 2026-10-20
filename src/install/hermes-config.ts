@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { dump, load } from 'js-yaml';
@@ -22,7 +30,11 @@ type Mapping = z.infer<typeof mappingSchema>;
 const SERVER_KEY = 'concord';
 
 export function hermesConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(env['HERMES_HOME']?.trim() ?? join(userHome(env), '.hermes'), 'config.yaml');
+  const configured = env['HERMES_HOME']?.trim();
+  return join(
+    configured === undefined || configured === '' ? join(userHome(env), '.hermes') : configured,
+    'config.yaml',
+  );
 }
 
 function readConfig(path: string): Mapping {
@@ -33,11 +45,12 @@ function readConfig(path: string): Mapping {
 }
 
 function writeConfig(path: string, config: Mapping): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${String(process.pid)}.tmp`;
+  const target = existsSync(path) ? realpathSync(path) : path;
+  mkdirSync(dirname(target), { recursive: true });
+  const temporary = `${target}.${String(process.pid)}.tmp`;
   try {
     writeFileSync(temporary, dump(config, { lineWidth: 100, noRefs: true }), { mode: 0o600 });
-    renameSync(temporary, path);
+    renameSync(temporary, target);
   } finally {
     rmSync(temporary, { force: true });
   }
