@@ -13,6 +13,7 @@ export const harnessNames = [
   'gemini',
   'grok',
   'goose',
+  'hermes',
   'antigravity',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
@@ -197,6 +198,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Concord MCP server is registered with Goose; durable inbox delivery is available.',
     unsupportedDetail: 'Goose does not meet the verified MCP baseline (1.52.0).',
+  },
+  hermes: {
+    name: 'hermes',
+    executable: 'hermes',
+    minimumVersion: [0, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Concord MCP is registered with Hermes; task context can be pulled during active turns.',
+    unsupportedDetail: 'Hermes CLI is not available.',
   },
   antigravity: {
     name: 'antigravity',
