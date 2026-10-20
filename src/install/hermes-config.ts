@@ -34,7 +34,7 @@ function readConfig(path: string): Mapping {
 
 function writeConfig(path: string, config: Mapping): void {
   mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
+  const temporary = `${path}.${String(process.pid)}.tmp`;
   try {
     writeFileSync(temporary, dump(config, { lineWidth: 100, noRefs: true }), { mode: 0o600 });
     renameSync(temporary, path);
