@@ -1,6 +1,12 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { chmodSync } from 'node:fs';
+import {
+  installGlobalAdapters,
+  statusAdapter,
+  uninstallGlobalAdapters,
+} from '../../src/install/adapters/index.js';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -29,6 +35,22 @@ function seed(path: string, yaml: string): void {
 }
 
 describe('Hermes MCP config', () => {
+  it('detects and installs the Hermes adapter through global setup', () => {
+    const { env, path } = fixture();
+    const bin = join(env.HOME, 'bin');
+    mkdirSync(bin);
+    const hermes = join(bin, 'hermes');
+    writeFileSync(hermes, '#!/bin/sh\necho hermes\n');
+    chmodSync(hermes, 0o755);
+    const runtimeEnv = { ...env, PATH: bin };
+    expect(statusAdapter('hermes', runtimeEnv).status).toBe('action_required');
+    installGlobalAdapters(import.meta.url, runtimeEnv);
+    expect(statusAdapter('hermes', runtimeEnv).status).toBe('installed');
+    expect(existsSync(path)).toBe(true);
+    uninstallGlobalAdapters(runtimeEnv);
+    expect(statusAdapter('hermes', runtimeEnv).status).toBe('action_required');
+  });
+
   it('uses the Hermes home override', () => {
     const { env } = fixture();
     expect(hermesConfigPath(env)).toBe(join(env.HOME, '.hermes', 'config.yaml'));
