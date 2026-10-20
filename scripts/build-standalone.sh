@@ -2,12 +2,14 @@
 # Build the standalone tarball for the current platform: a pinned Node runtime
 # plus the built package and its production dependencies, so `install.sh` can
 # install Concord without npm. Run after `pnpm build`, on the platform being
-# packaged (better-sqlite3's native addon is fetched for the bundled Node).
+# packaged: only that platform's better-sqlite3 addon is kept, and the smoke
+# test runs the bundled Node.
 #
 # Output: release/concord-<os>-<arch>.tar.gz and its .sha256.
 set -euo pipefail
 
-NODE_VERSION="${NODE_VERSION:-24.21.0}"
+# Not NODE_VERSION: official node images set that, which would unpin the runtime.
+NODE_VERSION="${CONCORD_NODE_VERSION:-24.21.0}"
 
 case "$(uname -s)" in
   Darwin) os=darwin ;;

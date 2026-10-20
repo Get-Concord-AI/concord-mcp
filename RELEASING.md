@@ -66,7 +66,7 @@ Release is created only after the publish and every tarball succeed, and
 carries the tarballs, their `.sha256` files, and `install.sh`; until then the
 curl installer keeps serving the previous release. If a standalone job fails,
 rerun it and the release job follows. The bundled
-Node version is `NODE_VERSION` in that script.
+Node version is the `CONCORD_NODE_VERSION` default in that script.
 
 ## Notes
 
