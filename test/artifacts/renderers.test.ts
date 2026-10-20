@@ -46,18 +46,26 @@ describe('renderEventsJsonl', () => {
     const lines = output.slice(0, -1).split('\n');
     expect(lines).toHaveLength(2);
     const expectedKeys = ['task_id', 'tool', 'status', 'detail', 'created_at'];
-    for (const line of lines) {
-      const parsed = z.record(z.string(), z.unknown()).parse(JSON.parse(line));
+    const eventSchema = z.object({
+      task_id: z.string().nullable(),
+      tool: z.string(),
+      status: z.string(),
+      detail: z.string().nullable(),
+      created_at: z.string(),
+    });
+    const parsedEvents = lines.map((line) => {
+      const parsed = eventSchema.parse(JSON.parse(line));
       expect(Object.keys(parsed)).toEqual(expectedKeys);
-    }
-    expect(z.string().parse(lines[0]) && JSON.parse(z.string().parse(lines[0]))).toEqual({
+      return parsed;
+    });
+    expect(parsedEvents[0]).toEqual({
       task_id: 'TASK-1',
       tool: 'claim_work',
       status: 'success',
       detail: 'started',
       created_at: '2026-10-20T01:00:00Z',
     });
-    expect(z.string().parse(lines[1]) && JSON.parse(z.string().parse(lines[1]))).toEqual({
+    expect(parsedEvents[1]).toEqual({
       task_id: null,
       tool: 'handoff',
       status: 'error',
