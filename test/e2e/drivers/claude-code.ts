@@ -9,6 +9,7 @@ import {
   mcpServerFromJson,
   type McpServerSpec,
 } from '../support/installed.js';
+import type { JsonObject } from '../support/mcp.js';
 import { parseDelivered, type Delivered } from '../support/messages.js';
 import {
   deliveredFrom,
@@ -37,7 +38,7 @@ export class ClaudeCodeSession extends HarnessSession {
     return this.sandbox.env({ CLAUDE_CODE_SESSION_ID: this.sessionId });
   }
 
-  private payload(event: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  private payload(event: string, extra: JsonObject = {}): JsonObject {
     return {
       session_id: this.sessionId,
       transcript_path: join(this.sandbox.home, '.claude', 'projects', `${this.sessionId}.jsonl`),
@@ -70,6 +71,7 @@ export class ClaudeCodeSession extends HarnessSession {
     );
     return deliveredFrom(
       results,
+      'post-tool-use',
       (stdout) => hookJson(stdout, postToolUseSchema)?.hookSpecificOutput.additionalContext,
     );
   }
@@ -80,7 +82,11 @@ export class ClaudeCodeSession extends HarnessSession {
       this.payload('Stop', { stop_hook_active: false }),
       this.env(),
     );
-    const messages = deliveredFrom(results, (stdout) => hookJson(stdout, stopSchema)?.reason);
+    const messages = deliveredFrom(
+      results,
+      'stop',
+      (stdout) => hookJson(stdout, stopSchema)?.reason,
+    );
     return { continued: messages.length > 0, messages };
   }
 
@@ -99,7 +105,7 @@ export class ClaudeCodeSession extends HarnessSession {
   }
 
   idleReceived(): Delivered[] {
-    return parseDelivered(this.monitorOutput.join(''));
+    return parseDelivered(this.monitorOutput.join(''), 'monitor');
   }
 
   protected mcpServer(): McpServerSpec {

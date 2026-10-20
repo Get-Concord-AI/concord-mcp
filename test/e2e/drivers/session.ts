@@ -4,8 +4,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import type { McpServerSpec } from '../support/installed.js';
-import { McpSession } from '../support/mcp.js';
-import { eventually, parseDelivered, type Delivered } from '../support/messages.js';
+import { McpSession, type JsonObject } from '../support/mcp.js';
+import { eventually, parseDelivered, type Channel, type Delivered } from '../support/messages.js';
 import { runShell, type CommandResult, type Sandbox } from '../support/sandbox.js';
 
 /**
@@ -89,7 +89,7 @@ export abstract class HarnessSession {
   }
 
   /** Call a Concord tool from inside this session, as its model would. */
-  async call<T>(tool: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
+  async call<T>(tool: string, args: JsonObject, schema: z.ZodType<T>): Promise<T> {
     // A model whose MCP server cannot see its session passes the id it was told.
     const withId = this.mcpKnowsSession ? args : { agent_id: this.agentId, ...args };
     return (await this.connection()).call(tool, withId, schema);
@@ -116,7 +116,7 @@ export abstract class HarnessSession {
   /** Run installed hook commands in order with this session's payload. */
   protected async runHooks(
     commands: readonly string[],
-    payload: Record<string, unknown>,
+    payload: JsonObject,
     env: NodeJS.ProcessEnv,
   ): Promise<CommandResult[]> {
     const results: CommandResult[] = [];
@@ -174,13 +174,14 @@ export abstract class HarnessSession {
 /** Extract delivered messages from each hook's stdout with `extract`. */
 export function deliveredFrom(
   results: readonly CommandResult[],
+  via: Channel,
   extract: (stdout: string) => string | undefined,
 ): Delivered[] {
   return results.flatMap((result) => {
     const stdout = result.stdout.trim();
     if (stdout === '') return [];
     const text = extract(stdout);
-    return text === undefined ? [] : parseDelivered(text);
+    return text === undefined ? [] : parseDelivered(text, via);
   });
 }
 

@@ -8,6 +8,7 @@ import {
   mcpServerFromJson,
   type McpServerSpec,
 } from '../support/installed.js';
+import type { JsonObject } from '../support/mcp.js';
 import { parseDelivered, type Delivered } from '../support/messages.js';
 import { stringEnv } from './claude-code.js';
 import { deliveredFrom, HarnessSession, hookJson, type EndTurn } from './session.js';
@@ -36,7 +37,7 @@ export class CursorSession extends HarnessSession {
     return this.sandbox.env(this.sessionEnv);
   }
 
-  private payload(event: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  private payload(event: string, extra: JsonObject = {}): JsonObject {
     return {
       conversation_id: this.sessionId,
       generation_id: `${this.sessionId}-gen`,
@@ -78,6 +79,7 @@ export class CursorSession extends HarnessSession {
     );
     const messages = deliveredFrom(
       results,
+      'followup',
       (stdout) => hookJson(stdout, stopSchema)?.followup_message,
     );
     return { continued: messages.length > 0, messages };
@@ -92,7 +94,7 @@ export class CursorSession extends HarnessSession {
   }
 
   idleReceived(): Delivered[] {
-    return parseDelivered(this.monitorOutput.join(''));
+    return parseDelivered(this.monitorOutput.join(''), 'monitor');
   }
 
   protected mcpServer(): McpServerSpec {

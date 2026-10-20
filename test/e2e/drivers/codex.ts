@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { codexConfig, hookCommands, type McpServerSpec } from '../support/installed.js';
+import type { JsonObject } from '../support/mcp.js';
 import { eventually, parseDelivered, type Delivered } from '../support/messages.js';
 import { stringEnv } from './claude-code.js';
 import {
@@ -29,6 +30,10 @@ const appServerRequestSchema = z.object({
     .loose()
     .nullable(),
 });
+
+const endpointViewSchema = z
+  .object({ promptable: z.boolean(), capabilities: z.array(z.string()) })
+  .loose();
 
 type AppServerMode = 'idle' | 'busy' | 'down';
 
@@ -60,7 +65,7 @@ export class CodexSession extends HarnessSession {
     return this.sandbox.env();
   }
 
-  private payload(event: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  private payload(event: string, extra: JsonObject = {}): JsonObject {
     return {
       session_id: this.sessionId,
       cwd: this.sandbox.repo,
@@ -80,12 +85,13 @@ export class CodexSession extends HarnessSession {
     const agentId = results.map((result) => registeredAgentId(result.stdout)).find(Boolean);
     if (agentId === undefined) throw new Error('Codex SessionStart named no agent id.');
     this.learnAgentId(agentId);
-    // The host SessionStart launched owns the endpoint once it has resumed the thread.
+    // The host SessionStart launched owns the endpoint only once its relay is
+    // registered, which happens after it resumes the thread.
     if (this.mode !== 'down') {
-      await eventually(
-        () => (this.threadResumed() ? true : undefined),
-        'the Codex host to resume its thread',
-      );
+      await eventually(async () => {
+        const view = await this.call('inspect_work', { agent_id: agentId }, endpointViewSchema);
+        return view.promptable && view.capabilities.includes('inject') ? true : undefined;
+      }, 'the Codex host to register its relay endpoint');
     }
   }
 
@@ -94,7 +100,10 @@ export class CodexSession extends HarnessSession {
     return this.sandbox.codexAppServerLog().flatMap((line) => {
       const request = appServerRequestSchema.parse(JSON.parse(line));
       if (request.method !== method || request.params?.threadId !== this.sessionId) return [];
-      return parseDelivered((request.params.input ?? []).map((part) => part.text ?? '').join('\n'));
+      return parseDelivered(
+        (request.params.input ?? []).map((part) => part.text ?? '').join('\n'),
+        method,
+      );
     });
   }
 
@@ -106,6 +115,7 @@ export class CodexSession extends HarnessSession {
     );
     const hooked = deliveredFrom(
       results,
+      'post-tool-use',
       (stdout) => hookJson(stdout, postToolUseSchema)?.hookSpecificOutput.additionalContext,
     );
     const steers = this.appServerTurns('turn/steer');
@@ -120,20 +130,17 @@ export class CodexSession extends HarnessSession {
       this.payload('Stop', { stop_hook_active: false }),
       this.env(),
     );
-    const messages = deliveredFrom(results, (stdout) => hookJson(stdout, stopSchema)?.reason);
+    const messages = deliveredFrom(
+      results,
+      'stop',
+      (stdout) => hookJson(stdout, stopSchema)?.reason,
+    );
     return { continued: messages.length > 0, messages };
   }
 
   /** Codex needs no monitor: the host SessionStart launched is its idle receiver. */
   startIdleReceiver(): Promise<void> {
     return Promise.resolve();
-  }
-
-  private threadResumed(): boolean {
-    return this.sandbox.codexAppServerLog().some((line) => {
-      const request = appServerRequestSchema.parse(JSON.parse(line));
-      return request.method === 'thread/resume' && request.params?.threadId === this.sessionId;
-    });
   }
 
   idleReceived(): Delivered[] {

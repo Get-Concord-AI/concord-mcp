@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, inject, it } from 'vi
 import { CodexSession } from './drivers/codex.js';
 import { DRIVEN, DRIVERS, type DrivenHarness } from './drivers/index.js';
 import type { HarnessSession, ReceiverState } from './drivers/session.js';
-import type { Delivered } from './support/messages.js';
+import type { Channel, Delivered } from './support/messages.js';
 import { Sandbox } from './support/sandbox.js';
 import { nonce, prompt, reply, untilIdleReachable } from './support/scenario.js';
 
@@ -17,6 +17,8 @@ import { nonce, prompt, reply, untilIdleReachable } from './support/scenario.js'
  */
 
 interface Expectation {
+  /** The channel that must hand the message over. */
+  via: Channel;
   delivery: 'delivered' | 'queued_pull';
   immediateMode: 'inject' | 'steer' | null;
   outlook: RegExp;
@@ -24,20 +26,46 @@ interface Expectation {
 
 const EXPECTED: Record<DrivenHarness, Record<ReceiverState, Expectation>> = {
   'claude-code': {
-    busy: { delivery: 'queued_pull', immediateMode: null, outlook: /only checks between steps/u },
-    idle: { delivery: 'queued_pull', immediateMode: null, outlook: /can be injected now/u },
+    busy: {
+      via: 'post-tool-use',
+      delivery: 'queued_pull',
+      immediateMode: null,
+      outlook: /only checks between steps/u,
+    },
+    idle: {
+      via: 'monitor',
+      delivery: 'queued_pull',
+      immediateMode: null,
+      outlook: /can be injected now/u,
+    },
   },
   codex: {
     busy: {
+      via: 'turn/steer',
       delivery: 'delivered',
       immediateMode: 'steer',
       outlook: /steering for its active turn/u,
     },
-    idle: { delivery: 'delivered', immediateMode: 'inject', outlook: /started a new turn/u },
+    idle: {
+      via: 'turn/start',
+      delivery: 'delivered',
+      immediateMode: 'inject',
+      outlook: /started a new turn/u,
+    },
   },
   cursor: {
-    busy: { delivery: 'queued_pull', immediateMode: null, outlook: /only checks between steps/u },
-    idle: { delivery: 'queued_pull', immediateMode: null, outlook: /arrive on its own/u },
+    busy: {
+      via: 'followup',
+      delivery: 'queued_pull',
+      immediateMode: null,
+      outlook: /only checks between steps/u,
+    },
+    idle: {
+      via: 'monitor',
+      delivery: 'queued_pull',
+      immediateMode: null,
+      outlook: /arrive on its own/u,
+    },
   },
 };
 
@@ -114,7 +142,9 @@ describe('cross-harness message delivery', () => {
       state === 'idle'
         ? [await to.waitForIdle(sent.message_id)]
         : copiesOf(await to.receiveBusy(), sent.message_id);
-    expect(arrived).toEqual([{ messageId: sent.message_id, sender: from.agentId, content: body }]);
+    expect(arrived).toEqual([
+      { messageId: sent.message_id, sender: from.agentId, content: body, via: expected.via },
+    ]);
 
     // Exactly once: no other channel hands it over again.
     const later = [...(await to.receiveBusy()), ...(await to.endTurn()).messages];
@@ -125,10 +155,11 @@ describe('cross-harness message delivery', () => {
     const answer = nonce('reply');
     const replied = await reply(to, sent.message_id, answer);
     expect(replied.recipient_agent_id).toBe(from.agentId);
+    // Whichever channel the sender's harness offers in its current state.
     const received = copiesOf(await receiveAnyhow(from, replied.message_id), replied.message_id);
-    expect(received).toEqual([
-      { messageId: replied.message_id, sender: to.agentId, content: answer },
-    ]);
+    expect(
+      received.map(({ messageId, sender, content }) => ({ messageId, sender, content })),
+    ).toEqual([{ messageId: replied.message_id, sender: to.agentId, content: answer }]);
   });
 
   it('reaches a Codex session through its hooks when the controller is down', async () => {
@@ -144,7 +175,7 @@ describe('cross-harness message delivery', () => {
     expect(sent.delivery).toBe('queued_pull');
     expect(sent.outlook).toMatch(/only checks between steps/u);
     expect(copiesOf(await to.receiveBusy(), sent.message_id)).toEqual([
-      { messageId: sent.message_id, sender: from.agentId, content: body },
+      { messageId: sent.message_id, sender: from.agentId, content: body, via: 'post-tool-use' },
     ]);
     expect(copiesOf((await to.endTurn()).messages, sent.message_id)).toEqual([]);
   });

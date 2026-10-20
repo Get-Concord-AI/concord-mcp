@@ -4,15 +4,20 @@
  * whatever envelope (hook JSON, monitor line, app-server turn) carries it.
  */
 
+/** The harness channel that handed a message over. */
+export type Channel =
+  'post-tool-use' | 'stop' | 'followup' | 'monitor' | 'turn/start' | 'turn/steer';
+
 export interface Delivered {
   messageId: string;
   sender: string;
   content: string;
+  via: Channel;
 }
 
 const HEADER = /\[concord from (\S+) id=([^\s\]]+)(?: task=[^\]]*)?\]/gu;
 
-export function parseDelivered(text: string): Delivered[] {
+export function parseDelivered(text: string, via: Channel): Delivered[] {
   const headers = [...text.matchAll(HEADER)];
   return headers.map((header, index) => {
     const start = header.index + header[0].length;
@@ -21,18 +26,19 @@ export function parseDelivered(text: string): Delivered[] {
       sender: header[1] ?? '',
       messageId: header[2] ?? '',
       content: text.slice(start, end).trim(),
+      via,
     };
   });
 }
 
 export async function eventually<T>(
-  probe: () => T | undefined,
+  probe: () => T | undefined | Promise<T | undefined>,
   description: string,
   timeoutMs = 15_000,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const value = probe();
+    const value = await probe();
     if (value !== undefined) return value;
     if (Date.now() > deadline) throw new Error(`Timed out waiting for ${description}.`);
     await new Promise((resolve) => setTimeout(resolve, 100));

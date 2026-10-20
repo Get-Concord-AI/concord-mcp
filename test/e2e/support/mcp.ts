@@ -4,6 +4,9 @@ import { z } from 'zod';
 
 import type { McpServerSpec } from './installed.js';
 
+export type JsonValue = z.infer<ReturnType<typeof z.json>>;
+export type JsonObject = Record<string, JsonValue>;
+
 const toolResultSchema = z.object({
   isError: z.boolean().optional(),
   structuredContent: z.record(z.string(), z.json()).optional(),
@@ -49,7 +52,7 @@ export class McpSession {
   }
 
   /** Call a tool and parse its structured result with `schema`. */
-  async call<T>(tool: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
+  async call<T>(tool: string, args: JsonObject, schema: z.ZodType<T>): Promise<T> {
     const raw: unknown = await this.client.callTool({ name: tool, arguments: args });
     const result = toolResultSchema.parse(raw);
     const text = result.content
