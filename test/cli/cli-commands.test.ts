@@ -79,6 +79,14 @@ describe('CLI read/export commands', () => {
     expect(runHandoffPacket(dir, 'TASK-NONE')).toContain('No task TASK-NONE');
   });
 
+  it('suggests current tools when an existing task has no handoff or review', () => {
+    const repos = openRepositories(join(dir, '.concord', 'concord.db'));
+    handleClaimWork(repos, { task_id: 'TASK-EMPTY', title: 'Not finished', agent: 'codex' });
+    expect(runHandoffPacket(dir, 'TASK-EMPTY')).toContain('finish_work with outcome "handoff"');
+    expect(runHandoffPacket(dir, 'TASK-EMPTY')).toContain('transfer_work');
+    expect(runReviewPacket(dir, 'TASK-EMPTY')).toContain('finish_work with outcome "review_ready"');
+  });
+
   it('prints a review packet for a task', () => {
     const out = runReviewPacket(dir, 'TASK-12');
     expect(out).toContain('# Review Packet: TASK-12');

@@ -12,7 +12,7 @@ export function runHandoffPacket(cwd: string, taskId: string): string {
   }
   const handoff = ctx.repos.handoffs.latestForTask(taskId);
   if (handoff === undefined) {
-    return `No handoff recorded for ${taskId}. Ask the agent to call the handoff tool.`;
+    return `No handoff recorded for ${taskId}. Ask the agent to call finish_work with outcome "handoff" or transfer_work.`;
   }
   return renderHandoffMarkdown(task, handoff);
 }
