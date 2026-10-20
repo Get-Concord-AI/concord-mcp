@@ -89,6 +89,7 @@ export class CopilotUiServerClient implements PushPromptSession {
   private buffer: Buffer = Buffer.alloc(0);
   private nextId = 1;
   private busy = false;
+  private closed = false;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly closedListeners: (() => void)[] = [];
 
@@ -110,6 +111,7 @@ export class CopilotUiServerClient implements PushPromptSession {
       this.onData(chunk);
     });
     socket.on('close', () => {
+      this.closed = true;
       this.failPending(new Error('Copilot server connection closed.'));
       for (const listener of this.closedListeners) listener();
     });
@@ -134,8 +136,15 @@ export class CopilotUiServerClient implements PushPromptSession {
     return parsed.success ? parsed.data.messageId : undefined;
   }
 
-  /** Run `listener` once the server goes away (the TUI exited). */
+  /**
+   * Run `listener` once the server goes away (the TUI exited) — at once if it
+   * already has, so a host that subscribes after a slow setup still stops.
+   */
   onClosed(listener: () => void): void {
+    if (this.closed) {
+      listener();
+      return;
+    }
     this.closedListeners.push(listener);
   }
 

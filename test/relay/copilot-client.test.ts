@@ -155,4 +155,21 @@ describe('CopilotUiServerClient', () => {
     await expect(client.pushPrompt('hello', 'inject')).rejects.toThrow('Session not found');
     await closed;
   });
+
+  it('stops a host that subscribes after the TUI already exited', async () => {
+    const fake = await fakeServer((request, socket) => {
+      reply(socket, request.id, { ok: true });
+      if (request.method === 'session.resume') socket.end();
+    });
+    server = fake.server;
+    const client = new CopilotUiServerClient(fake.address, 'sess-1');
+    await client.connect();
+    await settle();
+
+    let stopped = false;
+    client.onClosed(() => {
+      stopped = true;
+    });
+    expect(stopped).toBe(true);
+  });
 });

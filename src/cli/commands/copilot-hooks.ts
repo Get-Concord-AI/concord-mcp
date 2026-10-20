@@ -4,8 +4,8 @@ import type { CloudRuntime } from '../../cloud/runtime.js';
 import { listCloudAgents } from '../../cloud/runtime.js';
 import type { Repositories } from '../../db/index.js';
 import {
-  agentIdForSession,
   hookSessionId,
+  resolveIdentity,
   UNRESOLVED_IDENTITY_MESSAGE,
 } from '../../domain/identity.js';
 import { buildRoster, deriveLiveness } from '../../domain/presence.js';
@@ -13,6 +13,7 @@ import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbo
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { launchDetachedConcord } from '../detached-host.js';
 import { drainFromCloud, registerInCloud, watching } from './cloud-inbox.js';
+import type { MessageSpool } from './copilot-spool.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
 import { sessionStartMessage, type RosterLine } from './session-start-message.js';
 
@@ -21,13 +22,22 @@ import { sessionStartMessage, type RosterLine } from './session-start-message.js
  *
  * Every Copilot hook receives `{ sessionId, cwd, ... }` on stdin, and the MCP
  * server receives the same id as `COPILOT_AGENT_SESSION_ID`, so both derive one
- * agent id. Hooks run with the session's project as `cwd`, but the payload's
- * `cwd` is used because user-level hooks are the ones Concord installs.
+ * agent id — or both use `CONCORD_AGENT_ID` when the operator set it in the
+ * environment Copilot was started from. Hooks run with the session's project
+ * as `cwd`, but the payload's `cwd` is used because user-level hooks are the
+ * ones Concord installs.
  */
 
 const KIND = 'copilot-cli';
 /** Copilot caps `additionalContext` from postToolUse at 10 KB. */
 const POST_TOOL_CONTEXT_LIMIT = 9_000;
+/**
+ * A sender keeps a message pending while it pushes it to a live host (at most
+ * a 1.5 s attempt and one retry). Hooks of a hosted session leave messages that
+ * young to the push, so Copilot never receives one twice (#261).
+ */
+const PUSH_GRACE_MS = 10_000;
+const POST_TOOL_HEADER = '[concord] Incoming message(s):\n\n';
 
 const payloadSchema = z.object({ cwd: z.string().optional() }).loose();
 
@@ -65,6 +75,14 @@ export function copilotWorkspace(rawJson: string): string {
 }
 
 export function localCopilotBackend(repos: Repositories, repoRoot: string): CopilotHookBackend {
+  const hosted = (agentId: string): boolean => {
+    const endpoint = repos.agentEndpoints.getByAgent(agentId);
+    return (
+      endpoint?.transport === 'local-ipc' &&
+      endpoint.status === 'connected' &&
+      (endpoint.expiresAt === null || Date.parse(endpoint.expiresAt) > Date.now())
+    );
+  };
   return {
     register: (agentId, cwd) => {
       ensureAgentRegistered(repos, { agentId, kind: KIND }, cwd);
@@ -75,14 +93,16 @@ export function localCopilotBackend(repos: Repositories, repoRoot: string): Copi
       Promise.resolve(
         buildRoster(repos.agents.list(), Date.now()).filter((entry) => entry.agentId !== agentId),
       ),
-    drain: (agentId) => Promise.resolve(drainInbox(repos, agentId, KIND)),
+    drain: (agentId) => {
+      const createdBefore = hosted(agentId)
+        ? new Date(Date.now() - PUSH_GRACE_MS).toISOString()
+        : undefined;
+      return Promise.resolve(drainInbox(repos, agentId, KIND, undefined, createdBefore));
+    },
     startLiveHost: (agentId, sessionId, serverAddress) => {
-      const endpoint = repos.agentEndpoints.getByAgent(agentId);
-      const hosted =
-        endpoint?.transport === 'local-ipc' &&
-        endpoint.status === 'connected' &&
-        (endpoint.expiresAt === null || Date.parse(endpoint.expiresAt) > Date.now());
-      if (!hosted) launchDetachedConcord(repoRoot, hostArgs(agentId, sessionId, serverAddress));
+      if (!hosted(agentId)) {
+        launchDetachedConcord(repoRoot, hostArgs(agentId, sessionId, serverAddress));
+      }
     },
   };
 }
@@ -113,9 +133,19 @@ export function cloudCopilotBackend(runtime: CloudRuntime): CopilotHookBackend {
   };
 }
 
-function agentIdFor(rawJson: string): string | undefined {
-  const sessionId = hookSessionId(rawJson);
-  return sessionId === undefined ? undefined : agentIdForSession(KIND, sessionId);
+/** What one hook invocation works with. */
+export interface CopilotHookContext {
+  readonly backend: CopilotHookBackend;
+  readonly spool: MessageSpool;
+  /** The hook's environment: `CONCORD_AGENT_ID` and the launcher's address live here. */
+  readonly env: NodeJS.ProcessEnv;
+  /** The embedded server of a session `concord adapters copilot` started. */
+  readonly serverAddress?: string | undefined;
+}
+
+/** The same identity rules the MCP server applies: operator id, then the session. */
+function agentIdFor(rawJson: string, env: NodeJS.ProcessEnv): string | undefined {
+  return resolveIdentity(env, { kind: KIND, hookPayload: rawJson })?.agentId;
 }
 
 function describe(error: unknown): string {
@@ -127,86 +157,110 @@ function describe(error: unknown): string {
  * who it is and who else is here through `additionalContext`.
  */
 export async function copilotSessionStart(
-  backend: CopilotHookBackend,
+  context: CopilotHookContext,
   rawJson: string,
-  serverAddress?: string,
 ): Promise<string> {
   const sessionId = hookSessionId(rawJson);
-  if (sessionId === undefined) {
+  const agentId = agentIdFor(rawJson, context.env);
+  if (sessionId === undefined || agentId === undefined) {
     return JSON.stringify({ additionalContext: `Concord: ${UNRESOLVED_IDENTITY_MESSAGE}` });
   }
-  const agentId = agentIdForSession(KIND, sessionId);
   try {
-    await backend.register(agentId, copilotWorkspace(rawJson));
+    await context.backend.register(agentId, copilotWorkspace(rawJson));
     // Started by `concord adapters copilot`: a host can reach the idle session.
-    if (serverAddress !== undefined) backend.startLiveHost(agentId, sessionId, serverAddress);
-    const others = await backend.roster(agentId);
+    if (context.serverAddress !== undefined) {
+      context.backend.startLiveHost(agentId, sessionId, context.serverAddress);
+    }
+    const others = await context.backend.roster(agentId);
     return JSON.stringify({ additionalContext: sessionStartMessage(agentId, others) });
   } catch (error) {
     return JSON.stringify({ additionalContext: `Concord could not register: ${describe(error)}` });
   }
 }
 
-/** postToolUse: deliver waiting messages mid-turn, within Copilot's context cap. */
-export async function copilotPostToolUse(
-  backend: CopilotHookBackend,
-  rawJson: string,
-): Promise<string> {
-  const agentId = agentIdFor(rawJson);
-  if (agentId === undefined) return '{}';
+/** Spooled messages first, then any newly drained, in arrival order. */
+async function waiting(
+  context: CopilotHookContext,
+  agentId: string,
+): Promise<DeliverableMessage[]> {
+  const spooled = context.spool.take(agentId);
   try {
-    const messages = await backend.drain(agentId);
-    if (messages.length === 0) return '{}';
-    const context = `[concord] Incoming message(s):\n\n${renderInboxBody(messages)}`;
-    return JSON.stringify({
-      additionalContext:
-        context.length <= POST_TOOL_CONTEXT_LIMIT
-          ? context
-          : `${context.slice(0, POST_TOOL_CONTEXT_LIMIT)}\n\n[concord] Truncated at ` +
-            "Copilot's context limit for tool hooks.",
-    });
+    return [...spooled, ...(await context.backend.drain(agentId))];
   } catch {
-    return '{}';
+    return spooled;
   }
 }
 
 /**
- * agentStop: when a message arrived after the last tool call, block the stop
- * so the message becomes the next turn's prompt instead of waiting for the
- * user. Copilot itself stops honouring blocks after eight in a row.
+ * The longest prefix of `messages` whose rendering fits `limit`. Order is kept:
+ * once one message does not fit, it and everything after it wait.
  */
-export async function copilotAgentStop(
-  backend: CopilotHookBackend,
+export function fittingPrefix(
+  messages: readonly DeliverableMessage[],
+  limit: number,
+): DeliverableMessage[] {
+  const fit: DeliverableMessage[] = [];
+  for (const message of messages) {
+    if (POST_TOOL_HEADER.length + renderInboxBody([...fit, message]).length > limit) break;
+    fit.push(message);
+  }
+  return fit;
+}
+
+/**
+ * postToolUse: deliver waiting messages mid-turn. Only whole messages that fit
+ * Copilot's context cap are shown; the rest are spooled for the next hook.
+ */
+export async function copilotPostToolUse(
+  context: CopilotHookContext,
   rawJson: string,
 ): Promise<string> {
-  const agentId = agentIdFor(rawJson);
+  const agentId = agentIdFor(rawJson, context.env);
   if (agentId === undefined) return '{}';
-  try {
-    const messages = await backend.drain(agentId);
-    if (messages.length === 0) return '{}';
-    return JSON.stringify({
-      decision: 'block',
-      reason: `New Concord message(s) arrived before this turn ended.\n\n${renderInboxBody(messages)}`,
-    });
-  } catch {
-    return '{}';
-  }
+  const messages = await waiting(context, agentId);
+  if (messages.length === 0) return '{}';
+  const shown = fittingPrefix(messages, POST_TOOL_CONTEXT_LIMIT);
+  context.spool.put(agentId, messages.slice(shown.length));
+  return JSON.stringify({
+    additionalContext:
+      shown.length > 0
+        ? `${POST_TOOL_HEADER}${renderInboxBody(shown)}`
+        : '[concord] A message too long to show here is waiting; it arrives when this turn ends.',
+  });
+}
+
+/**
+ * agentStop: when messages are waiting — spooled, or arrived after the last
+ * tool call — block the stop so they become the next turn's prompt instead of
+ * waiting for the user. Copilot itself stops honouring blocks after eight in a row.
+ */
+export async function copilotAgentStop(
+  context: CopilotHookContext,
+  rawJson: string,
+): Promise<string> {
+  const agentId = agentIdFor(rawJson, context.env);
+  if (agentId === undefined) return '{}';
+  const messages = await waiting(context, agentId);
+  if (messages.length === 0) return '{}';
+  return JSON.stringify({
+    decision: 'block',
+    reason: `New Concord message(s) arrived before this turn ended.\n\n${renderInboxBody(messages)}`,
+  });
 }
 
 /** Run one Copilot hook event; unknown events are reported, never fatal to the session. */
 export async function runCopilotHook(
-  backend: CopilotHookBackend,
+  context: CopilotHookContext,
   event: string,
   rawJson: string,
-  serverAddress?: string,
 ): Promise<string | undefined> {
   switch (event) {
     case 'session-start':
-      return copilotSessionStart(backend, rawJson, serverAddress);
+      return copilotSessionStart(context, rawJson);
     case 'post-tool-use':
-      return copilotPostToolUse(backend, rawJson);
+      return copilotPostToolUse(context, rawJson);
     case 'stop':
-      return copilotAgentStop(backend, rawJson);
+      return copilotAgentStop(context, rawJson);
     default:
       return undefined;
   }

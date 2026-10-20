@@ -3,9 +3,14 @@ import { spawn } from 'node:child_process';
 import type { CloudRuntime } from '../../cloud/runtime.js';
 import { atLeast, executablePath, run, versionTuple } from '../../install/adapters/index.js';
 import { relayAddress } from '../../relay/address.js';
-import { PushPromptSessionAdapter } from '../../relay/adapters.js';
+import { renderInboxBody } from '../../domain/pull-inbox.js';
+import { PushPromptSessionAdapter, type PushPromptSession } from '../../relay/adapters.js';
 import { CopilotUiServerClient } from '../../relay/copilot-client.js';
-import { startAgentRelay } from '../../relay/server.js';
+import {
+  startAgentRelay,
+  type AgentSessionAdapter,
+  type AgentSessionDelivery,
+} from '../../relay/server.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { openContext } from '../context.js';
 import { availablePort } from '../local-port.js';
@@ -80,6 +85,42 @@ export async function launchCopilot(args: readonly string[]): Promise<void> {
   if (code !== null && code !== 0) process.exitCode = code;
 }
 
+/**
+ * The local relay hands over a message's bare text, while hooks and the cloud
+ * host frame it with its sender and id. Frame it the same way here, so Copilot
+ * can tell a peer message from the user and knows which id to answer.
+ */
+export class FramedCopilotAdapter implements AgentSessionAdapter {
+  readonly provider = KIND;
+
+  constructor(private readonly session: PushPromptSession) {}
+
+  isBusy(): boolean {
+    return this.session.isBusy();
+  }
+
+  steer(delivery: AgentSessionDelivery): Promise<string | undefined> {
+    return this.session.pushPrompt(frame(delivery), 'steer');
+  }
+
+  inject(delivery: AgentSessionDelivery): Promise<string | undefined> {
+    return this.session.pushPrompt(frame(delivery), 'inject');
+  }
+}
+
+function frame(delivery: AgentSessionDelivery): string {
+  return renderInboxBody([
+    {
+      messageId: delivery.messageId,
+      senderAgentId: delivery.senderAgentId,
+      taskId: null,
+      content: delivery.content,
+      messageKind: 'prompt',
+      deliveryLatencyMs: null,
+    },
+  ]);
+}
+
 async function connectSession(address: string, sessionId: string): Promise<CopilotUiServerClient> {
   const client = new CopilotUiServerClient(address, sessionId);
   await client.connect();
@@ -99,7 +140,7 @@ export async function hostCopilot(
     repos: context.repos,
     agentId,
     address: relayAddress(context.concordPath, agentId),
-    adapter: new PushPromptSessionAdapter(KIND, client),
+    adapter: new FramedCopilotAdapter(client),
     pullFallback: true,
   });
   await new Promise<void>((resolve) => {
@@ -123,6 +164,7 @@ export async function hostCopilotInCloud(
   address: string,
 ): Promise<void> {
   const client = await connectSession(address, sessionId);
+  // deliverToSession frames each message before handing it over.
   const adapter = new PushPromptSessionAdapter(KIND, client);
   // The TUI is gone: nothing left to deliver to, and the receiver lease lapses.
   client.onClosed(() => process.exit(0));

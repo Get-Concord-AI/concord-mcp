@@ -26,6 +26,7 @@ import {
 } from './cloud-hooks.js';
 import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
 import { copilotServerAddress } from './copilot-adapter.js';
+import { fileSpool } from './copilot-spool.js';
 import {
   cloudCopilotBackend,
   copilotWorkspace,
@@ -396,7 +397,11 @@ async function runCopilotClientHook(event: string): Promise<void> {
     const context = openContext(workspace);
     backend = localCopilotBackend(context.repos, context.repoRoot);
   }
-  const output = await runCopilotHook(backend, event, input, copilotServerAddress());
+  const output = await runCopilotHook(
+    { backend, spool: fileSpool(), env: process.env, serverAddress: copilotServerAddress() },
+    event,
+    input,
+  );
   if (output === undefined) {
     process.stderr.write(`Unknown hook event for copilot-cli: ${event}\n`);
     process.exitCode = 1;
