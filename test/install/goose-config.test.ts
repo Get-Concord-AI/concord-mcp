@@ -70,7 +70,9 @@ describe('Goose configuration', () => {
     const { env, path } = fixture();
     const invalid = 'extensions:\n  - invalid\n';
     writeYaml(path, invalid);
-    expect(() => installGooseMcpConfig(env)).toThrow('must be a mapping');
+    expect(() => {
+      installGooseMcpConfig(env);
+    }).toThrow('must be a mapping');
     expect(readFileSync(path, 'utf8')).toBe(invalid);
   });
 });
