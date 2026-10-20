@@ -1,5 +1,6 @@
 import { createConnection } from 'node:net';
 
+import { renderPeerMessage } from '../domain/pull-inbox.js';
 import type { AgentMessageDispatcher, DeliveryReceipt } from '../tools/agent-messages.js';
 import {
   decodeRelayResponse,
@@ -48,7 +49,9 @@ export class SocketAgentMessageDispatcher implements AgentMessageDispatcher {
             senderAgentId: request.message.senderAgentId,
             recipientAgentId: request.message.recipientAgentId,
             credentialProof: request.endpoint.credentialHash,
-            content: request.message.content,
+            // Framed as every other channel frames it (a cloud host frames its
+            // own), so the session knows who wrote and which id to answer.
+            content: renderPeerMessage(request.message),
           }),
         );
       });
