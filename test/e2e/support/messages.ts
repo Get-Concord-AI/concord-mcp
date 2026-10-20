@@ -6,7 +6,13 @@
 
 /** The harness channel that handed a message over. */
 export type Channel =
-  'post-tool-use' | 'stop' | 'followup' | 'monitor' | 'turn/start' | 'turn/steer';
+  | 'post-tool-use'
+  | 'pre-invocation'
+  | 'stop'
+  | 'followup'
+  | 'monitor'
+  | 'turn/start'
+  | 'turn/steer';
 
 export interface Delivered {
   messageId: string;

@@ -32,6 +32,7 @@ const stopSchema = z.object({ decision: z.literal('block'), reason: z.string() }
 export class ClaudeCodeSession extends HarnessSession {
   readonly harness = 'claude-code';
   readonly mcpKnowsSession = true;
+  readonly reach = ['busy', 'idle'] as const;
   private readonly monitorOutput: string[] = [];
 
   private env(): NodeJS.ProcessEnv {

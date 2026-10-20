@@ -38,18 +38,14 @@ export function mcpServerFromJson(path: string): McpServerSpec {
 }
 
 const commandHookSchema = z.object({ type: z.string().optional(), command: z.string() }).loose();
-const claudeHooksSchema = z.object({
+const pluginHooksSchema = z.object({
   hooks: z.record(z.string(), z.array(z.object({ hooks: z.array(commandHookSchema) }).loose())),
 });
 
-/** Claude Code plugin hooks, read through the link `setup` placed in HOME. */
-export function claudePluginRoot(home: string): string {
-  return realpathSync(join(home, '.claude', 'skills', 'concord-relay'));
-}
-
-export function claudeHooks(home: string): HookTable {
-  const parsed = claudeHooksSchema.parse(
-    JSON.parse(readJson(join(claudePluginRoot(home), 'hooks', 'hooks.json'))),
+/** A Claude Code plugin's `hooks/hooks.json`. */
+function pluginHooks(pluginRoot: string): HookTable {
+  const parsed = pluginHooksSchema.parse(
+    JSON.parse(readJson(join(pluginRoot, 'hooks', 'hooks.json'))),
   );
   return new Map(
     Object.entries(parsed.hooks).map(([event, groups]) => [
@@ -57,6 +53,15 @@ export function claudeHooks(home: string): HookTable {
       groups.flatMap((group) => group.hooks.map((hook) => hook.command)),
     ]),
   );
+}
+
+/** Claude Code plugin hooks, read through the link `setup` placed in HOME. */
+export function claudePluginRoot(home: string): string {
+  return realpathSync(join(home, '.claude', 'skills', 'concord-relay'));
+}
+
+export function claudeHooks(home: string): HookTable {
+  return pluginHooks(claudePluginRoot(home));
 }
 
 const monitorsSchema = z.array(z.object({ name: z.string(), command: z.string() }).loose());
@@ -86,21 +91,40 @@ export function cursorHooks(home: string): HookTable {
   );
 }
 
+const antigravityHooksSchema = z.record(
+  z.string(),
+  z.record(z.string(), z.array(commandHookSchema)),
+);
+
+/** Workspace Antigravity hooks (`.agents/hooks.json`), merged across their owner groups. */
+export function antigravityHooks(repo: string): HookTable {
+  const parsed = antigravityHooksSchema.parse(
+    JSON.parse(readJson(join(repo, '.agents', 'hooks.json'))),
+  );
+  const table: HookTable = new Map();
+  for (const events of Object.values(parsed)) {
+    for (const [event, hooks] of Object.entries(events)) {
+      table.set(event, [...(table.get(event) ?? []), ...hooks.map((hook) => hook.command)]);
+    }
+  }
+  return table;
+}
+
 /** A TOML basic string, which shares JSON's escapes for everything Concord writes. */
 function tomlString(value: string): string {
   return z.string().parse(JSON.parse(value));
 }
 
 /**
- * Codex hooks and MCP server from `~/.codex/config.toml`. Only the shapes
- * Concord writes are understood; anything else is ignored.
+ * Hook tables and the Concord MCP server from a Codex `config.toml`. Only the shapes Concord writes are understood.
  */
-export function codexConfig(home: string): { hooks: HookTable; mcp: McpServerSpec } {
-  const lines = readFileSync(join(home, '.codex', 'config.toml'), 'utf8').split('\n');
+function tomlConfig(path: string): { hooks: HookTable; mcp: McpServerSpec } {
+  const lines = readFileSync(path, 'utf8').split('\n');
   const hooks: HookTable = new Map();
   let section = '';
   let mcpCommand: string | undefined;
   const mcpArgs: string[] = [];
+  const mcpEnv: Record<string, string> = {};
   for (const raw of lines) {
     const line = raw.trim();
     const header = /^\[\[?([^\]]+)\]\]?$/u.exec(line);
@@ -120,9 +144,15 @@ export function codexConfig(home: string): { hooks: HookTable; mcp: McpServerSpe
     if (section === 'mcp_servers.concord' && entry[1] === 'args') {
       mcpArgs.push(...z.array(z.string()).parse(JSON.parse(entry[2])));
     }
+    if (section === 'mcp_servers.concord.env') mcpEnv[entry[1]] = tomlString(entry[2]);
   }
-  if (mcpCommand === undefined) throw new Error('~/.codex/config.toml has no concord MCP server.');
-  return { hooks, mcp: { command: mcpCommand, args: mcpArgs, env: {} } };
+  if (mcpCommand === undefined) throw new Error(`${path} has no concord MCP server.`);
+  return { hooks, mcp: { command: mcpCommand, args: mcpArgs, env: mcpEnv } };
+}
+
+/** Codex hooks and MCP server from `~/.codex/config.toml`. */
+export function codexConfig(home: string): { hooks: HookTable; mcp: McpServerSpec } {
+  return tomlConfig(join(home, '.codex', 'config.toml'));
 }
 
 /** Commands for one event, failing loudly when the harness would run none. */

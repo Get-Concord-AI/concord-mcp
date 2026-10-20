@@ -30,6 +30,11 @@ export abstract class HarnessSession {
   abstract readonly harness: string;
   /** False where the harness hides its session from the MCP server (Codex, Cursor). */
   abstract readonly mcpKnowsSession: boolean;
+  /**
+   * The states its adapter can deliver a message in, per its catalog entry in
+   * `src/domain/harness-config.ts`. Empty for a harness that cannot receive.
+   */
+  abstract readonly reach: readonly ReceiverState[];
 
   readonly sessionId = randomUUID();
   private learnedAgentId: string | undefined;

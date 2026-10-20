@@ -47,6 +47,7 @@ type AppServerMode = 'idle' | 'busy' | 'down';
 export class CodexSession extends HarnessSession {
   readonly harness = 'codex';
   readonly mcpKnowsSession = false;
+  readonly reach = ['busy', 'idle'] as const;
   private mode: AppServerMode = 'idle';
   /** Steers already reported by `receiveBusy`, which, like a hook, hands each over once. */
   private steersSeen = 0;

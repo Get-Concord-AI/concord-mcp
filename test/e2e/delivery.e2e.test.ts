@@ -2,14 +2,16 @@ import { afterAll, afterEach, beforeAll, describe, expect, inject, it } from 'vi
 
 import { CodexSession } from './drivers/codex.js';
 import { DRIVEN, DRIVERS, type DrivenHarness } from './drivers/index.js';
-import type { HarnessSession, ReceiverState } from './drivers/session.js';
+import type { HarnessSession } from './drivers/session.js';
 import type { Channel, Delivered } from './support/messages.js';
 import { Sandbox } from './support/sandbox.js';
-import { nonce, prompt, reply, untilIdleReachable } from './support/scenario.js';
+import { inspectAgent, nonce, prompt, reply, untilIdleReachable } from './support/scenario.js';
 
 /**
- * Every harness sends to every harness, with the recipient busy (mid-turn) and
- * idle (at the prompt, kept reachable by whatever its adapter installed).
+ * Every harness sends to every harness, with the recipient busy (mid-turn) and,
+ * where its adapter supports it, idle (at the prompt, kept reachable by
+ * whatever its adapter installed). A harness with no idle receiver is checked
+ * for the opposite: the sender is told the message will wait, and it does.
  *
  * Each case checks that the sender was told the truth about delivery, that the
  * message arrived through the channel that harness promises, exactly once, and
@@ -24,7 +26,8 @@ interface Expectation {
   outlook: RegExp;
 }
 
-const EXPECTED: Record<DrivenHarness, Record<ReceiverState, Expectation>> = {
+/** Per harness, what each state it can be reached in promises. No `idle`: none. */
+const EXPECTED: Record<DrivenHarness, { busy: Expectation; idle?: Expectation }> = {
   'claude-code': {
     busy: {
       via: 'post-tool-use',
@@ -67,11 +70,21 @@ const EXPECTED: Record<DrivenHarness, Record<ReceiverState, Expectation>> = {
       outlook: /arrive on its own/u,
     },
   },
+  antigravity: {
+    busy: {
+      via: 'pre-invocation',
+      delivery: 'queued_pull',
+      immediateMode: null,
+      outlook: /only checks between steps/u,
+    },
+  },
 };
 
 const CASES = DRIVEN.flatMap((sender) =>
   DRIVEN.flatMap((receiver) =>
-    (['busy', 'idle'] as const).map((state) => ({ sender, receiver, state })),
+    (['busy', 'idle'] as const)
+      .filter((state) => EXPECTED[receiver][state] !== undefined)
+      .map((state) => ({ sender, receiver, state })),
   ),
 );
 
@@ -132,6 +145,7 @@ describe('cross-harness message delivery', () => {
     const body = nonce(`${sender}-to-${receiver}-${state}`);
     const sent = await prompt(from, to, body);
     const expected = EXPECTED[receiver][state];
+    if (expected === undefined) throw new Error(`${receiver} cannot be reached ${state}.`);
     expect(sent.recipient_agent_id).toBe(to.agentId);
     expect(sent.delivery).toBe(expected.delivery);
     expect(sent.immediate_mode).toBe(expected.immediateMode);
@@ -161,6 +175,41 @@ describe('cross-harness message delivery', () => {
       received.map(({ messageId, sender, content }) => ({ messageId, sender, content })),
     ).toEqual([{ messageId: replied.message_id, sender: to.agentId, content: answer }]);
   });
+
+  const UNREACHABLE_IDLE = DRIVEN.filter((harness) => EXPECTED[harness].idle === undefined);
+
+  it.each(UNREACHABLE_IDLE)(
+    'tells the sender an idle %s session will see it next turn, and delivers it then',
+    async (receiver) => {
+      const to = open(receiver);
+      await to.start();
+      await to.endTurn();
+      const from = open('claude-code');
+      await from.start();
+
+      const body = nonce(`${receiver}-idle`);
+      const sent = await prompt(from, to, body);
+      expect(sent.delivery).toBe('queued_pull');
+      expect(sent.outlook).toMatch(/will not see this until its next turn/u);
+
+      // Nothing hands it over while the session sits idle.
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      const waiting = await inspectAgent(from, to);
+      expect(waiting.inbox.find((message) => message.messageId === sent.message_id)?.status).toBe(
+        'pending',
+      );
+
+      // The next turn's first busy-path hook delivers it.
+      expect(copiesOf(await to.receiveBusy(), sent.message_id)).toEqual([
+        {
+          messageId: sent.message_id,
+          sender: from.agentId,
+          content: body,
+          via: EXPECTED[receiver].busy.via,
+        },
+      ]);
+    },
+  );
 
   it('reaches a Codex session through its hooks when the controller is down', async () => {
     const to = new CodexSession(sandbox);

@@ -28,6 +28,7 @@ const stopSchema = z.object({ followup_message: z.string() });
 export class CursorSession extends HarnessSession {
   readonly harness = 'cursor';
   readonly mcpKnowsSession = false;
+  readonly reach = ['busy', 'idle'] as const;
   private monitorCommand: string | undefined;
   private readonly monitorOutput: string[] = [];
   /** Cursor applies a sessionStart hook's `env` to the session's later hooks. */

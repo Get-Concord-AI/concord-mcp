@@ -1,5 +1,6 @@
 import { harnessNames, type HarnessName } from '../../../src/domain/harness-config.js';
 import type { Sandbox } from '../support/sandbox.js';
+import { AntigravitySession } from './antigravity.js';
 import { ClaudeCodeSession } from './claude-code.js';
 import { CodexSession } from './codex.js';
 import { CursorSession } from './cursor.js';
@@ -15,11 +16,12 @@ export const DRIVERS = {
   'claude-code': ClaudeCodeSession,
   codex: CodexSession,
   cursor: CursorSession,
+  antigravity: AntigravitySession,
 } satisfies Partial<Record<HarnessName, SessionClass>>;
 
 export type DrivenHarness = keyof typeof DRIVERS;
 
-export const DRIVEN: readonly DrivenHarness[] = ['claude-code', 'codex', 'cursor'];
+export const DRIVEN: readonly DrivenHarness[] = ['claude-code', 'codex', 'cursor', 'antigravity'];
 
 export const UNDRIVEN: readonly HarnessName[] = harnessNames.filter(
   (name) => !DRIVEN.some((driven) => driven === name),
