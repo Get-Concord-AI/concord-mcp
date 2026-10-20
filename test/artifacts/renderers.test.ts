@@ -34,7 +34,10 @@ describe('renderEventsJsonl', () => {
     for (const line of lines) {
       const parsed: unknown = JSON.parse(line);
       expect(parsed).toBeTypeOf('object');
-      expect(Object.keys(JSON.parse(line))).toEqual(expectedKeys);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Expected an event object');
+      }
+      expect(Object.keys(parsed)).toEqual(expectedKeys);
     }
     expect(JSON.parse(lines[0])).toEqual({ task_id: 'TASK-1', tool: 'claim_work', status: 'success', detail: 'started', created_at: '2026-10-20T01:00:00Z' });
     expect(JSON.parse(lines[1])).toEqual({ task_id: null, tool: 'handoff', status: 'error', detail: null, created_at: '2026-10-20T02:00:00Z' });
