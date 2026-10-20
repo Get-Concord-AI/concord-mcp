@@ -14,7 +14,8 @@ import type { DeliverableMessage } from '../../domain/pull-inbox.js';
  * hook's context at 10 KB. Rather than cut a message short, the hook shows the
  * whole messages that fit and keeps the rest here; the session's next hook
  * shows them first, and its stop hook — which has no cap — shows everything.
- * A session's hooks run one at a time, so the file has a single writer.
+ * A session's hooks run one at a time; its live host adds only what it
+ * failed to push, so writes stay rare and short.
  */
 export interface MessageSpool {
   take(agentId: string): DeliverableMessage[];
@@ -32,11 +33,17 @@ const spooledSchema = z.array(
   }),
 );
 
-/** The spool under `~/.concord/copilot-spool`, one file per agent. */
-export function fileSpool(env: NodeJS.ProcessEnv = process.env): MessageSpool {
+/**
+ * The spool under `~/.concord/copilot-spool`, one file per agent per
+ * repository: an operator-chosen id such as `alpha` may run in several.
+ */
+export function fileSpool(repoRoot: string, env: NodeJS.ProcessEnv = process.env): MessageSpool {
   const dir = join(userHome(env), '.concord', 'copilot-spool');
   const pathFor = (agentId: string): string =>
-    join(dir, `${createHash('sha256').update(agentId).digest('hex').slice(0, 16)}.json`);
+    join(
+      dir,
+      `${createHash('sha256').update(`${repoRoot}\0${agentId}`).digest('hex').slice(0, 16)}.json`,
+    );
   return {
     take: (agentId) => {
       const path = pathFor(agentId);

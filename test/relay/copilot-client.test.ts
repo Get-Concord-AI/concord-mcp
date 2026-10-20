@@ -1,6 +1,6 @@
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
@@ -56,8 +56,6 @@ function sessionEvent(socket: Socket, sessionId: string, type: string): void {
   );
 }
 
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30));
-
 describe('Copilot ui-server framing', () => {
   it('round-trips Content-Length frames and keeps a partial one buffered', () => {
     const frames = encodeFrame({ id: 1 }) + encodeFrame({ id: 2, text: 'héllo' });
@@ -110,22 +108,30 @@ describe('CopilotUiServerClient', () => {
     let peer: Socket | undefined;
     const fake = await fakeServer((request, socket) => {
       peer = socket;
-      reply(socket, request.id, { ok: true });
+      reply(
+        socket,
+        request.id,
+        request.method === 'session.send' ? { messageId: 'm' } : { ok: true },
+      );
     });
     server = fake.server;
     const client = new CopilotUiServerClient(fake.address, 'sess-1');
     await client.connect();
     if (peer === undefined) throw new Error('no connection');
+    const connection = peer;
+    // A steer's reply follows every earlier frame on the socket, so once it
+    // resolves the events sent before it have been handled — no timing guess.
+    const afterEvents = (...types: [string, string][]): Promise<string | undefined> => {
+      for (const [sessionId, type] of types) sessionEvent(connection, sessionId, type);
+      return client.pushPrompt('sync', 'steer');
+    };
 
     expect(client.isBusy()).toBe(false);
-    sessionEvent(peer, 'sess-1', 'assistant.turn_start');
-    await settle();
+    await afterEvents(['sess-1', 'assistant.turn_start']);
     expect(client.isBusy()).toBe(true);
-    sessionEvent(peer, 'other-session', 'session.idle');
-    await settle();
+    await afterEvents(['other-session', 'session.idle']);
     expect(client.isBusy()).toBe(true);
-    sessionEvent(peer, 'sess-1', 'session.idle');
-    await settle();
+    await afterEvents(['sess-1', 'session.idle']);
     expect(client.isBusy()).toBe(false);
     client.close();
   });
@@ -158,13 +164,17 @@ describe('CopilotUiServerClient', () => {
 
   it('stops a host that subscribes after the TUI already exited', async () => {
     const fake = await fakeServer((request, socket) => {
+      if (socket.writableEnded) return;
       reply(socket, request.id, { ok: true });
       if (request.method === 'session.resume') socket.end();
     });
     server = fake.server;
     const client = new CopilotUiServerClient(fake.address, 'sess-1');
     await client.connect();
-    await settle();
+    // Wait for the close itself, then subscribe late.
+    await vi.waitFor(async () => {
+      await expect(client.pushPrompt('probe', 'steer')).rejects.toThrow();
+    });
 
     let stopped = false;
     client.onClosed(() => {

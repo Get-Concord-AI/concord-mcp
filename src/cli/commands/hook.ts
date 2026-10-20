@@ -391,14 +391,22 @@ async function runCopilotClientHook(event: string): Promise<void> {
     return;
   }
   let backend: CopilotHookBackend;
+  let repoRoot: string;
   if (access.kind === 'cloud') {
     backend = cloudCopilotBackend(access.runtime);
+    repoRoot = access.runtime.repoRoot;
   } else {
     const context = openContext(workspace);
     backend = localCopilotBackend(context.repos, context.repoRoot);
+    repoRoot = context.repoRoot;
   }
   const output = await runCopilotHook(
-    { backend, spool: fileSpool(), env: process.env, serverAddress: copilotServerAddress() },
+    {
+      backend,
+      spool: fileSpool(repoRoot),
+      env: process.env,
+      serverAddress: copilotServerAddress(),
+    },
     event,
     input,
   );

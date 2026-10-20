@@ -31,12 +31,6 @@ import { sessionStartMessage, type RosterLine } from './session-start-message.js
 const KIND = 'copilot-cli';
 /** Copilot caps `additionalContext` from postToolUse at 10 KB. */
 const POST_TOOL_CONTEXT_LIMIT = 9_000;
-/**
- * A sender keeps a message pending while it pushes it to a live host (at most
- * a 1.5 s attempt and one retry). Hooks of a hosted session leave messages that
- * young to the push, so Copilot never receives one twice (#261).
- */
-const PUSH_GRACE_MS = 10_000;
 const POST_TOOL_HEADER = '[concord] Incoming message(s):\n\n';
 
 const payloadSchema = z.object({ cwd: z.string().optional() }).loose();
@@ -94,10 +88,13 @@ export function localCopilotBackend(repos: Repositories, repoRoot: string): Copi
         buildRoster(repos.agents.list(), Date.now()).filter((entry) => entry.agentId !== agentId),
       ),
     drain: (agentId) => {
-      const createdBefore = hosted(agentId)
-        ? new Date(Date.now() - PUSH_GRACE_MS).toISOString()
-        : undefined;
-      return Promise.resolve(drainInbox(repos, agentId, KIND, undefined, createdBefore));
+      // A live host is the session's single consumer: it pushes, and sweeps up
+      // anything a push missed. Draining here too could show a message twice.
+      if (hosted(agentId)) {
+        repos.agents.touch(agentId);
+        return Promise.resolve([]);
+      }
+      return Promise.resolve(drainInbox(repos, agentId, KIND));
     },
     startLiveHost: (agentId, sessionId, serverAddress) => {
       if (!hosted(agentId)) {

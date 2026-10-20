@@ -3,9 +3,15 @@ import { spawn } from 'node:child_process';
 import type { CloudRuntime } from '../../cloud/runtime.js';
 import { atLeast, executablePath, run, versionTuple } from '../../install/adapters/index.js';
 import { relayAddress } from '../../relay/address.js';
-import { renderInboxBody } from '../../domain/pull-inbox.js';
+import type { Repositories } from '../../db/index.js';
+import {
+  renderInboxBody,
+  toDeliverable,
+  type DeliverableMessage,
+} from '../../domain/pull-inbox.js';
 import { PushPromptSessionAdapter, type PushPromptSession } from '../../relay/adapters.js';
 import { CopilotUiServerClient } from '../../relay/copilot-client.js';
+import { RELAY_PROTOCOL_VERSION } from '../../relay/protocol.js';
 import {
   startAgentRelay,
   type AgentSessionAdapter,
@@ -16,6 +22,7 @@ import { openContext } from '../context.js';
 import { availablePort } from '../local-port.js';
 import { deliverToSession } from './cloud-codex.js';
 import { watchCloud } from './cloud-inbox.js';
+import { fileSpool, type MessageSpool } from './copilot-spool.js';
 
 /**
  * Copilot CLI with idle wake-up (issue #261), shaped like the Codex adapter.
@@ -92,6 +99,8 @@ export async function launchCopilot(args: readonly string[]): Promise<void> {
  */
 export class FramedCopilotAdapter implements AgentSessionAdapter {
   readonly provider = KIND;
+  /** Every message handed to Copilot, so a sweep never hands one over twice. */
+  readonly handled = new Set<string>();
 
   constructor(private readonly session: PushPromptSession) {}
 
@@ -100,12 +109,58 @@ export class FramedCopilotAdapter implements AgentSessionAdapter {
   }
 
   steer(delivery: AgentSessionDelivery): Promise<string | undefined> {
+    this.handled.add(delivery.messageId);
     return this.session.pushPrompt(frame(delivery), 'steer');
   }
 
   inject(delivery: AgentSessionDelivery): Promise<string | undefined> {
+    this.handled.add(delivery.messageId);
     return this.session.pushPrompt(frame(delivery), 'inject');
   }
+}
+
+/** How old a pending message must be before the sweep takes it: past any push. */
+export const SWEEP_AFTER_MS = 10_000;
+const SWEEP_EVERY_MS = 5_000;
+
+/**
+ * The live host is its session's single consumer (#261): hooks of a hosted
+ * session do not drain. A sender keeps a message pending while it pushes it
+ * here, and leaves it pending when the push fails or times out — even if the
+ * push reached Copilot late. The sweep claims messages past that window and
+ * hands over only those this host never received; ones it could not hand over
+ * go to the spool, which the session's next hook shows.
+ */
+export async function sweepStragglers(
+  repos: Repositories,
+  agentId: string,
+  adapter: FramedCopilotAdapter,
+  spool: MessageSpool,
+  now = Date.now(),
+): Promise<void> {
+  const claimed = repos.agentMessages.claimPendingForRecipient(
+    agentId,
+    KIND,
+    new Date(now - SWEEP_AFTER_MS).toISOString(),
+  );
+  const failed: DeliverableMessage[] = [];
+  for (const message of claimed) {
+    if (adapter.handled.has(message.messageId)) continue;
+    const delivery: AgentSessionDelivery = {
+      version: RELAY_PROTOCOL_VERSION,
+      type: 'deliver',
+      messageId: message.messageId,
+      senderAgentId: message.senderAgentId,
+      recipientAgentId: agentId,
+      content: message.content,
+    };
+    try {
+      await (adapter.isBusy() ? adapter.steer(delivery) : adapter.inject(delivery));
+    } catch {
+      failed.push(toDeliverable(message));
+    }
+  }
+  if (failed.length > 0) spool.put(agentId, [...spool.take(agentId), ...failed]);
 }
 
 function frame(delivery: AgentSessionDelivery): string {
@@ -136,15 +191,28 @@ export async function hostCopilot(
   const context = openContext(process.cwd());
   ensureAgentRegistered(context.repos, { agentId, kind: KIND }, context.repoRoot);
   const client = await connectSession(address, sessionId);
+  const adapter = new FramedCopilotAdapter(client);
   const relay = await startAgentRelay({
     repos: context.repos,
     agentId,
     address: relayAddress(context.concordPath, agentId),
-    adapter: new FramedCopilotAdapter(client),
+    adapter,
     pullFallback: true,
   });
+  const spool = fileSpool(context.repoRoot);
+  let sweeping = false;
+  const sweeper = setInterval(() => {
+    if (sweeping) return;
+    sweeping = true;
+    void sweepStragglers(context.repos, agentId, adapter, spool)
+      .catch(() => undefined)
+      .finally(() => {
+        sweeping = false;
+      });
+  }, SWEEP_EVERY_MS);
   await new Promise<void>((resolve) => {
     const stop = (): void => {
+      clearInterval(sweeper);
       void relay.close().finally(() => {
         client.close();
         resolve();

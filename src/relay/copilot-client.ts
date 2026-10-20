@@ -158,7 +158,9 @@ export class CopilotUiServerClient implements PushPromptSession {
     params: Record<string, z.core.util.JSONType>,
   ): Promise<RpcResult> {
     const socket = this.socket;
-    if (socket === undefined) return Promise.reject(new Error('Copilot server is not connected.'));
+    if (socket === undefined || this.closed) {
+      return Promise.reject(new Error('Copilot server is not connected.'));
+    }
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });

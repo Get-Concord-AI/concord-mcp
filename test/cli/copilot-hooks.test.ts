@@ -134,8 +134,12 @@ describe('Copilot CLI hooks', () => {
   });
 
   it('shows what fits now and the rest, in order, on the next hook', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-20T12:00:00Z'));
     await hook(ctx, 'session-start');
     sendTo(repos, `first ${'a'.repeat(5_000)}`, 'k-a');
+    // Distinct timestamps: messages created in one millisecond have no fixed order.
+    vi.setSystemTime(new Date('2026-10-20T12:00:01Z'));
     sendTo(repos, `second ${'b'.repeat(5_000)}`, 'k-b');
 
     const now = await shownContext(ctx);
@@ -146,9 +150,7 @@ describe('Copilot CLI hooks', () => {
     expect(next?.length).toBeLessThan(10_000);
   });
 
-  it('leaves a hosted session’s newest messages to the live push, so none arrives twice', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-10-20T12:00:00Z'));
+  it('leaves a hosted session to its live host, the single consumer', async () => {
     await hook(ctx, 'session-start');
     repos.agentEndpoints.upsert({
       endpointId: 'relay-1',
@@ -158,17 +160,28 @@ describe('Copilot CLI hooks', () => {
       capabilities: ['local-ipc', 'inject', 'steer', 'idle', 'pull'],
       address: '/tmp/relay.sock',
       credentialHash: 'proof',
-      expiresAt: '2026-10-21T00:00:00Z',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
-    sendTo(repos, 'Pushed live right now.', 'k-live');
+    sendTo(repos, 'Pushed by the host.', 'k-live');
 
-    // While the sender's push may still be in flight, hooks take nothing.
     expect(JSON.parse(await hook(ctx, 'post-tool-use'))).toEqual({});
     expect(JSON.parse(await hook(ctx, 'stop'))).toEqual({});
+    expect(repos.agentMessages.listByAgent(AGENT_ID)[0]?.status).toBe('pending');
+  });
 
-    // A message the push never delivered is drained once it is clearly stale.
-    vi.setSystemTime(new Date('2026-10-20T12:00:11Z'));
-    expect(await shownContext(ctx)).toContain('Pushed live right now.');
+  it('still shows what a host spooled after a failed handoff', async () => {
+    await hook(ctx, 'session-start');
+    ctx.spool.put(AGENT_ID, [
+      {
+        messageId: 'm-spooled',
+        senderAgentId: 'peer',
+        taskId: null,
+        content: 'Spooled by the host.',
+        messageKind: 'prompt',
+        deliveryLatencyMs: null,
+      },
+    ]);
+    expect(await shownContext(ctx)).toContain('Spooled by the host.');
   });
 
   it('blocks the stop so a late message becomes the next turn', async () => {

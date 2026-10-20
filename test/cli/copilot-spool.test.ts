@@ -19,7 +19,7 @@ const message: DeliverableMessage = {
 describe('fileSpool', () => {
   it('holds messages per agent until taken once', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-spool-'));
-    const spool = fileSpool({ HOME: home });
+    const spool = fileSpool('/repo', { HOME: home });
     spool.put('copilot-cli:a', [message]);
 
     expect(spool.take('copilot-cli:b')).toEqual([]);
@@ -27,9 +27,16 @@ describe('fileSpool', () => {
     expect(spool.take('copilot-cli:a')).toEqual([]);
   });
 
+  it('keeps each repository apart for an operator id used in several', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-spool-'));
+    fileSpool('/repo-a', { HOME: home }).put('alpha', [message]);
+    expect(fileSpool('/repo-b', { HOME: home }).take('alpha')).toEqual([]);
+    expect(fileSpool('/repo-a', { HOME: home }).take('alpha')).toEqual([message]);
+  });
+
   it.skipIf(process.platform === 'win32')('writes owner-only files and nothing when empty', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-spool-'));
-    const spool = fileSpool({ HOME: home });
+    const spool = fileSpool('/repo', { HOME: home });
     spool.put('copilot-cli:a', []);
     const dir = join(home, '.concord', 'copilot-spool');
     expect(existsSync(dir)).toBe(false);
