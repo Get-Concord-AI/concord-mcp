@@ -73,3 +73,29 @@ jobs:
 
       - name: Cross-harness e2e
         run: pnpm e2e
+
+  real-harness-e2e:
+    name: Real-harness e2e (fake model)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned harness CLIs
+        run: scripts/install-e2e-harnesses.sh
+
+      - name: Real harnesses against a fake model
+        run: pnpm e2e test/e2e/real
+        env:
+          CONCORD_E2E_REAL_HARNESSES: all

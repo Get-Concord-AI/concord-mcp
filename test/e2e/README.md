@@ -20,9 +20,36 @@ be observed.
 `CONCORD_E2E_ROOT` moves `.e2e/`. It must not be under a temp directory,
 because Concord treats adapter links into one as throwaway checkouts.
 
+## Real harnesses against a fake model (`test/e2e/real`)
+
+Claude Code, Codex, Grok and Goose let you choose the model API they call. The
+real-harness suite runs their **real binaries** against a local fake model
+(`real/fake-model`) that speaks the Anthropic Messages and OpenAI Responses
+APIs. A scripted brain plays a cooperative agent: it loads Concord's tools,
+calls `start_work`, and answers every `[concord from … id=…]` message with
+`update_work`. Each harness really loads Concord's adapter, runs its hooks and
+monitors, and takes turns. Only the model is replaced, so runs are
+deterministic and need no accounts.
+
+| Harness     | Mid-turn                                   | Idle                                              |
+| ----------- | ------------------------------------------ | ------------------------------------------------- |
+| Claude Code | PostToolUse hook                           | plugin monitor in a real TUI                      |
+| Codex       | hooks (pre-trusted)                        | `concord adapters codex` controller starts a turn |
+| Grok        | PostToolUse hook                           | persistent `monitor` the model starts when asked  |
+| Goose       | sends; messages to it are refused honestly | —                                                 |
+
+Interactive sessions run in a pseudo-terminal (`real/pty-run.py`, Python 3).
+A harness that is not installed is skipped. `CONCORD_E2E_REAL_HARNESSES=all`
+(or a comma list) makes them required, which CI does after
+`scripts/install-e2e-harnesses.sh` installs pinned versions.
+
+Cursor and Antigravity talk to private vendor backends, so they cannot be
+pointed at a fake model; they are covered by the simulated drivers below.
+
 ## Drivers
 
-A driver (`drivers/<harness>.ts`) plays one session of a harness:
+For Cursor and Antigravity, and as fast checks of setup and identity, a
+simulated driver (`drivers/<harness>.ts`) plays one session of a harness:
 
 - it reads every hook and MCP command from the files `setup` installed, never
   from a hardcoded string;
