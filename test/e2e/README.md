@@ -43,6 +43,9 @@ A harness that is not installed is skipped. `CONCORD_E2E_REAL_HARNESSES=all`
 (or a comma list) makes them required, which CI does after
 `scripts/install-e2e-harnesses.sh` installs pinned versions.
 
+Run it as a normal user: Claude Code refuses its permission-bypass options as
+root, which is the usual default in a Docker container.
+
 Cursor and Antigravity talk to private vendor backends, so they cannot be
 pointed at a fake model; they are covered by the simulated drivers below.
 
