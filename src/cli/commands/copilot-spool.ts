@@ -14,8 +14,7 @@ import type { DeliverableMessage } from '../../domain/pull-inbox.js';
  * hook's context at 10 KB. Rather than cut a message short, the hook shows the
  * whole messages that fit and keeps the rest here; the session's next hook
  * shows them first, and its stop hook — which has no cap — shows everything.
- * A session's hooks run one at a time; its live host adds only what it
- * failed to push, so writes stay rare and short.
+ * Only a session's hooks use its file, and they run one at a time.
  */
 export interface MessageSpool {
   take(agentId: string): DeliverableMessage[];

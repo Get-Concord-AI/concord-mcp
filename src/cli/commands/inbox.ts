@@ -100,10 +100,9 @@ export function drainInbox(
   agentId: string,
   provider: string,
   capability: EndpointCapability = capabilityFor(provider),
-  createdBefore?: string,
 ): DeliverableMessage[] {
   registerPullEndpoint(repos, agentId, provider, Date.now(), capability);
-  const claimed = repos.agentMessages.claimPendingForRecipient(agentId, provider, createdBefore);
+  const claimed = repos.agentMessages.claimPendingForRecipient(agentId, provider);
   repos.agents.touch(agentId);
   return claimed.map(toDeliverable);
 }

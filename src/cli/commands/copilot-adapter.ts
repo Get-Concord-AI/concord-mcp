@@ -4,11 +4,7 @@ import type { CloudRuntime } from '../../cloud/runtime.js';
 import { atLeast, executablePath, run, versionTuple } from '../../install/adapters/index.js';
 import { relayAddress } from '../../relay/address.js';
 import type { Repositories } from '../../db/index.js';
-import {
-  renderInboxBody,
-  toDeliverable,
-  type DeliverableMessage,
-} from '../../domain/pull-inbox.js';
+import { renderInboxBody } from '../../domain/pull-inbox.js';
 import { PushPromptSessionAdapter, type PushPromptSession } from '../../relay/adapters.js';
 import { CopilotUiServerClient } from '../../relay/copilot-client.js';
 import { RELAY_PROTOCOL_VERSION } from '../../relay/protocol.js';
@@ -22,7 +18,6 @@ import { openContext } from '../context.js';
 import { availablePort } from '../local-port.js';
 import { deliverToSession } from './cloud-codex.js';
 import { watchCloud } from './cloud-inbox.js';
-import { fileSpool, type MessageSpool } from './copilot-spool.js';
 
 /**
  * Copilot CLI with idle wake-up (issue #261), shaped like the Codex adapter.
@@ -127,25 +122,32 @@ const SWEEP_EVERY_MS = 5_000;
  * The live host is its session's single consumer (#261): hooks of a hosted
  * session do not drain. A sender keeps a message pending while it pushes it
  * here, and leaves it pending when the push fails or times out — even if the
- * push reached Copilot late. The sweep claims messages past that window and
- * hands over only those this host never received; ones it could not hand over
- * go to the spool, which the session's next hook shows.
+ * push reached Copilot late. The sweep takes messages pending past that window:
+ * one this host already handed to Copilot is only marked delivered; any other
+ * is handed over and marked delivered once Copilot accepts it. A failed handoff
+ * stays pending for the next sweep, or for the hooks once this host is gone —
+ * nothing is claimed that has not reached the session.
  */
 export async function sweepStragglers(
   repos: Repositories,
   agentId: string,
   adapter: FramedCopilotAdapter,
-  spool: MessageSpool,
   now = Date.now(),
 ): Promise<void> {
-  const claimed = repos.agentMessages.claimPendingForRecipient(
-    agentId,
-    KIND,
-    new Date(now - SWEEP_AFTER_MS).toISOString(),
-  );
-  const failed: DeliverableMessage[] = [];
-  for (const message of claimed) {
-    if (adapter.handled.has(message.messageId)) continue;
+  const cutoff = new Date(now - SWEEP_AFTER_MS).toISOString();
+  const stragglers = repos.agentMessages
+    .listByAgent(agentId)
+    .filter(
+      (message) =>
+        message.recipientAgentId === agentId &&
+        message.status === 'pending' &&
+        message.createdAt < cutoff,
+    );
+  for (const message of stragglers) {
+    if (adapter.handled.has(message.messageId)) {
+      repos.agentMessages.markDelivered(message.messageId, KIND, null);
+      continue;
+    }
     const delivery: AgentSessionDelivery = {
       version: RELAY_PROTOCOL_VERSION,
       type: 'deliver',
@@ -155,12 +157,13 @@ export async function sweepStragglers(
       content: message.content,
     };
     try {
-      await (adapter.isBusy() ? adapter.steer(delivery) : adapter.inject(delivery));
+      const receipt = await (adapter.isBusy() ? adapter.steer(delivery) : adapter.inject(delivery));
+      repos.agentMessages.markDelivered(message.messageId, KIND, receipt ?? null);
     } catch {
-      failed.push(toDeliverable(message));
+      // Not handed over: still pending, so the next sweep tries again.
+      adapter.handled.delete(message.messageId);
     }
   }
-  if (failed.length > 0) spool.put(agentId, [...spool.take(agentId), ...failed]);
 }
 
 function frame(delivery: AgentSessionDelivery): string {
@@ -199,12 +202,11 @@ export async function hostCopilot(
     adapter,
     pullFallback: true,
   });
-  const spool = fileSpool(context.repoRoot);
   let sweeping = false;
   const sweeper = setInterval(() => {
     if (sweeping) return;
     sweeping = true;
-    void sweepStragglers(context.repos, agentId, adapter, spool)
+    void sweepStragglers(context.repos, agentId, adapter)
       .catch(() => undefined)
       .finally(() => {
         sweeping = false;

@@ -31,14 +31,8 @@ export interface AgentMessageRepository {
   /**
    * Atomically take every pending message for `agentId`, marking each
    * delivered and returning only the ones this call actually claimed.
-   * `createdBefore` (ISO time) leaves newer messages pending, for a caller
-   * that must not race a live push still in flight.
    */
-  claimPendingForRecipient(
-    agentId: string,
-    provider: string,
-    createdBefore?: string,
-  ): AgentMessageRecord[];
+  claimPendingForRecipient(agentId: string, provider: string): AgentMessageRecord[];
   listByTask(taskId: string): AgentMessageRecord[];
   listThread(messageId: string): AgentMessageRecord[];
   markDelivered(messageId: string, provider: string, receipt: string | null): AgentMessageRecord;
@@ -122,15 +116,10 @@ export function createAgentMessageRepository(
     return message;
   }
 
-  function claimPending(
-    agentId: string,
-    provider: string,
-    createdBefore: string | undefined,
-  ): AgentMessageRecord[] {
+  function claimPending(agentId: string, provider: string): AgentMessageRecord[] {
     const raw: unknown = listPendingStmt.all(agentId);
     const claimed: AgentMessageRecord[] = [];
     for (const row of rawListSchema.parse(raw).map(parseAgentMessageRow)) {
-      if (createdBefore !== undefined && row.createdAt >= createdBefore) continue;
       const result = markDeliveredStmt.run({
         message_id: row.messageId,
         provider,
@@ -183,12 +172,12 @@ export function createAgentMessageRepository(
       const raw: unknown = listByAgentStmt.all(agentId, agentId);
       return rawListSchema.parse(raw).map(parseAgentMessageRow);
     },
-    claimPendingForRecipient(agentId, provider, createdBefore) {
+    claimPendingForRecipient(agentId, provider) {
       // A Claude Code session drains from both a 2s monitor poll and a
       // PostToolUse hook, so two drains overlap routinely. The UPDATE is the
       // claim: whoever flips the row out of 'pending' owns the message, and
       // the loser emits nothing rather than showing the agent a duplicate.
-      return claimTransaction.immediate(agentId, provider, createdBefore);
+      return claimTransaction.immediate(agentId, provider);
     },
     listByTask(taskId) {
       const raw: unknown = listByTaskStmt.all(project, taskId);
