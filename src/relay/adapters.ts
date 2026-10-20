@@ -1,9 +1,18 @@
 import { z } from 'zod';
 
+import { renderPeerMessage } from '../domain/pull-inbox.js';
 import type { AgentSessionAdapter, AgentSessionDelivery } from './server.js';
 
 export interface CodexAppServerClient {
   request(method: 'turn/steer' | 'turn/start', params: Record<string, unknown>): Promise<unknown>;
+}
+
+/**
+ * The turn input for a delivery, framed like every other channel so the agent
+ * knows who sent it and which message id to reply to.
+ */
+function codexInput(delivery: AgentSessionDelivery): { type: 'text'; text: string }[] {
+  return [{ type: 'text', text: renderPeerMessage({ ...delivery, taskId: null }) }];
 }
 
 /** Codex's supported app-server API: steer busy turns and start idle turns. */
@@ -26,7 +35,7 @@ export class CodexAppServerAdapter implements AgentSessionAdapter {
     await this.client.request('turn/steer', {
       threadId: this.threadId,
       expectedTurnId: turnId,
-      input: [{ type: 'text', text: delivery.content }],
+      input: codexInput(delivery),
     });
     return turnId;
   }
@@ -34,7 +43,7 @@ export class CodexAppServerAdapter implements AgentSessionAdapter {
   async inject(delivery: AgentSessionDelivery): Promise<string | undefined> {
     const result = await this.client.request('turn/start', {
       threadId: this.threadId,
-      input: [{ type: 'text', text: delivery.content }],
+      input: codexInput(delivery),
     });
     return receiptFrom(result);
   }

@@ -47,14 +47,20 @@ export function toDeliverable(message: {
  * (`RELAYED_MESSAGE_GUIDANCE`). Repeating it per message cost roughly 24x the
  * payload of a short message.
  */
-function renderMessage(message: DeliverableMessage): string {
+export type PeerMessage = Pick<
+  DeliverableMessage,
+  'messageId' | 'senderAgentId' | 'taskId' | 'content'
+>;
+
+/** One message as the recipient sees it, whichever channel carries it. */
+export function renderPeerMessage(message: PeerMessage): string {
   const task = message.taskId === null ? '' : ` task=${message.taskId}`;
   return `[concord from ${message.senderAgentId} id=${message.messageId}${task}]\n${message.content}`;
 }
 
 /** The human-readable block shared by every channel. */
 export function renderInboxBody(messages: readonly DeliverableMessage[]): string {
-  return messages.map(renderMessage).join('\n\n');
+  return messages.map(renderPeerMessage).join('\n\n');
 }
 
 /** One line per message, for a plugin monitor's stdout. */
