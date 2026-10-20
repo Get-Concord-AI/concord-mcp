@@ -43,7 +43,7 @@ describe('Copilot CLI hooks', () => {
   let backend: CopilotHookBackend;
   beforeEach(() => {
     repos = createRepositories(openDatabase(':memory:'));
-    backend = localCopilotBackend(repos);
+    backend = localCopilotBackend(repos, '/repo');
   });
 
   it('derives the same agent id the MCP server resolves from COPILOT_AGENT_SESSION_ID', () => {
@@ -100,11 +100,29 @@ describe('Copilot CLI hooks', () => {
       register: () => Promise.reject(new Error('down')),
       roster: () => Promise.resolve([]),
       drain: () => Promise.reject(new Error('down')),
+      startLiveHost: () => undefined,
     };
     const start = contextSchema.parse(JSON.parse(await hook(failing, 'session-start', payload())));
     expect(start.additionalContext).toContain('down');
     expect(JSON.parse(await hook(failing, 'post-tool-use', payload()))).toEqual({});
     expect(JSON.parse(await hook(failing, 'stop', payload()))).toEqual({});
+  });
+
+  it('starts a live host only for sessions the launcher started (#261)', async () => {
+    const hosts: string[][] = [];
+    const recording: CopilotHookBackend = {
+      register: () => Promise.resolve(),
+      roster: () => Promise.resolve([]),
+      drain: () => Promise.resolve([]),
+      startLiveHost: (agentId, sessionId, address) => {
+        hosts.push([agentId, sessionId, address]);
+      },
+    };
+    await runCopilotHook(recording, 'session-start', payload());
+    expect(hosts).toEqual([]);
+
+    await runCopilotHook(recording, 'session-start', payload(), '127.0.0.1:47125');
+    expect(hosts).toEqual([[AGENT_ID, SESSION, '127.0.0.1:47125']]);
   });
 
   it('reports an unknown event as unhandled', async () => {

@@ -11,7 +11,8 @@ import {
 import { buildRoster, deriveLiveness } from '../../domain/presence.js';
 import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
-import { drainFromCloud, registerInCloud } from './cloud-inbox.js';
+import { launchDetachedConcord } from '../detached-host.js';
+import { drainFromCloud, registerInCloud, watching } from './cloud-inbox.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
 import { sessionStartMessage, type RosterLine } from './session-start-message.js';
 
@@ -35,6 +36,21 @@ export interface CopilotHookBackend {
   register(agentId: string, cwd: string): Promise<void>;
   roster(agentId: string): Promise<RosterLine[]>;
   drain(agentId: string): Promise<DeliverableMessage[]>;
+  /** Start a live host for a launcher session, unless one already serves it (#261). */
+  startLiveHost(agentId: string, sessionId: string, serverAddress: string): void;
+}
+
+function hostArgs(agentId: string, sessionId: string, serverAddress: string): string[] {
+  return [
+    'adapters',
+    'host-copilot',
+    '--agent',
+    agentId,
+    '--session',
+    sessionId,
+    '--server',
+    serverAddress,
+  ];
 }
 
 /** The workspace a Copilot hook is for: its payload's `cwd`, else the process's. */
@@ -48,7 +64,7 @@ export function copilotWorkspace(rawJson: string): string {
   }
 }
 
-export function localCopilotBackend(repos: Repositories): CopilotHookBackend {
+export function localCopilotBackend(repos: Repositories, repoRoot: string): CopilotHookBackend {
   return {
     register: (agentId, cwd) => {
       ensureAgentRegistered(repos, { agentId, kind: KIND }, cwd);
@@ -60,6 +76,14 @@ export function localCopilotBackend(repos: Repositories): CopilotHookBackend {
         buildRoster(repos.agents.list(), Date.now()).filter((entry) => entry.agentId !== agentId),
       ),
     drain: (agentId) => Promise.resolve(drainInbox(repos, agentId, KIND)),
+    startLiveHost: (agentId, sessionId, serverAddress) => {
+      const endpoint = repos.agentEndpoints.getByAgent(agentId);
+      const hosted =
+        endpoint?.transport === 'local-ipc' &&
+        endpoint.status === 'connected' &&
+        (endpoint.expiresAt === null || Date.parse(endpoint.expiresAt) > Date.now());
+      if (!hosted) launchDetachedConcord(repoRoot, hostArgs(agentId, sessionId, serverAddress));
+    },
   };
 }
 
@@ -81,6 +105,11 @@ export function cloudCopilotBackend(runtime: CloudRuntime): CopilotHookBackend {
         .filter((peer) => peer.liveness !== 'archived');
     },
     drain: (agentId) => drainFromCloud(runtime, agentId, KIND),
+    startLiveHost: (agentId, sessionId, serverAddress) => {
+      if (!watching(runtime, agentId)) {
+        launchDetachedConcord(runtime.repoRoot, hostArgs(agentId, sessionId, serverAddress));
+      }
+    },
   };
 }
 
@@ -100,13 +129,17 @@ function describe(error: unknown): string {
 export async function copilotSessionStart(
   backend: CopilotHookBackend,
   rawJson: string,
+  serverAddress?: string,
 ): Promise<string> {
-  const agentId = agentIdFor(rawJson);
-  if (agentId === undefined) {
+  const sessionId = hookSessionId(rawJson);
+  if (sessionId === undefined) {
     return JSON.stringify({ additionalContext: `Concord: ${UNRESOLVED_IDENTITY_MESSAGE}` });
   }
+  const agentId = agentIdForSession(KIND, sessionId);
   try {
     await backend.register(agentId, copilotWorkspace(rawJson));
+    // Started by `concord adapters copilot`: a host can reach the idle session.
+    if (serverAddress !== undefined) backend.startLiveHost(agentId, sessionId, serverAddress);
     const others = await backend.roster(agentId);
     return JSON.stringify({ additionalContext: sessionStartMessage(agentId, others) });
   } catch (error) {
@@ -165,10 +198,11 @@ export async function runCopilotHook(
   backend: CopilotHookBackend,
   event: string,
   rawJson: string,
+  serverAddress?: string,
 ): Promise<string | undefined> {
   switch (event) {
     case 'session-start':
-      return copilotSessionStart(backend, rawJson);
+      return copilotSessionStart(backend, rawJson, serverAddress);
     case 'post-tool-use':
       return copilotPostToolUse(backend, rawJson);
     case 'stop':

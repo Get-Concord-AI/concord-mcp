@@ -27,7 +27,22 @@ repository resolves its own workspace.
 
 ## Messages
 
-Copilot CLI has no way to wake an idle session, so delivery uses its hooks:
+Start Copilot through Concord to make the session reachable while it is idle:
+
+```bash
+concord adapters copilot            # instead of `copilot`
+concord adapters copilot -i "..."   # any Copilot flags are forwarded
+```
+
+The launcher runs Copilot's TUI with its embedded server (`--ui-server`) on a
+fresh loopback port. When the session starts, Concord's hook launches a host
+for it that resumes the session over that server and hands each message to
+Copilot: it steers a running turn, or starts a new turn while Copilot is idle
+— the same shape as `concord adapters codex`. The host exits with the TUI.
+Copilot releases before 1.0.100 are started without the server and keep hook
+delivery.
+
+Sessions started with plain `copilot` use hooks only:
 
 | Hook           | What Concord does                                                    |
 | -------------- | -------------------------------------------------------------------- |
@@ -35,9 +50,13 @@ Copilot CLI has no way to wake an idle session, so delivery uses its hooks:
 | `postToolUse`  | delivers waiting messages into the turn after each tool call         |
 | `agentStop`    | keeps the turn going when a message arrived after the last tool call |
 
-A message sent to an idle session waits in its inbox and arrives during its
-next turn. `concord adapters status` reports Copilot CLI with `pull`, `steer`,
-and `busy` reach — no `idle`.
+A message sent to an idle plain session waits in its inbox and arrives during
+its next turn.
+
+> **Security:** like Codex's app-server, Copilot's embedded server listens on
+> `127.0.0.1` without authentication, so other processes and users on the same
+> machine can reach it while the session runs. Use plain `copilot` on shared
+> machines.
 
 Copilot also runs hooks from a project's `.claude/settings.json`. Concord's
 optional Claude Code session-start hook stays silent inside Copilot, so it

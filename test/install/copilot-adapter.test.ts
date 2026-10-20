@@ -34,7 +34,7 @@ describe('Copilot CLI adapter', () => {
 
     expect(report.find((entry) => entry.harness === 'copilot-cli')).toMatchObject({
       status: 'installed',
-      capabilities: ['pull', 'steer', 'busy'],
+      capabilities: ['pull', 'inject', 'steer', 'idle', 'busy'],
     });
     expect(copilotConfigInstalled(env)).toBe(true);
     expect(existsSync(copilotHooksFile(env))).toBe(true);

@@ -25,11 +25,13 @@ import {
   handleCloudSessionStart,
 } from './cloud-hooks.js';
 import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
+import { copilotServerAddress } from './copilot-adapter.js';
 import {
   cloudCopilotBackend,
   copilotWorkspace,
   localCopilotBackend,
   runCopilotHook,
+  type CopilotHookBackend,
 } from './copilot-hooks.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
 import { antigravitySessionStartMessage, sessionStartMessage } from './session-start-message.js';
@@ -387,11 +389,14 @@ async function runCopilotClientHook(event: string): Promise<void> {
     process.stdout.write('{}\n');
     return;
   }
-  const backend =
-    access.kind === 'cloud'
-      ? cloudCopilotBackend(access.runtime)
-      : localCopilotBackend(openContext(workspace).repos);
-  const output = await runCopilotHook(backend, event, input);
+  let backend: CopilotHookBackend;
+  if (access.kind === 'cloud') {
+    backend = cloudCopilotBackend(access.runtime);
+  } else {
+    const context = openContext(workspace);
+    backend = localCopilotBackend(context.repos, context.repoRoot);
+  }
+  const output = await runCopilotHook(backend, event, input, copilotServerAddress());
   if (output === undefined) {
     process.stderr.write(`Unknown hook event for copilot-cli: ${event}\n`);
     process.exitCode = 1;
