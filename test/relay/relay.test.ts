@@ -121,7 +121,7 @@ describe('local IPC relay', () => {
         params: {
           threadId: 'thread-1',
           expectedTurnId: 'turn-7',
-          input: [{ type: 'text', text: 'Use the new constraint.' }],
+          input: [{ type: 'text', text: '[concord from a id=m1]\nUse the new constraint.' }],
         },
       },
     ]);
