@@ -11,7 +11,7 @@ type Mapping = z.infer<typeof mappingSchema>;
 const SERVER_KEY = 'concord';
 
 export function hermesConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(env['HERMES_HOME']?.trim() || join(userHome(env), '.hermes'), 'config.yaml');
+  return join(env['HERMES_HOME']?.trim() ?? join(userHome(env), '.hermes'), 'config.yaml');
 }
 
 function readConfig(path: string): Mapping {
@@ -63,7 +63,8 @@ export function uninstallHermesMcpConfig(env: NodeJS.ProcessEnv = process.env): 
   const config = readConfig(path);
   const servers = mappingSchema.safeParse(config['mcp_servers']);
   if (!servers.success || !(SERVER_KEY in servers.data)) return;
-  const next: Mapping = { ...servers.data };
-  delete next[SERVER_KEY];
+  const next: Mapping = Object.fromEntries(
+    Object.entries(servers.data).filter(([key]) => key !== SERVER_KEY),
+  );
   writeConfig(path, { ...config, mcp_servers: next });
 }
