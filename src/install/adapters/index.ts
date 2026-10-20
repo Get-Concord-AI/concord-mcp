@@ -50,11 +50,7 @@ import {
 
 export type { HarnessName, MonitorKind } from '../../domain/harness-config.js';
 export type AdapterStatus =
-  | 'installed'
-  | 'not_detected'
-  | 'action_required'
-  | 'unsupported_version'
-  | 'error';
+  'installed' | 'not_detected' | 'action_required' | 'unsupported_version' | 'error';
 
 export interface AdapterReport {
   harness: HarnessName;
