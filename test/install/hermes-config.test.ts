@@ -114,6 +114,14 @@ describe('Hermes MCP config', () => {
     expect(existsSync(path)).toBe(false);
   });
 
+  it('continues global cleanup when Hermes YAML is malformed', () => {
+    const { env, path } = fixture();
+    const original = 'mcp_servers: [invalid\n';
+    seed(path, original);
+    expect(() => uninstallGlobalAdapters(env)).not.toThrow();
+    expect(readFileSync(path, 'utf8')).toBe(original);
+  });
+
   it('rejects invalid server maps without overwriting existing config', () => {
     const { env, path } = fixture();
     const original = 'mcp_servers:\n  - bad\n';

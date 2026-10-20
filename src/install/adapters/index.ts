@@ -804,7 +804,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
-  uninstallHermesMcpConfig(env);
+  try {
+    uninstallHermesMcpConfig(env);
+  } catch {
+    // Preserve malformed Hermes settings and continue independent adapter cleanup.
+  }
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
   if (existsSync(antigravityMcp)) {
     try {
