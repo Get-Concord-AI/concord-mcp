@@ -39,7 +39,8 @@ is not a complete configuration file for every client.
   "args": ["-y", "@concord-ai/concord-mcp@0.14.2"],
   "env": {
     "CONCORD_REPO_ROOT": "/absolute/path/to/your/repository",
-    "CONCORD_AGENT_KIND": "your-client-name"
+    "CONCORD_AGENT_KIND": "your-client-name",
+    "CONCORD_AGENT_ID": "your-client:replace-with-unique-session-id"
   }
 }
 ```
@@ -55,6 +56,17 @@ paths. The first `npx` launch may take longer while it downloads the package.
 - `CONCORD_AGENT_KIND` labels the client kind. It does not create a live delivery
   adapter or supply a session identity. Follow the workflow's agent identity
   requirements when calling write tools; do not reuse another session's id.
+- `CONCORD_AGENT_ID` supplies the session identity for a client Concord cannot
+  identify automatically. Before starting the server, replace the example value
+  with an operator-chosen id unique to this agent session. `CONCORD_AGENT_KIND`
+  alone is insufficient: a write call without a resolvable identity fails with
+  "Concord cannot tell which session you are." The server uses the configured
+  identity when the generated instructions tell the agent to omit `agent_id`.
+- Keep one identity per agent session. Do not share this server process/id
+  between independent chats or agents: they would act as the same owner. For a
+  new session, set a new id and restart the server. If the client shares one
+  server across chats, use separate client/server instances for independent
+  agents rather than changing the identity underneath ongoing work.
 - Replace the repository path for each workspace. A user-level server entry
   pinned to one repository keeps using that repository when you open another.
 
@@ -71,7 +83,8 @@ Create `.vscode/mcp.json` in the opened repository:
       "args": ["-y", "@concord-ai/concord-mcp@0.14.2"],
       "env": {
         "CONCORD_REPO_ROOT": "${workspaceFolder}",
-        "CONCORD_AGENT_KIND": "vscode"
+        "CONCORD_AGENT_KIND": "vscode",
+        "CONCORD_AGENT_ID": "vscode:replace-with-unique-session-id"
       }
     }
   }
@@ -82,7 +95,8 @@ This uses VS Code's `servers` format, not a generic `mcpServers` wrapper.
 `${workspaceFolder}` is expanded by VS Code. See its
 [MCP configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
 
-1. Open the repository folder in VS Code.
+1. Open the repository folder in VS Code. Replace the example `CONCORD_AGENT_ID`
+   with a unique id for this session before starting the server.
 2. Run **MCP: List Servers** from the Command Palette, select **concord**, and
    choose **Start Server**. Review the workspace/server trust prompts.
 3. Check the server output for **Discovered 5 tools**. The tools are `start_work`,
@@ -97,8 +111,10 @@ This uses VS Code's `servers` format, not a generic `mcpServers` wrapper.
 Concord 0.14.2 package. In an isolated workspace, the server started through `npx`,
 discovered all five tools, and returned the correct repository through
 `concord://work-state`. The setup command above was also run with a temporary
-HOME. Executable paths were made absolute for the test machine. Model-driven
-tool calls and live push delivery were not tested. Windows, Linux, Windsurf, and
+HOME. Executable paths were made absolute for the test machine. A separate SDK stdio check against the same published package verified
+that `start_work` without an identity fails, while setting `CONCORD_AGENT_ID`
+allows `start_work`, `inspect_work`, and `finish_work` with no `agent_id` argument.
+Model-driven tool calls and live push delivery were not tested. Windows, Linux, Windsurf, and
 Zed were not tested; consult each client's configuration documentation rather
 than copying the VS Code wrapper into it.
 
