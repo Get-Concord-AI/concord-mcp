@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   hermesConfigInstalled,
@@ -11,8 +11,14 @@ import {
   uninstallHermesMcpConfig,
 } from '../../src/install/hermes-config.js';
 
+const temporaryHomes: string[] = [];
+afterEach(() => {
+  for (const home of temporaryHomes.splice(0)) rmSync(home, { recursive: true, force: true });
+});
+
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), 'concord-hermes-test-'));
+  temporaryHomes.push(home);
   const env = { HOME: home };
   return { env, path: hermesConfigPath(env) };
 }
@@ -45,6 +51,12 @@ describe('Hermes MCP config', () => {
     expect(remaining).toContain('model: test');
     uninstallHermesMcpConfig(env);
     expect(readFileSync(path, 'utf8')).toBe(remaining);
+  });
+
+  it('rejects a different npx package as installed', () => {
+    const { env, path } = fixture();
+    seed(path, 'mcp_servers:\n  concord:\n    command: npx\n    args: [other-package]\n');
+    expect(hermesConfigInstalled(env)).toBe(false);
   });
 
   it('does not create config when uninstalling a missing installation', () => {

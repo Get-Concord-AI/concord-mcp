@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { dump, load } from 'js-yaml';
@@ -6,7 +6,18 @@ import { z } from 'zod';
 
 import { userHome } from '../config/paths.js';
 
-const mappingSchema = z.record(z.string(), z.unknown());
+type YamlValue = string | number | boolean | null | YamlValue[] | { [key: string]: YamlValue };
+const yamlValueSchema: z.ZodType<YamlValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(yamlValueSchema),
+    z.record(z.string(), yamlValueSchema),
+  ]),
+);
+const mappingSchema = z.record(z.string(), yamlValueSchema);
 type Mapping = z.infer<typeof mappingSchema>;
 const SERVER_KEY = 'concord';
 
@@ -23,7 +34,13 @@ function readConfig(path: string): Mapping {
 
 function writeConfig(path: string, config: Mapping): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, dump(config, { lineWidth: 100, noRefs: true }), { mode: 0o600 });
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, dump(config, { lineWidth: 100, noRefs: true }), { mode: 0o600 });
+    renameSync(temporary, path);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
 }
 
 export function hermesConfigInstalled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -33,7 +50,13 @@ export function hermesConfigInstalled(env: NodeJS.ProcessEnv = process.env): boo
     const servers = mappingSchema.safeParse(readConfig(path)['mcp_servers']);
     if (!servers.success) return false;
     const entry = mappingSchema.safeParse(servers.data[SERVER_KEY]);
-    return entry.success && entry.data['enabled'] !== false && entry.data['command'] === 'npx';
+    return (
+      entry.success &&
+      entry.data['enabled'] !== false &&
+      entry.data['command'] === 'npx' &&
+      Array.isArray(entry.data['args']) &&
+      entry.data['args'].includes('@concord-ai/concord-mcp')
+    );
   } catch {
     return false;
   }
