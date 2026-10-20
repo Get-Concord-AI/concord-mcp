@@ -136,13 +136,8 @@ export async function sweepStragglers(
 ): Promise<void> {
   const cutoff = new Date(now - SWEEP_AFTER_MS).toISOString();
   const stragglers = repos.agentMessages
-    .listByAgent(agentId)
-    .filter(
-      (message) =>
-        message.recipientAgentId === agentId &&
-        message.status === 'pending' &&
-        message.createdAt < cutoff,
-    );
+    .listPendingForRecipient(agentId)
+    .filter((message) => message.createdAt < cutoff);
   for (const message of stragglers) {
     if (adapter.handled.has(message.messageId)) {
       repos.agentMessages.markDelivered(message.messageId, KIND, null);
@@ -156,13 +151,17 @@ export async function sweepStragglers(
       recipientAgentId: agentId,
       content: message.content,
     };
+    let receipt: string | undefined;
     try {
-      const receipt = await (adapter.isBusy() ? adapter.steer(delivery) : adapter.inject(delivery));
-      repos.agentMessages.markDelivered(message.messageId, KIND, receipt ?? null);
+      receipt = await (adapter.isBusy() ? adapter.steer(delivery) : adapter.inject(delivery));
     } catch {
       // Not handed over: still pending, so the next sweep tries again.
       adapter.handled.delete(message.messageId);
+      continue;
     }
+    // Handed over: it stays in `handled`, so if recording this fails the next
+    // sweep only retries the record, never the handoff.
+    repos.agentMessages.markDelivered(message.messageId, KIND, receipt ?? null);
   }
 }
 

@@ -28,6 +28,8 @@ export interface AgentMessageRepository {
   get(messageId: string): AgentMessageRecord | undefined;
   getByIdempotency(senderAgentId: string, idempotencyKey: string): AgentMessageRecord | undefined;
   listByAgent(agentId: string): AgentMessageRecord[];
+  /** Messages waiting for `agentId`, oldest first, without claiming them. */
+  listPendingForRecipient(agentId: string): AgentMessageRecord[];
   /**
    * Atomically take every pending message for `agentId`, marking each
    * delivered and returning only the ones this call actually claimed.
@@ -170,6 +172,10 @@ export function createAgentMessageRepository(
     },
     listByAgent(agentId) {
       const raw: unknown = listByAgentStmt.all(agentId, agentId);
+      return rawListSchema.parse(raw).map(parseAgentMessageRow);
+    },
+    listPendingForRecipient(agentId) {
+      const raw: unknown = listPendingStmt.all(agentId);
       return rawListSchema.parse(raw).map(parseAgentMessageRow);
     },
     claimPendingForRecipient(agentId, provider) {

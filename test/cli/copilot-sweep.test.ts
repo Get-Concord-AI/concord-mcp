@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   FramedCopilotAdapter,
@@ -80,5 +80,38 @@ describe('sweepStragglers (#261)', () => {
     await sweepStragglers(repos, AGENT, adapter, later());
     expect(repos.agentMessages.get(id)?.status).toBe('delivered');
     expect(pushed).toHaveLength(1);
+  });
+
+  it('never repeats a handoff when only recording it failed', async () => {
+    const id = send(repos, 'Accepted, but the database was busy.', 'k-5');
+    vi.spyOn(repos.agentMessages, 'markDelivered').mockImplementationOnce(() => {
+      throw new Error('SQLITE_BUSY');
+    });
+    await expect(sweepStragglers(repos, AGENT, adapter, later())).rejects.toThrow('SQLITE_BUSY');
+    expect(repos.agentMessages.get(id)?.status).toBe('pending');
+
+    await sweepStragglers(repos, AGENT, adapter, later());
+    expect(pushed).toHaveLength(1);
+    expect(repos.agentMessages.get(id)?.status).toBe('delivered');
+  });
+
+  it('reads only messages waiting for the session', () => {
+    const waiting = send(repos, 'Waiting.', 'k-6');
+    registerPullEndpoint(repos, 'peer', 'claude-code');
+    handleSendAgentMessage(repos, {
+      operation: 'prompt',
+      agentId: AGENT,
+      toAgentId: 'peer',
+      content: 'Sent by the session itself.',
+      idempotencyKey: 'k-7',
+    });
+    repos.agentMessages.markDelivered(
+      send(repos, 'Already delivered.', 'k-8'),
+      'copilot-cli',
+      null,
+    );
+    expect(repos.agentMessages.listPendingForRecipient(AGENT).map((m) => m.messageId)).toEqual([
+      waiting,
+    ]);
   });
 });
