@@ -66,14 +66,14 @@ describe('sweepStragglers (#261)', () => {
     const id = send(repos, 'Being pushed right now.', 'k-3');
     await sweepStragglers(repos, AGENT, adapter, Date.now());
     expect(pushed).toEqual([]);
-    expect(repos.agentMessages.get(id)?.status).toBe('pending');
+    expect(repos.agentMessages.get(id)?.status).toBe('sent');
   });
 
   it('claims nothing it could not hand over, so the next sweep retries it', async () => {
     const id = send(repos, 'Copilot was momentarily unavailable.', 'k-4');
     fail = true;
     await sweepStragglers(repos, AGENT, adapter, later());
-    expect(repos.agentMessages.get(id)?.status).toBe('pending');
+    expect(repos.agentMessages.get(id)?.status).toBe('sent');
 
     fail = false;
     await sweepStragglers(repos, AGENT, adapter, later());
@@ -87,7 +87,7 @@ describe('sweepStragglers (#261)', () => {
       throw new Error('SQLITE_BUSY');
     });
     await expect(sweepStragglers(repos, AGENT, adapter, later())).rejects.toThrow('SQLITE_BUSY');
-    expect(repos.agentMessages.get(id)?.status).toBe('pending');
+    expect(repos.agentMessages.get(id)?.status).toBe('sent');
 
     await sweepStragglers(repos, AGENT, adapter, later());
     expect(pushed).toHaveLength(1);

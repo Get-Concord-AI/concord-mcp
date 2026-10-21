@@ -11,6 +11,8 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { relayAddress } from '../../relay/address.js';
 import { CodexAppServerAdapter } from '../../relay/adapters.js';
 import { CodexDaemonClient } from '../../relay/codex-client.js';
+import { CodexReadTracker } from '../../relay/codex-read-tracker.js';
+import { sessionKey } from '../../domain/receipts.js';
 import { startAgentRelay } from '../../relay/server.js';
 import {
   installGlobalAdapters,
@@ -33,9 +35,23 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
   const context = openContext(process.cwd());
   ensureAgentRegistered(context.repos, { agentId, kind: 'codex' }, context.repoRoot);
   const client = new CodexDaemonClient();
+  // Read receipts: the turn that took a pushed message completed with it as input.
+  const session = sessionKey(threadId);
+  const reads = new CodexReadTracker(threadId, (messageIds) => {
+    try {
+      context.repos.agentMessages.markRead(agentId, session, messageIds, 'turn_completed');
+    } catch (error) {
+      process.stderr.write(
+        `Concord: could not record a read receipt: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
+  });
+  client.onNotification((method, params) => {
+    reads.notify(method, params);
+  });
   await client.connect();
   await client.resumeThread(threadId);
-  const adapter = new CodexAppServerAdapter(client, threadId, () => client.currentTurnId());
+  const adapter = new CodexAppServerAdapter(client, threadId, () => client.currentTurnId(), reads);
   const relay = await startAgentRelay({
     repos: context.repos,
     agentId,

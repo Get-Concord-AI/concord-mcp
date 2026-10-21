@@ -67,7 +67,7 @@ describe('pull-transport inbox', () => {
     registerPullEndpoint(repos, 'beta', 'claude-code');
     const messageId = send(repos, 'schema.ts is mine for the next hour', 'key-1');
 
-    expect(repos.agentMessages.get(messageId)?.status).toBe('pending');
+    expect(repos.agentMessages.get(messageId)?.status).toBe('sent');
 
     const drained = drainInbox(repos, 'beta', 'claude-code');
 
@@ -84,15 +84,25 @@ describe('pull-transport inbox', () => {
     expect(drainInbox(repos, 'beta', 'claude-code')).toHaveLength(0);
   });
 
-  it('rejects a send when the recipient never registered', () => {
-    expect(() => send(repos, 'anyone there?', 'key-1')).toThrow(/no prompt endpoint/i);
+  it('queues a send for a recipient that never registered an endpoint', () => {
+    const queued = handleSendAgentMessage(repos, {
+      operation: 'prompt',
+      agentId: 'alpha',
+      toAgentId: 'beta',
+      content: 'anyone there?',
+      idempotencyKey: 'key-1',
+    });
+    expect(queued.message.status).toBe('sent');
+    expect(queued.outlook).toMatch(/no live session/i);
   });
 
-  it('stops accepting messages once the recipient session has gone stale', () => {
+  it('queues for a recipient whose session has gone stale, delivering when it returns', () => {
     const hourAgo = Date.now() - 60 * 60 * 1000;
     registerPullEndpoint(repos, 'beta', 'claude-code', hourAgo);
 
-    expect(() => send(repos, 'still there?', 'key-1')).toThrow(/no longer live/i);
+    const messageId = send(repos, 'still there?', 'key-1');
+    expect(repos.agentMessages.get(messageId)?.status).toBe('sent');
+    expect(drainInbox(repos, 'beta', 'claude-code')).toHaveLength(1);
   });
 
   it('warns the sender when the recipient cannot be reached while idle', () => {

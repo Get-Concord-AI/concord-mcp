@@ -11,6 +11,15 @@ set -uo pipefail
 CONCORD_BIN="${CONCORD_BIN:-concord}"
 CONCORD_INBOX_POLL_SECONDS="${CONCORD_INBOX_POLL_SECONDS:-2}"
 
+# A monitor orphaned by a crashed or killed harness would keep draining
+# messages into a pipe nobody reads, marking them delivered to a dead session.
+# Once its parent is gone this process is reparented to init (pid 1).
+harness_alive() {
+  local parent
+  parent="$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')"
+  [ -n "${parent}" ] && [ "${parent}" != "1" ]
+}
+
 # Identity needs no configuration: Claude Code exports CLAUDE_CODE_SESSION_ID
 # into this process, and `concord inbox drain` derives the agent id from it.
 # CONCORD_AGENT_ID overrides it when a human wants to name the agents.
@@ -27,7 +36,7 @@ fi
 # not a new process every couple of seconds. Restarted after any failure it
 # cannot ride out itself (a lapsed login, say), slowly.
 if "${CONCORD_BIN}" inbox status --cloud >/dev/null 2>&1; then
-  while true; do
+  while harness_alive; do
     "${CONCORD_BIN}" inbox watch --provider claude-code --format monitor 2>/dev/null || true
     sleep 30
   done
@@ -36,9 +45,11 @@ fi
 while true; do
   # Never let a transient failure (a locked database, a mid-write config) kill
   # the monitor: a dead monitor silently stops delivering messages.
-  # --await-seen: Claude Code holds a notification while the agent is blocked
-  # on its user, so a drained message only counts as seen once this plugin's
-  # UserPromptSubmit or Stop hook confirms the session showed it.
-  "${CONCORD_BIN}" inbox drain --format monitor --await-seen 2>/dev/null || true
+  # A drained message counts as delivered, never read: Claude Code may hold the
+  # notification while the agent is blocked on its user. Read is recorded by
+  # this plugin's hooks once the message id shows up in the session's prompt
+  # or transcript.
+  harness_alive || exit 0
+  "${CONCORD_BIN}" inbox drain --format monitor 2>/dev/null || true
   sleep "${CONCORD_INBOX_POLL_SECONDS}"
 done

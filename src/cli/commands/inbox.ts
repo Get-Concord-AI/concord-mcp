@@ -15,7 +15,8 @@ import {
 } from '../../domain/delivery.js';
 import { grokMonitorNudge } from '../../domain/grok-monitor.js';
 import { harnessConfigFor } from '../../domain/harness-config.js';
-import { hookSessionId } from '../../domain/identity.js';
+import { hookSessionId, resolveSessionId } from '../../domain/identity.js';
+import { sessionKey } from '../../domain/receipts.js';
 import {
   renderGeminiAfterAgent,
   renderGeminiAfterTool,
@@ -30,7 +31,7 @@ import { resolveAgentId } from '../agent-identity.js';
 import { resolveStore } from '../../workspaces/store.js';
 import { openContext } from '../context.js';
 import { launchDetachedConcord } from '../detached-host.js';
-import { observeHookEvent, observeToolDone, observeTurnEnd } from './inbox-observe.js';
+import { isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
 import {
   cloudAccess,
   drainFromCloud,
@@ -92,10 +93,10 @@ export function registerPullEndpoint(
 }
 
 /**
- * Take every pending message for `agentId` and mark it delivered. Draining is
- * what records delivery, so a message is only ever counted as delivered once
- * the recipient has actually been handed it. Pass `awaitSeen` when the caller
- * only queues them in the harness and the session confirms what it showed.
+ * Take every sent message for `agentId` and mark it delivered to the session
+ * in `options`. Draining is what records delivery, so a message is only ever
+ * counted as delivered once the recipient's session has been handed it. It is
+ * never counted as read here: that takes evidence from the session itself.
  */
 export function drainInbox(
   repos: Repositories,
@@ -108,6 +109,15 @@ export function drainInbox(
   const claimed = repos.agentMessages.claimPendingForRecipient(agentId, provider, options);
   repos.agents.touch(agentId);
   return claimed.map(toDeliverable);
+}
+
+/** The opaque key of the session this command runs for, when it can tell. */
+export function currentSession(provider: string, hookPayload: string | undefined): string | null {
+  const raw = resolveSessionId(process.env, {
+    kind: provider,
+    ...(hookPayload === undefined ? {} : { hookPayload }),
+  });
+  return raw === undefined ? null : sessionKey(raw);
 }
 
 function isSqliteBusy(error: unknown): boolean {
@@ -131,6 +141,7 @@ export async function watchInbox(
   emit: (messages: readonly DeliverableMessage[]) => void,
 ): Promise<void> {
   const monitorCapability = monitorCapabilityFor(provider);
+  const session = currentSession(provider, undefined);
   await new Promise<void>((resolve, reject) => {
     let timer: NodeJS.Timeout | undefined;
     let finished = false;
@@ -153,7 +164,10 @@ export async function watchInbox(
     const poll = (): void => {
       let messages: DeliverableMessage[];
       try {
-        messages = drainInbox(repos, agentId, provider, monitorCapability);
+        messages = drainInbox(repos, agentId, provider, monitorCapability, {
+          session,
+          via: 'monitor',
+        });
         heartbeatReceiver(repos, agentId, interval);
       } catch (error) {
         // A monitor is the session's live receive endpoint. Transient SQLite
@@ -425,19 +439,12 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       'post-tool-use and stop emit hook JSON; monitor emits one line per message; json emits raw records',
       'json',
     )
-    .option(
-      '--await-seen',
-      'Monitor only: count messages as seen when the session confirms it, not on drain',
-    )
     .action(async (options) => {
       const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
       if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
       // Checked before anything is taken: a format typo must not cost a batch.
       if (!DRAIN_FORMATS.includes(options.format)) {
         throw new Error(`Unknown --format: ${options.format}`);
-      }
-      if (options.awaitSeen === true && options.format !== 'monitor') {
-        throw new Error('--await-seen only applies to --format monitor.');
       }
       if (access.kind === 'unusable') {
         reportCloudFailure(access.reason);
@@ -464,16 +471,25 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         else if (nudge !== undefined) writeMonitorNudge(nudge);
         return;
       }
+      // A subagent shares its parent's session id, so its hooks resolve the
+      // parent's agent. Draining there would hand the parent's messages to
+      // whichever subagent ran a tool, and its activity proves nothing about
+      // what the parent's model saw (#216).
+      if (hookPayload !== undefined && isSubagentHook(parseObservedHook(hookPayload))) return;
       const context = openContext(process.cwd());
       const isMonitor = options.format === 'monitor';
-      if (options.format === 'stop') observeTurnEnd(context.repos, agentId);
-      if (options.format === 'post-tool-use') observeToolDone(context.repos, agentId);
+      // Read evidence first, so this invocation never marks read a message it
+      // is itself about to deliver.
+      if (hookPayload !== undefined) observeHookEvent(context.repos, agentId, hookPayload);
       const messages = drainInbox(
         context.repos,
         agentId,
         options.provider,
         isMonitor ? monitorCapabilityFor(options.provider) : capabilityFor(options.provider),
-        { awaitSeen: options.awaitSeen === true },
+        {
+          session: currentSession(options.provider, hookPayload),
+          via: isMonitor ? 'monitor' : 'hook',
+        },
       );
       if (isMonitor) heartbeatReceiver(context.repos, agentId, 2_000);
       // Silence matters: a hook that prints on an empty inbox would inject

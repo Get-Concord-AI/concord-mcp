@@ -566,7 +566,7 @@ describe('simplified workflow MCP contract', () => {
       expect(JSON.stringify(sent)).toContain('next turn');
 
       const message = repos.agentMessages.listByTask('TASK-TARGET')[0];
-      expect(message?.status).toBe('pending');
+      expect(message?.status).toBe('sent');
 
       const drained = drainInbox(repos, 'codex:target', 'codex');
       expect(drained[0]?.content).toContain('Please re-check the parser boundary.');
@@ -618,12 +618,12 @@ describe('simplified workflow MCP contract', () => {
           task_id: 'TASK-TARGET',
           agent_id: 'codex:sender',
           to_agent_id: 'codex:target',
-          content: 'This should fail.',
-          idempotency_key: 'sender-failed',
+          content: 'Queued until the target is back.',
+          idempotency_key: 'sender-queued',
         },
       });
-      expect(failed.isError).toBe(true);
-      expect(repos.tasks.get('TASK-TARGET')?.updatedAt).toBe(oldTimestamp);
+      expect(failed.isError).not.toBe(true);
+      expect(JSON.stringify(failed)).toContain('"ticks":"✓"');
 
       const inspected = await harness.client.callTool({
         name: 'inspect_work',
@@ -730,7 +730,7 @@ describe('simplified workflow MCP contract', () => {
     }
   });
 
-  it('fails immediately for an unreachable target without suggesting another agent', async () => {
+  it('queues for an unreachable target without suggesting another agent', async () => {
     repos.agents.upsert({
       agentId: 'codex:sender',
       kind: 'codex',
@@ -767,10 +767,10 @@ describe('simplified workflow MCP contract', () => {
           idempotency_key: 'offline-1',
         },
       });
-      expect(result.isError).toBe(true);
-      expect(JSON.stringify(result)).toContain('target_not_promptable');
+      expect(result.isError).not.toBe(true);
+      expect(JSON.stringify(result)).toContain('no live session');
       expect(JSON.stringify(result)).not.toContain('candidate');
-      expect(repos.agentMessages.listByAgent('cursor:offline')[0]?.status).toBe('failed');
+      expect(repos.agentMessages.listByAgent('cursor:offline')[0]?.status).toBe('sent');
     } finally {
       await close(harness);
     }
@@ -817,7 +817,7 @@ describe('simplified workflow MCP contract', () => {
       // A retry of a still-pending message re-uses the queued row rather than
       // enqueueing a duplicate the recipient would read twice.
       expect(repos.agentMessages.listByAgent('codex:target')).toHaveLength(1);
-      expect(repos.agentMessages.get(pending.messageId)?.status).toBe('pending');
+      expect(repos.agentMessages.get(pending.messageId)?.status).toBe('sent');
       expect(JSON.stringify(result)).toContain('"idempotent_replay":true');
     } finally {
       await close(harness);

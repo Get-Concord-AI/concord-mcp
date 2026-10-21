@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "concord inbox drain --format post-tool-use"
+            "command": "concord inbox drain --from-hook --format post-tool-use"
           }
         ]
       }
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "concord inbox drain --format stop"
+            "command": "concord inbox drain --from-hook --format stop"
           }
         ]
       }

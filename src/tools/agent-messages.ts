@@ -78,9 +78,22 @@ export function endpointPromptable(
 /** A retried send of a message that already left the queue: say where it got to. */
 function replayOutlook(message: AgentMessageRecord): string {
   if (message.status === 'replied') return 'This message was already delivered and answered.';
-  return message.seenAt === null
-    ? 'This message was already handed to that agent, which has not seen it yet.'
-    : 'This message was already delivered, and that agent has seen it.';
+  return message.status === 'read'
+    ? 'This message was already delivered, and that agent has read it.'
+    : 'This message was already handed to that agent, which has not read it yet.';
+}
+
+/**
+ * The outlook for a message that waits in the queue because nothing can take
+ * it right now. A registered agent whose session is not live may come back
+ * (a resumed session, or an operator-named agent's next session).
+ */
+function queuedOutlook(recipientAgentId: string, message: AgentMessageRecord): string {
+  return (
+    `Sent (✓) and queued: ${recipientAgentId} has no live session to take it now. It will be ` +
+    `delivered when that agent's session next checks in, or fail as expired at ` +
+    `${message.expiresAt ?? 'its expiry'}. Check its receipt with inspect_work message_id.`
+  );
 }
 
 function required(value: string | undefined, field: string, operation: string): string {
@@ -133,7 +146,7 @@ export function handleSendAgentMessage(
       `Agent ${input.agentId} is not the recipient of ${parent.messageId}.`,
     );
   }
-  if (parent?.status === 'failed' || parent?.status === 'pending') {
+  if (parent?.status === 'failed' || parent?.status === 'sent') {
     throw new AgentMessageDeliveryError(
       'unauthorized',
       parent.messageId,
@@ -193,7 +206,7 @@ export function handleSendAgentMessage(
         replay.errorDetail ?? `Message ${replay.messageId} previously failed delivery.`,
       );
     }
-    if (replay.status !== 'pending') {
+    if (replay.status !== 'sent') {
       return {
         message: replay,
         idempotentReplay: true,
@@ -217,32 +230,27 @@ export function handleSendAgentMessage(
       idempotencyKey: input.idempotencyKey,
     });
   }
-  const endpoint = repos.agentEndpoints.getByAgent(recipientAgentId);
-  if (endpoint === undefined) {
-    fail(
-      repos,
-      message,
-      'target_not_promptable',
-      `Agent ${recipientAgentId} has no prompt endpoint.`,
-    );
-  }
-  if (!endpointPromptable(endpoint)) {
-    fail(
-      repos,
-      message,
-      'target_unreachable',
-      `Agent ${recipientAgentId} is registered but its session is no longer live.`,
-    );
-  }
-
-  // The pending row is the queue. Delivery is recorded when the recipient
-  // actually reads it, so `delivered` never overstates what the agent has seen.
+  // The sent row is the queue, even for a recipient with no live session:
+  // it is delivered when that agent's session next drains, or expires.
+  // Delivery is recorded when the recipient's session takes it, so
+  // `delivered` never overstates what reached it.
   if (parent !== undefined) {
     repos.agentMessages.markReplied(parent.messageId);
   }
   repos.agents.touch(input.agentId);
   const activityTask =
     !idempotentReplay && task !== undefined ? tasks.touchActivity(task.taskId) : task;
+  const endpoint = repos.agentEndpoints.getByAgent(recipientAgentId);
+  if (endpoint === undefined || !endpointPromptable(endpoint)) {
+    return {
+      message,
+      idempotentReplay,
+      task: activityTask ?? null,
+      outlook: queuedOutlook(recipientAgentId, message),
+      delivery: 'queued_pull',
+      immediateMode: null,
+    };
+  }
   const outlook = deliveryOutlook(effectiveEndpointCapabilities(endpoint));
   return {
     message,
@@ -276,7 +284,7 @@ export async function handleSendAgentMessageWithDelivery(
   dispatcher: AgentMessageDispatcher,
 ): Promise<SendAgentMessageResult> {
   const result = handleSendAgentMessage(repos, input);
-  if (result.message.status !== 'pending') return result;
+  if (result.message.status !== 'sent') return result;
 
   const endpoint = repos.agentEndpoints.getByAgent(result.message.recipientAgentId);
   const capabilities = effectiveEndpointCapabilities(endpoint);

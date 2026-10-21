@@ -1,3 +1,4 @@
+import { MESSAGING_V2_MIGRATION } from './messaging-v2-migration.js';
 import { PROJECT_SCOPE_MIGRATION } from './project-scope-migration.js';
 
 /**
@@ -265,4 +266,7 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE agent_endpoints ADD COLUMN awaiting_user_since TEXT;
   `,
+  // 015 — messaging v2: sent/delivered/read/replied receipts, per-session
+  // delivery attribution, and expiry for messages nobody ever took.
+  MESSAGING_V2_MIGRATION,
 ];

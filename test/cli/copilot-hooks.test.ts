@@ -166,7 +166,7 @@ describe('Copilot CLI hooks', () => {
 
     expect(JSON.parse(await hook(ctx, 'post-tool-use'))).toEqual({});
     expect(JSON.parse(await hook(ctx, 'stop'))).toEqual({});
-    expect(repos.agentMessages.listByAgent(AGENT_ID)[0]?.status).toBe('pending');
+    expect(repos.agentMessages.listByAgent(AGENT_ID)[0]?.status).toBe('sent');
   });
 
   it('still shows what a host spooled after a failed handoff', async () => {

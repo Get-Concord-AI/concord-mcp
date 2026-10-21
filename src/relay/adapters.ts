@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import type { CodexReadTracker } from './codex-read-tracker.js';
 import type { AgentSessionAdapter, AgentSessionDelivery } from './server.js';
 
 export interface CodexAppServerClient {
@@ -14,6 +15,7 @@ export class CodexAppServerAdapter implements AgentSessionAdapter {
     private readonly client: CodexAppServerClient,
     private readonly threadId: string,
     private readonly currentTurnId: () => string | undefined,
+    private readonly reads?: CodexReadTracker,
   ) {}
 
   isBusy(): boolean {
@@ -23,18 +25,22 @@ export class CodexAppServerAdapter implements AgentSessionAdapter {
   async steer(delivery: AgentSessionDelivery): Promise<string | undefined> {
     const turnId = this.currentTurnId();
     if (turnId === undefined) throw new Error('Codex session has no active turn to steer.');
+    this.reads?.expect(delivery.messageId);
     await this.client.request('turn/steer', {
       threadId: this.threadId,
       expectedTurnId: turnId,
       input: [{ type: 'text', text: delivery.content }],
+      clientUserMessageId: delivery.messageId,
     });
     return turnId;
   }
 
   async inject(delivery: AgentSessionDelivery): Promise<string | undefined> {
+    this.reads?.expect(delivery.messageId);
     const result = await this.client.request('turn/start', {
       threadId: this.threadId,
       input: [{ type: 'text', text: delivery.content }],
+      clientUserMessageId: delivery.messageId,
     });
     return receiptFrom(result);
   }

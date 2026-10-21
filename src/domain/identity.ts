@@ -111,6 +111,26 @@ export function hookSessionId(rawJson: string): string | undefined {
   return sessionId === undefined || sessionId === '' ? undefined : sessionId;
 }
 
+/**
+ * The raw session id this process runs in, from a hook payload or the
+ * client's environment. Independent of `CONCORD_AGENT_ID`: an operator-named
+ * agent still runs in one session at a time, and receipts are per session.
+ */
+export function resolveSessionId(
+  env: NodeJS.ProcessEnv,
+  options: ResolveIdentityOptions = {},
+): string | undefined {
+  if (options.hookPayload !== undefined) {
+    const fromHook = hookSessionId(options.hookPayload);
+    if (fromHook !== undefined) return fromHook;
+  }
+  for (const source of sourcesFor(options.kind)) {
+    const sessionId = env[source.envVar]?.trim();
+    if (sessionId !== undefined && sessionId !== '') return sessionId;
+  }
+  return undefined;
+}
+
 export interface ResolveIdentityOptions {
   /** Client the agent runs in. Selects which session source may be read. */
   kind?: string | undefined;

@@ -35,6 +35,10 @@ export class CodexDaemonClient {
   private buffer = '';
   private readonly pending = new Map<number, PendingRequest>();
   private activeTurnId: string | undefined;
+  private readonly listeners: ((
+    method: string,
+    params: Record<string, unknown> | undefined,
+  ) => void)[] = [];
 
   constructor(
     private readonly command = 'codex',
@@ -44,6 +48,13 @@ export class CodexDaemonClient {
 
   currentTurnId(): string | undefined {
     return this.activeTurnId;
+  }
+
+  /** Receive every app-server notification (item and turn events). */
+  onNotification(
+    listener: (method: string, params: Record<string, unknown> | undefined) => void,
+  ): void {
+    this.listeners.push(listener);
   }
 
   async connect(): Promise<void> {
@@ -157,6 +168,9 @@ export class CodexDaemonClient {
     }
     const notification = notificationSchema.safeParse(value);
     if (!notification.success) return;
+    for (const listener of this.listeners) {
+      listener(notification.data.method, notification.data.params);
+    }
     const turn = turnSchema.safeParse(notification.data.params?.['turn']);
     if (!turn.success) return;
     if (notification.data.method === 'turn/started') this.activeTurnId = turn.data.id;

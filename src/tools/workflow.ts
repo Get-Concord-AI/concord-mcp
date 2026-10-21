@@ -1,3 +1,6 @@
+import { outboxReceiptLines } from './inspect-messages.js';
+import { handleInspectWork } from './inspect-work.js';
+import { describeReceipt, toReceipt } from '../domain/receipts.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { Repositories, TaskRecord } from '../db/index.js';
@@ -13,7 +16,6 @@ import {
   finishWorkInputShape,
   type FinishWorkInput,
   inspectWorkInputShape,
-  type InspectWorkInput,
   startWorkInputShape,
   type StartWorkInput,
   transferWorkInputShape,
@@ -22,8 +24,6 @@ import {
   type UpdateWorkInput,
 } from '../domain/schemas.js';
 import { handleClaimWork, type ClaimWorkResult } from './claim-work.js';
-import { handleGetTaskContext, type TaskContextResult } from './get-task-context.js';
-import { handleGetWorkState } from './get-work-state.js';
 import {
   handleAcceptHandoff,
   handleDeclineHandoff,
@@ -45,7 +45,6 @@ import { handleUpdateTask, type UpdateTaskResult } from './update-task.js';
 import {
   AgentMessageDeliveryError,
   handleSendAgentMessageWithDelivery,
-  inspectAgentCommunication,
   type AgentMessageDispatcher,
   type SendAgentMessageResult,
 } from './agent-messages.js';
@@ -191,42 +190,7 @@ export function handleStartWork(
   return transact();
 }
 
-export type InspectWorkResult =
-  | { scope: 'workspace'; state: ReturnType<typeof handleGetWorkState> }
-  | { scope: 'task'; context: TaskContextResult }
-  | { scope: 'agent'; communication: ReturnType<typeof inspectAgentCommunication> }
-  | {
-      scope: 'message';
-      thread: ReturnType<Repositories['agentMessages']['listThread']>;
-      events: ReturnType<Repositories['agentMessages']['listEvents']>;
-    };
-
-export function handleInspectWork(repos: Repositories, input: InspectWorkInput): InspectWorkResult {
-  const selectors = [input.task_id, input.agent_id, input.message_id].filter(
-    (value) => value !== undefined,
-  );
-  if (selectors.length > 1) {
-    throw new Error('inspect_work accepts only one of task_id, agent_id, or message_id.');
-  }
-  if (input.task_id !== undefined) {
-    return { scope: 'task', context: handleGetTaskContext(repos, { task_id: input.task_id }) };
-  }
-  if (input.agent_id !== undefined) {
-    return { scope: 'agent', communication: inspectAgentCommunication(repos, input.agent_id) };
-  }
-  if (input.message_id !== undefined) {
-    const message = repos.agentMessages.get(input.message_id);
-    if (message === undefined) {
-      throw new Error(`Agent message ${input.message_id} does not exist.`);
-    }
-    return {
-      scope: 'message',
-      thread: repos.agentMessages.listThread(input.message_id),
-      events: repos.agentMessages.listEvents(input.message_id),
-    };
-  }
-  return { scope: 'workspace', state: handleGetWorkState(repos) };
-}
+export { handleInspectWork, type InspectWorkResult } from './inspect-work.js';
 
 export type UpdateWorkResult = UpdateTaskResult | SendAgentMessageResult;
 
@@ -651,7 +615,7 @@ export function registerWorkflowTools(
     },
     (args) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleInspectWork(repos, args);
+      const result = handleInspectWork(repos, args, session?.agentId);
       if (result.scope === 'workspace') {
         return withSessionAdvisories({
           content: [
@@ -685,8 +649,11 @@ export function registerWorkflowTools(
               type: 'text',
               text: withWorkspaceText(
                 `${result.communication.agentId}; promptable ${String(result.communication.promptable)}, ` +
-                  `${String(result.communication.inbox.length)} inbox message(s), ` +
-                  `${String(result.communication.outbox.length)} outbox message(s)` +
+                  (result.communication.private
+                    ? 'its messages are private to it'
+                    : `${String(result.communication.inbox.length)} inbox message(s), ` +
+                      `${String(result.communication.outbox.length)} outbox message(s)` +
+                      outboxReceiptLines(result.communication.outbox)) +
                   (result.communication.awaitingUserSince === null
                     ? '.'
                     : `; waiting on its user since ${result.communication.awaitingUserSince}.`),
@@ -826,11 +793,9 @@ export function registerWorkflowTools(
             {
               type: 'text',
               text: withWorkspaceText(
-                result.message.status === 'pending'
-                  ? `${args.operation ?? 'prompt'} ${result.message.messageId}; queued for ` +
-                      `${result.message.recipientAgentId}. ${result.outlook}`
-                  : `${args.operation ?? 'prompt'} ${result.message.messageId}; status ` +
-                      `${result.message.status}.`,
+                `${args.operation ?? 'prompt'} ${result.message.messageId} to ` +
+                  `${result.message.recipientAgentId}: ` +
+                  `${describeReceipt(toReceipt(result.message))}. ${result.outlook}`,
                 workspace,
               ),
             },
@@ -848,6 +813,7 @@ export function registerWorkflowTools(
             provider: result.message.provider,
             provider_receipt: result.message.providerReceipt,
             delivered_at: result.message.deliveredAt,
+            receipt: toReceipt(result.message),
             idempotent_replay: result.idempotentReplay,
             delivery: result.delivery,
             immediate_mode: result.immediateMode,

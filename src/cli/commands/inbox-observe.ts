@@ -1,30 +1,36 @@
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
+
 import { z } from 'zod';
 
 import type { Repositories } from '../../db/index.js';
-import { renderedMessageIds } from '../../domain/pull-inbox.js';
+import { hookSessionId } from '../../domain/identity.js';
+import { idsInPrompt, idsReadInTranscript, sessionKey } from '../../domain/receipts.js';
 
 /**
- * What a session's own hooks reveal about the messages its monitor handed it.
+ * What a session's own hooks reveal about the messages it was handed.
  *
  * A harness monitor drains a message the moment it arrives, but the harness
  * may hold the notification — for as long as the agent is blocked on a
  * question or permission prompt for its user. Only the session can say when
- * the agent was actually shown it, and only a fresh session can tell that
- * whatever its predecessor was holding died with it.
+ * its model was actually shown a message, and only by naming the message id:
+ * in the prompt that started a turn, or in the session transcript followed by
+ * something the model wrote. Timing alone never counts.
  */
 
-/** The parts of a Claude Code hook payload this reads; everything else is ignored. */
+/** The parts of a hook payload this reads; everything else is ignored. */
 const observedHookSchema = z
   .object({
-    hook_event_name: z.string(),
+    hook_event_name: z.string().optional(),
     /** SessionStart: startup, resume, clear, or compact. */
     source: z.string().optional(),
     /** UserPromptSubmit: the prompt, including a monitor notification that started the turn. */
     prompt: z.string().optional(),
     /** PreToolUse: the tool about to run. */
     tool_name: z.string().optional(),
-    /** Notification: why Claude Code is asking for the user's attention. */
+    /** Notification: why the harness is asking for the user's attention. */
     notification_type: z.string().optional(),
+    /** The session's conversation so far, where the harness exposes one. */
+    transcript_path: z.string().nullable().optional(),
     /**
      * Set when the hook fired inside a subagent or a background agent forked
      * from the session, rather than in the session's own conversation.
@@ -33,32 +39,104 @@ const observedHookSchema = z
   })
   .loose();
 
+export type ObservedHook = z.infer<typeof observedHookSchema>;
+
 /** Claude Code's tool that blocks the turn on a question for the user. */
 const ASK_USER_TOOL = 'AskUserQuestion';
+/** The most of a transcript read per hook: unread messages are recent. */
+const TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
 
 export interface Observation {
-  /** Messages this event proved the agent was shown. */
-  seen: string[];
-  /** Unseen messages returned to the queue for this agent's new session. */
+  /** Messages this event proved the agent's model was shown. */
+  read: string[];
+  /** Unread messages returned to the queue for this agent's new session. */
   requeued: string[];
 }
 
-const NOTHING: Observation = { seen: [], requeued: [] };
+export function parseObservedHook(rawJson: string): ObservedHook | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    return undefined;
+  }
+  const result = observedHookSchema.safeParse(parsed);
+  return result.success ? result.data : undefined;
+}
+
+/** The session key a hook payload belongs to, when it names one. */
+export function hookSession(rawJson: string): string | null {
+  const raw = hookSessionId(rawJson);
+  return raw === undefined ? null : sessionKey(raw);
+}
+
+/** A hook fired by a subagent or a forked background agent, not the session itself. */
+export function isSubagentHook(hook: ObservedHook | undefined): boolean {
+  return hook?.agent_id !== undefined && hook.agent_id !== '';
+}
+
+function readTail(path: string): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, 'r');
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, TRANSCRIPT_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    return buffer.toString('utf8');
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/** Mark read whatever this hook's prompt or transcript proves the model was shown. */
+function observeRead(
+  repos: Repositories,
+  agentId: string,
+  session: string | null,
+  hook: ObservedHook,
+): string[] {
+  const unread = repos.agentMessages.listUnreadForSession(agentId, session);
+  if (unread.length === 0) return [];
+  const candidates = unread.map((message) => message.messageId);
+  const read: string[] = [];
+  if (hook.prompt !== undefined) {
+    const shown = idsInPrompt(hook.prompt).filter((id) => candidates.includes(id));
+    read.push(
+      ...repos.agentMessages
+        .markRead(agentId, session, shown, 'prompt')
+        .map((message) => message.messageId),
+    );
+  }
+  const transcriptPath = hook.transcript_path;
+  if (transcriptPath !== undefined && transcriptPath !== null && transcriptPath !== '') {
+    const remaining = candidates.filter((id) => !read.includes(id));
+    const text = remaining.length === 0 ? undefined : readTail(transcriptPath);
+    if (text !== undefined) {
+      read.push(
+        ...repos.agentMessages
+          .markRead(agentId, session, idsReadInTranscript(text, remaining), 'transcript')
+          .map((message) => message.messageId),
+      );
+    }
+  }
+  return read;
+}
 
 /**
  * Apply one hook event to `agentId`'s messages and presence.
  *
+ * - Any hook from the session itself can carry read evidence (its prompt or
+ *   transcript). Hooks fired inside a subagent are ignored: a subagent's
+ *   activity is not proof the session's own model saw anything.
  * - `PreToolUse` for `AskUserQuestion`, and a `permission_prompt`
  *   notification, mean the session is about to block on its user. Recorded so
  *   a sender can be told; delivery is never held on it, because dismissing a
- *   prompt with Esc or Deny fires no hook to clear it. A question asked
- *   inside a subagent or a forked background agent (`agent_id` set) is not
- *   the session blocking: Claude Code forks one after a turn ends, and its
- *   tool calls still fire the session's hooks.
- * - `UserPromptSubmit` carries the text that started the turn. A monitor
- *   notification arrives this way, so any message rendered in it was seen.
+ *   prompt with Esc or Deny fires no hook to clear it.
  * - `SessionStart` from `startup` is a new session for this agent: anything
- *   delivered to an earlier session but never shown is queued again. A
+ *   delivered to an earlier session but never read is queued again. A
  *   `resume` restores the earlier session along with what it was holding, so
  *   requeueing there would show the agent the same message twice.
  */
@@ -67,65 +145,38 @@ export function observeHookEvent(
   agentId: string,
   rawJson: string,
 ): Observation {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch {
-    return NOTHING;
-  }
-  const result = observedHookSchema.safeParse(parsed);
-  if (!result.success) return NOTHING;
-  const event = result.data;
+  const hook = parseObservedHook(rawJson);
+  if (hook === undefined || isSubagentHook(hook)) return { read: [], requeued: [] };
+  const session = hookSession(rawJson);
+  const read = observeRead(repos, agentId, session, hook);
+  let requeued: string[] = [];
 
-  switch (event.hook_event_name) {
+  switch (hook.hook_event_name) {
     case 'PreToolUse':
-      if (event.tool_name === ASK_USER_TOOL && event.agent_id === undefined) {
-        awaitUser(repos, agentId);
-      }
-      return NOTHING;
+      if (hook.tool_name === ASK_USER_TOOL) awaitUser(repos, agentId);
+      break;
     case 'Notification':
-      if (event.notification_type === 'permission_prompt') awaitUser(repos, agentId);
-      return NOTHING;
-    case 'UserPromptSubmit': {
+      if (hook.notification_type === 'permission_prompt') awaitUser(repos, agentId);
+      break;
+    case 'SessionStart':
       repos.agentEndpoints.setAwaitingUser(agentId, null);
-      const ids = event.prompt === undefined ? [] : renderedMessageIds(event.prompt);
-      const seen = repos.agentMessages.markSeen(agentId, ids, 'prompt');
-      return { seen: seen.map((message) => message.messageId), requeued: [] };
-    }
-    case 'SessionStart': {
-      repos.agentEndpoints.setAwaitingUser(agentId, null);
-      if (event.source !== 'startup') return NOTHING;
-      const requeued = repos.agentMessages.requeueUnseen(agentId);
-      return { seen: [], requeued: requeued.map((message) => message.messageId) };
-    }
+      if (hook.source === 'startup') {
+        requeued = repos.agentMessages
+          .requeueUnread(agentId, session)
+          .map((message) => message.messageId);
+      }
+      break;
+    case undefined:
+      break;
     default:
-      return NOTHING;
+      // UserPromptSubmit, PostToolUse, Stop and the like: the session moved on,
+      // so whatever it was waiting on its user for has been answered. With
+      // parallel tool calls this can clear early; the flag is advisory.
+      repos.agentEndpoints.setAwaitingUser(agentId, null);
   }
+  return { read, requeued };
 }
 
 function awaitUser(repos: Repositories, agentId: string): void {
   repos.agentEndpoints.setAwaitingUser(agentId, new Date().toISOString());
-}
-
-/**
- * A tool call in `agentId`'s session finished (its PostToolUse hook), so
- * whatever it was waiting on its user for has been answered. With parallel
- * tool calls this can clear early; the flag is advisory, so that only costs a
- * sender the warning.
- */
-export function observeToolDone(repos: Repositories, agentId: string): void {
-  repos.agentEndpoints.setAwaitingUser(agentId, null);
-}
-
-/**
- * A turn in `agentId`'s session is ending (its Stop hook). Any notification the
- * monitor handed the harness before now was shown to the agent during that
- * turn — including one held while the agent was blocked on its user, since the
- * turn could only end after the user answered.
- */
-export function observeTurnEnd(repos: Repositories, agentId: string, now = new Date()): string[] {
-  repos.agentEndpoints.setAwaitingUser(agentId, null);
-  return repos.agentMessages
-    .markSeenDeliveredBy(agentId, now.toISOString(), 'stop')
-    .map((message) => message.messageId);
 }
