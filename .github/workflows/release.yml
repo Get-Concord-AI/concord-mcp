@@ -92,17 +92,17 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
         run: |
-          for attempt in {1..30}; do
+          for attempt in {1..90}; do
             if npm view "@concord-ai/concord-mcp@${PACKAGE_VERSION}" version --prefer-online >/dev/null 2>&1; then
               echo "@concord-ai/concord-mcp@${PACKAGE_VERSION} is visible on npm"
               exit 0
             fi
 
-            echo "Waiting for npm propagation (${attempt}/30)"
+            echo "Waiting for npm propagation (${attempt}/90)"
             sleep 10
           done
 
-          echo "npm version ${PACKAGE_VERSION} was not visible after 5 minutes" >&2
+          echo "npm version ${PACKAGE_VERSION} was not visible after 15 minutes" >&2
           exit 1
 
       - name: Install MCP Registry publisher
