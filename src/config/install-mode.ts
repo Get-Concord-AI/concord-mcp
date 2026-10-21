@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { z } from 'zod';
@@ -58,6 +58,18 @@ export function standaloneInstall(
   }
 }
 
+/**
+ * A path inside this package, re-rooted at the standalone install's `current`
+ * link. Modules resolve to their version directory, which the installer prunes
+ * two upgrades later; links written through `current` follow every upgrade.
+ */
+export function upgradeStablePath(path: string, moduleUrl: string = import.meta.url): string {
+  const install = standaloneInstall(moduleUrl);
+  const root = packageRoot(moduleUrl);
+  if (install === undefined || !path.startsWith(root)) return path;
+  return join(install.installDir, 'current', 'lib', path.slice(root.length));
+}
+
 /** The installer's settings that keep an upgrade in this install's locations. */
 function locationEnv(install: StandaloneInstall): Record<string, string> {
   return { CONCORD_INSTALL_DIR: install.installDir, CONCORD_BIN_DIR: install.binDir };
@@ -72,9 +84,10 @@ export function standaloneUpdateCommand(
   install: StandaloneInstall,
   home: string = homedir(),
 ): string {
+  // install.sh is POSIX-only, so its defaults are POSIX paths on every host.
   const defaults = {
-    installDir: join(home, '.concord', 'standalone'),
-    binDir: join(home, '.local', 'bin'),
+    installDir: posix.join(home, '.concord', 'standalone'),
+    binDir: posix.join(home, '.local', 'bin'),
   };
   if (install.installDir === defaults.installDir && install.binDir === defaults.binDir) {
     return STANDALONE_UPDATE_COMMAND;

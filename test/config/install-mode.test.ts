@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -14,6 +14,7 @@ import {
   standaloneUpdateCommand,
   standaloneUpgrade,
   updateCommand,
+  upgradeStablePath,
 } from '../../src/config/install-mode.js';
 
 /** A package root with a module at `dist/config/`, returning that module's URL. */
@@ -79,6 +80,23 @@ describe('install mode', () => {
     expect(standaloneInstall(packageModuleUrl('not json'))).toBeUndefined();
     expect(standaloneInstall(packageModuleUrl('{"binDir":"","installDir":"/x"}'))).toBeUndefined();
     expect(standaloneInstall(packageModuleUrl('{"binDir":"/x"}'))).toBeUndefined();
+  });
+
+  it('re-roots package paths at the current link for a standalone install', () => {
+    const moduleUrl = packageModuleUrl(
+      '{"binDir":"/home/me/.local/bin","installDir":"/home/me/.concord/standalone"}',
+    );
+    const root = fileURLToPath(new URL('../../', moduleUrl));
+    expect(upgradeStablePath(join(root, 'plugin', 'gemini'), moduleUrl)).toBe(
+      join('/home/me/.concord/standalone', 'current', 'lib', 'plugin', 'gemini'),
+    );
+    expect(upgradeStablePath('/elsewhere/plugin', moduleUrl)).toBe('/elsewhere/plugin');
+  });
+
+  it('leaves package paths alone for an npm install', () => {
+    const moduleUrl = packageModuleUrl();
+    const path = join(fileURLToPath(new URL('../../', moduleUrl)), 'plugin');
+    expect(upgradeStablePath(path, moduleUrl)).toBe(path);
   });
 
   it('treats this checkout as an npm install', () => {
