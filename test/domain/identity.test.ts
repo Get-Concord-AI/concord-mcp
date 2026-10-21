@@ -55,10 +55,45 @@ describe('resolveIdentity', () => {
     expect(identity?.kind).toBe('goose');
   });
 
+  it('derives an Antigravity identity from ANTIGRAVITY_CONVERSATION_ID and ANTIGRAVITY_SESSION_ID', () => {
+    const fromConv = resolveIdentity({ ANTIGRAVITY_CONVERSATION_ID: 'conv-123' });
+    expect(fromConv?.agentId).toBe(agentIdForSession('antigravity', 'conv-123'));
+    expect(fromConv?.kind).toBe('antigravity');
+    expect(fromConv?.origin).toBe('session');
+
+    const fromSession = resolveIdentity({ ANTIGRAVITY_SESSION_ID: 'sess-456' });
+    expect(fromSession?.agentId).toBe(agentIdForSession('antigravity', 'sess-456'));
+    expect(fromSession?.kind).toBe('antigravity');
+  });
+
+  it('reads conversation_id and conversationId from an Antigravity hook payload', () => {
+    const snakeCase = resolveIdentity(
+      {},
+      { kind: 'antigravity', hookPayload: JSON.stringify({ conversation_id: 'conv-snake' }) },
+    );
+    expect(snakeCase?.agentId).toBe(agentIdForSession('antigravity', 'conv-snake'));
+    expect(snakeCase?.origin).toBe('hook');
+
+    const camelCase = resolveIdentity(
+      {},
+      { kind: 'antigravity', hookPayload: JSON.stringify({ conversationId: 'conv-camel' }) },
+    );
+    expect(camelCase?.agentId).toBe(agentIdForSession('antigravity', 'conv-camel'));
+    expect(camelCase?.origin).toBe('hook');
+  });
+
+  it('returns undefined when ANTIGRAVITY_AGENT is set without a conversation or session ID', () => {
+    expect(resolveIdentity({ ANTIGRAVITY_AGENT: '1' }, { kind: 'antigravity' })).toBeUndefined();
+    expect(resolveIdentity({ ANTIGRAVITY_AGENT: '1' })).toBeUndefined();
+  });
+
   it('never lets one client borrow another client session id', () => {
-    // A Codex hook whose payload is missing must not fall through to the Claude
-    // Code environment and register codex:<hash of a Claude session>.
+    // A Codex or Antigravity session must not fall through to the Claude
+    // Code environment and register codex/antigravity:<hash of a Claude session>.
     expect(resolveIdentity({ CLAUDE_CODE_SESSION_ID: SESSION }, { kind: 'codex' })).toBeUndefined();
+    expect(
+      resolveIdentity({ CLAUDE_CODE_SESSION_ID: SESSION }, { kind: 'antigravity' }),
+    ).toBeUndefined();
   });
 
   it('returns undefined rather than inventing an id when nothing identifies the session', () => {

@@ -6,8 +6,9 @@ import { executablePath, run } from './adapters/index.js';
 import { removeBlock, upsertBlock } from './block.js';
 import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
+import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
-import { CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
+import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
 import {
   CONCORD_SERVER_COMMAND,
   CONCORD_SERVER_KEY,
@@ -36,10 +37,12 @@ interface Registration {
 
 /** A user-level file global mode owns part of, for one harness. */
 interface UserFile {
-  /** Nothing is written unless this harness command is installed. */
-  readonly executable: string;
+  /** If provided, this harness command must be installed unless isDetected is provided. */
+  readonly executable?: string | undefined;
+  /** Custom detection function for harnesses that can be detected without CLI on PATH. */
+  readonly isDetected?: ((env: NodeJS.ProcessEnv) => boolean) | undefined;
   /** Set for an MCP registration, which `--no-mcp` skips. */
-  readonly registration?: Registration;
+  readonly registration?: Registration | undefined;
   readonly path: (env: NodeJS.ProcessEnv) => string;
   readonly install: (existing: string | undefined, path: string) => string;
   readonly uninstall: (existing: string) => string;
@@ -51,18 +54,42 @@ function grokHome(env: NodeJS.ProcessEnv): string {
   return configured === undefined || configured === '' ? join(userHome(env), '.grok') : configured;
 }
 
-function instructionFile(executable: string, path: (env: NodeJS.ProcessEnv) => string): UserFile {
+function antigravityConfigDir(env: NodeJS.ProcessEnv): string {
+  return join(userHome(env), '.gemini', 'config');
+}
+
+function isAntigravityDetected(env: NodeJS.ProcessEnv): boolean {
+  return (
+    executablePath('agy', env) !== undefined ||
+    env['ANTIGRAVITY_AGENT'] === '1' ||
+    existsSync(antigravityConfigDir(env))
+  );
+}
+
+function instructionFile(
+  executable: string,
+  path: (env: NodeJS.ProcessEnv) => string,
+  header?: string,
+  isDetected?: (env: NodeJS.ProcessEnv) => boolean,
+): UserFile {
   return {
     executable,
+    ...(isDetected !== undefined ? { isDetected } : {}),
     path,
-    install: (existing) => upsertBlock(existing ?? '', CONCORD_GLOBAL_INSTRUCTIONS),
-    uninstall: removeBlock,
+    install: (existing) => upsertBlock(existing ?? header ?? '', CONCORD_GLOBAL_INSTRUCTIONS),
+    uninstall: (existing) => {
+      const rest = removeBlock(existing);
+      if (rest.trim() === header?.trim()) {
+        return '';
+      }
+      return rest;
+    },
   };
 }
 
 /**
- * User-level instructions, and MCP registrations edited directly (Codex and
- * Goose adapters register themselves). Cursor's instructions come from its
+ * User-level instructions, and MCP registrations edited directly (Codex,
+ * Goose, and Copilot CLI adapters register themselves). Cursor's instructions come from its
  * sessionStart hook, as its user rules are not a file.
  */
 const USER_FILES: readonly UserFile[] = [
@@ -70,11 +97,18 @@ const USER_FILES: readonly UserFile[] = [
   instructionFile('codex', (env) => join(codexHome(env), 'AGENTS.md')),
   instructionFile('gemini', (env) => join(userHome(env), '.gemini', 'GEMINI.md')),
   instructionFile('goose', (env) => join(dirname(gooseConfigPath(env)), '.goosehints')),
+  instructionFile('copilot', (env) => join(copilotHome(env), 'copilot-instructions.md')),
+  instructionFile(
+    'agy',
+    (env) => join(antigravityConfigDir(env), 'rules', 'concord.md'),
+    ANTIGRAVITY_RULE_HEADER,
+    isAntigravityDetected,
+  ),
   {
     executable: 'gemini',
     registration: { id: 'gemini', present: hasMcpServer },
     path: (env) => join(userHome(env), '.gemini', 'settings.json'),
-    install: (existing) => upsertGeminiSettings(existing),
+    install: (existing) => upsertGeminiSettings(existing, undefined),
     // Only the server goes: the shell settings may serve other tools by now.
     uninstall: removeMcpServer,
   },
@@ -82,7 +116,7 @@ const USER_FILES: readonly UserFile[] = [
     executable: 'cursor',
     registration: { id: 'cursor', present: hasMcpServer },
     path: (env) => join(userHome(env), '.cursor', 'mcp.json'),
-    install: (existing) => upsertMcpServer(existing),
+    install: (existing) => upsertMcpServer(existing, undefined),
     uninstall: removeMcpServer,
   },
   {
@@ -94,6 +128,15 @@ const USER_FILES: readonly UserFile[] = [
       const rest = removeGrokMcpServer(existing);
       return rest === '' ? '' : `${rest}\n`;
     },
+  },
+  {
+    executable: 'agy',
+    isDetected: isAntigravityDetected,
+    registration: { id: 'antigravity', present: hasMcpServer },
+    path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
+    install: (existing) =>
+      upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
+    uninstall: removeMcpServer,
   },
 ];
 
@@ -108,6 +151,12 @@ function mayChange(
   return enable && (existing === undefined || !registration.present(existing));
 }
 
+function isFileDetected(file: UserFile, env: NodeJS.ProcessEnv): boolean {
+  if (file.isDetected !== undefined) return file.isDetected(env);
+  if (file.executable !== undefined) return executablePath(file.executable, env) !== undefined;
+  return false;
+}
+
 function applyFile(
   env: NodeJS.ProcessEnv,
   file: UserFile,
@@ -117,7 +166,7 @@ function applyFile(
 ): void {
   const path = file.path(env);
   const exists = existsSync(path);
-  if (enable ? executablePath(file.executable, env) === undefined : !exists) return;
+  if (enable ? !isFileDetected(file, env) : !exists) return;
   try {
     const existing = exists ? readFileSync(path, 'utf8') : undefined;
     const { registration } = file;

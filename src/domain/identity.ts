@@ -39,6 +39,13 @@ export const SESSION_SOURCES: readonly SessionSource[] = [
   { kind: 'claude-code', envVar: 'CLAUDE_CODE_SESSION_ID' },
   { kind: 'grok', envVar: 'GROK_SESSION_ID' },
   { kind: 'goose', envVar: 'AGENT_SESSION_ID' },
+  // Copilot CLI hands its MCP servers the same id its hooks receive as `sessionId`.
+  { kind: 'copilot-cli', envVar: 'COPILOT_AGENT_SESSION_ID' },
+  // Set in Google Antigravity IDE environments (Windows, Linux, macOS).
+  // Headless agy CLI does not pass these variables to child processes; sessions
+  // there resolve through hookPayload (SessionStart / PreInvocation hooks).
+  { kind: 'antigravity', envVar: 'ANTIGRAVITY_CONVERSATION_ID' },
+  { kind: 'antigravity', envVar: 'ANTIGRAVITY_SESSION_ID' },
 ];
 
 /** How an identity was established, for diagnostics and error messages. */
@@ -52,7 +59,12 @@ export interface AgentIdentity {
 
 /** The one field we need from any client's hook payload. */
 const hookSessionSchema = z
-  .object({ session_id: z.string().optional(), sessionId: z.string().optional() })
+  .object({
+    session_id: z.string().optional(),
+    sessionId: z.string().optional(),
+    conversation_id: z.string().optional(),
+    conversationId: z.string().optional(),
+  })
   .loose();
 
 /**
@@ -67,10 +79,10 @@ export function agentIdForSession(kind: string, sessionId: string): string {
   return `${kind}:${createHash('sha256').update(sessionId).digest('hex').slice(0, 8)}`;
 }
 
-/** The session source for a client, when that client exposes one. */
-function sourceFor(kind: string | undefined): SessionSource | undefined {
-  if (kind === undefined) return undefined;
-  return SESSION_SOURCES.find((source) => source.kind === kind);
+/** The session sources for a client, when that client exposes any. */
+function sourcesFor(kind: string | undefined): readonly SessionSource[] {
+  if (kind === undefined) return SESSION_SOURCES;
+  return SESSION_SOURCES.filter((source) => source.kind === kind);
 }
 
 /**
@@ -90,7 +102,12 @@ export function hookSessionId(rawJson: string): string | undefined {
   }
   const result = hookSessionSchema.safeParse(parsed);
   if (!result.success) return undefined;
-  const sessionId = (result.data.session_id ?? result.data.sessionId)?.trim();
+  const sessionId = (
+    result.data.conversation_id ??
+    result.data.conversationId ??
+    result.data.session_id ??
+    result.data.sessionId
+  )?.trim();
   return sessionId === undefined || sessionId === '' ? undefined : sessionId;
 }
 
@@ -131,12 +148,11 @@ export function resolveIdentity(
     }
   }
 
-  // With a kind, only that client's source is consulted; without one (the MCP
+  // With a kind, only that client's sources are consulted; without one (the MCP
   // server, which is told nothing), take whichever source this process was
   // actually launched by.
-  const candidates = kind === undefined ? SESSION_SOURCES : [sourceFor(kind)];
+  const candidates = sourcesFor(kind);
   for (const source of candidates) {
-    if (source === undefined) continue;
     const sessionId = env[source.envVar]?.trim();
     if (sessionId !== undefined && sessionId !== '') {
       return {

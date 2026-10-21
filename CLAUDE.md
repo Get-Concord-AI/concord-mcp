@@ -12,13 +12,12 @@ typed **task context**, leave **handoffs**, and generate **review packets**
 before opening PRs. SQLite is the source of truth; human-readable markdown
 artifacts are rendered from it for PR visibility.
 
-The surface is intentionally six MCP tools: `register_agent`, `get_work_state`,
-`claim_work`, `update_task`, `get_task_context`, and `handoff`. Review packets
-are produced by `handoff` with `ready_for_review` set, not a separate tool.
-`register_agent` was added with explicit product pull for agent presence (who is
-here and what they are working on); liveness is derived from `last_seen` in
-`domain/presence.ts`, not stored. Do not add more tools without explicit product
-pull.
+The surface is intentionally five MCP workflow tools: `start_work`,
+`inspect_work`, `update_work`, `transfer_work`, and `finish_work`. `start_work`
+registers agent presence and claims work. Review packets are produced by
+`finish_work` with outcome `review_ready`, not a separate tool. Liveness is
+derived from `last_seen` in `domain/presence.ts`, not stored. Do not add more
+tools without explicit product pull.
 
 ## Coding rules (non-negotiable)
 
@@ -69,11 +68,14 @@ src/
   config/paths.ts     .concord/ resolution, repo-root discovery
   db/                 SQLite: connection, schema, row parsers, repositories
   domain/             types, Zod input schemas, overlap detection (pure logic)
-  tools/              five-tool MCP surface; review-ready.ts is a
-                      handoff-invoked helper, not a registered tool
+  tools/              five workflow MCP tools; legacy handlers are internal helpers
   artifacts/          render HANDOFF.md / REVIEW_PACKET.md / WORK_STATE.json
   install/            per-client instruction writers
   cli/                commander CLI                     [bin: concord]
+  cloud/              Cloud API client, authentication, and MCP proxy
+  relay/              live message delivery and harness session adapters
+  workspaces/         client-root resolution and local/global store routing
+  telemetry/          content-free usage/workflow event recording and transport
 test/                 mirrors src/, uses :memory: sqlite
 ```
 
@@ -83,7 +85,7 @@ CLI commands are thin: validate input → call domain/db → render.
 ## Working in this repo
 
 ```bash
-pnpm install          # better-sqlite3 ships prebuilds; the build allowlist is a fallback
+pnpm install          # better-sqlite3 loads its bundled prebuilds; its node-gyp build is skipped
 pnpm typecheck        # tsc --noEmit
 pnpm lint             # eslint (strict, type-aware)
 pnpm test             # vitest run

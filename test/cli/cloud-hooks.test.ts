@@ -4,10 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import type { CloudRuntime } from '../../src/cloud/runtime.js';
 import {
   decideCloudPreToolUse,
+  handleCloudAntigravityPreInvocation,
+  handleCloudAntigravitySessionStart,
+  handleCloudAntigravityStop,
   handleCloudSessionStart,
 } from '../../src/cli/commands/cloud-hooks.js';
 import { cloudAccess } from '../../src/cli/commands/cloud-inbox.js';
@@ -203,5 +207,112 @@ describe('cloud hooks', () => {
     expect(access.runtime.checkoutRoot).toBe(worktree);
     expect(decision.result).toBe('blocked');
     expect(asked[0]?.searchParams.getAll('file')).toEqual(['src/a.ts']);
+  });
+
+  const injectStepsSchema = z.object({
+    injectSteps: z.array(
+      z.object({
+        ephemeralMessage: z.string().optional(),
+        systemMessage: z.string().optional(),
+        userMessage: z.string().optional(),
+      }),
+    ),
+  });
+
+  const stopSchema = z.object({
+    decision: z.string().optional(),
+    reason: z.string().optional(),
+  });
+
+  function cloudMessage(content: string) {
+    return {
+      id: `msg-${content}`,
+      senderAgentKey: 'codex:bbbb2222',
+      taskKey: null,
+      replyToMessageId: null,
+      content,
+      createdAt: NOW,
+      deliveredAt: NOW,
+    };
+  }
+
+  describe('Antigravity cloud hooks', () => {
+    it('registers session and injects system message with agent id', async () => {
+      const runtime = runtimeWith([
+        ['POST /v1/machines', () => ok({ machine: { id: 'm-uuid' } })],
+        ['POST /v1/agents', () => ok({ agent: { id: 'a-uuid' } })],
+        ['PUT /v1/agents/a-uuid/endpoint', () => ok({ endpoint: {} })],
+        [
+          'GET /v1/agents',
+          () =>
+            ok({
+              agents: [peer('codex:bbbb2222', NOW)],
+            }),
+        ],
+      ]);
+
+      const result = await handleCloudAntigravitySessionStart(
+        runtime,
+        JSON.stringify({ conversationId: 'conv-cloud-123' }),
+      );
+
+      expect(result.agentId).toMatch(/^antigravity:[0-9a-f]{8}$/);
+      const parsed = injectStepsSchema.parse(JSON.parse(result.output));
+      expect(parsed.injectSteps).toHaveLength(1);
+      expect(parsed.injectSteps[0]?.systemMessage).toContain(result.agentId);
+      expect(parsed.injectSteps[0]?.systemMessage).toContain('codex:bbbb2222');
+      expect(parsed.injectSteps[0]?.systemMessage).toContain('agent_id');
+      expect(parsed.injectSteps[0]?.systemMessage).toContain(
+        'write call (start_work, update_work, transfer_work, finish_work)',
+      );
+      expect(parsed.injectSteps[0]?.systemMessage).not.toContain('inspect_work');
+    });
+
+    it('returns error ephemeral message when conversationId is missing', async () => {
+      const runtime = runtimeWith([]);
+      const result = await handleCloudAntigravitySessionStart(runtime, '{}');
+
+      expect(result.agentId).toBeUndefined();
+      const parsed = injectStepsSchema.parse(JSON.parse(result.output));
+      expect(parsed.injectSteps[0]?.ephemeralMessage).toContain(
+        'Concord cannot tell which session you are',
+      );
+    });
+
+    it('drains cloud messages during pre-invocation', async () => {
+      const runtime = runtimeWith([
+        ['POST /v1/machines', () => ok({ machine: { id: 'm-uuid' } })],
+        ['POST /v1/agents', () => ok({ agent: { id: 'a-uuid' } })],
+        ['PUT /v1/agents/a-uuid/endpoint', () => ok({ endpoint: {} })],
+        ['POST /v1/messages/drain', () => ok({ messages: [cloudMessage('Cloud greeting!')] })],
+      ]);
+
+      const result = await handleCloudAntigravityPreInvocation(
+        runtime,
+        JSON.stringify({ conversationId: 'conv-cloud-123' }),
+      );
+
+      const parsed = injectStepsSchema.parse(JSON.parse(result.output));
+      expect(parsed.injectSteps).toHaveLength(1);
+      expect(parsed.injectSteps[0]?.userMessage).toContain('Cloud greeting!');
+    });
+
+    it('continues turn at stop when cloud messages arrived', async () => {
+      const runtime = runtimeWith([
+        ['POST /v1/machines', () => ok({ machine: { id: 'm-uuid' } })],
+        ['POST /v1/agents', () => ok({ agent: { id: 'a-uuid' } })],
+        ['PUT /v1/agents/a-uuid/endpoint', () => ok({ endpoint: {} })],
+        ['POST /v1/messages/drain', () => ok({ messages: [cloudMessage('Wait before stop!')] })],
+      ]);
+
+      const result = await handleCloudAntigravityStop(
+        runtime,
+        JSON.stringify({ conversationId: 'conv-cloud-123' }),
+      );
+
+      const parsed = stopSchema.parse(JSON.parse(result.output));
+      expect(parsed.decision).toBe('continue');
+      expect(parsed.reason).toContain('Wait before stop!');
+    });
   });
 });

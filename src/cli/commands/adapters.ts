@@ -1,6 +1,5 @@
 import type { Command } from '@commander-js/extra-typings';
 import { spawn } from 'node:child_process';
-import { createServer } from 'node:net';
 
 import { z } from 'zod';
 
@@ -20,7 +19,14 @@ import {
   uninstallGlobalAdapters,
 } from '../../install/adapters/index.js';
 import { openContext } from '../context.js';
+import { availablePort } from '../local-port.js';
 import { hostCodexInCloud } from './cloud-codex.js';
+import {
+  copilotServerAddress,
+  hostCopilot,
+  hostCopilotInCloud,
+  launchCopilot,
+} from './copilot-adapter.js';
 import { cloudAccess } from './cloud-inbox.js';
 
 async function hostCodex(agentId: string, threadId: string): Promise<void> {
@@ -48,25 +54,6 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
   await new Promise<void>((resolve) => {
     process.once('beforeExit', () => {
       resolve();
-    });
-  });
-}
-
-async function availablePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (address === null || typeof address === 'string') {
-        server.close();
-        reject(new Error('Could not allocate a local Codex app-server port.'));
-        return;
-      }
-      server.close((error) => {
-        if (error !== undefined) reject(error);
-        else resolve(address.port);
-      });
     });
   });
 }
@@ -190,6 +177,29 @@ export function registerAdaptersCommand(program: Command): void {
     .description('Launch Codex through a Concord-reachable local app-server')
     .argument('[args...]', 'Arguments forwarded to the Codex TUI')
     .action(async (args) => launchCodex(args, repoRoot()));
+  adapters
+    .command('copilot')
+    .description('Launch Copilot CLI with idle wake-up through its local embedded server')
+    .argument('[args...]', 'Arguments forwarded to the Copilot TUI')
+    // Copilot's own flags (-i, --allow-tool, ...) are forwarded, not parsed here.
+    .allowUnknownOption()
+    .action(async (args) => launchCopilot(args));
+  adapters
+    .command('host-copilot', { hidden: true })
+    .requiredOption('--agent <id>')
+    .requiredOption('--session <id>')
+    .option('--server <address>', "Embedded server address; defaults to the launcher's")
+    .action(async (options) => {
+      const address = options.server ?? copilotServerAddress();
+      if (address === undefined) throw new Error('No Copilot embedded server address.');
+      const access = cloudAccess(process.cwd());
+      if (access.kind === 'unusable') throw new Error(`Concord Cloud: ${access.reason}`);
+      if (access.kind === 'cloud') {
+        await hostCopilotInCloud(access.runtime, options.agent, options.session, address);
+        return;
+      }
+      await hostCopilot(options.agent, options.session, address);
+    });
   adapters
     .command('host-codex', { hidden: true })
     .requiredOption('--agent <id>')

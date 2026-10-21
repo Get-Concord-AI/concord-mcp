@@ -8,6 +8,7 @@ import {
   codexConfigFile,
   installCodexMcpConfig,
   installCodexHooks,
+  removeCodexMcpServer,
   uninstallCodexConfig,
   upsertCodexMcpServer,
 } from '../../src/install/codex-config.js';
@@ -122,5 +123,64 @@ describe('uninstallCodexConfig', () => {
     expect(result).not.toContain(CODEX_SECTION_HEADER);
     expect(result).not.toContain('concord hooks');
     expect(result).toContain('[other]');
+  });
+
+  it('removes Codex-written tool approval subtables so no transport-less server remains', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-'));
+    const env = { CODEX_HOME: home };
+    installCodexMcpConfig(env);
+    const path = codexConfigFile(env);
+    writeFileSync(
+      path,
+      `${readFileSync(path, 'utf8')}
+[mcp_servers.concord.tools.start_work]
+approval_mode = "approve"
+
+[mcp_servers.concord.env]
+CONCORD_REPO_ROOT = "/repo"
+
+[mcp_servers.other]
+command = "other"
+
+[mcp_servers.other.tools.run]
+approval_mode = "approve"
+`,
+    );
+
+    uninstallCodexConfig(env);
+
+    const result = readFileSync(path, 'utf8');
+    expect(result).not.toContain('mcp_servers.concord');
+    expect(result).toBe(
+      '[mcp_servers.other]\ncommand = "other"\n\n[mcp_servers.other.tools.run]\napproval_mode = "approve"\n',
+    );
+  });
+});
+
+describe('removeCodexMcpServer', () => {
+  it('matches quoted and spaced spellings and stops at array-of-tables headers', () => {
+    const source = [
+      '[ mcp_servers . "concord" ]',
+      'command = "concord-mcp"',
+      '',
+      "[mcp_servers.'concord'.tools.update_work]",
+      'approval_mode = "approve"',
+      '',
+      '[[hooks.Stop]]',
+      'type = "command"',
+      '',
+    ].join('\n');
+
+    expect(removeCodexMcpServer(source)).toBe('[[hooks.Stop]]\ntype = "command"\n');
+  });
+
+  it('keeps a table whose name only starts with concord', () => {
+    const source = '[mcp_servers.concord-cloud]\nurl = "https://example.test"\n';
+    expect(removeCodexMcpServer(source)).toBe(source);
+  });
+
+  it('ignores header-like lines inside multi-line strings', () => {
+    const source = '[notes]\ntext = """\n[mcp_servers.concord]\n"""\n';
+    expect(removeCodexMcpServer(source)).toBe(source);
   });
 });

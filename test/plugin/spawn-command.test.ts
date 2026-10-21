@@ -4,6 +4,8 @@ import { pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { batchCommandLine, quoteCmdArgument } from '../../src/install/spawn-command.js';
+
 const pluginSpawner = pathToFileURL(resolve('plugin/spawn-command.mjs')).href;
 
 function pluginEval(expression: string, file: string, args: readonly string[]): string {
@@ -51,5 +53,16 @@ process.stdout.write(result.stdout);
       encoding: 'utf8',
     });
     expect(result.stdout, result.stderr).toBe('a b&c');
+  });
+
+  it('quotes exactly like the package-side copy adapters use', () => {
+    const file = 'C:\\Program Files\\claude\\claude.cmd';
+    const args = ['plugin', 'install', 'C:\\a b\\100%', 'say "hi"', ''];
+    expect(pluginEval('batchCommandLine(file, args)', file, args)).toBe(
+      JSON.stringify(batchCommandLine(file, args)),
+    );
+    expect(pluginEval('args.map((arg) => quoteCmdArgument(arg))', '', args)).toBe(
+      JSON.stringify(args.map((arg) => quoteCmdArgument(arg))),
+    );
   });
 });

@@ -7,8 +7,8 @@ Goose's `config.yaml` when `goose` is detected. The extension is added under the
 Goose is an MCP-capable agent with no verified session wake or resume mechanism.
 Concord can register its MCP server with Goose, but inbox messaging is not
 currently supported because Concord cannot reliably register a Goose session
-endpoint for message delivery. Do not rely on `send_agent_message` for Goose
-sessions yet.
+endpoint for message delivery. Do not expect live inbox messages to reach
+Goose sessions yet.
 
 ## Configuration
 

@@ -13,7 +13,7 @@ pnpm install
 pnpm test
 ```
 
-Requires Node.js >= 20 and pnpm 10. `better-sqlite3` builds a native module on
+Requires Node.js >= 22.12 and pnpm 10. `better-sqlite3` builds a native module on
 install (allowlisted via `pnpm.onlyBuiltDependencies`).
 
 ## Before you write code

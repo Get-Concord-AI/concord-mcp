@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
+  antigravityWorkspace,
   decidePreToolUse,
+  handleAntigravityPreInvocation,
+  handleAntigravitySessionStart,
+  handleAntigravityStop,
   handleSessionStart,
   sessionStartIdentity,
 } from '../../src/cli/commands/hook.js';
@@ -9,6 +14,7 @@ import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
+import { handleSendAgentMessage } from '../../src/tools/agent-messages.js';
 
 function preToolUse(filePath: string): string {
   return JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: filePath } });
@@ -125,5 +131,155 @@ describe('handleSessionStart', () => {
     expect(result.agentId).toBeUndefined();
     expect(result.message).toContain('concord inbox register');
     expect(repos.agents.list()).toHaveLength(0);
+  });
+});
+
+describe('Antigravity hook handlers', () => {
+  let repos: Repositories;
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+  });
+
+  const injectStepsSchema = z.object({
+    injectSteps: z.array(
+      z.object({
+        ephemeralMessage: z.string().optional(),
+        systemMessage: z.string().optional(),
+        userMessage: z.string().optional(),
+      }),
+    ),
+  });
+
+  const stopSchema = z.object({
+    decision: z.string().optional(),
+    reason: z.string().optional(),
+  });
+
+  describe('handleAntigravitySessionStart', () => {
+    it('registers the agent and returns persistent system message with agent id', () => {
+      const payload = JSON.stringify({ conversationId: 'conv-test-123' });
+      const result = handleAntigravitySessionStart(repos, payload);
+
+      expect(result.agentId).toMatch(/^antigravity:[0-9a-f]{8}$/);
+      if (result.agentId === undefined) {
+        throw new Error('expected agentId to be defined');
+      }
+      expect(repos.agents.get(result.agentId)).toBeDefined();
+      expect(repos.agentEndpoints.getByAgent(result.agentId)).toBeDefined();
+
+      const output = injectStepsSchema.parse(JSON.parse(result.output));
+      expect(output.injectSteps).toHaveLength(1);
+      expect(output.injectSteps[0]?.systemMessage).toContain(result.agentId);
+      expect(output.injectSteps[0]?.systemMessage).toContain('agent_id');
+      expect(output.injectSteps[0]?.systemMessage).toContain('cannot see your session');
+      expect(output.injectSteps[0]?.systemMessage).toContain(
+        'write call (start_work, update_work, transfer_work, finish_work)',
+      );
+      expect(output.injectSteps[0]?.systemMessage).not.toContain('inspect_work');
+    });
+
+    it('returns error message when conversationId is missing', () => {
+      const result = handleAntigravitySessionStart(repos, '{}');
+      expect(result.agentId).toBeUndefined();
+      const output = injectStepsSchema.parse(JSON.parse(result.output));
+      expect(output.injectSteps[0]?.ephemeralMessage).toContain(
+        'Concord cannot tell which session you are',
+      );
+    });
+  });
+
+  describe('handleAntigravityPreInvocation', () => {
+    it('returns empty injectSteps when no messages are pending', () => {
+      const payload = JSON.stringify({ conversationId: 'conv-test-123' });
+      const result = handleAntigravityPreInvocation(repos, payload);
+      expect(injectStepsSchema.parse(JSON.parse(result.output))).toEqual({ injectSteps: [] });
+    });
+
+    it('drains pending inbox messages and injects them as userMessage', () => {
+      const payload = JSON.stringify({ conversationId: 'conv-test-123' });
+      const start = handleAntigravitySessionStart(repos, payload);
+      if (start.agentId === undefined) {
+        throw new Error('expected agentId to be defined');
+      }
+      const recipientId = start.agentId;
+
+      handleRegisterAgent(repos, { agent_id: 'claude:sender', kind: 'claude-code' });
+      handleSendAgentMessage(repos, {
+        operation: 'prompt',
+        agentId: 'claude:sender',
+        toAgentId: recipientId,
+        content: 'Review the latest diff please.',
+        idempotencyKey: 'k-1',
+      });
+
+      const result = handleAntigravityPreInvocation(repos, payload);
+      const parsed = injectStepsSchema.parse(JSON.parse(result.output));
+      expect(parsed.injectSteps).toHaveLength(1);
+      expect(parsed.injectSteps[0]?.userMessage).toContain('Review the latest diff please.');
+      expect(parsed.injectSteps[0]?.userMessage).toContain('claude:sender');
+
+      // Subsequent call should have no more pending messages
+      const secondResult = handleAntigravityPreInvocation(repos, payload);
+      expect(injectStepsSchema.parse(JSON.parse(secondResult.output))).toEqual({ injectSteps: [] });
+    });
+  });
+
+  describe('handleAntigravityStop', () => {
+    it('returns empty object when no messages are pending at stop', () => {
+      const payload = JSON.stringify({ conversationId: 'conv-test-123' });
+      const result = handleAntigravityStop(repos, payload);
+      expect(stopSchema.parse(JSON.parse(result.output))).toEqual({});
+    });
+
+    it('continues turn with reason when new messages arrived before stop', () => {
+      const payload = JSON.stringify({ conversationId: 'conv-test-123' });
+      const start = handleAntigravitySessionStart(repos, payload);
+      if (start.agentId === undefined) {
+        throw new Error('expected agentId to be defined');
+      }
+      const recipientId = start.agentId;
+
+      handleRegisterAgent(repos, { agent_id: 'claude:sender', kind: 'claude-code' });
+      handleSendAgentMessage(repos, {
+        operation: 'prompt',
+        agentId: 'claude:sender',
+        toAgentId: recipientId,
+        content: 'Wait, one more thing!',
+        idempotencyKey: 'k-2',
+      });
+
+      const result = handleAntigravityStop(repos, payload);
+      const parsed = stopSchema.parse(JSON.parse(result.output));
+      expect(parsed.decision).toBe('continue');
+      expect(parsed.reason).toContain('Wait, one more thing!');
+    });
+  });
+});
+
+describe('antigravityWorkspace', () => {
+  it('extracts first workspacePath from payload', () => {
+    const payload = JSON.stringify({
+      conversationId: 'conv-1',
+      workspacePaths: ['/home/user/project', '/other'],
+    });
+    expect(antigravityWorkspace(payload)).toBe('/home/user/project');
+  });
+
+  it('falls back to cwd when workspacePaths is absent', () => {
+    const payload = JSON.stringify({ conversationId: 'conv-1' });
+    expect(antigravityWorkspace(payload)).toBe(process.cwd());
+  });
+
+  it('falls back to cwd when workspacePaths is empty', () => {
+    const payload = JSON.stringify({ conversationId: 'conv-1', workspacePaths: [] });
+    expect(antigravityWorkspace(payload)).toBe(process.cwd());
+  });
+
+  it('falls back to cwd on invalid JSON', () => {
+    expect(antigravityWorkspace('{ not json')).toBe(process.cwd());
+  });
+
+  it('falls back to cwd on empty input', () => {
+    expect(antigravityWorkspace('')).toBe(process.cwd());
   });
 });

@@ -68,7 +68,8 @@ function socketAcceptingConnections(address: string): Promise<boolean> {
 }
 
 async function prepareRelayAddress(address: string): Promise<void> {
-  if (process.platform === 'win32' || !existsSync(address)) return;
+  // Named pipes have no filesystem entry, so on Windows ask the pipe itself.
+  if (process.platform !== 'win32' && !existsSync(address)) return;
   if (await socketAcceptingConnections(address)) {
     throw new Error(`A Concord relay is already active at ${address}.`);
   }

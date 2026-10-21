@@ -11,7 +11,17 @@ export const CONCORD_SERVER_KEY = 'concord';
 export const CONCORD_SERVER_COMMAND = 'concord-mcp';
 
 /** Repo-relative config paths that share the `mcpServers` JSON shape. */
-const JSON_TARGETS: readonly string[] = ['.mcp.json', join('.cursor', 'mcp.json')];
+const JSON_TARGETS: readonly string[] = [
+  '.mcp.json',
+  join('.cursor', 'mcp.json'),
+  join('.agents', 'mcp_config.json'),
+  join('.github', 'mcp.json'),
+];
+/** Harness kind each project file pins, for files only one harness reads. */
+const PINNED_KINDS: ReadonlyMap<string, string> = new Map([
+  [join('.agents', 'mcp_config.json'), 'antigravity'],
+  [join('.github', 'mcp.json'), 'copilot-cli'],
+]);
 const GEMINI_CONFIG_PATH = join('.gemini', 'settings.json');
 const GROK_CONFIG_PATH = join('.grok', 'config.toml');
 const GROK_FENCE_START = '# concord:mcp-start';
@@ -49,11 +59,20 @@ function configuredHome(env: NodeJS.ProcessEnv): string | undefined {
  * passing the previous output back in is a no-op. Without `repoRoot` the entry
  * is a user-level one, which finds the repository from where it is started.
  */
-export function upsertMcpServer(existing: string | undefined, repoRoot?: string): string {
+export function upsertMcpServer(
+  existing: string | undefined,
+  repoRoot?: string,
+  extraEnv?: Record<string, string>,
+): string {
   const source: unknown =
     existing === undefined || existing.trim() === '' ? {} : JSON.parse(existing);
   const config = mcpConfigSchema.parse(source);
   const servers = config.mcpServers ?? {};
+
+  const env = {
+    ...(repoRoot === undefined ? {} : { CONCORD_REPO_ROOT: repoRoot }),
+    ...(extraEnv ?? {}),
+  };
 
   const next = {
     ...config,
@@ -61,7 +80,7 @@ export function upsertMcpServer(existing: string | undefined, repoRoot?: string)
       ...servers,
       [CONCORD_SERVER_KEY]: {
         command: CONCORD_SERVER_COMMAND,
-        ...(repoRoot === undefined ? {} : { env: { CONCORD_REPO_ROOT: repoRoot } }),
+        ...(Object.keys(env).length === 0 ? {} : { env }),
       },
     },
   };
@@ -70,10 +89,16 @@ export function upsertMcpServer(existing: string | undefined, repoRoot?: string)
 
 /** Whether an `mcpServers` config string already registers Concord. */
 export function hasMcpServer(existing: string): boolean {
-  return CONCORD_SERVER_KEY in (mcpConfigSchema.parse(JSON.parse(existing)).mcpServers ?? {});
+  try {
+    if (existing.trim() === '') return false;
+    return CONCORD_SERVER_KEY in (mcpConfigSchema.parse(JSON.parse(existing)).mcpServers ?? {});
+  } catch {
+    return false;
+  }
 }
 
-const GROK_CONCORD_KEY = /^mcp_servers\.concord(?:\.|$)/u;
+/** Matches Concord's `mcp_servers.concord` TOML key path and every key or subtable under it. */
+export const CONCORD_TOML_KEY = /^mcp_servers\.concord(?:\.|$)/u;
 
 /** Each key path Grok TOML assigns or opens as a table, spacing and quotes removed. */
 function* grokKeyPaths(existing: string): Generator<{ path: string; header: boolean }> {
@@ -100,7 +125,7 @@ function* grokKeyPaths(existing: string): Generator<{ path: string; header: bool
 
 /** Whether Grok TOML registers Concord in any spelling: a table (quoted or not), dotted keys, or inline. */
 export function hasGrokMcpServer(existing: string): boolean {
-  return [...grokKeyPaths(existing)].some(({ path }) => GROK_CONCORD_KEY.test(path));
+  return [...grokKeyPaths(existing)].some(({ path }) => CONCORD_TOML_KEY.test(path));
 }
 
 /** Remove Concord's entry from an `mcpServers` config string, keeping the rest. */
@@ -193,7 +218,7 @@ export function removeGrokMcpServer(existing: string): string {
 
     const table = inString ? undefined : /^\s*\[([^\]]+)\]\s*(?:#.*)?$/u.exec(line)?.[1];
     if (table !== undefined) {
-      inConcordTable = GROK_CONCORD_KEY.test(tomlKeyPath(table));
+      inConcordTable = CONCORD_TOML_KEY.test(tomlKeyPath(table));
       if (inConcordTable) continue;
     }
     if (!inConcordTable) preserved.push(line);
@@ -206,9 +231,18 @@ function writeMcpConfig(repoRoot: string, relPath: string): string {
   const fullPath = join(repoRoot, relPath);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
 
+  if (existing !== undefined && hasMcpServer(existing) && !isConcordServerOwned(existing)) {
+    return relPath;
+  }
+
   let updated: string;
   try {
-    updated = upsertMcpServer(existing, repoRoot);
+    const kind = PINNED_KINDS.get(relPath);
+    updated = upsertMcpServer(
+      existing,
+      repoRoot,
+      kind === undefined ? undefined : { CONCORD_AGENT_KIND: kind },
+    );
   } catch {
     throw new McpConfigParseError(relPath);
   }
@@ -242,8 +276,9 @@ function writeGeminiConfig(repoRoot: string): string {
 
 /**
  * Register Concord in every project-scoped client config under `repoRoot`:
- * Claude Code, Cursor, Gemini CLI, and Grok Build. Codex uses its user-scoped
- * TOML installer because that harness does not expose a project MCP file.
+ * Claude Code, Cursor, Antigravity, Copilot CLI, Gemini CLI, and Grok Build.
+ * Codex uses its user-scoped TOML installer because that harness does not
+ * expose a project MCP file.
  */
 export function installMcpConfigs(repoRoot: string): string[] {
   return [
@@ -263,16 +298,42 @@ const CONCORD_PACKAGE_NAME = '@concord-ai/concord-mcp';
  * `@concord-ai/concord-mcp` optionally followed by a version. A path that
  * merely contains that text is the user's own wrapper and is left alone.
  */
-function isConcordWrittenEntry(entry: unknown): boolean {
+export function isConcordWrittenEntry(entry: unknown): boolean {
   const parsed = z
-    .object({ command: z.string().optional(), args: z.array(z.string()).optional() })
+    .object({
+      command: z.string().optional(),
+      args: z.array(z.string()).optional(),
+      env: z.record(z.string(), z.string()).optional(),
+    })
     .loose()
     .safeParse(entry);
   if (!parsed.success) return false;
+  // If the user specified custom arguments, it is a custom entry unless matching the runner shape.
+  if (parsed.data.args !== undefined && parsed.data.args.length > 0) {
+    const isRunner = parsed.data.args.some((arg) => isPackageSpec(arg, CONCORD_PACKAGE_NAME));
+    if (!isRunner) return false;
+  }
+  // If the user specified custom environment variables (other than CONCORD_REPO_ROOT or CONCORD_AGENT_KIND), it is custom.
+  const envKeys = Object.keys(parsed.data.env ?? {});
+  if (envKeys.some((key) => key !== 'CONCORD_REPO_ROOT' && key !== 'CONCORD_AGENT_KIND')) {
+    return false;
+  }
   if (parsed.data.command === CONCORD_SERVER_COMMAND) return true;
   // A non-string argument means this is not a shape Concord writes, so the
   // whole entry is treated as the user's own rather than parsed further.
   return (parsed.data.args ?? []).some((arg) => isPackageSpec(arg, CONCORD_PACKAGE_NAME));
+}
+
+/** Whether an existing MCP config string contains a Concord server entry written by Concord. */
+export function isConcordServerOwned(existing: string): boolean {
+  try {
+    if (existing.trim() === '') return false;
+    const config = mcpConfigSchema.parse(JSON.parse(existing));
+    const entry = config.mcpServers?.[CONCORD_SERVER_KEY];
+    return entry !== undefined && isConcordWrittenEntry(entry);
+  } catch {
+    return false;
+  }
 }
 
 /** Whether `arg` is exactly `name`, or `name@version` — not a path containing it. */

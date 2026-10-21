@@ -1,6 +1,6 @@
 {
   "name": "@concord-ai/concord-mcp",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "description": "Cross-harness communication and shared work-state for coding agents through MCP.",
   "mcpName": "io.github.Get-Concord-AI/concord-mcp",
   "keywords": [
@@ -81,7 +81,7 @@
     "vitest": "^5.0.1"
   },
   "pnpm": {
-    "onlyBuiltDependencies": [
+    "ignoredBuiltDependencies": [
       "better-sqlite3"
     ]
   }

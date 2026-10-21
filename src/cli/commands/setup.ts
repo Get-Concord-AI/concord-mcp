@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
 import { writeArtifacts } from '../../artifacts/index.js';
+import { installAntigravityHooks } from '../../install/antigravity-hooks.js';
 import { installClaudeHook } from '../../install/claude-hooks.js';
 import { installCodexMcpConfig } from '../../install/codex-config.js';
 import { applyGlobalMode, type GlobalModeReport } from '../../install/global-mode.js';
@@ -236,6 +237,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   }
   if (options.mcp !== false) {
     written.push(...installMcpConfigs(ctx.repoRoot));
+    written.push(installAntigravityHooks(ctx.repoRoot));
     // Global mode owns a user-level Cursor entry; without it, one is a stale
     // registration that would shadow this repository's pinned one.
     const migratedCursorConfig =

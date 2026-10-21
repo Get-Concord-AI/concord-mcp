@@ -2,7 +2,8 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { CONCORD_SERVER_COMMAND } from './mcp-config.js';
+import { CONCORD_SERVER_COMMAND, CONCORD_TOML_KEY } from './mcp-config.js';
+import { tomlKeyPath, tomlLines } from './toml-lines.js';
 
 /** The TOML table Codex reads Concord's server definition from. */
 export const CODEX_SECTION_HEADER = '[mcp_servers.concord]';
@@ -221,18 +222,21 @@ export function installCodexMcpConfig(env: NodeJS.ProcessEnv = process.env): str
   return fullPath;
 }
 
-function removeTable(source: string, header: string): string {
-  const lines = source.split('\n');
-  const start = lines.findIndex((line) => line.trim() === header);
-  if (start === -1) return source;
-  let end = lines.length;
-  for (let index = start + 1; index < lines.length; index += 1) {
-    if (TABLE_HEADER.test(lines[index] ?? '')) {
-      end = index;
-      break;
-    }
+/**
+ * Remove `[mcp_servers.concord]` and every table nested under it. Codex writes
+ * subtables such as `[mcp_servers.concord.tools.start_work]` when a tool is
+ * always-approved; leaving one behind still defines the server, now with no
+ * transport, and Codex refuses to load the whole config.
+ */
+export function removeCodexMcpServer(source: string): string {
+  const kept: string[] = [];
+  let inConcordTable = false;
+  for (const { text, inString } of tomlLines(source)) {
+    const table = inString ? undefined : /^\s*\[\[?([^\]]+)\]\]?\s*(?:#.*)?$/u.exec(text)?.[1];
+    if (table !== undefined) inConcordTable = CONCORD_TOML_KEY.test(tomlKeyPath(table));
+    if (!inConcordTable) kept.push(text);
   }
-  return [...lines.slice(0, start), ...lines.slice(end)]
+  return kept
     .join('\n')
     .replace(/\n{3,}/gu, '\n\n')
     .replace(/^\n+/u, '');
@@ -253,6 +257,6 @@ export function uninstallCodexConfig(env: NodeJS.ProcessEnv = process.env): stri
       (preserved === '' ? '' : `${preserved}\n`) +
       source.slice(end + HOOKS_END.length);
   }
-  writeFileSync(fullPath, removeTable(withoutHooks, CODEX_SECTION_HEADER));
+  writeFileSync(fullPath, removeCodexMcpServer(withoutHooks));
   return fullPath;
 }

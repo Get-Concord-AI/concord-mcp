@@ -13,6 +13,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (x64 and arm64). Update notices, `concord setup`'s upgrade, and the Goose
   extension follow the install method instead of assuming npm.
 
+## [0.14.2] - 2026-10-19
+
+### Added
+
+- **Sessions install or repair their own harness adapter.** When a Claude Code,
+  Grok or Goose session starts the Concord MCP server, it checks that harness's
+  adapter in the background. If the adapter is missing or broken and you opted
+  in during `concord setup` (or with `--auto-adapters`), Concord installs or
+  repairs it for the next session. The current session gets a one-time notice
+  with its agent id and monitor command. Without opt-in, nothing is changed
+  (#207).
+
+### Fixed
+
+- **Uninstalling no longer breaks Codex.** `concord adapters uninstall` left
+  behind the `[mcp_servers.concord.tools.*]` tables Codex writes when a tool is
+  always-approved, and Codex then refused to start with an "invalid transport"
+  error. Every `mcp_servers.concord` table is now removed (#227, #228).
+- **Grok sessions start the Concord monitor.** Grok's Stop hook now asks the
+  agent to start the persistent inbox monitor when none is running (#215).
+- **Monitor commands pass `--agent`.** Grok's `monitor` tool does not pass the
+  session id to the command it watches, so `concord inbox watch` could not tell
+  which session it was. The Grok and Cursor monitor commands now include
+  `--agent <agent-id>`, and `concord inbox register` prints the filled-in
+  command (#204, #206).
+
 ## [0.14.1] - 2026-10-17
 
 ### Fixed
@@ -510,7 +536,8 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.2...HEAD
+[0.14.2]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.12.0...v0.13.0

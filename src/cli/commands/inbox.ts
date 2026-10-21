@@ -1,5 +1,4 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 
 import type { Command } from '@commander-js/extra-typings';
@@ -30,6 +29,7 @@ import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { resolveAgentId } from '../agent-identity.js';
 import { resolveStore } from '../../workspaces/store.js';
 import { openContext } from '../context.js';
+import { launchDetachedConcord } from '../detached-host.js';
 import {
   cloudAccess,
   drainFromCloud,
@@ -246,24 +246,14 @@ export function workspaceExists(cwd: string, env: NodeJS.ProcessEnv = process.en
 }
 
 function launchCodexAdapterHost(repoRoot: string, agentId: string, threadId: string): void {
-  const entrypoint = process.argv[1];
-  if (entrypoint === undefined) return;
-  const child = spawn(
-    process.execPath,
-    [
-      entrypoint,
-      '--repo',
-      repoRoot,
-      'adapters',
-      'host-codex',
-      '--agent',
-      agentId,
-      '--thread',
-      threadId,
-    ],
-    { cwd: repoRoot, env: process.env, detached: true, stdio: 'ignore' },
-  );
-  child.unref();
+  launchDetachedConcord(repoRoot, [
+    'adapters',
+    'host-codex',
+    '--agent',
+    agentId,
+    '--thread',
+    threadId,
+  ]);
 }
 
 function recordDeliveredMessages(

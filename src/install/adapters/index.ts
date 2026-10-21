@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 
@@ -9,12 +8,32 @@ import {
   type MonitorKind,
 } from '../../domain/harness-config.js';
 import { userHome } from '../../config/paths.js';
+import { spawnCommandSync } from '../spawn-command.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
+import {
+  copilotConfigInstalled,
+  copilotHooksInstalled,
+  installCopilotHooks,
+  installCopilotMcpConfig,
+  uninstallCopilotConfig,
+} from '../copilot-config.js';
 import {
   gooseConfigInstalled,
   installGooseMcpConfig,
   uninstallGooseConfig,
 } from '../goose-config.js';
+import {
+  globalAntigravityHooksPath,
+  hasAntigravityHooks,
+  installGlobalAntigravityHooks,
+  uninstallGlobalAntigravityHooks,
+} from '../antigravity-hooks.js';
+import {
+  hasMcpServer,
+  isConcordServerOwned,
+  removeMcpServer,
+  upsertMcpServer,
+} from '../mcp-config.js';
 import {
   cursorTarget,
   hasConcordManifest,
@@ -68,25 +87,20 @@ export function run(
   ok: boolean;
   output: string;
 } {
-  const result = spawnSync(command, [...args], {
-    env,
-    encoding: 'utf8',
-    timeout: 15_000,
-    windowsHide: true,
-  });
+  const result = spawnCommandSync(command, args, { env, timeout: 15_000 });
   return {
     ok: result.status === 0,
     output: `${result.stdout}${result.stderr}`.trim(),
   };
 }
 
-function versionTuple(output: string): number[] | undefined {
+export function versionTuple(output: string): number[] | undefined {
   const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
   if (match === null) return undefined;
   return match.slice(1).map((part) => Number.parseInt(part, 10));
 }
 
-function atLeast(actual: readonly number[], required: readonly number[]): boolean {
+export function atLeast(actual: readonly number[], required: readonly number[]): boolean {
   for (let index = 0; index < required.length; index += 1) {
     const left = actual[index] ?? 0;
     const right = required[index] ?? 0;
@@ -512,6 +526,120 @@ function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
   };
 }
 
+function statusAntigravity(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterReport {
+  const config = HARNESS_CONFIGS.antigravity;
+  const executable = executablePath(config.executable, env);
+  const detected =
+    executable !== undefined ||
+    env['ANTIGRAVITY_AGENT'] === '1' ||
+    existsSync(join(userHome(env), '.gemini', 'config'));
+
+  if (!detected) {
+    return {
+      harness: config.name,
+      detected: false,
+      status: 'not_detected',
+      monitor: config.monitor.kind,
+      capabilities: [],
+      detail: 'Antigravity is not installed or not detected in environment.',
+    };
+  }
+
+  const workspaceMcpPath =
+    repoRoot === undefined ? undefined : join(repoRoot, '.agents', 'mcp_config.json');
+  const globalMcpPath = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
+  const workspaceHooksPath =
+    repoRoot === undefined ? undefined : join(repoRoot, '.agents', 'hooks.json');
+  const globalHooksPath = globalAntigravityHooksPath(env);
+  let hasWorkspace = false;
+  let hasGlobal = false;
+  let hasWorkspaceHooks = false;
+  let hasGlobalHooks = false;
+  try {
+    if (workspaceMcpPath !== undefined && existsSync(workspaceMcpPath)) {
+      hasWorkspace = hasMcpServer(readFileSync(workspaceMcpPath, 'utf8'));
+    }
+    if (existsSync(globalMcpPath)) {
+      hasGlobal = hasMcpServer(readFileSync(globalMcpPath, 'utf8'));
+    }
+    if (workspaceHooksPath !== undefined && existsSync(workspaceHooksPath)) {
+      hasWorkspaceHooks = hasAntigravityHooks(readFileSync(workspaceHooksPath, 'utf8'));
+    }
+    if (existsSync(globalHooksPath)) {
+      hasGlobalHooks = hasAntigravityHooks(readFileSync(globalHooksPath, 'utf8'));
+    }
+  } catch (error) {
+    return {
+      harness: config.name,
+      detected: true,
+      status: 'error',
+      monitor: config.monitor.kind,
+      capabilities: [],
+      detail: `Failed to read Antigravity configuration: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  const installed = hasWorkspace || hasGlobal;
+  const hooksRemaining = !installed && (hasWorkspaceHooks || hasGlobalHooks);
+
+  return {
+    harness: config.name,
+    detected: true,
+    status: installed ? 'installed' : 'action_required',
+    monitor: config.monitor.kind,
+    capabilities: installed ? [...config.installedCapabilities] : ['pull', 'busy'],
+    detail: installed
+      ? config.installedDetail
+      : hooksRemaining
+        ? 'Concord lifecycle hooks remain installed, but MCP server is not registered.'
+        : 'Concord MCP server is not yet registered in .agents/mcp_config.json or ~/.gemini/config/mcp_config.json.',
+  };
+}
+
+function statusCopilot(env: NodeJS.ProcessEnv): AdapterReport {
+  const config = HARNESS_CONFIGS['copilot-cli'];
+  const executable = executablePath(config.executable, env);
+  const base = { harness: config.name, monitor: config.monitor.kind };
+  if (executable === undefined) {
+    return {
+      ...base,
+      detected: false,
+      status: 'not_detected',
+      capabilities: [],
+      detail: 'Copilot CLI was not found on PATH.',
+    };
+  }
+  const version = versionTuple(run(executable, ['--version'], env).output);
+  if (version === undefined || !atLeast(version, config.minimumVersion)) {
+    return {
+      ...base,
+      detected: true,
+      status: 'unsupported_version',
+      capabilities: [],
+      detail: config.unsupportedDetail,
+    };
+  }
+  const server = copilotConfigInstalled(env);
+  const hooks = copilotHooksInstalled(env);
+  if (server && hooks) {
+    return {
+      ...base,
+      detected: true,
+      status: 'installed',
+      capabilities: [...config.installedCapabilities],
+      detail: config.installedDetail,
+    };
+  }
+  return {
+    ...base,
+    detected: true,
+    status: 'action_required',
+    capabilities: server ? ['pull'] : [],
+    detail: server
+      ? 'Concord lifecycle hooks are missing from Copilot CLI, so it cannot identify sessions or receive messages.'
+      : 'Concord MCP server is not yet registered with Copilot CLI.',
+  };
+}
+
 export function statusGlobalAdapters(
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
@@ -545,6 +673,10 @@ export function statusAdapter(
       return statusGrok(env);
     case 'goose':
       return statusGoose(env);
+    case 'antigravity':
+      return statusAntigravity(env, repoRoot);
+    case 'copilot-cli':
+      return statusCopilot(env);
   }
 }
 
@@ -569,6 +701,35 @@ export function installAdapter(
   env: NodeJS.ProcessEnv = process.env,
   isEphemeral: EphemeralTest = isEphemeralPath,
 ): void {
+  if (harness === 'antigravity') {
+    const config = HARNESS_CONFIGS.antigravity;
+    const executable = executablePath(config.executable, env);
+    const detected =
+      executable !== undefined ||
+      env['ANTIGRAVITY_AGENT'] === '1' ||
+      existsSync(join(userHome(env), '.gemini', 'config'));
+    if (!detected) return;
+    const path = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
+    if (existsSync(path)) {
+      const existing = readFileSync(path, 'utf8');
+      if (!hasMcpServer(existing)) {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(
+          path,
+          upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
+        );
+      }
+    } else {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(
+        path,
+        upsertMcpServer(undefined, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
+      );
+    }
+    installGlobalAntigravityHooks(env);
+    return;
+  }
+
   const executable = executablePath(HARNESS_CONFIGS[harness].executable, env);
   if (executable === undefined) return;
   switch (harness) {
@@ -607,6 +768,18 @@ export function installAdapter(
         return;
       }
       installGooseMcpConfig(env);
+      return;
+    }
+    case 'copilot-cli': {
+      const version = versionTuple(run(executable, ['--version'], env).output);
+      if (
+        version === undefined ||
+        !atLeast(version, HARNESS_CONFIGS['copilot-cli'].minimumVersion)
+      ) {
+        return;
+      }
+      installCopilotMcpConfig(env);
+      installCopilotHooks(env);
       return;
     }
   }
@@ -664,6 +837,23 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
+  uninstallCopilotConfig(env);
+  const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
+  if (existsSync(antigravityMcp)) {
+    try {
+      const existing = readFileSync(antigravityMcp, 'utf8');
+      if (hasMcpServer(existing) && isConcordServerOwned(existing)) {
+        writeFileSync(antigravityMcp, removeMcpServer(existing));
+      }
+    } catch {
+      // Unreadable or malformed config is left untouched.
+    }
+  }
+  try {
+    uninstallGlobalAntigravityHooks(env);
+  } catch {
+    // Malformed or unreadable hooks config is left untouched.
+  }
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

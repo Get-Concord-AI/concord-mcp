@@ -50,6 +50,12 @@ describe('upsertMcpServer', () => {
     expect(twice.split(CONCORD_SERVER_COMMAND).length - 1).toBe(1);
   });
 
+  it('supports extra environment variables such as CONCORD_AGENT_KIND', () => {
+    const out = upsertMcpServer(undefined, '/tmp/project', { CONCORD_AGENT_KIND: 'antigravity' });
+    expect(out).toContain('"CONCORD_AGENT_KIND": "antigravity"');
+    expect(out).toContain('"CONCORD_REPO_ROOT": "/tmp/project"');
+  });
+
   it('throws on malformed JSON rather than discarding it', () => {
     expect(() => upsertMcpServer('{ not json', '/tmp/project')).toThrow();
   });
@@ -63,6 +69,8 @@ describe('installMcpConfigs', () => {
     expect(written).toEqual([
       '.mcp.json',
       join('.cursor', 'mcp.json'),
+      join('.agents', 'mcp_config.json'),
+      join('.github', 'mcp.json'),
       join('.gemini', 'settings.json'),
       join('.grok', 'config.toml'),
     ]);
@@ -70,8 +78,22 @@ describe('installMcpConfigs', () => {
       expect(existsSync(join(root, relPath))).toBe(true);
       const content = readFileSync(join(root, relPath), 'utf8');
       expect(content).toContain(CONCORD_SERVER_COMMAND);
-      expect(content).toContain(root);
+      const escapedRoot = JSON.stringify(root).slice(1, -1);
+      expect(content.includes(root) || content.includes(escapedRoot)).toBe(true);
     }
+    const pinnedKind = (relPath: string): string | undefined =>
+      z
+        .object({
+          mcpServers: z.object({
+            concord: z.object({ env: z.object({ CONCORD_AGENT_KIND: z.string().optional() }) }),
+          }),
+        })
+        .parse(JSON.parse(readFileSync(join(root, relPath), 'utf8'))).mcpServers.concord.env
+        .CONCORD_AGENT_KIND;
+    expect(pinnedKind(join('.agents', 'mcp_config.json'))).toBe('antigravity');
+    expect(pinnedKind(join('.github', 'mcp.json'))).toBe('copilot-cli');
+    // Read by more than one harness, so each resolves its own session instead.
+    expect(pinnedKind('.mcp.json')).toBeUndefined();
     const gemini = z
       .object({
         tools: z.object({ shell: z.object({ backgroundCompletionBehavior: z.string() }) }),
@@ -80,6 +102,30 @@ describe('installMcpConfigs', () => {
       .parse(JSON.parse(readFileSync(join(root, '.gemini', 'settings.json'), 'utf8')));
     expect(gemini.tools.shell.backgroundCompletionBehavior).toBe('inject');
     expect(gemini.experimental.modelSteering).toBe(true);
+  });
+
+  it('preserves an existing custom user-owned concord server in .agents/mcp_config.json', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-mcp-config-'));
+    mkdirSync(join(root, '.agents'), { recursive: true });
+    const customConfig = {
+      mcpServers: {
+        concord: {
+          command: 'my-custom-concord',
+          args: ['--custom-flag'],
+          env: { CUSTOM_VAR: '1' },
+        },
+      },
+    };
+    writeFileSync(
+      join(root, '.agents', 'mcp_config.json'),
+      `${JSON.stringify(customConfig, null, 2)}\n`,
+    );
+
+    installMcpConfigs(root);
+    const content = readFileSync(join(root, '.agents', 'mcp_config.json'), 'utf8');
+    expect(content).toContain('my-custom-concord');
+    expect(content).toContain('--custom-flag');
+    expect(content).toContain('CUSTOM_VAR');
   });
 
   it('is idempotent and preserves an existing server', () => {

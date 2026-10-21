@@ -1,0 +1,14 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Discussions (Q&A and ideas)
+    url: https://github.com/Get-Concord-AI/concord-mcp/discussions
+    about: Ask questions, get help with your workflow, and share ideas.
+  - name: Documentation (README)
+    url: https://github.com/Get-Concord-AI/concord-mcp/blob/main/README.md
+    about: Read the project overview and getting started instructions.
+  - name: Documentation (guides)
+    url: https://github.com/Get-Concord-AI/concord-mcp/tree/main/docs
+    about: Find setup and usage guides for supported clients.
+  - name: Concord website
+    url: https://getconcord.ai
+    about: Learn more about Concord.

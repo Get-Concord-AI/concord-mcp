@@ -6,7 +6,16 @@
  * here rather than teaching each caller its own slightly different version.
  */
 
-export const harnessNames = ['claude-code', 'codex', 'cursor', 'gemini', 'grok', 'goose'] as const;
+export const harnessNames = [
+  'claude-code',
+  'codex',
+  'cursor',
+  'gemini',
+  'grok',
+  'goose',
+  'antigravity',
+  'copilot-cli',
+] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
 export const transports = ['pull', 'local-ipc', 'app-server'] as const;
@@ -189,6 +198,42 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Concord MCP server is registered with Goose; durable inbox delivery is available.',
     unsupportedDetail: 'Goose does not meet the verified MCP baseline (1.52.0).',
+  },
+  antigravity: {
+    name: 'antigravity',
+    executable: 'agy',
+    minimumVersion: [1, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'native',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Lifecycle hooks register session identity and drain inbox messages into turns; rules are available.',
+    unsupportedDetail: 'Antigravity executable not found or environment not detected.',
+  },
+  'copilot-cli': {
+    name: 'copilot-cli',
+    executable: 'copilot',
+    minimumVersion: [1, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: idleInject,
+    monitor: {
+      kind: 'managed-controller',
+      lifecycle: 'managed',
+      completion: 'controller',
+      background: true,
+      verified: true,
+    },
+    installedCapabilities: ['pull', 'inject', 'steer', 'idle', 'busy'],
+    installedDetail:
+      'Sessions started with `concord adapters copilot` are steered and woken through the embedded server; plain `copilot` sessions get hook delivery after tool calls and at turn end.',
+    unsupportedDetail: 'Copilot CLI does not meet the verified hooks baseline (1.0.0).',
   },
 };
 

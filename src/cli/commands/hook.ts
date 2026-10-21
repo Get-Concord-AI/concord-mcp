@@ -4,17 +4,38 @@ import type { Command } from '@commander-js/extra-typings';
 import { z } from 'zod';
 
 import type { Repositories } from '../../db/index.js';
-import { resolveIdentity, UNRESOLVED_IDENTITY_MESSAGE } from '../../domain/identity.js';
+import {
+  agentIdForSession,
+  hookSessionId,
+  resolveIdentity,
+  UNRESOLVED_IDENTITY_MESSAGE,
+} from '../../domain/identity.js';
+import { renderInboxBody } from '../../domain/pull-inbox.js';
 import { buildRoster } from '../../domain/presence.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { sessionStartIdentity } from '../agent-identity.js';
 import { openContext } from '../context.js';
 import { checkFileOverlaps } from './check.js';
-import { decideCloudPreToolUse, handleCloudSessionStart } from './cloud-hooks.js';
+import {
+  decideCloudPreToolUse,
+  handleCloudAntigravityPreInvocation,
+  handleCloudAntigravitySessionStart,
+  handleCloudAntigravityStop,
+  handleCloudSessionStart,
+} from './cloud-hooks.js';
 import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
-import { registerPullEndpoint } from './inbox.js';
-import { sessionStartMessage } from './session-start-message.js';
+import { copilotServerAddress } from './copilot-adapter.js';
+import { fileSpool } from './copilot-spool.js';
+import {
+  cloudCopilotBackend,
+  copilotWorkspace,
+  localCopilotBackend,
+  runCopilotHook,
+  type CopilotHookBackend,
+} from './copilot-hooks.js';
+import { drainInbox, registerPullEndpoint } from './inbox.js';
+import { antigravitySessionStartMessage, sessionStartMessage } from './session-start-message.js';
 import type { CloudRuntime } from '../../cloud/runtime.js';
 
 /** The subset of Claude Code's PreToolUse payload we need: the edited file path.
@@ -136,6 +157,118 @@ export function handleSessionStart(
   return { agentId, message: sessionStartMessage(agentId, others) };
 }
 
+const antigravityPayloadSchema = z
+  .object({ workspacePaths: z.array(z.string()).optional() })
+  .loose();
+
+/** The workspace an Antigravity hook is for: its payload's first workspace path, else cwd. */
+export function antigravityWorkspace(rawJson: string): string {
+  try {
+    const raw: unknown = JSON.parse(rawJson);
+    const parsed = antigravityPayloadSchema.safeParse(raw);
+    return (parsed.success ? parsed.data.workspacePaths?.[0] : undefined) ?? process.cwd();
+  } catch {
+    return process.cwd();
+  }
+}
+
+/**
+ * Handle Antigravity SessionStart hook: extracts conversationId, registers
+ * presence, and returns a persistent system message with the derived agent id.
+ */
+export function handleAntigravitySessionStart(
+  repos: Repositories,
+  rawJson: string,
+  workspace: string = process.cwd(),
+): { agentId: string | undefined; output: string } {
+  const sessionId = hookSessionId(rawJson);
+  if (sessionId === undefined) {
+    return {
+      agentId: undefined,
+      output: JSON.stringify({
+        injectSteps: [{ ephemeralMessage: `Concord: ${UNRESOLVED_IDENTITY_MESSAGE}` }],
+      }),
+    };
+  }
+  const identity = {
+    agentId: agentIdForSession('antigravity', sessionId),
+    kind: 'antigravity',
+    origin: 'hook' as const,
+  };
+  const agentId = identity.agentId;
+  ensureAgentRegistered(repos, identity, workspace);
+  registerPullEndpoint(repos, agentId, 'antigravity');
+
+  const others = buildRoster(repos.agents.list(), Date.now()).filter(
+    (entry) => entry.agentId !== agentId,
+  );
+  const msg = antigravitySessionStartMessage(agentId, others);
+  return {
+    agentId,
+    output: JSON.stringify({
+      injectSteps: [{ systemMessage: msg }],
+    }),
+  };
+}
+
+/**
+ * Handle Antigravity PreInvocation hook: extracts conversationId, registers
+ * presence, drains pending inbox messages, and injects them as userMessages.
+ */
+export function handleAntigravityPreInvocation(
+  repos: Repositories,
+  rawJson: string,
+  workspace: string = process.cwd(),
+): { output: string } {
+  const sessionId = hookSessionId(rawJson);
+  if (sessionId === undefined) {
+    return { output: JSON.stringify({ injectSteps: [] }) };
+  }
+  const identity = {
+    agentId: agentIdForSession('antigravity', sessionId),
+    kind: 'antigravity',
+    origin: 'hook' as const,
+  };
+  const agentId = identity.agentId;
+  ensureAgentRegistered(repos, identity, workspace);
+
+  const messages = drainInbox(repos, agentId, 'antigravity');
+  if (messages.length === 0) {
+    return { output: JSON.stringify({ injectSteps: [] }) };
+  }
+  return {
+    output: JSON.stringify({
+      injectSteps: [
+        {
+          userMessage: `[concord] Incoming message(s):\n\n${renderInboxBody(messages)}`,
+        },
+      ],
+    }),
+  };
+}
+
+/**
+ * Handle Antigravity Stop hook: checks if pending inbox messages exist;
+ * if so, drains them and tells Antigravity to continue the turn.
+ */
+export function handleAntigravityStop(repos: Repositories, rawJson: string): { output: string } {
+  const sessionId = hookSessionId(rawJson);
+  if (sessionId === undefined) {
+    return { output: JSON.stringify({}) };
+  }
+  const agentId = agentIdForSession('antigravity', sessionId);
+  const messages = drainInbox(repos, agentId, 'antigravity');
+  if (messages.length === 0) {
+    return { output: JSON.stringify({}) };
+  }
+  return {
+    output: JSON.stringify({
+      decision: 'continue',
+      reason: `New Concord message(s) arrived before this turn ended.\n\n${renderInboxBody(messages)}`,
+    }),
+  };
+}
+
 /** Read piped stdin to a string. Returns '' when attached to a TTY (no input). */
 function readStdin(): string {
   if (process.stdin.isTTY) {
@@ -152,21 +285,66 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
   program
     .command('hook <event>')
     .description(
-      'Run a Concord hook. events: pre-tool-use (PreToolUse overlap gate) and ' +
-        'session-start (SessionStart presence auto-register); both read a Claude Code JSON ' +
-        'payload on stdin.',
+      'Run a Concord hook. events: pre-tool-use (PreToolUse overlap gate), ' +
+        'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, and stop.',
     )
-    .action(async (event) => {
-      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
+    .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
+    .action(async (event, options) => {
+      if (options.client === 'copilot-cli') {
+        await runCopilotClientHook(event);
+        return;
+      }
+      // Copilot CLI also runs the hooks in a project's .claude/settings.json.
+      // Its own session-start hook registers the session under the right kind;
+      // this one would mint a claude-code id for a session that is not one.
+      if (event === 'session-start' && (process.env['COPILOT_CLI'] ?? '') !== '') return;
+      // For Antigravity hooks, read stdin once and derive the workspace from
+      // the payload's workspacePaths.  Global hooks run with cwd set to
+      // ~/.gemini/config, so the payload is the only reliable source.
+      const isAntigravity = options.client === 'antigravity';
+      const antigravityInput = isAntigravity ? readStdin() : '';
+      const workspace = isAntigravity ? antigravityWorkspace(antigravityInput) : process.cwd();
+
+      const access = cloudAccess(workspace, { timeoutMs: HOOK_TIMEOUT_MS });
       if (access.kind === 'unusable') {
         // Never a local workspace in its place, and never a blocked edit or session.
         process.stderr.write(`Concord Cloud could not be reached: ${access.reason}\n`);
+        if (isAntigravity) {
+          if (event === 'session-start' || event === 'pre-invocation') {
+            process.stdout.write(`${JSON.stringify({ injectSteps: [] })}\n`);
+          } else if (event === 'stop') {
+            process.stdout.write(`${JSON.stringify({})}\n`);
+          }
+        }
         return;
       }
       if (access.kind === 'cloud') {
-        await runCloudHook(access.runtime, event);
+        await runCloudHook(access.runtime, event, options.client, antigravityInput);
         return;
       }
+
+      if (isAntigravity) {
+        const repos = openContext(workspace).repos;
+        if (event === 'session-start') {
+          const result = handleAntigravitySessionStart(repos, antigravityInput, workspace);
+          process.stdout.write(`${result.output}\n`);
+          return;
+        }
+        if (event === 'pre-invocation') {
+          const result = handleAntigravityPreInvocation(repos, antigravityInput, workspace);
+          process.stdout.write(`${result.output}\n`);
+          return;
+        }
+        if (event === 'stop') {
+          const result = handleAntigravityStop(repos, antigravityInput);
+          process.stdout.write(`${result.output}\n`);
+          return;
+        }
+        process.stderr.write(`Unknown hook event for antigravity: ${event}\n`);
+        process.exitCode = 1;
+        return;
+      }
+
       if (event === 'session-start') {
         const result = handleSessionStart(openContext(process.cwd()).repos, readStdin());
         process.stdout.write(`${result.message}\n`);
@@ -201,12 +379,78 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     });
 }
 
+/** A Copilot CLI hook, against Concord Cloud when the repository is linked. */
+async function runCopilotClientHook(event: string): Promise<void> {
+  const input = readStdin();
+  const workspace = copilotWorkspace(input);
+  const access = cloudAccess(workspace, { timeoutMs: HOOK_TIMEOUT_MS });
+  if (access.kind === 'unusable') {
+    // Never a local workspace in its place, and never a blocked session.
+    process.stderr.write(`Concord Cloud could not be reached: ${access.reason}\n`);
+    process.stdout.write('{}\n');
+    return;
+  }
+  let backend: CopilotHookBackend;
+  let repoRoot: string;
+  if (access.kind === 'cloud') {
+    backend = cloudCopilotBackend(access.runtime);
+    repoRoot = access.runtime.repoRoot;
+  } else {
+    const context = openContext(workspace);
+    backend = localCopilotBackend(context.repos, context.repoRoot);
+    repoRoot = context.repoRoot;
+  }
+  const output = await runCopilotHook(
+    {
+      backend,
+      spool: fileSpool(repoRoot),
+      env: process.env,
+      serverAddress: copilotServerAddress(),
+    },
+    event,
+    input,
+  );
+  if (output === undefined) {
+    process.stderr.write(`Unknown hook event for copilot-cli: ${event}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`${output}\n`);
+}
+
 /**
  * A hook in a repository linked to Concord Cloud. Neither may break the
  * session: a cloud that cannot be reached is said once, and the edit or the
  * session goes ahead.
  */
-async function runCloudHook(runtime: CloudRuntime, event: string): Promise<void> {
+async function runCloudHook(
+  runtime: CloudRuntime,
+  event: string,
+  client?: string,
+  antigravityInput = '',
+): Promise<void> {
+  if (client === 'antigravity') {
+    const input = antigravityInput !== '' ? antigravityInput : readStdin();
+    if (event === 'session-start') {
+      const result = await handleCloudAntigravitySessionStart(runtime, input);
+      process.stdout.write(`${result.output}\n`);
+      return;
+    }
+    if (event === 'pre-invocation') {
+      const result = await handleCloudAntigravityPreInvocation(runtime, input);
+      process.stdout.write(`${result.output}\n`);
+      return;
+    }
+    if (event === 'stop') {
+      const result = await handleCloudAntigravityStop(runtime, input);
+      process.stdout.write(`${result.output}\n`);
+      return;
+    }
+    process.stderr.write(`Unknown hook event for antigravity: ${event}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
   if (event === 'session-start') {
     const message = await handleCloudSessionStart(runtime, readStdin()).then(
       (result) => result.message,
