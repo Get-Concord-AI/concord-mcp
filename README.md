@@ -74,7 +74,11 @@ direct prompts and replies.
 
 `concord setup` creates the local `.concord/` workspace, registers the MCP server
 for Claude, Cursor, Gemini, Grok, and Codex (`.mcp.json`, `.cursor/mcp.json`,
-`.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`) and writes
+`.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`).
+For [Goose](./docs/goose.md), it registers the `concord-relay` extension in
+Goose's `config.yaml` when detected. For
+[Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
+`.agents/hooks.json`, and `.agents/rules/concord.md`. It also writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
 `.codex/`, `.cursor/rules/`). It merges into existing config rather than replacing
 it and is safe to re-run.
