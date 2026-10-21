@@ -2,7 +2,10 @@
 # Install Concord without npm: downloads a release that bundles its own Node
 # runtime and puts `concord` and `concord-mcp` launchers on your PATH.
 #
-#   curl -fsSL https://github.com/Get-Concord-AI/concord-mcp/releases/latest/download/install.sh | sh
+#   curl -fsSL https://getconcord.ai/install.sh | sh
+#
+# (getconcord.ai redirects to this script on the latest GitHub Release:
+#  https://github.com/Get-Concord-AI/concord-mcp/releases/latest/download/install.sh)
 #
 # Environment:
 #   CONCORD_VERSION      version to install, e.g. 0.15.0 (default: latest release)

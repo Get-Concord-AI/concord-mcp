@@ -58,7 +58,7 @@ concord setup
 No Node.js? On macOS or Linux, install a self-contained build instead:
 
 ```bash
-curl -fsSL https://github.com/Get-Concord-AI/concord-mcp/releases/latest/download/install.sh | sh
+curl -fsSL https://getconcord.ai/install.sh | sh
 ```
 
 It bundles its own Node runtime under `~/.concord/standalone` and puts the

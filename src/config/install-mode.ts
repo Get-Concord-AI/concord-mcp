@@ -8,6 +8,8 @@ import { z } from 'zod';
 /** Marker the curl installer writes at the package root of a standalone install. */
 export const STANDALONE_MARKER = 'standalone.json';
 
+// The GitHub URL, not the getconcord.ai/install.sh redirect the docs show, so
+// upgrades never depend on the website.
 export const INSTALL_SCRIPT_URL =
   'https://github.com/Get-Concord-AI/concord-mcp/releases/latest/download/install.sh';
 

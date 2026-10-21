@@ -8,7 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Install without npm.** `curl -fsSL https://github.com/Get-Concord-AI/concord-mcp/releases/latest/download/install.sh | sh`
+- **Install without npm.** `curl -fsSL https://getconcord.ai/install.sh | sh`
   installs a self-contained build with its own Node runtime on macOS and Linux
   (x64 and arm64). Update notices, `concord setup`'s upgrade, and the Goose
   extension follow the install method instead of assuming npm.
