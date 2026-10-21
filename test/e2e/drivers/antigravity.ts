@@ -96,7 +96,13 @@ export class AntigravitySession extends HarnessSession {
     if (this.monitorCommand === undefined) {
       throw new Error('Antigravity SessionStart did not tell the agent how to start its monitor.');
     }
-    this.spawnMonitor(this.monitorCommand, this.env(), (text) => this.monitorOutput.push(text));
+    // Antigravity wakes only when the background command completes, so what the
+    // monitor printed counts as delivered once it has exited cleanly, not before.
+    const pending: string[] = [];
+    const child = this.spawnMonitor(this.monitorCommand, this.env(), (text) => pending.push(text));
+    child.once('exit', (code) => {
+      if (code === 0) this.monitorOutput.push(...pending);
+    });
     return Promise.resolve();
   }
 

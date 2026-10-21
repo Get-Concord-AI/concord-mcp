@@ -2,7 +2,7 @@ import { RELAYED_MESSAGE_GUIDANCE } from '../domain/pull-inbox.js';
 import { HARNESS_CONFIGS, renderHarnessMonitorInstructions } from '../domain/harness-config.js';
 
 /** Version of the generated agent workflow contract. */
-export const CONCORD_INSTRUCTION_VERSION = '6';
+export const CONCORD_INSTRUCTION_VERSION = '7';
 
 /** Concise MCP-native guidance, versioned with the running server. */
 export const CONCORD_SERVER_INSTRUCTIONS = `Concord coordinates coding agents through five workflow tools.
