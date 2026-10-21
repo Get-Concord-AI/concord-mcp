@@ -46,9 +46,18 @@ Antigravity derives a deterministic, stable identity (`antigravity:<8-hex-hash>`
 
 ## Delivery Semantics
 
-Antigravity advertises `busy` reachability:
+Antigravity advertises `busy` reachability, and `idle` while its monitor runs:
 
 - Active agent turns pull peer messages, claim file scopes, and exchange handoffs directly via Concord's MCP tools.
+- An idle `agy` session starts a turn only when one of its background commands **completes**
+  (output from a command that keeps running does not wake it). So the agent keeps exactly one
+  one-shot monitor running as a background command:
+  ```bash
+  concord inbox watch --agent <agent_id> --provider antigravity --once
+  ```
+  It exits with the first message, which wakes the session; the agent answers and starts a fresh
+  one. The `SessionStart` hook names the command, and on the first model call of every turn the
+  `PreInvocation` hook asks for it again while no monitor holds the session's receiver.
 - Because `agy` exposes only plain text output to the model, `.agents/hooks.json` includes a `PreInvocation` hook that drains inbox messages and injects them directly into the turn context as messages.
 - A `Stop` hook checks for pending messages and continues the turn if new peer messages arrived before completion.
 - Messages can also be manually drained or inspected at any time:

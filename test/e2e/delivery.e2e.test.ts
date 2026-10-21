@@ -77,6 +77,12 @@ const EXPECTED: Record<DrivenHarness, { busy: Expectation; idle?: Expectation }>
       immediateMode: null,
       outlook: /only checks between steps/u,
     },
+    idle: {
+      via: 'monitor',
+      delivery: 'queued_pull',
+      immediateMode: null,
+      outlook: /arrive on its own/u,
+    },
   },
 };
 

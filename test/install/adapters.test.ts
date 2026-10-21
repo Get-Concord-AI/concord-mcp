@@ -296,7 +296,7 @@ describe('global harness adapters', () => {
 
     expect(report.find((entry) => entry.harness === 'antigravity')).toMatchObject({
       status: 'installed',
-      capabilities: ['pull', 'busy'],
+      capabilities: ['pull', 'steer', 'idle', 'busy', 'monitor-command'],
     });
 
     const mcpConfig = readFileSync(join(home, '.gemini', 'config', 'mcp_config.json'), 'utf8');

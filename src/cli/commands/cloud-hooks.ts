@@ -14,10 +14,14 @@ import {
   hookSessionId,
   UNRESOLVED_IDENTITY_MESSAGE,
 } from '../../domain/identity.js';
+import {
+  antigravityInjectSteps,
+  antigravityMonitorNudge,
+} from '../../domain/antigravity-monitor.js';
 import { deriveLiveness } from '../../domain/presence.js';
 import { renderInboxBody } from '../../domain/pull-inbox.js';
 import { sessionStartIdentity } from '../agent-identity.js';
-import { drainFromCloud, registerInCloud } from './cloud-inbox.js';
+import { drainFromCloud, registerInCloud, watching } from './cloud-inbox.js';
 import type { HookDecision, SessionStartResult } from './hook.js';
 import { antigravitySessionStartMessage, sessionStartMessage } from './session-start-message.js';
 
@@ -212,18 +216,8 @@ export async function handleCloudAntigravityPreInvocation(
   const agentId = agentIdForSession('antigravity', sessionId);
   try {
     const messages = await drainFromCloud(runtime, agentId, 'antigravity');
-    if (messages.length === 0) {
-      return { output: JSON.stringify({ injectSteps: [] }) };
-    }
-    return {
-      output: JSON.stringify({
-        injectSteps: [
-          {
-            userMessage: `[concord] Incoming message(s):\n\n${renderInboxBody(messages)}`,
-          },
-        ],
-      }),
-    };
+    const nudge = antigravityMonitorNudge(rawJson, agentId, watching(runtime, agentId));
+    return { output: JSON.stringify({ injectSteps: antigravityInjectSteps(messages, nudge) }) };
   } catch {
     return { output: JSON.stringify({ injectSteps: [] }) };
   }

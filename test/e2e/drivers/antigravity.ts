@@ -9,7 +9,7 @@ import {
   type McpServerSpec,
 } from '../support/installed.js';
 import type { JsonObject } from '../support/mcp.js';
-import type { Delivered } from '../support/messages.js';
+import { parseDelivered, type Delivered } from '../support/messages.js';
 import { stringEnv } from './claude-code.js';
 import {
   deliveredFrom,
@@ -34,12 +34,15 @@ const stopSchema = z.object({ decision: z.literal('continue'), reason: z.string(
  * Antigravity (headless `agy`): the conversation id arrives only in hook
  * payloads, so the model passes the id SessionStart told it. Workspace hooks
  * inject messages before each model invocation and keep a stopping turn going.
- * Nothing reaches an idle session.
+ * An idle session is woken by the one-shot background monitor SessionStart
+ * tells the agent to run: its completion starts a turn.
  */
 export class AntigravitySession extends HarnessSession {
   readonly harness = 'antigravity';
   readonly mcpKnowsSession = false;
-  readonly reach = ['busy'] as const;
+  readonly reach = ['busy', 'idle'] as const;
+  private monitorCommand: string | undefined;
+  private readonly monitorOutput: string[] = [];
 
   private env(): NodeJS.ProcessEnv {
     return this.sandbox.env();
@@ -64,6 +67,9 @@ export class AntigravitySession extends HarnessSession {
     const agentId = told.map((message) => registeredAgentId(message)).find(Boolean);
     if (agentId === undefined) throw new Error('Antigravity SessionStart named no agent id.');
     this.learnAgentId(agentId);
+    this.monitorCommand = told
+      .map((message) => /`(concord inbox watch [^`]*?--once)`/u.exec(message)?.[1])
+      .find(Boolean);
   }
 
   /** PreInvocation runs before every model call, so it is how a busy turn hears. */
@@ -87,11 +93,15 @@ export class AntigravitySession extends HarnessSession {
   }
 
   startIdleReceiver(): Promise<void> {
-    return Promise.reject(new Error('Antigravity has no idle receiver.'));
+    if (this.monitorCommand === undefined) {
+      throw new Error('Antigravity SessionStart did not tell the agent how to start its monitor.');
+    }
+    this.spawnMonitor(this.monitorCommand, this.env(), (text) => this.monitorOutput.push(text));
+    return Promise.resolve();
   }
 
   idleReceived(): Delivered[] {
-    return [];
+    return parseDelivered(this.monitorOutput.join(''), 'monitor');
   }
 
   protected mcpServer(): McpServerSpec {

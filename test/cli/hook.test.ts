@@ -10,7 +10,9 @@ import {
   handleSessionStart,
   sessionStartIdentity,
 } from '../../src/cli/commands/hook.js';
+import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 import { openDatabase } from '../../src/db/connection.js';
+import { monitorCapabilityFor } from '../../src/domain/delivery.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
@@ -178,6 +180,19 @@ describe('Antigravity hook handlers', () => {
       expect(output.injectSteps[0]?.systemMessage).not.toContain('inspect_work');
     });
 
+    it('tells the agent to start its idle monitor with its own id filled in', () => {
+      const payload = JSON.stringify({ conversationId: 'conv-test-123' });
+      const result = handleAntigravitySessionStart(repos, payload);
+      const message =
+        injectStepsSchema.parse(JSON.parse(result.output)).injectSteps[0]?.systemMessage ?? '';
+
+      expect(message).toContain(
+        `\`concord inbox watch --agent ${result.agentId ?? ''} --provider antigravity --once\``,
+      );
+      expect(message).toContain('background command');
+      expect(message).not.toContain('never need to poll');
+    });
+
     it('returns error message when conversationId is missing', () => {
       const result = handleAntigravitySessionStart(repos, '{}');
       expect(result.agentId).toBeUndefined();
@@ -189,6 +204,39 @@ describe('Antigravity hook handlers', () => {
   });
 
   describe('handleAntigravityPreInvocation', () => {
+    it('asks for the idle monitor on the first model call while none is watching', () => {
+      const payload = JSON.stringify({ conversationId: 'conv-test-123', invocationNum: 0 });
+      const start = handleAntigravitySessionStart(repos, payload);
+      const result = handleAntigravityPreInvocation(repos, payload);
+      const steps = injectStepsSchema.parse(JSON.parse(result.output)).injectSteps;
+      expect(steps).toHaveLength(1);
+      expect(steps[0]?.userMessage).toContain(
+        `concord inbox watch --agent ${start.agentId ?? ''} --provider antigravity --once`,
+      );
+    });
+
+    it('does not ask for the monitor while one holds the receiver', () => {
+      const payload = JSON.stringify({ conversationId: 'conv-test-123', invocationNum: 0 });
+      const start = handleAntigravitySessionStart(repos, payload);
+      const agentId = start.agentId ?? '';
+      registerPullEndpoint(
+        repos,
+        agentId,
+        'antigravity',
+        Date.now(),
+        monitorCapabilityFor('antigravity'),
+      );
+      const endpoint = repos.agentEndpoints.getByAgent(agentId);
+      if (endpoint === undefined) throw new Error('expected an endpoint');
+      repos.agentEndpoints.heartbeatReceiver(
+        endpoint.endpointId,
+        new Date(Date.now() + 60_000).toISOString(),
+      );
+
+      const result = handleAntigravityPreInvocation(repos, payload);
+      expect(injectStepsSchema.parse(JSON.parse(result.output))).toEqual({ injectSteps: [] });
+    });
+
     it('returns empty injectSteps when no messages are pending', () => {
       const payload = JSON.stringify({ conversationId: 'conv-test-123' });
       const result = handleAntigravityPreInvocation(repos, payload);

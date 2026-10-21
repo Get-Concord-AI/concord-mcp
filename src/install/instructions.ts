@@ -1,5 +1,5 @@
 import { RELAYED_MESSAGE_GUIDANCE } from '../domain/pull-inbox.js';
-import { renderHarnessMonitorInstructions } from '../domain/harness-config.js';
+import { HARNESS_CONFIGS, renderHarnessMonitorInstructions } from '../domain/harness-config.js';
 
 /** Version of the generated agent workflow contract. */
 export const CONCORD_INSTRUCTION_VERSION = '6';
@@ -70,8 +70,11 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
 - Use \`inspect_work\` to read the workspace, one task, one agent, or one message
   thread. Use \`update_work\` for durable progress and for live prompts/replies
   to another promptable workspace agent.
-- Incoming messages are automatically delivered into your turns via PreInvocation hooks.
-  You can also inspect or drain them manually with \`concord inbox drain --provider antigravity --agent <agent_id>\`.
+- Incoming messages are delivered into a running turn via PreInvocation hooks. To hear them
+  while idle, keep exactly one background command running for
+  \`${HARNESS_CONFIGS.antigravity.monitor.command ?? ''}\`; when it completes, answer the
+  message and start a fresh one. You can also inspect or drain them manually with
+  \`concord inbox drain --provider antigravity --agent <agent_id>\`.
 - Use \`transfer_work\` for assignment, acceptance, decline, release,
   reassignment, evidence-bearing handoff offers, and reopening.
 - **Before finishing**, call \`finish_work\` once with the outcome, changed

@@ -1,3 +1,5 @@
+import { antigravityMonitorCommand } from '../../domain/antigravity-monitor.js';
+
 export interface RosterLine {
   readonly agentId: string;
   readonly liveness: string;
@@ -31,17 +33,24 @@ export function sessionStartMessage(agentId: string, others: readonly RosterLine
   ].join('\n');
 }
 
-/** Antigravity's MCP server cannot see the session, so the id must be passed explicitly on writes. */
+/**
+ * Antigravity's MCP server cannot see the session, so the id must be passed explicitly on writes.
+ * Hooks only reach a running turn; an idle session hears peers through a one-shot background
+ * monitor whose completion wakes it.
+ */
 export function antigravitySessionStartMessage(
   agentId: string,
   others: readonly RosterLine[],
 ): string {
+  const monitor = antigravityMonitorCommand(agentId);
   return [
     `Concord: this session is agent \`${agentId}\`. Pass agent_id: "${agentId}" on every ` +
       'write call (start_work, update_work, transfer_work, finish_work). ' +
       'The MCP server cannot see your session, so it cannot fill this in for you.',
-    'Messages from other agents in this workspace are delivered into your turns automatically; ' +
-      'you never need to poll for them.',
+    'Messages from other agents reach a running turn automatically. To hear them while idle, ' +
+      `start exactly one background command now: \`${monitor}\`. Do not wait on it or ` +
+      'poll it. When it completes with a message, answer it, then immediately start a fresh ' +
+      'one with the same command.',
     ...rosterLines(others),
   ].join('\n');
 }
