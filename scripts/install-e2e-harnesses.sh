@@ -12,6 +12,7 @@ set -euo pipefail
 
 CLAUDE_CODE_VERSION="2.1.305"
 CODEX_VERSION="0.163.0"
+COPILOT_VERSION="1.0.101"
 GROK_VERSION="1.0.60"
 GROK_SHA256="10e6af64b24724fc1074c373e906b9ad121110044dddcbd97ad43c3a25f96d5f"
 GOOSE_VERSION="v1.54.0"
@@ -36,7 +37,8 @@ fetch() {
 # npm versions are immutable once published.
 npm install --global --no-audit --no-fund \
   "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-  "@openai/codex@${CODEX_VERSION}"
+  "@openai/codex@${CODEX_VERSION}" \
+  "@github/copilot@${COPILOT_VERSION}"
 
 # The binaries Grok's and Goose's install scripts would download, fetched directly.
 fetch "https://x.ai/cli/grok-${GROK_VERSION}-linux-x86_64" "${GROK_SHA256}" "${WORK}/grok"

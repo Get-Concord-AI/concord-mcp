@@ -12,7 +12,7 @@ The suite tests Concord as a user installs it. `global-setup.ts` runs
 git repository, and that install on `PATH`. `concord setup` runs for real.
 
 The harness binaries `setup` and the Codex host shell out to (`claude`,
-`codex`, `cursor`, `grok`, `goose`, `agy`) are played by
+`codex`, `cursor`, `grok`, `goose`, `agy`, `copilot`) are played by
 `shims/harness-shim.mjs`. It reports the verified minimum version, records
 every call, and acts as a Codex app-server so `turn/start` and `turn/steer` can
 be observed.
@@ -22,7 +22,8 @@ because Concord treats adapter links into one as throwaway checkouts.
 
 ## Real harnesses against a fake model (`test/e2e/real`)
 
-Claude Code, Codex, Grok and Goose let you choose the model API they call. The
+Claude Code, Codex, Copilot CLI, Grok and Goose let you choose the model API they
+call. The
 real-harness suite runs their **real binaries** against a local fake model
 (`real/fake-model`) that speaks the Anthropic Messages and OpenAI Responses
 APIs. A scripted brain plays a cooperative agent: it loads Concord's tools,
@@ -35,6 +36,7 @@ deterministic and need no accounts.
 | ----------- | ------------------------------------------ | ------------------------------------------------- |
 | Claude Code | PostToolUse hook                           | plugin monitor in a real TUI                      |
 | Codex       | hooks (pre-trusted)                        | `concord adapters codex` controller starts a turn |
+| Copilot CLI | postToolUse hook                           | `concord adapters copilot` host starts a turn     |
 | Grok        | PostToolUse hook                           | persistent `monitor` the model starts when asked  |
 | Goose       | sends; messages to it are refused honestly | —                                                 |
 
@@ -45,6 +47,9 @@ A harness that is not installed is skipped. `CONCORD_E2E_REAL_HARNESSES=all`
 
 Run it as a normal user: Claude Code refuses its permission-bypass options as
 root, which is the usual default in a Docker container.
+
+Copilot CLI runs offline with a custom provider (`COPILOT_OFFLINE`,
+`COPILOT_PROVIDER_*`), so it needs no GitHub login either.
 
 Cursor and Antigravity talk to private vendor backends, so they cannot be
 pointed at a fake model; they are covered by the simulated drivers below.
@@ -57,7 +62,8 @@ simulated driver (`drivers/<harness>.ts`) plays one session of a harness:
 - it reads every hook and MCP command from the files `setup` installed, never
   from a hardcoded string;
 - it sends that harness's hook payloads and environment (Codex: session id on
-  stdin only, scrubbed MCP env; Cursor: `conversation_id`, `workspace_roots`);
+  stdin only, scrubbed MCP env; Cursor: `conversation_id`, `workspace_roots`;
+  Copilot: `sessionId` in hooks, `COPILOT_AGENT_SESSION_ID` for MCP);
 - it parses that harness's output envelopes back into delivered messages.
 
 The scenarios (`delivery.e2e.test.ts`) run every sender × receiver × state over

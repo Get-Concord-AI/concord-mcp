@@ -84,6 +84,15 @@ const EXPECTED: Record<DrivenHarness, { busy: Expectation; idle?: Expectation }>
       outlook: /arrive on its own/u,
     },
   },
+  // A plain `copilot` session; `concord adapters copilot` (idle wake) runs for real in test/e2e/real.
+  'copilot-cli': {
+    busy: {
+      via: 'post-tool-use',
+      delivery: 'queued_pull',
+      immediateMode: null,
+      outlook: /only checks between steps/u,
+    },
+  },
 };
 
 const CASES = DRIVEN.flatMap((sender) =>

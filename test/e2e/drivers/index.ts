@@ -3,6 +3,7 @@ import type { Sandbox } from '../support/sandbox.js';
 import { AntigravitySession } from './antigravity.js';
 import { ClaudeCodeSession } from './claude-code.js';
 import { CodexSession } from './codex.js';
+import { CopilotSession } from './copilot.js';
 import { CursorSession } from './cursor.js';
 import type { HarnessSession } from './session.js';
 
@@ -17,11 +18,18 @@ export const DRIVERS = {
   codex: CodexSession,
   cursor: CursorSession,
   antigravity: AntigravitySession,
+  'copilot-cli': CopilotSession,
 } satisfies Partial<Record<HarnessName, SessionClass>>;
 
 export type DrivenHarness = keyof typeof DRIVERS;
 
-export const DRIVEN: readonly DrivenHarness[] = ['claude-code', 'codex', 'cursor', 'antigravity'];
+export const DRIVEN: readonly DrivenHarness[] = [
+  'claude-code',
+  'codex',
+  'cursor',
+  'antigravity',
+  'copilot-cli',
+];
 
 export const UNDRIVEN: readonly HarnessName[] = harnessNames.filter(
   (name) => !DRIVEN.some((driven) => driven === name),

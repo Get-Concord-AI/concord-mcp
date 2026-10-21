@@ -21,7 +21,7 @@ import type { FakeModel } from './fake-model/server.js';
  * where idle delivery exists, an interactive one.
  */
 
-export type RealHarnessName = 'claude-code' | 'codex' | 'grok' | 'goose';
+export type RealHarnessName = 'claude-code' | 'codex' | 'copilot-cli' | 'grok' | 'goose';
 
 export interface RealHarness {
   name: RealHarnessName;
@@ -159,6 +159,28 @@ const codex: RealHarness = {
   ],
 };
 
+const copilot: RealHarness = {
+  name: 'copilot-cli',
+  executable: 'copilot',
+  idle: 'tui',
+  configure: () => undefined,
+  // A custom provider needs no GitHub login, and offline mode keeps the
+  // session from reaching GitHub at all. `COPILOT_ALLOW_ALL=true` also trusts
+  // the folder, which loads its MCP servers and hooks.
+  env: (model) => ({
+    COPILOT_OFFLINE: 'true',
+    COPILOT_PROVIDER_TYPE: 'anthropic',
+    COPILOT_PROVIDER_BASE_URL: model.origin,
+    COPILOT_PROVIDER_API_KEY: FAKE_KEY,
+    COPILOT_MODEL: 'claude-haiku-4-5',
+    COPILOT_ALLOW_ALL: 'true',
+    COPILOT_AUTO_UPDATE: 'false',
+  }),
+  headless: (prompt) => ['copilot', '--yolo', '-p', prompt],
+  // Copilot is reachable while idle only when launched through Concord's adapter.
+  interactive: (prompt) => ['concord', 'adapters', 'copilot', '--yolo', '-i', prompt],
+};
+
 const grok: RealHarness = {
   name: 'grok',
   executable: 'grok',
@@ -226,7 +248,7 @@ const goose: RealHarness = {
   interactive: (prompt) => ['goose', 'run', '--no-session', '-t', prompt],
 };
 
-export const REAL_HARNESSES: readonly RealHarness[] = [claudeCode, codex, grok, goose];
+export const REAL_HARNESSES: readonly RealHarness[] = [claudeCode, codex, copilot, grok, goose];
 
 /** The host directory holding a harness's executable, if it is installed. */
 export function hostBinaryDir(executable: string): string | undefined {
