@@ -137,7 +137,12 @@ export function decide(conversation: Conversation): Intent {
 
 /** Shell tools across harnesses. */
 export function isShell(tool: string): boolean {
-  return ['Bash', 'run_terminal_command', 'exec_command', 'developer__shell', 'shell'].includes(
-    tool,
-  );
+  return [
+    'Bash',
+    'bash',
+    'run_terminal_command',
+    'exec_command',
+    'developer__shell',
+    'shell',
+  ].includes(tool);
 }

@@ -29,7 +29,7 @@ function readJson(path: string): string {
   return readFileSync(path, 'utf8');
 }
 
-/** The Concord server from a `{ "mcpServers": … }` file (Claude, Cursor, Antigravity). */
+/** The Concord server from a `{ "mcpServers": … }` file (Claude, Cursor, Antigravity, Copilot). */
 export function mcpServerFromJson(path: string): McpServerSpec {
   const parsed = mcpFileSchema.parse(JSON.parse(readJson(path)));
   const server = parsed.mcpServers['concord'];
@@ -108,6 +108,20 @@ export function antigravityHooks(repo: string): HookTable {
     }
   }
   return table;
+}
+
+const copilotHooksSchema = z.object({
+  hooks: z.record(z.string(), z.array(z.object({ bash: z.string() }).loose())),
+});
+
+/** User-level Copilot CLI hooks (`~/.copilot/hooks/concord.json`), run with bash. */
+export function copilotHooks(home: string): HookTable {
+  const parsed = copilotHooksSchema.parse(
+    JSON.parse(readJson(join(home, '.copilot', 'hooks', 'concord.json'))),
+  );
+  return new Map(
+    Object.entries(parsed.hooks).map(([event, hooks]) => [event, hooks.map((hook) => hook.bash)]),
+  );
 }
 
 /** A TOML basic string, which shares JSON's escapes for everything Concord writes. */

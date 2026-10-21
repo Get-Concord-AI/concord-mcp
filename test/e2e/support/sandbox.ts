@@ -19,7 +19,14 @@ export const REPO_ROOT = resolve(HERE, '..', '..', '..');
 const SHIM = join(HERE, '..', 'shims', 'harness-shim.mjs');
 
 /** Harness binaries `concord setup` looks for, each played by the shim. */
-const SHIMMED = ['claude', 'codex', 'cursor', 'grok', 'goose', 'agy'] as const;
+const SHIMMED = ['claude', 'codex', 'cursor', 'grok', 'goose', 'agy', 'copilot'] as const;
+
+/**
+ * Sandboxes made by this worker so far. Each gets its own directory: a
+ * harness's last hook can still run after its case ends, and must not land in
+ * the next case's workspace.
+ */
+let created = 0;
 
 export function e2eRoot(): string {
   return resolve(process.env['CONCORD_E2E_ROOT'] ?? join(REPO_ROOT, '.e2e'));
@@ -95,7 +102,8 @@ export class Sandbox {
     prefix: string,
     options: { realHarnesses?: readonly string[] } = {},
   ): Sandbox {
-    const root = join(e2eRoot(), 'sandboxes', `${name}-${String(process.pid)}`);
+    created += 1;
+    const root = join(e2eRoot(), 'sandboxes', `${name}-${String(process.pid)}-${String(created)}`);
     killSandboxProcesses(root);
     rmSync(root, { recursive: true, force: true });
     const sandbox = new Sandbox(root, prefix, options.realHarnesses ?? []);

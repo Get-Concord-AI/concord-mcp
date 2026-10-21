@@ -27,7 +27,7 @@ describe('concord setup in a clean sandbox', () => {
     sandbox.dispose();
   });
 
-  it.each(['claude-code', 'codex', 'cursor', 'grok', 'goose', 'antigravity'])(
+  it.each(['claude-code', 'codex', 'cursor', 'grok', 'goose', 'antigravity', 'copilot-cli'])(
     'reports the %s adapter as installed',
     (harness) => {
       expect(setupOutput).toMatch(new RegExp(`^\\s+${harness}\\s+installed\\b`, 'mu'));

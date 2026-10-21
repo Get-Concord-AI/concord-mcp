@@ -23,6 +23,7 @@ const VERSIONS = {
   grok: 'grok 1.0.0',
   goose: '1.52.0',
   agy: '1.0.0',
+  copilot: 'GitHub Copilot CLI 1.0.101.',
 };
 
 const [harness = 'unknown', ...args] = process.argv.slice(2);
