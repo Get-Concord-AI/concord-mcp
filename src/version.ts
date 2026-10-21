@@ -1,2 +1,2 @@
 /** Single source of truth for the package version, shared by the CLI and server. */
-export const VERSION = '0.14.2';
+export const VERSION = '0.15.0';
