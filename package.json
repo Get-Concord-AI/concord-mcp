@@ -50,6 +50,7 @@
     "version": "node scripts/sync-version.mjs && git add src/version.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "vitest run --config vitest.e2e.config.ts",
     "demo": "pnpm build && bash examples/whack-a-mole/run.sh",
     "demo:stop": "bash examples/whack-a-mole/stop.sh",
     "prepublishOnly": "npm run build"
