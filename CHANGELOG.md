@@ -6,12 +6,59 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-21
+
 ### Added
 
+- **GitHub Copilot CLI support.** `concord setup` registers Concord in
+  `~/.copilot/mcp-config.json` and `.github/mcp.json`, writes instructions into
+  `.github/copilot-instructions.md`, and installs the adapter when `copilot` is
+  on PATH. Copilot exposes no session id to MCP servers, so identity comes from
+  the per-call `agent_id` or `CONCORD_AGENT_ID` (#177).
+- **Wake idle Copilot CLI sessions.** `concord adapters copilot [args...]`
+  starts Copilot (1.0.100 or later) with its embedded server and attaches a
+  Concord host, so peer messages steer a busy turn or start a turn while the
+  session is idle, like `concord adapters codex`. Plain `copilot` sessions keep
+  hook delivery (#261, #262).
+- **Google Antigravity support.** Concord detects the `agy` CLI and the
+  Antigravity IDE, registers its MCP server with its own agent kind, and
+  installs lifecycle hooks (`.agents/hooks.json`, or
+  `~/.gemini/config/hooks.json` for global adapters) that give each
+  conversation its agent id and deliver messages mid-turn (#187, #220).
+- **Wake idle Antigravity sessions.** Antigravity now runs a one-shot
+  `concord inbox watch --once` monitor in the background, and the first model
+  call of a turn asks for it when none is running, so an idle `agy` session
+  wakes when a peer writes (#271, #274).
 - **Install without npm.** `curl -fsSL https://getconcord.ai/install.sh | sh`
   installs a self-contained build with its own Node runtime on macOS and Linux
   (x64 and arm64). Update notices, `concord setup`'s upgrade, and the Goose
-  extension follow the install method instead of assuming npm.
+  extension follow the install method instead of assuming npm. Adapter links
+  keep working across standalone upgrades (#226).
+
+### Fixed
+
+- **Codex controller messages show who sent them.** Messages delivered by
+  `concord adapters codex` now carry the `[concord from <agent> id=<id>]`
+  header like every other channel, so the receiving session can reply to them
+  (#264).
+- **Copilot messages are framed once.** The Copilot live host no longer adds a
+  second header to relay messages (#273).
+- **Idle wake on macOS with long temp paths.** When the relay socket path
+  would exceed the Unix socket limit (as under Copilot's per-session
+  `TMPDIR`), Concord falls back to `/tmp/concord-relay-<uid>`, and refuses a
+  relay directory owned by another user (#272).
+- **CLI empty states name the current tools.** `concord handoff` and
+  `concord review-packet` point to `finish_work` instead of the removed
+  `handoff` tool (#240, #245).
+
+### Changed
+
+- A cross-harness end-to-end suite drives the real Claude Code, Codex, Grok,
+  Goose and Copilot CLI binaries against a scripted fake model, and runs in CI
+  on Ubuntu and macOS. CI also verifies on Windows (#196, #266, #270, #275).
+- Documentation updates: Node minimum, `concord check`/`watch`, `events.jsonl`,
+  Goose tools, Cursor agent discovery, and README setup files for Goose and
+  Antigravity.
 
 ## [0.14.2] - 2026-10-19
 
