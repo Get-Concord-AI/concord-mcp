@@ -7,7 +7,7 @@ import { join } from 'node:path';
  * The longest Unix-domain socket path `listen` accepts: `sun_path` is 104
  * bytes on macOS and the BSDs and 108 on Linux, including the closing NUL.
  */
-const MAX_SOCKET_PATH = process.platform === 'linux' ? 107 : 103;
+export const MAX_SOCKET_PATH = process.platform === 'linux' ? 107 : 103;
 
 /** A short deterministic endpoint avoids Unix socket path-length limits. */
 export function relayAddress(

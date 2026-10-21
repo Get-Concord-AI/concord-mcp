@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { relayAddress } from '../../src/relay/address.js';
+import { MAX_SOCKET_PATH, relayAddress } from '../../src/relay/address.js';
 
 const posix = process.platform !== 'win32';
 const created: string[] = [];
@@ -24,6 +24,19 @@ function listen(path: string): Promise<void> {
       });
     });
   });
+}
+
+/** A base under a fresh /tmp directory whose socket path is exactly `bytes` long, padded with `unit`. */
+function baseFor(bytes: number, unit: string): { root: string; base: string } {
+  const root = mkdtempSync('/tmp/r-');
+  created.push(root);
+  const user = typeof process.getuid === 'function' ? String(process.getuid()) : 'user';
+  const tail = `/concord-relay-${user}/${'0'.repeat(24)}.sock`;
+  let filler = '';
+  const length = (): number => Buffer.byteLength(`${root}/${filler}${tail}`);
+  while (length() + Buffer.byteLength(unit) <= bytes) filler += unit;
+  while (length() < bytes) filler += 'a';
+  return { root, base: join(root, filler) };
 }
 
 describe.skipIf(!posix)('relayAddress', () => {
@@ -47,6 +60,35 @@ describe.skipIf(!posix)('relayAddress', () => {
     expect(dirname(dirname(address))).toBe('/tmp');
     expect(Buffer.byteLength(address)).toBeLessThanOrEqual(103);
     await listen(address);
+  });
+
+  it('keeps a socket path exactly at the platform limit where it is, and listens on it', async () => {
+    const { base } = baseFor(MAX_SOCKET_PATH, 'a');
+    const address = relayAddress('/repo/.concord', 'codex:a', base);
+    expect(Buffer.byteLength(address)).toBe(MAX_SOCKET_PATH);
+    expect(address.startsWith(base)).toBe(true);
+    await listen(address);
+  });
+
+  it('falls back once the path is one byte over the limit, counting bytes not characters', () => {
+    // With 'é' the path is one byte over but far fewer characters than the limit.
+    for (const unit of ['a', 'é']) {
+      const { root, base } = baseFor(MAX_SOCKET_PATH + 1, unit);
+      const address = relayAddress('/repo/.concord', 'codex:a', base);
+      expect(address.startsWith(root)).toBe(false);
+      expect(dirname(dirname(address))).toBe('/tmp');
+    }
+  });
+
+  it('refuses a relay directory that is a symlink, leaving its target alone', () => {
+    const base = mkdtempSync('/tmp/r-');
+    const target = mkdtempSync('/tmp/r-target-');
+    created.push(base, target);
+    chmodSync(target, 0o755);
+    const user = typeof process.getuid === 'function' ? String(process.getuid()) : 'user';
+    symlinkSync(target, join(base, `concord-relay-${user}`));
+    expect(() => relayAddress('/repo/.concord', 'codex:a', base)).toThrow(/does not own/u);
+    expect(statSync(target).mode & 0o777).toBe(0o755);
   });
 
   it('is the same for the same workspace and agent', () => {
