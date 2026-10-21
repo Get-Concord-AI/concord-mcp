@@ -39,6 +39,10 @@ def stop(_signum, _frame):
 
 
 signal.signal(signal.SIGTERM, stop)
+# A query can be split across reads, so match against the tail of the last
+# read too; the longest query is 7 bytes.
+KEEP = max(len(query) for query, _ in REPLIES) - 1
+tail = b''
 with open(log, 'ab') as out:
     while True:
         ready, _, _ = select.select([fd], [], [], 0.2)
@@ -52,6 +56,10 @@ with open(log, 'ab') as out:
             break
         out.write(data)
         out.flush()
+        window = tail + data
         for query, reply in REPLIES:
-            if query in data:
+            # Count only matches that end in this read, so none is answered twice.
+            start = window.find(query, max(0, len(tail) - len(query) + 1))
+            if start != -1:
                 os.write(fd, reply)
+        tail = window[-KEEP:]
