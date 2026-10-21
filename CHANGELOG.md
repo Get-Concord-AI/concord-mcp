@@ -53,9 +53,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- A cross-harness end-to-end suite drives the real Claude Code, Codex, Grok,
-  Goose and Copilot CLI binaries against a scripted fake model, and runs in CI
-  on Ubuntu and macOS. CI also verifies on Windows (#196, #266, #270, #275).
+- End-to-end tests run in CI. A simulated cross-harness suite runs on Ubuntu
+  and macOS, and a real-harness suite drives the Claude Code, Codex, Grok,
+  Goose and Copilot CLI binaries against a scripted fake model on Ubuntu. CI
+  also verifies on Windows (#196, #266, #270, #275).
 - Documentation updates: Node minimum, `concord check`/`watch`, `events.jsonl`,
   Goose tools, Cursor agent discovery, and README setup files for Goose and
   Antigravity.
