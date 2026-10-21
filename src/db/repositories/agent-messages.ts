@@ -71,9 +71,10 @@ export interface AgentMessageRepository {
    */
   markReadByInspect(agentId: string, messageIds: readonly string[]): AgentMessageRecord[];
   /**
-   * Return every message delivered to a session other than `session` and
-   * never read to the queue, so this agent's new session receives it instead
-   * of losing it with the session it was handed to.
+   * Return every message delivered to a named session other than `session`
+   * and never read to the queue, so this agent's new session receives it
+   * instead of losing it with the session it was handed to. A delivery whose
+   * session is unknown is left alone: it may be this very session's.
    */
   requeueUnread(agentId: string, session: string | null): AgentMessageRecord[];
   /** Fail every `sent` message past its expiry. */
@@ -177,7 +178,7 @@ export function createAgentMessageRepository(
     SELECT * FROM agent_messages
     WHERE recipient_agent_id = @agent_id AND status = 'delivered'
       AND delivered_via IN ('monitor', 'hook', 'adapter')
-      AND delivered_session IS NOT @session
+      AND delivered_session IS NOT NULL AND delivered_session IS NOT @session
     ORDER BY created_at, message_id
   `);
   const requeueStmt = db.prepare(`
