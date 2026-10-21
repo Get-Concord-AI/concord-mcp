@@ -87,7 +87,10 @@ describe('local IPC relay', () => {
       expect(result.delivery).toBe('delivered');
       expect(result.immediateMode).toBe('inject');
       expect(result.message.providerReceipt).toBe('turn-new');
-      expect(deliveries[0]?.content).toBe('Start reviewing now.');
+      // Framed like every other channel, so the woken session can reply.
+      expect(deliveries[0]?.content).toBe(
+        `[concord from codex:sender id=${result.message.messageId}]\nStart reviewing now.`,
+      );
     } finally {
       await relay.close();
     }
@@ -182,7 +185,9 @@ describe('local IPC relay', () => {
       );
 
       expect(result.delivery).toBe('delivered');
-      expect(deliveries.map((delivery) => delivery.content)).toEqual(['Still reachable.']);
+      expect(deliveries.map((delivery) => delivery.content)).toEqual([
+        `[concord from codex:sender id=${result.message.messageId}]\nStill reachable.`,
+      ]);
     } finally {
       await relay.close();
     }
