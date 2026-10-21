@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  FramedCopilotAdapter,
+  CopilotSessionAdapter,
   SWEEP_AFTER_MS,
   sweepStragglers,
 } from '../../src/cli/commands/copilot-adapter.js';
@@ -27,7 +27,7 @@ describe('sweepStragglers (#261)', () => {
   let repos: Repositories;
   let pushed: string[];
   let fail: boolean;
-  let adapter: FramedCopilotAdapter;
+  let adapter: CopilotSessionAdapter;
   const later = (): number => Date.now() + SWEEP_AFTER_MS + 1_000;
 
   beforeEach(() => {
@@ -37,7 +37,7 @@ describe('sweepStragglers (#261)', () => {
     registerPullEndpoint(repos, AGENT, 'copilot-cli');
     pushed = [];
     fail = false;
-    adapter = new FramedCopilotAdapter({
+    adapter = new CopilotSessionAdapter({
       isBusy: () => false,
       pushPrompt: (content) => {
         if (fail) return Promise.reject(new Error('TUI gone'));
@@ -51,8 +51,7 @@ describe('sweepStragglers (#261)', () => {
     send(repos, 'Missed by the push.', 'k-1');
     await sweepStragglers(repos, AGENT, adapter, later());
     expect(pushed).toHaveLength(1);
-    expect(pushed[0]).toContain('[concord from peer id=');
-    expect(pushed[0]).toContain('Missed by the push.');
+    expect(pushed[0]).toMatch(/^\[concord from peer id=[^\]]+\]\nMissed by the push\.$/u);
   });
 
   it('never hands over twice a message the host already pushed', async () => {
