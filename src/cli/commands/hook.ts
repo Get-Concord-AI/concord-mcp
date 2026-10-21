@@ -25,6 +25,15 @@ import {
   handleCloudSessionStart,
 } from './cloud-hooks.js';
 import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
+import { copilotServerAddress } from './copilot-adapter.js';
+import { fileSpool } from './copilot-spool.js';
+import {
+  cloudCopilotBackend,
+  copilotWorkspace,
+  localCopilotBackend,
+  runCopilotHook,
+  type CopilotHookBackend,
+} from './copilot-hooks.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
 import { antigravitySessionStartMessage, sessionStartMessage } from './session-start-message.js';
 import type { CloudRuntime } from '../../cloud/runtime.js';
@@ -277,10 +286,18 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     .command('hook <event>')
     .description(
       'Run a Concord hook. events: pre-tool-use (PreToolUse overlap gate), ' +
-        'session-start (SessionStart presence auto-register), pre-invocation, and stop.',
+        'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, and stop.',
     )
-    .option('--client <client>', 'Client calling the hook (e.g. antigravity, claude)')
+    .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {
+      if (options.client === 'copilot-cli') {
+        await runCopilotClientHook(event);
+        return;
+      }
+      // Copilot CLI also runs the hooks in a project's .claude/settings.json.
+      // Its own session-start hook registers the session under the right kind;
+      // this one would mint a claude-code id for a session that is not one.
+      if (event === 'session-start' && (process.env['COPILOT_CLI'] ?? '') !== '') return;
       // For Antigravity hooks, read stdin once and derive the workspace from
       // the payload's workspacePaths.  Global hooks run with cwd set to
       // ~/.gemini/config, so the payload is the only reliable source.
@@ -360,6 +377,45 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
         process.exitCode = 2;
       }
     });
+}
+
+/** A Copilot CLI hook, against Concord Cloud when the repository is linked. */
+async function runCopilotClientHook(event: string): Promise<void> {
+  const input = readStdin();
+  const workspace = copilotWorkspace(input);
+  const access = cloudAccess(workspace, { timeoutMs: HOOK_TIMEOUT_MS });
+  if (access.kind === 'unusable') {
+    // Never a local workspace in its place, and never a blocked session.
+    process.stderr.write(`Concord Cloud could not be reached: ${access.reason}\n`);
+    process.stdout.write('{}\n');
+    return;
+  }
+  let backend: CopilotHookBackend;
+  let repoRoot: string;
+  if (access.kind === 'cloud') {
+    backend = cloudCopilotBackend(access.runtime);
+    repoRoot = access.runtime.repoRoot;
+  } else {
+    const context = openContext(workspace);
+    backend = localCopilotBackend(context.repos, context.repoRoot);
+    repoRoot = context.repoRoot;
+  }
+  const output = await runCopilotHook(
+    {
+      backend,
+      spool: fileSpool(repoRoot),
+      env: process.env,
+      serverAddress: copilotServerAddress(),
+    },
+    event,
+    input,
+  );
+  if (output === undefined) {
+    process.stderr.write(`Unknown hook event for copilot-cli: ${event}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`${output}\n`);
 }
 
 /**

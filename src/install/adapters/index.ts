@@ -11,6 +11,13 @@ import { userHome } from '../../config/paths.js';
 import { spawnCommandSync } from '../spawn-command.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import {
+  copilotConfigInstalled,
+  copilotHooksInstalled,
+  installCopilotHooks,
+  installCopilotMcpConfig,
+  uninstallCopilotConfig,
+} from '../copilot-config.js';
+import {
   gooseConfigInstalled,
   installGooseMcpConfig,
   uninstallGooseConfig,
@@ -87,13 +94,13 @@ export function run(
   };
 }
 
-function versionTuple(output: string): number[] | undefined {
+export function versionTuple(output: string): number[] | undefined {
   const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
   if (match === null) return undefined;
   return match.slice(1).map((part) => Number.parseInt(part, 10));
 }
 
-function atLeast(actual: readonly number[], required: readonly number[]): boolean {
+export function atLeast(actual: readonly number[], required: readonly number[]): boolean {
   for (let index = 0; index < required.length; index += 1) {
     const left = actual[index] ?? 0;
     const right = required[index] ?? 0;
@@ -588,6 +595,51 @@ function statusAntigravity(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterRe
   };
 }
 
+function statusCopilot(env: NodeJS.ProcessEnv): AdapterReport {
+  const config = HARNESS_CONFIGS['copilot-cli'];
+  const executable = executablePath(config.executable, env);
+  const base = { harness: config.name, monitor: config.monitor.kind };
+  if (executable === undefined) {
+    return {
+      ...base,
+      detected: false,
+      status: 'not_detected',
+      capabilities: [],
+      detail: 'Copilot CLI was not found on PATH.',
+    };
+  }
+  const version = versionTuple(run(executable, ['--version'], env).output);
+  if (version === undefined || !atLeast(version, config.minimumVersion)) {
+    return {
+      ...base,
+      detected: true,
+      status: 'unsupported_version',
+      capabilities: [],
+      detail: config.unsupportedDetail,
+    };
+  }
+  const server = copilotConfigInstalled(env);
+  const hooks = copilotHooksInstalled(env);
+  if (server && hooks) {
+    return {
+      ...base,
+      detected: true,
+      status: 'installed',
+      capabilities: [...config.installedCapabilities],
+      detail: config.installedDetail,
+    };
+  }
+  return {
+    ...base,
+    detected: true,
+    status: 'action_required',
+    capabilities: server ? ['pull'] : [],
+    detail: server
+      ? 'Concord lifecycle hooks are missing from Copilot CLI, so it cannot identify sessions or receive messages.'
+      : 'Concord MCP server is not yet registered with Copilot CLI.',
+  };
+}
+
 export function statusGlobalAdapters(
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
@@ -623,6 +675,8 @@ export function statusAdapter(
       return statusGoose(env);
     case 'antigravity':
       return statusAntigravity(env, repoRoot);
+    case 'copilot-cli':
+      return statusCopilot(env);
   }
 }
 
@@ -716,6 +770,18 @@ export function installAdapter(
       installGooseMcpConfig(env);
       return;
     }
+    case 'copilot-cli': {
+      const version = versionTuple(run(executable, ['--version'], env).output);
+      if (
+        version === undefined ||
+        !atLeast(version, HARNESS_CONFIGS['copilot-cli'].minimumVersion)
+      ) {
+        return;
+      }
+      installCopilotMcpConfig(env);
+      installCopilotHooks(env);
+      return;
+    }
   }
 }
 
@@ -771,6 +837,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
+  uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
   if (existsSync(antigravityMcp)) {
     try {

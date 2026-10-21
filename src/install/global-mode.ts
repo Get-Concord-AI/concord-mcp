@@ -6,6 +6,7 @@ import { executablePath, run } from './adapters/index.js';
 import { removeBlock, upsertBlock } from './block.js';
 import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
+import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
 import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
 import {
@@ -87,8 +88,8 @@ function instructionFile(
 }
 
 /**
- * User-level instructions, and MCP registrations edited directly (Codex and
- * Goose adapters register themselves). Cursor's instructions come from its
+ * User-level instructions, and MCP registrations edited directly (Codex,
+ * Goose, and Copilot CLI adapters register themselves). Cursor's instructions come from its
  * sessionStart hook, as its user rules are not a file.
  */
 const USER_FILES: readonly UserFile[] = [
@@ -96,6 +97,7 @@ const USER_FILES: readonly UserFile[] = [
   instructionFile('codex', (env) => join(codexHome(env), 'AGENTS.md')),
   instructionFile('gemini', (env) => join(userHome(env), '.gemini', 'GEMINI.md')),
   instructionFile('goose', (env) => join(dirname(gooseConfigPath(env)), '.goosehints')),
+  instructionFile('copilot', (env) => join(copilotHome(env), 'copilot-instructions.md')),
   instructionFile(
     'agy',
     (env) => join(antigravityConfigDir(env), 'rules', 'concord.md'),
@@ -106,7 +108,7 @@ const USER_FILES: readonly UserFile[] = [
     executable: 'gemini',
     registration: { id: 'gemini', present: hasMcpServer },
     path: (env) => join(userHome(env), '.gemini', 'settings.json'),
-    install: (existing) => upsertGeminiSettings(existing),
+    install: (existing) => upsertGeminiSettings(existing, undefined),
     // Only the server goes: the shell settings may serve other tools by now.
     uninstall: removeMcpServer,
   },
@@ -114,7 +116,7 @@ const USER_FILES: readonly UserFile[] = [
     executable: 'cursor',
     registration: { id: 'cursor', present: hasMcpServer },
     path: (env) => join(userHome(env), '.cursor', 'mcp.json'),
-    install: (existing) => upsertMcpServer(existing),
+    install: (existing) => upsertMcpServer(existing, undefined),
     uninstall: removeMcpServer,
   },
   {

@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, and Goose talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, and GitHub Copilot CLI talk to each other.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -88,7 +88,7 @@ answer is saved in `~/.concord/config.json`; `concord setup --global` or
 With global mode on, Concord registers itself at user level for each installed
 agent and adds a short Concord section to their user instruction files
 (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, Goose's
-`.goosehints`; Cursor receives it from its global session hook). Nothing is
+`.goosehints`, `~/.copilot/copilot-instructions.md`; Cursor receives it from its global session hook). Nothing is
 written into those repositories: their work is kept in `~/.concord/global.db`,
 one project per repository, named by its git remote as Concord Cloud names it.
 Sessions outside any repository share the `general` project. A repository you
@@ -99,16 +99,17 @@ removes exactly what it added.
 
 ## Supported agents
 
-| Agent                              | Integration guide                            |
-| ---------------------------------- | -------------------------------------------- |
-| Claude Code                        | [Setup and delivery](./docs/claude-code.md)  |
-| Codex                              | [Setup and delivery](./docs/codex.md)        |
-| Cursor                             | [Setup and delivery](./docs/cursor.md)       |
-| Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)   |
-| Grok Build                         | [Setup and delivery](./docs/grok-build.md)   |
-| Goose                              | [Setup and delivery](./docs/goose.md)        |
-| Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)  |
-| Any other MCP-capable coding agent | Shared work-state through the five MCP tools |
+| Agent                              | Integration guide                                  |
+| ---------------------------------- | -------------------------------------------------- |
+| Claude Code                        | [Setup and delivery](./docs/claude-code.md)        |
+| Codex                              | [Setup and delivery](./docs/codex.md)              |
+| Cursor                             | [Setup and delivery](./docs/cursor.md)             |
+| Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)         |
+| Grok Build                         | [Setup and delivery](./docs/grok-build.md)         |
+| Goose                              | [Setup and delivery](./docs/goose.md)              |
+| Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
+| GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
+| Any other MCP-capable coding agent | Shared work-state through the five MCP tools       |
 
 > There is no universal `/concord` slash command — commands are client-specific.
 > Concord works through MCP tools plus the installed instructions on any
