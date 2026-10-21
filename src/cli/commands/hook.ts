@@ -10,6 +10,11 @@ import {
   resolveIdentity,
   UNRESOLVED_IDENTITY_MESSAGE,
 } from '../../domain/identity.js';
+import {
+  antigravityInjectSteps,
+  antigravityMonitorNudge,
+} from '../../domain/antigravity-monitor.js';
+import { receiverActive } from '../../domain/delivery.js';
 import { renderInboxBody } from '../../domain/pull-inbox.js';
 import { buildRoster } from '../../domain/presence.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
@@ -213,7 +218,8 @@ export function handleAntigravitySessionStart(
 
 /**
  * Handle Antigravity PreInvocation hook: extracts conversationId, registers
- * presence, drains pending inbox messages, and injects them as userMessages.
+ * presence, drains pending inbox messages, and injects them as userMessages,
+ * asking the agent to start its idle monitor when none is watching.
  */
 export function handleAntigravityPreInvocation(
   repos: Repositories,
@@ -233,16 +239,13 @@ export function handleAntigravityPreInvocation(
   ensureAgentRegistered(repos, identity, workspace);
 
   const messages = drainInbox(repos, agentId, 'antigravity');
-  if (messages.length === 0) {
-    return { output: JSON.stringify({ injectSteps: [] }) };
-  }
+  const watching = receiverActive(repos.agentEndpoints.getByAgent(agentId));
   return {
     output: JSON.stringify({
-      injectSteps: [
-        {
-          userMessage: `[concord] Incoming message(s):\n\n${renderInboxBody(messages)}`,
-        },
-      ],
+      injectSteps: antigravityInjectSteps(
+        messages,
+        antigravityMonitorNudge(rawJson, agentId, watching),
+      ),
     }),
   };
 }

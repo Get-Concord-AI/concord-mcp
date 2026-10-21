@@ -51,5 +51,17 @@ describe('harness configuration', () => {
     expect(guidance).toContain(HARNESS_CONFIGS.cursor.monitor.command);
     expect(guidance).toContain(HARNESS_CONFIGS.gemini.monitor.command);
     expect(guidance).toContain(HARNESS_CONFIGS.grok.monitor.command);
+    expect(guidance).toContain(HARNESS_CONFIGS.antigravity.monitor.command);
+  });
+
+  it('keeps an idle Antigravity session reachable with a one-shot background monitor', () => {
+    expect(HARNESS_CONFIGS.antigravity.monitorCapability.reach).toEqual(['busy', 'idle']);
+    expect(HARNESS_CONFIGS.antigravity.monitor).toMatchObject({
+      lifecycle: 'one-shot',
+      background: true,
+      verified: true,
+      backgroundShell: { supported: true, completionStartsTurn: true },
+    });
+    expect(HARNESS_CONFIGS.antigravity.monitor.command).toMatch(/--provider antigravity --once$/u);
   });
 });

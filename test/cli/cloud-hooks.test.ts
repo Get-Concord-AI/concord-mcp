@@ -266,6 +266,9 @@ describe('cloud hooks', () => {
         'write call (start_work, update_work, transfer_work, finish_work)',
       );
       expect(parsed.injectSteps[0]?.systemMessage).not.toContain('inspect_work');
+      expect(parsed.injectSteps[0]?.systemMessage).toContain(
+        `concord inbox watch --agent ${result.agentId ?? ''} --provider antigravity --once`,
+      );
     });
 
     it('returns error ephemeral message when conversationId is missing', async () => {
