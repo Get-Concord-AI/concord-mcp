@@ -38,6 +38,8 @@ export interface AgentMessageRepository {
   get(messageId: string): AgentMessageRecord | undefined;
   getByIdempotency(senderAgentId: string, idempotencyKey: string): AgentMessageRecord | undefined;
   listByAgent(agentId: string): AgentMessageRecord[];
+  /** The newest messages in the store, oldest first: the human view. */
+  listRecent(limit: number): AgentMessageRecord[];
   /** Messages waiting for `agentId`, oldest first, without claiming them. */
   listPendingForRecipient(agentId: string): AgentMessageRecord[];
   /**
@@ -118,6 +120,11 @@ export function createAgentMessageRepository(
     SELECT * FROM agent_messages
     WHERE sender_agent_id = ? OR recipient_agent_id = ?
     ORDER BY created_at, message_id
+  `);
+  const listRecentStmt = db.prepare(`
+    SELECT * FROM (
+      SELECT * FROM agent_messages ORDER BY created_at DESC, message_id DESC LIMIT ?
+    ) ORDER BY created_at, message_id
   `);
   const listPendingStmt = db.prepare(`
     SELECT * FROM agent_messages
@@ -344,6 +351,10 @@ export function createAgentMessageRepository(
     },
     listByAgent(agentId) {
       const raw: unknown = listByAgentStmt.all(agentId, agentId);
+      return rawListSchema.parse(raw).map(parseAgentMessageRow);
+    },
+    listRecent(limit) {
+      const raw: unknown = listRecentStmt.all(limit);
       return rawListSchema.parse(raw).map(parseAgentMessageRow);
     },
     listPendingForRecipient(agentId) {

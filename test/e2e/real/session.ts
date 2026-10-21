@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +51,11 @@ export class HarnessRun {
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
     return run;
+  }
+
+  /** Type into a pseudo-terminal session (see pty-run.py). */
+  type(keys: string): void {
+    writeFileSync(`${this.log}.keys`, keys);
   }
 
   /** What the harness printed, or for a pseudo-terminal session its screen log. */
@@ -154,7 +159,70 @@ export class Probe {
     );
   }
 
+  /** The receipt of a message the probe sent, with the evidence behind its read tick. */
+  async receipt(messageId: string): Promise<ProbeReceipt> {
+    const view = await this.mcp.call('inspect_work', { message_id: messageId }, threadSchema);
+    const message = view.thread.find((entry) => entry.messageId === messageId);
+    if (message === undefined) throw new Error(`Message ${messageId} is not visible to the probe.`);
+    const events = view.events.filter((event) => event.messageId === messageId);
+    return {
+      ...message.receipt,
+      deliveredVia: message.deliveredVia,
+      readEvidence: events.find((event) => event.event === 'read')?.detail ?? null,
+      events: events.map((event) => event.event),
+    };
+  }
+
+  /** Wait for a message's receipt to satisfy `predicate`. */
+  async receiptUntil(
+    messageId: string,
+    predicate: (receipt: ProbeReceipt) => boolean,
+    description: string,
+    timeoutMs = 60_000,
+  ): Promise<ProbeReceipt> {
+    return eventually(
+      async () => {
+        const receipt = await this.receipt(messageId);
+        return predicate(receipt) ? receipt : undefined;
+      },
+      description,
+      timeoutMs,
+    );
+  }
+
   close(): Promise<void> {
     return this.mcp.close();
   }
 }
+
+const receiptSchema = z
+  .object({
+    status: z.string(),
+    ticks: z.string(),
+    sent_at: z.string(),
+    delivered_at: z.string().nullable(),
+    read_at: z.string().nullable(),
+    replied_at: z.string().nullable(),
+  })
+  .loose();
+const threadSchema = z
+  .object({
+    thread: z.array(
+      z
+        .object({
+          messageId: z.string(),
+          deliveredVia: z.string().nullable(),
+          receipt: receiptSchema,
+        })
+        .loose(),
+    ),
+    events: z.array(
+      z.object({ messageId: z.string(), event: z.string(), detail: z.string().nullable() }).loose(),
+    ),
+  })
+  .loose();
+export type ProbeReceipt = z.infer<typeof receiptSchema> & {
+  deliveredVia: string | null;
+  readEvidence: string | null;
+  events: string[];
+};
