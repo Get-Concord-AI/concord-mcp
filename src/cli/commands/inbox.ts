@@ -291,6 +291,14 @@ function recordDeliveredMessages(
   }
 }
 
+/** Drain formats a hook prints, as opposed to a monitor or a script. */
+const HOOK_FORMATS: readonly string[] = [
+  'post-tool-use',
+  'stop',
+  'gemini-after-tool',
+  'gemini-after-agent',
+];
+
 const DRAIN_FORMATS: readonly string[] = [
   'json',
   'monitor',
@@ -414,6 +422,9 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       const existing =
         options.provider === 'codex' ? context.repos.agentEndpoints.getByAgent(agentId) : undefined;
       registerPullEndpoint(context.repos, agentId, options.provider);
+      // A SessionStart payload says whether this is a fresh session, which
+      // takes back what an earlier session was handed but never read.
+      if (hookPayload !== undefined) observeHookEvent(context.repos, agentId, hookPayload);
       const alreadyHosted =
         existing?.transport === 'local-ipc' &&
         existing.status === 'connected' &&
@@ -451,8 +462,13 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         return;
       }
       const grokStop = options.provider === 'grok' && options.format === 'stop';
+      // Hook formats only ever run as hooks, whose stdin always ends, so the
+      // payload (read evidence, subagent marker) is safe to read even without
+      // --from-hook. Identity still comes from it only with --from-hook.
       const hookPayload =
-        options.fromHook === true || grokStop ? (readHookPayload() ?? '') : undefined;
+        options.fromHook === true || HOOK_FORMATS.includes(options.format)
+          ? (readHookPayload() ?? '')
+          : undefined;
       const agentId = resolveAgentId(options.agent, process.env, {
         kind: options.provider,
         ...(options.fromHook === true ? { hookPayload } : {}),

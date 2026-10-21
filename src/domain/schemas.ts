@@ -119,7 +119,15 @@ export type StartWorkInput = z.infer<z.ZodObject<typeof startWorkInputShape>>;
 
 export const inspectWorkInputShape = {
   task_id: taskIdField.optional().describe('Task to inspect; omit for the whole workspace state'),
-  agent_id: z.string().min(1).optional().describe('Agent communication inbox/outbox to inspect'),
+  agent_id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Your own agent id to read your inbox/outbox with receipts (another agent shows presence ' +
+        'only). With message_id or task_id, names you as the reader where Concord cannot see ' +
+        'your session.',
+    ),
   message_id: z.string().min(1).optional().describe('Prompt/reply thread to inspect'),
   workspace_id: workspaceIdField,
 } as const;
