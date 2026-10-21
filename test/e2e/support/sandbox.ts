@@ -76,6 +76,8 @@ export class Sandbox {
   private constructor(
     readonly root: string,
     readonly prefix: string,
+    /** Host directories of real harness binaries, searched after Concord's. */
+    private readonly harnessPath: readonly string[],
   ) {
     this.home = join(root, 'home');
     this.repo = join(root, 'repo');
@@ -83,16 +85,24 @@ export class Sandbox {
     this.shimDir = join(root, 'shim');
   }
 
-  /** A fresh sandbox named after the test file, with Concord installed at `prefix`. */
-  static create(name: string, prefix: string): Sandbox {
+  /**
+   * A fresh sandbox named after the test file, with Concord installed at
+   * `prefix`. By default the harness binaries are shims; pass `realHarnesses`
+   * (host directories holding real `claude`, `codex`, …) to use those instead.
+   */
+  static create(
+    name: string,
+    prefix: string,
+    options: { realHarnesses?: readonly string[] } = {},
+  ): Sandbox {
     const root = join(e2eRoot(), 'sandboxes', `${name}-${String(process.pid)}`);
     killSandboxProcesses(root);
     rmSync(root, { recursive: true, force: true });
-    const sandbox = new Sandbox(root, prefix);
+    const sandbox = new Sandbox(root, prefix, options.realHarnesses ?? []);
     for (const directory of [sandbox.home, sandbox.repo, sandbox.bin, sandbox.shimDir]) {
       mkdirSync(directory, { recursive: true });
     }
-    for (const harness of SHIMMED) {
+    for (const harness of options.realHarnesses === undefined ? SHIMMED : []) {
       const wrapper = join(sandbox.bin, harness);
       writeFileSync(wrapper, `#!/bin/sh\nexec "${process.execPath}" "${SHIM}" ${harness} "$@"\n`);
       chmodSync(wrapper, 0o755);
@@ -115,6 +125,8 @@ export class Sandbox {
       PATH: [
         this.bin,
         join(this.prefix, 'bin'),
+        // After Concord's own bin, so a host-wide `concord` never shadows the build under test.
+        ...this.harnessPath,
         dirname(process.execPath),
         '/usr/bin',
         '/bin',
@@ -159,7 +171,8 @@ export class Sandbox {
   dispose(): void {
     killSandboxProcesses(this.root);
     if (process.env['CONCORD_E2E_KEEP'] !== '1') {
-      rmSync(this.root, { recursive: true, force: true });
+      // A harness may still be flushing files as it exits.
+      rmSync(this.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   }
 }
