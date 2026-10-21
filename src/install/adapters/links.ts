@@ -13,6 +13,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { HarnessName } from '../../domain/harness-config.js';
+import { upgradeStablePath } from '../../config/install-mode.js';
 import { userHome } from '../../config/paths.js';
 import { claudeSkillsPluginPath } from '../claude-plugin.js';
 
@@ -74,7 +75,7 @@ export function packagedPath(moduleUrl: string, parts: readonly string[]): strin
   let directory = dirname(fileURLToPath(moduleUrl));
   for (let depth = 0; depth < 7; depth += 1) {
     const candidate = join(directory, ...parts);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate)) return upgradeStablePath(candidate);
     const parent = dirname(directory);
     if (parent === directory) break;
     directory = parent;

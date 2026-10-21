@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Install without npm.** `curl -fsSL https://getconcord.ai/install.sh | sh`
+  installs a self-contained build with its own Node runtime on macOS and Linux
+  (x64 and arm64). Update notices, `concord setup`'s upgrade, and the Goose
+  extension follow the install method instead of assuming npm.
+
 ## [0.14.2] - 2026-10-19
 
 ### Added

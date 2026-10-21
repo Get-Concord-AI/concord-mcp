@@ -10,6 +10,7 @@ import { installClaudeHook } from '../../install/claude-hooks.js';
 import { installCodexMcpConfig } from '../../install/codex-config.js';
 import { applyGlobalMode, type GlobalModeReport } from '../../install/global-mode.js';
 import { readUserConfig, writeUserConfig } from '../../config/user-config.js';
+import { standaloneInstall, standaloneUpgrade } from '../../config/install-mode.js';
 import { installConcord } from '../../install/index.js';
 import {
   installGlobalAdapters,
@@ -150,8 +151,14 @@ async function askToUpgrade(update: AvailableUpdate): Promise<boolean> {
 function installUpdate(env: NodeJS.ProcessEnv): Promise<number> {
   return new Promise((resolve, reject) => {
     const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    const child = spawn(npm, ['install', '-g', '@concord-ai/concord-mcp@latest'], {
-      env,
+    // A curl install has no npm; rerunning its installer replaces it in place.
+    const standalone = standaloneInstall();
+    const upgrade =
+      standalone === undefined
+        ? { command: npm, args: ['install', '-g', '@concord-ai/concord-mcp@latest'], env: {} }
+        : standaloneUpgrade(standalone);
+    const child = spawn(upgrade.command, upgrade.args, {
+      env: { ...env, ...upgrade.env },
       shell: false,
       stdio: 'inherit',
     });
