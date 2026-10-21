@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   COPILOT_SERVER_ENV,
-  FramedCopilotAdapter,
+  CopilotSessionAdapter,
   copilotLaunchPlan,
   copilotServerAddress,
   supportsUiServer,
@@ -30,9 +30,9 @@ describe('concord adapters copilot (#261)', () => {
     expect(supportsUiServer('not a version')).toBe(false);
   });
 
-  it('frames a local push with its sender and id, as hooks do', async () => {
+  it('hands a relay delivery over as the sender framed it', async () => {
     const pushed: [string, string][] = [];
-    const adapter = new FramedCopilotAdapter({
+    const adapter = new CopilotSessionAdapter({
       isBusy: () => true,
       pushPrompt: (content, mode) => {
         pushed.push([content, mode]);
@@ -45,7 +45,7 @@ describe('concord adapters copilot (#261)', () => {
       messageId: 'msg-7',
       senderAgentId: 'peer:tester',
       recipientAgentId: 'copilot-cli:abc',
-      content: 'the codeword is FIG-11',
+      content: '[concord from peer:tester id=msg-7]\nthe codeword is FIG-11',
     };
     expect(await adapter.steer(delivery)).toBe('m-1');
     await adapter.inject(delivery);

@@ -4,7 +4,7 @@ import type { CloudRuntime } from '../../cloud/runtime.js';
 import { atLeast, executablePath, run, versionTuple } from '../../install/adapters/index.js';
 import { relayAddress } from '../../relay/address.js';
 import type { Repositories } from '../../db/index.js';
-import { renderInboxBody } from '../../domain/pull-inbox.js';
+import { renderPeerMessage } from '../../domain/pull-inbox.js';
 import { PushPromptSessionAdapter, type PushPromptSession } from '../../relay/adapters.js';
 import { CopilotUiServerClient } from '../../relay/copilot-client.js';
 import { RELAY_PROTOCOL_VERSION } from '../../relay/protocol.js';
@@ -88,11 +88,12 @@ export async function launchCopilot(args: readonly string[]): Promise<void> {
 }
 
 /**
- * The local relay hands over a message's bare text, while hooks and the cloud
- * host frame it with its sender and id. Frame it the same way here, so Copilot
- * can tell a peer message from the user and knows which id to answer.
+ * Hands relay deliveries to the Copilot session. A sender's dispatcher has
+ * already framed each one with its sender and id, as hooks and the cloud host
+ * do, so Copilot can tell a peer message from the user and knows which id to
+ * answer; framing it again here would show the header twice.
  */
-export class FramedCopilotAdapter implements AgentSessionAdapter {
+export class CopilotSessionAdapter implements AgentSessionAdapter {
   readonly provider = KIND;
   /** Every message handed to Copilot, so a sweep never hands one over twice. */
   readonly handled = new Set<string>();
@@ -105,12 +106,12 @@ export class FramedCopilotAdapter implements AgentSessionAdapter {
 
   steer(delivery: AgentSessionDelivery): Promise<string | undefined> {
     this.handled.add(delivery.messageId);
-    return this.session.pushPrompt(frame(delivery), 'steer');
+    return this.session.pushPrompt(delivery.content, 'steer');
   }
 
   inject(delivery: AgentSessionDelivery): Promise<string | undefined> {
     this.handled.add(delivery.messageId);
-    return this.session.pushPrompt(frame(delivery), 'inject');
+    return this.session.pushPrompt(delivery.content, 'inject');
   }
 }
 
@@ -131,7 +132,7 @@ const SWEEP_EVERY_MS = 5_000;
 export async function sweepStragglers(
   repos: Repositories,
   agentId: string,
-  adapter: FramedCopilotAdapter,
+  adapter: CopilotSessionAdapter,
   now = Date.now(),
 ): Promise<void> {
   const cutoff = new Date(now - SWEEP_AFTER_MS).toISOString();
@@ -149,7 +150,8 @@ export async function sweepStragglers(
       messageId: message.messageId,
       senderAgentId: message.senderAgentId,
       recipientAgentId: agentId,
-      content: message.content,
+      // Read straight from the store, so framed here as a dispatcher would.
+      content: renderPeerMessage(message),
     };
     let receipt: string | undefined;
     try {
@@ -163,19 +165,6 @@ export async function sweepStragglers(
     // sweep only retries the record, never the handoff.
     repos.agentMessages.markDelivered(message.messageId, KIND, receipt ?? null);
   }
-}
-
-function frame(delivery: AgentSessionDelivery): string {
-  return renderInboxBody([
-    {
-      messageId: delivery.messageId,
-      senderAgentId: delivery.senderAgentId,
-      taskId: null,
-      content: delivery.content,
-      messageKind: 'prompt',
-      deliveryLatencyMs: null,
-    },
-  ]);
 }
 
 async function connectSession(address: string, sessionId: string): Promise<CopilotUiServerClient> {
@@ -193,7 +182,7 @@ export async function hostCopilot(
   const context = openContext(process.cwd());
   ensureAgentRegistered(context.repos, { agentId, kind: KIND }, context.repoRoot);
   const client = await connectSession(address, sessionId);
-  const adapter = new FramedCopilotAdapter(client);
+  const adapter = new CopilotSessionAdapter(client);
   const relay = await startAgentRelay({
     repos: context.repos,
     agentId,
