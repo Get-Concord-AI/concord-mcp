@@ -5,7 +5,7 @@ import { DRIVEN, DRIVERS, type DrivenHarness } from './drivers/index.js';
 import type { HarnessSession } from './drivers/session.js';
 import type { Channel, Delivered } from './support/messages.js';
 import { Sandbox } from './support/sandbox.js';
-import { inspectAgent, nonce, prompt, reply, untilIdleReachable } from './support/scenario.js';
+import { nonce, prompt, receiptOf, reply, untilIdleReachable } from './support/scenario.js';
 
 /**
  * Every harness sends to every harness, with the recipient busy (mid-turn) and,
@@ -39,7 +39,7 @@ const EXPECTED: Record<DrivenHarness, { busy: Expectation; idle?: Expectation }>
       via: 'monitor',
       delivery: 'queued_pull',
       immediateMode: null,
-      outlook: /can be injected now/u,
+      outlook: /live receiver picks it up/u,
     },
   },
   codex: {
@@ -209,10 +209,9 @@ describe('cross-harness message delivery', () => {
 
       // Nothing hands it over while the session sits idle.
       await new Promise((resolve) => setTimeout(resolve, 2_000));
-      const waiting = await inspectAgent(from, to);
-      expect(waiting.inbox.find((message) => message.messageId === sent.message_id)?.status).toBe(
-        'pending',
-      );
+      const waiting = await receiptOf(from, sent.message_id);
+      expect(waiting?.status).toBe('sent');
+      expect(waiting?.receipt.ticks).toBe('✓');
 
       // The next turn's first busy-path hook delivers it.
       expect(copiesOf(await to.receiveBusy(), sent.message_id)).toEqual([

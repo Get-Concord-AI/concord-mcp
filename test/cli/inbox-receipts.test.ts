@@ -8,6 +8,7 @@ import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { renderStatusText } from '../../src/artifacts/work-state-view.js';
 import { observeHookEvent } from '../../src/cli/commands/inbox-observe.js';
+import { resolveInboxOwner } from '../../src/cli/agent-identity.js';
 import { drainInbox, registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 import { monitorCapabilityFor } from '../../src/domain/delivery.js';
 import { renderedMessageIds, renderMonitorLines } from '../../src/domain/pull-inbox.js';
@@ -470,3 +471,19 @@ describe('waiting on the user', () => {
 function fail(): never {
   throw new Error('missing message');
 }
+
+describe('resolveInboxOwner', () => {
+  it("refuses to drain another agent's inbox from a session it can see", () => {
+    const env = { CLAUDE_CODE_SESSION_ID: 'session-1' };
+    const own = resolveInboxOwner(undefined, env, { kind: 'claude-code' });
+
+    expect(resolveInboxOwner(own, env, { kind: 'claude-code' })).toBe(own);
+    expect(() => resolveInboxOwner('claude-code:someone', env, { kind: 'claude-code' })).toThrow(
+      /cannot take messages addressed to/,
+    );
+  });
+
+  it('trusts the named agent where no session is visible', () => {
+    expect(resolveInboxOwner('grok:abc', {}, { kind: 'grok' })).toBe('grok:abc');
+  });
+});

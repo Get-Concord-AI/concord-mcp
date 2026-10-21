@@ -1,6 +1,6 @@
 # Concord Messaging v2
 
-Status: **draft, not started.** This is the design for the next version of
+Status: **implemented in local mode** (this branch). This is the design for the next version of
 agent-to-agent messaging in the open-source `concord-mcp` package (local
 SQLite mode).
 
@@ -62,9 +62,10 @@ Rules:
   `delivered_at`, `read_at`, `replied_at`, `failed_at`. A reply that arrives
   before a read was recorded also sets `read_at`.
 - **"Sent" is a server acknowledgement.** The `update_work` result includes
-  the receipt only after the INSERT has committed. If the call errors, the
-  message was not sent. Retrying with the same `idempotency_key` is safe and
-  returns the current receipt.
+  the receipt only after the INSERT has committed. If the call errors or times
+  out, the outcome is unknown: the commit may have happened and only the
+  response been lost. Retry with the **same** `idempotency_key`, which returns
+  the stored message and its current receipt, never a duplicate.
 
 ## Offline recipients: queue, don't fail
 
@@ -75,9 +76,9 @@ A recipient only has to be a **registered** agent. If it has no live receiver:
 - It becomes `delivered` the next time that agent's session drains (on
   SessionStart registration, a hook, or a monitor poll).
 - Each message gets `expires_at = sent_at + MESSAGE_TTL` (default 24h, defined
-  in `src/domain/delivery.ts`). A `sent` message past its expiry, or one whose
-  recipient session explicitly ended, moves to `failed` with
-  `error_code: "expired"`.
+  as `MESSAGE_TTL_MS` in `src/domain/receipts.ts`). A `sent` message past its
+  expiry moves to `failed` with `error_code: "expired"`. A receiver
+  disconnecting is not a reason to expire: the agent may come back.
 - Expiry is applied lazily whenever a send, drain or inspect touches the
   message, so no daemon is needed.
 
@@ -95,13 +96,13 @@ somewhere only the model's input could put it.
 
 ### What sends the read receipt
 
-| Delivery path                                                                                      | Delivered when                               | Who reports read                                                                                          | Evidence                                                                                                                                                                                                                                                                                                                 |
-| -------------------------------------------------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Monitor** (Claude Code, Grok, Cursor, Gemini)                                                    | The monitor claims the message and prints it | The session's own hooks, through `concord inbox ack --from-hook` (or folded into the existing hook drain) | **`UserPromptSubmit`**: the held notification started a turn, and the prompt text contains `id=<message_id>`. **`Stop` / `PostToolUse`**: the hook payload's `transcript_path` holds the `[concord from … id=…]` entry, followed by an assistant entry. The transcript is read from the offset the last hook stopped at. |
-| **Hook** (PostToolUse `additionalContext`, Stop `decision: block`, Gemini/Antigravity equivalents) | The hook claims the message and returns it   | The next hook from the same session                                                                       | The returned text enters the context before the model's next call. If a transcript is available, confirm the id there; otherwise the next hook in the same session counts.                                                                                                                                               |
-| **Codex adapter** (`concord adapters codex`, `turn/start` or `turn/steer`)                         | The app-server accepts the call              | The adapter host, which already follows `turn/started` / `turn/completed` (`src/relay/codex-client.ts`)   | `turn/completed` with a completed status for the turn the message started (inject) or was steered into. An interrupted or failed turn leaves it at delivered.                                                                                                                                                            |
-| **`inspect_work`** of the recipient's own inbox or a thread                                        | n/a                                          | The MCP server                                                                                            | The message content was returned to the model in the tool result.                                                                                                                                                                                                                                                        |
-| **Reply**                                                                                          | n/a                                          | The MCP server                                                                                            | A reply to the message implies read.                                                                                                                                                                                                                                                                                     |
+| Delivery path                                                                                      | Delivered when                               | Who reports read                                                                                             | Evidence                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Monitor** (Claude Code, Grok, Cursor, Gemini)                                                    | The monitor claims the message and prints it | The session's own hooks: `concord inbox observe`, and the existing hook drains, which now read their payload | **`UserPromptSubmit`**: the held notification started a turn, and the prompt text contains `id=<message_id>`. **`Stop` / `PostToolUse`**: the hook payload's `transcript_path` holds the `[concord from … id=…]` entry, followed by an assistant entry; entries that only queue text (`queue-operation`) do not count. The last 4 MB of the transcript is read. |
+| **Hook** (PostToolUse `additionalContext`, Stop `decision: block`, Gemini/Antigravity equivalents) | The hook claims the message and returns it   | The next hook from the same session                                                                          | The returned text is in the transcript (for Claude Code, a `hook_additional_context` attachment); a later model entry proves the model was called with it. No transcript, no read.                                                                                                                                                                              |
+| **Codex adapter** (`concord adapters codex`, `turn/start` or `turn/steer`)                         | The app-server accepts the call              | The adapter host, which already follows `turn/started` / `turn/completed` (`src/relay/codex-client.ts`)      | Concord sends its message id as `clientUserMessageId`. Read once a `userMessage` item carrying that `clientId` (or the rendered header) is recorded in a turn **and** that turn's `turn/completed` has `status: "completed"`. Interrupted or failed turns leave it delivered (`src/relay/codex-read-tracker.ts`).                                               |
+| **`inspect_work`** of the recipient's own inbox or a thread                                        | n/a                                          | The MCP server                                                                                               | The message content was returned to the model in the tool result.                                                                                                                                                                                                                                                                                               |
+| **Reply**                                                                                          | n/a                                          | The MCP server                                                                                               | A reply to the message implies read.                                                                                                                                                                                                                                                                                                                            |
 
 So the receipt is written by Concord's own hook command, adapter host or MCP
 server, running as the recipient. Each one records the read in the local store
@@ -111,15 +112,10 @@ Read is credited only to the session that took the delivery
 they carry `agent_id` in the payload: a subagent's activity is not proof that
 the main agent saw anything (#216).
 
-Harnesses whose hooks expose neither the prompt text nor a transcript (to be
-verified for Grok and Cursor) fall back to a cautious rule:
-
-- Record whether the session was idle (its last hook was `Stop`) or busy when
-  the message was delivered.
-- If it was idle, the next hook counts as read.
-- If it was busy, read counts only at the first hook _after_ the next `Stop`.
-
-This can show the read tick a turn late, but it never shows it early.
+There is **no timing fallback**. A harness whose hooks expose neither the
+prompt nor a transcript can only show read through `inspect_work` or a reply;
+otherwise its messages stay at ✓✓. Showing read late or never is honest;
+showing it early is not.
 
 ### Example: Claude Code waiting on a user question (#208)
 
@@ -172,11 +168,17 @@ only for messages they sent or received.
   - The caller is resolved with `resolveActorId`.
   - If the id is not the caller's, the result has presence and promptability
     only: no inbox, no outbox, no content.
-  - A new `scope: "inbox"`, used without `agent_id`, returns the caller's own
-    inbox and outbox.
+  - Passing your own id returns your inbox and outbox, each message with its
+    receipt. Messages you received count as read: the content was returned
+    to you.
+  - With `message_id` or `task_id`, `agent_id` names the reader instead. It is
+    only honoured where Concord cannot see the session (Codex); a visible
+    session always wins. With no reader at all, content is withheld.
 - `inspect_work` with `message_id` returns the thread only if the caller is the
-  sender or recipient of some message in it. Otherwise it returns "not found",
-  so it doesn't reveal that the thread exists.
+  sender or recipient of that message, and then only the messages in the
+  thread the caller sent or received. Otherwise it returns "not found", so it
+  doesn't reveal that the thread exists. A sender checking a receipt never
+  changes it.
 - `inspect_work` with `task_id` lists only the message threads the caller takes
   part in.
 - `concord inbox drain` / `watch` take `--agent`, but it must match the
@@ -186,8 +188,7 @@ only for messages they sent or received.
   state, so a human looking does not mark anything delivered or read:
   - `concord messages [--agent <id>] [--thread <id>] [--json]`: a list of
     messages with their ticks.
-  - A **Messages** pane in `concord dashboard`: conversations by agent pair,
-    each with its last message and tick, and a thread drill-down.
+  - A **Messages** pane in `concord dashboard` is a follow-up.
 
 **Threat model:** this separates cooperating agents from each other. It is not
 a security boundary against a local process that can open
@@ -217,7 +218,7 @@ item, every `message_id` result and every `update_work` send result carries a
 `ticks` is one of `✓`, `✓✓`, `read`, `replied`, `failed`. It is a display
 convenience derived from `status`.
 
-## Schema changes (migration 013)
+## Schema changes (migration 015)
 
 SQLite CHECK constraints require rebuilding the table, so follow the pattern of
 `src/db/project-scope-migration.ts`.
@@ -225,55 +226,44 @@ SQLite CHECK constraints require rebuilding the table, so follow the pattern of
 - `agent_messages`:
   - Status CHECK becomes `('sent','delivered','read','replied','failed')`.
     Existing `pending` rows become `sent`.
-  - Add `read_at TEXT`, `expires_at TEXT`, `delivered_session TEXT`,
-    `delivered_via TEXT` (`monitor | hook | adapter`) and
-    `delivered_while TEXT` (`idle | busy`, used only by the cautious fallback
-    rule).
+  - Add `read_at TEXT` (from the #208 branch's `seen_at`), `expires_at TEXT`,
+    `delivered_session TEXT` (sha256 of the harness session id) and
+    `delivered_via TEXT` (`monitor | hook | adapter | inspect`).
   - Existing open rows get `expires_at = created_at + MESSAGE_TTL`.
 - `agent_message_events.event` becomes
   `('sent','delivered','read','replied','failed','expired','requeued')`. The
   `read` event's detail records the evidence (`prompt`, `transcript`,
-  `turn_completed`, `inspect`, `reply`, `fallback`). Existing
-  `accepted` events become `sent`.
+  `turn_completed`, `inspect`). Existing `accepted` events become `sent` and
+  `seen` events become `read`. Messages v1 counted as seen become `read`.
 - Add `expired` to the error codes in `src/db/rows.ts`.
 - Recreate the indexes. The pending-drain index now covers `status = 'sent'`.
 - The Zod row schemas and records in `src/db/rows.ts` gain `readAt`,
-  `expiresAt`, `deliveredSession`, `deliveredVia` and `deliveredWhile`. No
-  casts.
+  `expiresAt`, `deliveredSession` and `deliveredVia` (`src/db/message-rows.ts`).
+  No casts.
 
-## Implementation outline
+## Implementation
 
-1. **Privacy** (can ship first, on its own): the `inspect_work` scoping, the
-   `--agent` check on drain and watch, and participant-filtered task messages.
-2. **Receipts and schema:**
-   - Migration 013.
-   - Repository transitions in `src/db/repositories/agent-messages.ts`:
-     `markRead(recipient, session, messageIds)`, `requeueUnread`,
-     `expireStale`, `listForParticipant`, and `markReplied` accepting
-     `delivered | read`.
-   - `src/domain/receipts.ts`: the evidence rules (prompt id match, transcript
-     scan from a stored offset, Codex turn completion, cautious fallback).
-   - Read reporters:
-     - a `UserPromptSubmit` hook in the Claude Code plugin;
-     - transcript checks in the existing `Stop` / `PostToolUse` hook drains;
-     - a `markRead` call from the Codex adapter host on `turn/completed`;
-     - `inspect_work` and reply on the server.
-   - Requeue on a fresh `SessionStart`, and a parent-alive check in
-     `watch-inbox.sh`.
-   - Build on the Claude Code work on the #208 branch (`fix/agent-question`):
-     its `seen_at` becomes `read_at`.
-   - Remove the fail-fast on offline recipients.
-   - Frame IPC deliveries with `renderInboxBody` (today
-     `src/relay/socket-dispatcher.ts` sends raw content).
-3. **Human views:** `concord messages` and the dashboard Messages pane.
-4. **Docs:** MCP server instructions (`RELAYED_MESSAGE_GUIDANCE`), the
-   per-client instruction writers in `src/install/`, the README and
-   `CLAUDE.md`.
+- `src/db/messaging-v2-migration.ts`, `src/db/message-rows.ts`,
+  `src/db/repositories/agent-messages.ts`: statuses, guarded transitions
+  (`markRead`, `markReadByInspect`, `requeueUnread`, `expireStale`).
+- `src/domain/receipts.ts`: receipts, session keys, and the evidence rules
+  (prompt ids, transcript scan).
+- `src/cli/commands/inbox-observe.ts`: applies a hook payload (read evidence,
+  waiting-on-user, requeue on `startup`); ignores subagent hooks.
+- `src/cli/commands/inbox.ts`: drains record the session and channel; hook
+  formats read their payload; a subagent hook never drains; `--agent` must
+  match a visible session.
+- `src/relay/codex-read-tracker.ts`: Codex read receipts in the adapter host.
+- `src/tools/inspect-messages.ts`, `src/tools/inspect-work.ts`: privacy and
+  read-on-inspect.
+- `src/cli/commands/messages.ts`: `concord messages`.
+- `plugin/concord-relay`: hook drains pass their payload; the monitor exits once
+  its harness is gone.
 
 ## Testing
 
 - **Unit tests** (`:memory:` SQLite):
-  - Migration 013 upgrades a v12 store that contains pending, delivered,
+  - Migration 015 upgrades a v12 store that contains pending, delivered,
     replied and failed rows.
   - Transitions are monotonic and guarded.
   - Table tests for `receipts.ts`:
@@ -282,7 +272,6 @@ SQLite CHECK constraints require rebuilding the table, so follow the pattern of
     - the transcript scan finds the id only when an assistant entry follows it;
     - subagent hooks (`agent_id` set) are ignored;
     - Codex `turn/completed` marks read, but an interrupted turn does not;
-    - the fallback rule handles idle and busy deliveries;
     - a reply implies read.
   - Requeue on `startup` but not on `resume`.
   - Expiry.

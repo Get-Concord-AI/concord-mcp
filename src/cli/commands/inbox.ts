@@ -27,7 +27,7 @@ import {
 } from '../../domain/pull-inbox.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
-import { resolveAgentId } from '../agent-identity.js';
+import { resolveAgentId, resolveInboxOwner } from '../agent-identity.js';
 import { resolveStore } from '../../workspaces/store.js';
 import { openContext } from '../context.js';
 import { launchDetachedConcord } from '../detached-host.js';
@@ -469,7 +469,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         options.fromHook === true || HOOK_FORMATS.includes(options.format)
           ? (readHookPayload() ?? '')
           : undefined;
-      const agentId = resolveAgentId(options.agent, process.env, {
+      const agentId = resolveInboxOwner(options.agent, process.env, {
         kind: options.provider,
         ...(options.fromHook === true ? { hookPayload } : {}),
       });
@@ -557,7 +557,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
       if (access.kind === 'unusable') throw new Error(`Concord Cloud: ${access.reason}`);
       const hookPayload = options.fromHook === true ? (readHookPayload() ?? '') : undefined;
-      const agentId = resolveAgentId(options.agent, process.env, {
+      const agentId = resolveInboxOwner(options.agent, process.env, {
         kind: options.provider,
         ...(hookPayload === undefined ? {} : { hookPayload }),
       });

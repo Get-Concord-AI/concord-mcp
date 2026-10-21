@@ -66,6 +66,29 @@ export function inspectAgent(observer: HarnessSession, target: HarnessSession) {
   return observer.call('inspect_work', { agent_id: target.agentId }, agentViewSchema);
 }
 
+const threadSchema = z
+  .object({
+    thread: z.array(
+      z
+        .object({
+          messageId: z.string(),
+          status: z.string(),
+          receipt: z.object({ ticks: z.string() }).loose(),
+        })
+        .loose(),
+    ),
+  })
+  .loose();
+
+/**
+ * Where a message `sender` sent got to, read from the sender's own view of
+ * the thread: another agent's inbox is private to it.
+ */
+export async function receiptOf(sender: HarnessSession, messageId: string) {
+  const view = await sender.call('inspect_work', { message_id: messageId }, threadSchema);
+  return view.thread.find((message) => message.messageId === messageId);
+}
+
 /** Wait until `target` advertises a live receiver that reaches it while idle. */
 export async function untilIdleReachable(
   observer: HarnessSession,
