@@ -1,4 +1,5 @@
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
@@ -36,10 +37,44 @@ const observedHookSchema = z
      * from the session, rather than in the session's own conversation.
      */
     agent_id: z.string().optional(),
+    /** Grok spells its payload in camelCase. */
+    hookEventName: z.string().optional(),
+    transcriptPath: z.string().nullable().optional(),
   })
   .loose();
 
 export type ObservedHook = z.infer<typeof observedHookSchema>;
+
+/** Hook event names as some harnesses spell them (`post_tool_use`), in Claude Code's form. */
+const EVENT_NAMES: Readonly<Record<string, string>> = {
+  session_start: 'SessionStart',
+  user_prompt_submit: 'UserPromptSubmit',
+  pre_tool_use: 'PreToolUse',
+  post_tool_use: 'PostToolUse',
+  notification: 'Notification',
+  stop: 'Stop',
+};
+
+function eventName(hook: ObservedHook): string | undefined {
+  const name = hook.hook_event_name ?? hook.hookEventName;
+  return name === undefined ? undefined : (EVENT_NAMES[name] ?? name);
+}
+
+/**
+ * The file holding what the model was actually sent. Grok's hooks point at
+ * `updates.jsonl`, its UI event stream; the conversation itself (hook context
+ * as `user` entries, the model's turns as `assistant`) is `chat_history.jsonl`
+ * beside it.
+ */
+function conversationFile(hook: ObservedHook): string | undefined {
+  const path = hook.transcript_path ?? hook.transcriptPath ?? undefined;
+  if (path === undefined || path === null || path === '') return undefined;
+  if (basename(path) === 'updates.jsonl') {
+    const history = join(dirname(path), 'chat_history.jsonl');
+    if (existsSync(history)) return history;
+  }
+  return path;
+}
 
 /** Claude Code's tool that blocks the turn on a question for the user. */
 const ASK_USER_TOOL = 'AskUserQuestion';
@@ -110,8 +145,8 @@ function observeRead(
         .map((message) => message.messageId),
     );
   }
-  const transcriptPath = hook.transcript_path;
-  if (transcriptPath !== undefined && transcriptPath !== null && transcriptPath !== '') {
+  const transcriptPath = conversationFile(hook);
+  if (transcriptPath !== undefined) {
     const remaining = candidates.filter((id) => !read.includes(id));
     const text = remaining.length === 0 ? undefined : readTail(transcriptPath);
     if (text !== undefined) {
@@ -151,7 +186,7 @@ export function observeHookEvent(
   const read = observeRead(repos, agentId, session, hook);
   let requeued: string[] = [];
 
-  switch (hook.hook_event_name) {
+  switch (eventName(hook)) {
     case 'PreToolUse':
       if (hook.tool_name === ASK_USER_TOOL) awaitUser(repos, agentId);
       break;

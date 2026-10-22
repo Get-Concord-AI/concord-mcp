@@ -487,3 +487,36 @@ describe('resolveInboxOwner', () => {
     expect(resolveInboxOwner('grok:abc', {}, { kind: 'grok' })).toBe('grok:abc');
   });
 });
+
+describe('read evidence in other harnesses', () => {
+  it("reads Grok's camelCase payload and its chat history beside updates.jsonl", () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'grok');
+    const messageId = send(repos, 'schema changed', 'k1');
+    drainInbox(repos, 'beta', 'grok', undefined, { session: sessionKey(SESSION), via: 'hook' });
+    const dir = mkdtempSync(join(tmpdir(), 'concord-grok-'));
+    writeFileSync(join(dir, 'updates.jsonl'), '{"method":"_x.ai/session/update"}\n');
+    writeFileSync(
+      join(dir, 'chat_history.jsonl'),
+      [
+        { type: 'user', content: `[concord from alpha id=${messageId}]\nschema changed` },
+        { type: 'assistant', content: 'noted' },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n'),
+    );
+
+    observeHookEvent(
+      repos,
+      'beta',
+      JSON.stringify({
+        hookEventName: 'stop',
+        sessionId: SESSION,
+        transcriptPath: join(dir, 'updates.jsonl'),
+      }),
+    );
+    expect(status(repos, messageId)).toBe('read');
+  });
+});
