@@ -150,7 +150,9 @@ export function handleSendAgentMessage(
       `Agent ${input.agentId} is not the recipient of ${parent.messageId}.`,
     );
   }
-  if (parent?.status === 'failed' || parent?.status === 'sent') {
+  // Its recipient knows the id, so it was shown the message; a `sent` parent
+  // here was only requeued after reaching it, and the reply proves it read it.
+  if (parent?.status === 'failed') {
     throw new AgentMessageDeliveryError(
       'unauthorized',
       parent.messageId,

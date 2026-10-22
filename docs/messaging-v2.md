@@ -87,12 +87,19 @@ A recipient only has to be a **registered** agent. If it has no live receiver:
 Like a phone that is switched off, a recipient whose session is gone shows a
 single tick. Before any receipt is shown or changed, Concord sweeps:
 
-- a **delivered, unread** message whose recipient has neither a live endpoint
+- a **delivered, unread** message that reached its recipient through a monitor
+  or an adapter, whose recipient has neither a live endpoint
   lease nor a live receiver (monitor) lease goes back to `sent`, with a
   `requeued` event (`unreachable`). Nobody holds it any more; it is delivered
   again if the agent comes back, or expires.
 - A session that is alive but blocked on its user keeps heartbeating its
   monitor, so its held messages correctly stay ✓✓.
+- Hook deliveries are not swept: the hook put the message straight into the
+  model's context, and a hook-only session's lease lapses whenever its model
+  thinks for a while, so a lapsed lease proves nothing there. `SessionEnd`
+  still requeues them.
+- A recipient can always reply to a message it was given, even one requeued
+  to ✓ in the meantime: the reply proves it read it.
 
 ## Read detection: evidence, not timing
 

@@ -97,7 +97,7 @@ export interface AgentMessageRepository {
   requeueSession(agentId: string, session: string): AgentMessageRecord[];
   /**
    * Settle what time alone has decided, before any receipt is shown:
-   * - a delivered, unread message whose recipient is no longer reachable (no
+   * - a delivered, unread message (monitor or adapter) whose recipient is no longer reachable (no
    *   live endpoint and no live receiver: its session ended without saying
    *   so) goes back to `sent`, because nobody holds it any more;
    * - a `sent` message past its expiry fails as `expired`.
@@ -174,8 +174,10 @@ export function createAgentMessageRepository(
     WHERE message_id = @message_id AND status = 'sent'
   `);
   const markRepliedStmt = db.prepare(`
-    UPDATE agent_messages SET status = 'replied', replied_at = @now, read_at = COALESCE(read_at, @now)
-    WHERE message_id = @message_id AND status IN ('delivered', 'read')
+    UPDATE agent_messages
+    SET status = 'replied', replied_at = @now, read_at = COALESCE(read_at, @now),
+        delivered_at = COALESCE(delivered_at, @now)
+    WHERE message_id = @message_id AND status IN ('sent', 'delivered', 'read')
   `);
   // A delivery to an unknown session (a monitor that could not see its
   // session id) can be read by any of the recipient's sessions.
@@ -223,10 +225,13 @@ export function createAgentMessageRepository(
   // A session blocked on its user still heartbeats its monitor, so it stays
   // reachable and its held messages stay delivered. Only a session with
   // neither a live endpoint lease nor a live receiver lease is gone.
+  // Hook deliveries are left out: a hook puts the message straight into the
+  // model's context, and a hook-only session's lease lapses whenever its model
+  // thinks for a while between tool calls, so an expired lease proves nothing.
   const listUnreachableStmt = db.prepare(`
     SELECT m.* FROM agent_messages m
     LEFT JOIN agent_endpoints e ON e.agent_id = m.recipient_agent_id
-    WHERE m.status = 'delivered' AND m.delivered_via IN ('monitor', 'hook', 'adapter')
+    WHERE m.status = 'delivered' AND m.delivered_via IN ('monitor', 'adapter')
       AND (
         e.agent_id IS NULL OR e.status <> 'connected'
         OR (e.expires_at IS NOT NULL AND e.expires_at < @now

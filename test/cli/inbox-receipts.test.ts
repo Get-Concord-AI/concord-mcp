@@ -734,3 +734,52 @@ describe('unreachable recipients show a single tick', () => {
     expect(status(repos, messageId)).toBe('delivered');
   });
 });
+
+describe('hook-only sessions that think for a while', () => {
+  let repos: Repositories;
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'codex');
+  });
+
+  it('keeps a hook delivery ✓✓ when the lease lapses mid-thought, and the reply still lands', () => {
+    const messageId = send(repos, 'long question', 'k1');
+    drainInbox(repos, 'beta', 'codex', undefined, { session: sessionKey(SESSION), via: 'hook' });
+    // No hook for longer than the lease while the model thinks.
+    repos.db
+      .prepare(
+        'UPDATE agent_endpoints SET expires_at = ?, receiver_expires_at = NULL WHERE agent_id = ?',
+      )
+      .run('2000-01-01T00:00:00.000Z', 'beta');
+
+    handleSendAgentMessage(repos, {
+      operation: 'reply',
+      agentId: 'beta',
+      replyToMessageId: messageId,
+      content: 'answer',
+      idempotencyKey: 'r1',
+    });
+    expect(status(repos, messageId)).toBe('replied');
+  });
+
+  it('accepts a reply to a message that was requeued after reaching its recipient', () => {
+    const messageId = send(repos, 'requeued', 'k1');
+    drainInbox(repos, 'beta', 'codex', undefined, { session: sessionKey('old'), via: 'monitor' });
+    repos.agentMessages.requeueUnread('beta', sessionKey('new'));
+    expect(status(repos, messageId)).toBe('sent');
+
+    handleSendAgentMessage(repos, {
+      operation: 'reply',
+      agentId: 'beta',
+      replyToMessageId: messageId,
+      content: 'got it anyway',
+      idempotencyKey: 'r1',
+    });
+    const message = repos.agentMessages.get(messageId);
+    expect(message?.status).toBe('replied');
+    expect(message?.readAt).not.toBeNull();
+  });
+});
