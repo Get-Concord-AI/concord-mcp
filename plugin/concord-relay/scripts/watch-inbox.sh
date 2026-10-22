@@ -13,16 +13,25 @@ CONCORD_INBOX_POLL_SECONDS="${CONCORD_INBOX_POLL_SECONDS:-2}"
 
 # A monitor orphaned by a crashed or killed harness would keep draining
 # messages into a pipe nobody reads, marking them delivered to a dead session.
-# The harness is whatever started this script: once it is gone, or this
-# process has been reparented to someone else (init, or a subreaper such as
-# systemd --user), stop. A harness that is itself pid 1 (a container) keeps
-# working, because the parent never changes.
-HARNESS_PID="${PPID}"
+# The harness is whatever started this script. Claude Code starts monitors
+# through a shell wrapper (`zsh -c … eval`), which can outlive a crashed
+# harness, so look through any shell parents to the process that launched
+# them. Once that process is gone, stop. A harness that is itself pid 1 (a
+# container) keeps working.
+harness_pid() {
+  local pid="${PPID}" comm
+  for _ in 1 2 3; do
+    comm="$(ps -o comm= -p "${pid}" 2>/dev/null | sed 's#.*/##; s#^-##')"
+    case "${comm}" in
+      sh | bash | zsh | dash | fish) pid="$(ps -o ppid= -p "${pid}" 2>/dev/null | tr -d ' ')" ;;
+      *) break ;;
+    esac
+  done
+  printf '%s' "${pid}"
+}
+HARNESS_PID="$(harness_pid)"
 harness_alive() {
-  local parent
-  kill -0 "${HARNESS_PID}" 2>/dev/null || return 1
-  parent="$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')"
-  [ -z "${parent}" ] || [ "${parent}" = "${HARNESS_PID}" ]
+  [ -z "${HARNESS_PID}" ] || [ "${HARNESS_PID}" = "0" ] || kill -0 "${HARNESS_PID}" 2>/dev/null
 }
 
 # Identity needs no configuration: Claude Code exports CLAUDE_CODE_SESSION_ID
