@@ -24,6 +24,8 @@ const observedHookSchema = z
     hook_event_name: z.string().optional(),
     /** SessionStart: startup, resume, clear, or compact. */
     source: z.string().optional(),
+    /** SessionEnd: clear, logout, prompt_input_exit, other. */
+    reason: z.string().optional(),
     /** UserPromptSubmit: the prompt, including a monitor notification that started the turn. */
     prompt: z.string().optional(),
     /** PreToolUse: the tool about to run. */
@@ -207,7 +209,9 @@ export function observeHookEvent(
     case 'SessionEnd':
       // A session that ended will never read what it was handed but did not
       // show. Requeued, it reaches this agent's next session or expires.
-      if (session !== null) {
+      // `/clear` ends the conversation but not the process: its monitor keeps
+      // delivering, so requeueing would only hand the message straight back.
+      if (session !== null && hook.reason !== 'clear') {
         requeued = repos.agentMessages
           .requeueSession(agentId, session)
           .map((message) => message.messageId);

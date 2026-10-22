@@ -618,3 +618,17 @@ describe('review follow-ups', () => {
     expect(events(repos, messageId)).toEqual(['sent', 'delivered', 'read', 'replied']);
   });
 });
+
+describe('SessionEnd from /clear', () => {
+  it('leaves deliveries alone, since the monitor lives on in the same process', () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'claude-code');
+    const messageId = send(repos, 'held', 'k1');
+    monitorDrain(repos);
+
+    observeHookEvent(repos, 'beta', hook({ hook_event_name: 'SessionEnd', reason: 'clear' }));
+    expect(status(repos, messageId)).toBe('delivered');
+  });
+});

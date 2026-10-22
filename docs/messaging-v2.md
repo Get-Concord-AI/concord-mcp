@@ -209,8 +209,10 @@ a security boundary against a local process that can open
   one's mail. Requeue on `startup` helps operator-named agents
   (`CONCORD_AGENT_ID`). For everyone, `SessionEnd` returns what that session
   was handed but never read to ✓, so the sender sees the truth and the message
-  expires instead of sitting at ✓✓ forever. A session killed outright fires no
-  `SessionEnd` and stays at ✓✓.
+  expires instead of sitting at ✓✓ forever. A session killed outright (crash,
+  `kill -9`) fires no `SessionEnd`, so its unread deliveries stay at ✓✓.
+  `SessionEnd` from `/clear` does not requeue: the process and its monitor
+  live on, and would only hand the message straight back.
 - **One live session per named agent is assumed.** Two terminals sharing a
   `CONCORD_AGENT_ID` can each be handed a message: delivery is at-least-once,
   and the id in every header lets an agent spot a repeat.
