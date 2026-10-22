@@ -117,6 +117,10 @@ prompt nor a transcript can only show read through `inspect_work` or a reply;
 otherwise its messages stay at ✓✓. Showing read late or never is honest;
 showing it early is not.
 
+`UserPromptSubmit` runs as the prompt is submitted, so prompt evidence is
+recorded a moment before the harness calls the model with it. The message is
+then in the input the model is being sent; nothing can still hold it back.
+
 ### Example: Claude Code waiting on a user question (#208)
 
 1. Agent A is blocked on an `AskUserQuestion` picker or a permission prompt.

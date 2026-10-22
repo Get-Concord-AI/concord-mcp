@@ -79,6 +79,18 @@ function modelSaw(model: FakeModel, messageId: string): boolean {
   return model.turns.some((turn) => turn.conversation.text.includes(`id=${messageId}`));
 }
 
+/**
+ * Prompt evidence is recorded by UserPromptSubmit, which runs as the prompt
+ * is submitted, a moment before the harness calls the model with it.
+ */
+async function untilModelSaw(model: FakeModel, messageId: string): Promise<void> {
+  await eventually(
+    () => (modelSaw(model, messageId) ? true : undefined),
+    `the model to be called with ${messageId}`,
+    15_000,
+  );
+}
+
 /** Wait for the model to go quiet after a tool call it made. */
 async function untilCalled(model: FakeModel, tool: string): Promise<void> {
   await eventually(
@@ -215,7 +227,7 @@ for (const harness of REAL_HARNESSES) {
           ['read'],
           90_000,
         );
-        expect(modelSaw(model, sent.message_id)).toBe(true);
+        await untilModelSaw(model, sent.message_id);
         expect(receipt.delivered_at).not.toBeNull();
         expect(receipt.events).toEqual(expect.arrayContaining(['sent', 'delivered', 'read']));
       },
@@ -295,7 +307,7 @@ for (const harness of REAL_HARNESSES) {
           ['read'],
           90_000,
         );
-        expect(modelSaw(model, sent.message_id)).toBe(true);
+        await untilModelSaw(model, sent.message_id);
         expect(receipt.delivered_at).not.toBeNull();
       },
       180_000,
@@ -338,7 +350,7 @@ for (const harness of REAL_HARNESSES) {
           ['read'],
           90_000,
         );
-        expect(modelSaw(model, sent.message_id)).toBe(true);
+        await untilModelSaw(model, sent.message_id);
         expect(['prompt', 'transcript']).toContain(read.readEvidence);
       },
       240_000,
