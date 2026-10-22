@@ -55,27 +55,37 @@ function readOnInspect(
   return messages.map((message) => changed.get(message.messageId) ?? message);
 }
 
-export type AgentInboxView = Omit<AgentCommunicationView, 'inbox' | 'outbox'> & {
-  inbox: MessageView[];
-  outbox: MessageView[];
-  /** True when the viewer is another agent: presence only, no messages. */
-  private: boolean;
-};
+type AgentPresenceView = Omit<AgentCommunicationView, 'inbox' | 'outbox'>;
+
+/**
+ * Another agent sees presence only. Its inbox and outbox are left out rather
+ * than sent empty, so a caller cannot mistake hidden mail for no mail.
+ */
+export type AgentInboxView =
+  | (AgentPresenceView & { private: true; messages: string })
+  | (AgentPresenceView & { private: false; inbox: MessageView[]; outbox: MessageView[] });
+
+export function privateMessagesNote(agentId: string): string {
+  return (
+    `Messages are private to ${agentId}; Concord does not show one agent another's inbox or outbox. ` +
+    'For a message you sent, check its receipt with inspect_work message_id.'
+  );
+}
 
 export function inspectAgentInbox(
   repos: Repositories,
   agentId: string,
   viewer: Viewer,
 ): AgentInboxView {
-  const communication = inspectAgentCommunication(repos, agentId);
+  const { inbox, outbox, ...presence } = inspectAgentCommunication(repos, agentId);
   if (viewer.agentId !== agentId) {
-    return { ...communication, inbox: [], outbox: [], private: true };
+    return { ...presence, private: true, messages: privateMessagesNote(agentId) };
   }
   return {
-    ...communication,
-    inbox: readOnInspect(repos, viewer, communication.inbox).map(view),
-    outbox: communication.outbox.map(view),
+    ...presence,
     private: false,
+    inbox: readOnInspect(repos, viewer, inbox).map(view),
+    outbox: outbox.map(view),
   };
 }
 

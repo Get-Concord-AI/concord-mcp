@@ -650,7 +650,7 @@ export function registerWorkflowTools(
               text: withWorkspaceText(
                 `${result.communication.agentId}; promptable ${String(result.communication.promptable)}, ` +
                   (result.communication.private
-                    ? 'its messages are private to it'
+                    ? result.communication.messages
                     : `${String(result.communication.inbox.length)} inbox message(s), ` +
                       `${String(result.communication.outbox.length)} outbox message(s)` +
                       outboxReceiptLines(result.communication.outbox)) +

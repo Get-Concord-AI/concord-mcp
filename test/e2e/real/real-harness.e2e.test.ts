@@ -26,7 +26,9 @@ function required(harness: RealHarness): boolean {
   return wanted === 'all' || wanted.split(',').includes(harness.name);
 }
 
-const privateViewSchema = z.object({ private: z.boolean(), outbox: z.array(z.unknown()) }).loose();
+const privateViewSchema = z
+  .object({ private: z.boolean(), messages: z.string().optional() })
+  .loose();
 
 const endpointSchema = z
   .object({ promptable: z.boolean(), capabilities: z.array(z.string()) })
@@ -471,7 +473,9 @@ for (const harness of REAL_HARNESSES) {
             privateViewSchema,
           );
           expect(view.private).toBe(true);
-          expect(view.outbox).toEqual([]);
+          expect(view).not.toHaveProperty('inbox');
+          expect(view).not.toHaveProperty('outbox');
+          expect(view.messages).toMatch(/private to/u);
           await expect(
             outsider.call('inspect_work', { message_id: sent.message_id }, privateViewSchema),
           ).rejects.toThrow(/does not exist/u);

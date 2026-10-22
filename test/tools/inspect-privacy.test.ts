@@ -49,8 +49,11 @@ describe('inbox privacy', () => {
     expect(result.scope).toBe('agent');
     if (result.scope !== 'agent') return;
     expect(result.communication.private).toBe(true);
-    expect(result.communication.inbox).toEqual([]);
-    expect(result.communication.outbox).toEqual([]);
+    // Left out, not sent empty: an empty list would read as "no messages".
+    expect(result.communication).not.toHaveProperty('inbox');
+    expect(result.communication).not.toHaveProperty('outbox');
+    if (!result.communication.private) return;
+    expect(result.communication.messages).toMatch(/private to beta/);
   });
 
   it('shows an agent its own mail with receipts, and reading its inbox marks it read', () => {
@@ -59,7 +62,9 @@ describe('inbox privacy', () => {
     drainInbox(repos, 'alpha', 'claude-code');
 
     const result = handleInspectWork(repos, { agent_id: 'alpha' }, 'alpha');
-    if (result.scope !== 'agent') throw new Error('expected agent scope');
+    if (result.scope !== 'agent' || result.communication.private) {
+      throw new Error('expected own agent scope');
+    }
     expect(result.communication.inbox.map((message) => message.receipt.ticks)).toEqual(['read']);
     expect(result.communication.outbox.map((message) => message.receipt.ticks)).toEqual(['✓']);
     expect(repos.agentMessages.get(toAlpha)?.status).toBe('read');
@@ -130,7 +135,9 @@ describe('inbox privacy', () => {
     // Naming yourself is trusted for reading, never for changing a receipt.
     expect(repos.agentMessages.get(messageId)?.status).toBe('sent');
     const inbox = handleInspectWork(repos, { agent_id: 'beta' });
-    if (inbox.scope !== 'agent') throw new Error('expected agent scope');
+    if (inbox.scope !== 'agent' || inbox.communication.private) {
+      throw new Error('expected own agent scope');
+    }
     expect(inbox.communication.inbox).toHaveLength(1);
     expect(repos.agentMessages.get(messageId)?.status).toBe('sent');
     // A visible session always wins over a named one.
