@@ -26,7 +26,6 @@ const agentViewSchema = z
   .object({
     promptable: z.boolean(),
     capabilities: z.array(z.string()),
-    inbox: z.array(z.object({ messageId: z.string(), status: z.string() }).loose()),
   })
   .loose();
 

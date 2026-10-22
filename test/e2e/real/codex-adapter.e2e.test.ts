@@ -89,8 +89,8 @@ describe.skipIf((binaryDir === undefined || codex === undefined) && !required)(
       const reads: string[] = [];
       // Notifications can start before the thread id (and so the tracker) exists.
       const trackers: CodexReadTracker[] = [];
-      client.onNotification((method, params) => {
-        for (const tracker of trackers) tracker.notify(method, params);
+      client.onNotification((notification) => {
+        for (const tracker of trackers) tracker.notify(notification);
       });
       await client.connect();
       cleanup.push(() => {

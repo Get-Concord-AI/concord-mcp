@@ -52,8 +52,8 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
       );
     }
   });
-  client.onNotification((method, params) => {
-    reads.notify(method, params);
+  client.onNotification((notification) => {
+    reads.notify(notification);
   });
   await client.connect();
   await client.resumeThread(threadId);

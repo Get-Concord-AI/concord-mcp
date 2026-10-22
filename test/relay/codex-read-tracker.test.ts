@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { parseCodexNotification } from '../../src/relay/codex-notifications.js';
 import { CodexReadTracker } from '../../src/relay/codex-read-tracker.js';
+
+/** Feed a raw app-server notification through the same parser the client uses. */
+function send(t: CodexReadTracker, method: string, params: object): void {
+  const notification = parseCodexNotification({ method, params });
+  if (notification !== undefined) t.notify(notification);
+}
 
 function tracker(): { reads: string[][]; tracker: CodexReadTracker } {
   const reads: string[][] = [];
@@ -31,9 +38,9 @@ describe('CodexReadTracker', () => {
   it('reads a pushed message once its input item is recorded and the turn completes', () => {
     const { reads, tracker: t } = tracker();
     t.expect('m1');
-    t.notify('item/completed', item('turn-1', 'm1'));
+    send(t, 'item/completed', item('turn-1', 'm1'));
     expect(reads).toEqual([]);
-    t.notify('turn/completed', completed('turn-1'));
+    send(t, 'turn/completed', completed('turn-1'));
     expect(reads).toEqual([['m1']]);
   });
 
@@ -43,48 +50,48 @@ describe('CodexReadTracker', () => {
       reads.push([ids, evidence]);
     });
     t.expect('m1');
-    t.notify('item/started', item('turn-1', 'm1'));
-    t.notify('item/started', modelItem('turn-1', 'reasoning'));
+    send(t, 'item/started', item('turn-1', 'm1'));
+    send(t, 'item/started', modelItem('turn-1', 'reasoning'));
     expect(reads).toEqual([[['m1'], 'model_output']]);
     // The turn completing later reports nothing new.
-    t.notify('turn/completed', completed('turn-1'));
+    send(t, 'turn/completed', completed('turn-1'));
     expect(reads).toHaveLength(1);
   });
 
   it('does not count model output that started before a steered message landed', () => {
     const { reads, tracker: t } = tracker();
     t.expect('m1');
-    t.notify('item/started', modelItem('turn-1', 'commandExecution'));
-    t.notify('item/completed', item('turn-1', 'm1'));
+    send(t, 'item/started', modelItem('turn-1', 'commandExecution'));
+    send(t, 'item/completed', item('turn-1', 'm1'));
     // The command finishing was sampled without the message.
-    t.notify('item/completed', modelItem('turn-1', 'commandExecution'));
+    send(t, 'item/completed', modelItem('turn-1', 'commandExecution'));
     expect(reads).toEqual([]);
-    t.notify('item/started', modelItem('turn-1', 'agentMessage'));
+    send(t, 'item/started', modelItem('turn-1', 'agentMessage'));
     expect(reads).toEqual([['m1']]);
   });
 
   it('reads a message the model answered even if the turn is then interrupted', () => {
     const { reads, tracker: t } = tracker();
     t.expect('m1');
-    t.notify('item/completed', item('turn-1', 'm1'));
-    t.notify('item/started', modelItem('turn-1'));
-    t.notify('turn/completed', completed('turn-1', 'interrupted'));
+    send(t, 'item/completed', item('turn-1', 'm1'));
+    send(t, 'item/started', modelItem('turn-1'));
+    send(t, 'turn/completed', completed('turn-1', 'interrupted'));
     expect(reads).toEqual([['m1']]);
   });
 
   it('matches the rendered header when Codex reports no client id', () => {
     const { reads, tracker: t } = tracker();
     t.expect('m1');
-    t.notify('item/completed', item('turn-1', null, '[concord from a id=m1]\nhi'));
-    t.notify('turn/completed', completed('turn-1'));
+    send(t, 'item/completed', item('turn-1', null, '[concord from a id=m1]\nhi'));
+    send(t, 'turn/completed', completed('turn-1'));
     expect(reads).toEqual([['m1']]);
   });
 
   it('handles the turn completing before its item is reported', () => {
     const { reads, tracker: t } = tracker();
     t.expect('m1');
-    t.notify('turn/completed', completed('turn-1'));
-    t.notify('item/completed', item('turn-1', 'm1'));
+    send(t, 'turn/completed', completed('turn-1'));
+    send(t, 'item/completed', item('turn-1', 'm1'));
     expect(reads).toEqual([['m1']]);
   });
 
@@ -92,20 +99,20 @@ describe('CodexReadTracker', () => {
     const { reads, tracker: t } = tracker();
     t.expect('m1');
     t.expect('m2');
-    t.notify('item/completed', item('turn-1', 'm1'));
-    t.notify('turn/completed', completed('turn-1', 'interrupted'));
-    t.notify('item/completed', item('turn-2', 'm2'));
-    t.notify('turn/completed', completed('turn-2', 'failed'));
+    send(t, 'item/completed', item('turn-1', 'm1'));
+    send(t, 'turn/completed', completed('turn-1', 'interrupted'));
+    send(t, 'item/completed', item('turn-2', 'm2'));
+    send(t, 'turn/completed', completed('turn-2', 'failed'));
     expect(reads).toEqual([]);
   });
 
   it('ignores other threads, unknown messages, and turns without our input', () => {
     const { reads, tracker: t } = tracker();
     t.expect('m1');
-    t.notify('item/completed', { ...item('turn-1', 'm1'), threadId: 'thread-2' });
-    t.notify('item/completed', item('turn-1', 'someone-else'));
-    t.notify('turn/completed', completed('turn-1'));
-    t.notify('turn/completed', completed('turn-9'));
+    send(t, 'item/completed', { ...item('turn-1', 'm1'), threadId: 'thread-2' });
+    send(t, 'item/completed', item('turn-1', 'someone-else'));
+    send(t, 'turn/completed', completed('turn-1'));
+    send(t, 'turn/completed', completed('turn-9'));
     expect(reads).toEqual([]);
   });
 
@@ -113,11 +120,11 @@ describe('CodexReadTracker', () => {
     const { reads, tracker: t } = tracker();
     t.expect('m1');
     t.expect('m2');
-    t.notify('item/started', item('turn-1', 'm1'));
-    t.notify('item/completed', item('turn-1', 'm1'));
-    t.notify('item/completed', item('turn-1', 'm2'));
-    t.notify('turn/completed', completed('turn-1'));
-    t.notify('turn/completed', completed('turn-1'));
+    send(t, 'item/started', item('turn-1', 'm1'));
+    send(t, 'item/completed', item('turn-1', 'm1'));
+    send(t, 'item/completed', item('turn-1', 'm2'));
+    send(t, 'turn/completed', completed('turn-1'));
+    send(t, 'turn/completed', completed('turn-1'));
     expect(reads).toEqual([['m1', 'm2']]);
   });
 });

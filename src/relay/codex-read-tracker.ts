@@ -1,6 +1,5 @@
-import { z } from 'zod';
-
 import { renderedMessageIds } from '../domain/pull-inbox.js';
+import type { CodexItem, CodexNotification } from './codex-notifications.js';
 
 /**
  * Read receipts for Concord messages pushed into a Codex thread.
@@ -22,20 +21,6 @@ import { renderedMessageIds } from '../domain/pull-inbox.js';
  * whichever order things happen in.
  */
 
-const userMessageItemSchema = z
-  .object({
-    type: z.literal('userMessage'),
-    clientId: z.string().nullable().optional(),
-    content: z.unknown().optional(),
-  })
-  .loose();
-const itemNotificationSchema = z
-  .object({
-    threadId: z.string().optional(),
-    turnId: z.string().optional(),
-    item: z.unknown(),
-  })
-  .loose();
 /** Items only the model produces: one starting means it was sampled with the turn's input so far. */
 const MODEL_ITEM_TYPES = new Set([
   'agentMessage',
@@ -46,13 +31,6 @@ const MODEL_ITEM_TYPES = new Set([
   'mcpToolCall',
   'webSearch',
 ]);
-const modelItemSchema = z.object({ type: z.string() }).loose();
-const turnNotificationSchema = z
-  .object({
-    threadId: z.string().optional(),
-    turn: z.object({ id: z.string(), status: z.string().optional() }).loose(),
-  })
-  .loose();
 
 export type CodexReadEvidence = 'model_output' | 'turn_completed';
 
@@ -75,30 +53,30 @@ export class CodexReadTracker {
   }
 
   /** Feed every app-server notification through here. */
-  notify(method: string, params: Record<string, unknown> | undefined): void {
-    if (method === 'item/started' || method === 'item/completed') this.onItem(method, params);
-    if (method === 'turn/completed') this.onTurnCompleted(params);
+  notify(notification: CodexNotification): void {
+    if (!this.sameThread(notification.threadId)) return;
+    if (notification.method === 'item/started' || notification.method === 'item/completed') {
+      if (notification.turnId !== undefined) {
+        this.onItem(notification.method, notification.turnId, notification.item);
+      }
+      return;
+    }
+    if (notification.method === 'turn/completed') {
+      this.onTurnCompleted(notification.turn.id, notification.turn.status);
+    }
   }
 
-  private onItem(method: string, params: Record<string, unknown> | undefined): void {
-    const notification = itemNotificationSchema.safeParse(params);
-    if (!notification.success || !this.sameThread(notification.data.threadId)) return;
-    const turnId = notification.data.turnId;
-    if (turnId === undefined) return;
-    const item = userMessageItemSchema.safeParse(notification.data.item);
-    if (!item.success) {
+  private onItem(method: 'item/started' | 'item/completed', turnId: string, item: CodexItem): void {
+    if (item.type !== 'userMessage') {
       // Only an item the model starts after the message counts: one already
       // under way when a steer landed was sampled without it.
-      const other = modelItemSchema.safeParse(notification.data.item);
-      if (method === 'item/started' && other.success && MODEL_ITEM_TYPES.has(other.data.type)) {
+      if (method === 'item/started' && MODEL_ITEM_TYPES.has(item.type)) {
         this.settle(turnId, 'model_output');
       }
       return;
     }
-    const ids = new Set(renderedMessageIds(JSON.stringify(item.data.content ?? '')));
-    if (item.data.clientId !== undefined && item.data.clientId !== null) {
-      ids.add(item.data.clientId);
-    }
+    const ids = new Set(renderedMessageIds(item.text));
+    if (item.clientId !== null) ids.add(item.clientId);
     const ours = [...ids].filter((id) => this.pushed.has(id));
     if (ours.length === 0) return;
     const forTurn = this.recorded.get(turnId) ?? new Set<string>();
@@ -107,10 +85,7 @@ export class CodexReadTracker {
     if (this.completed.has(turnId)) this.settle(turnId, 'turn_completed');
   }
 
-  private onTurnCompleted(params: Record<string, unknown> | undefined): void {
-    const notification = turnNotificationSchema.safeParse(params);
-    if (!notification.success || !this.sameThread(notification.data.threadId)) return;
-    const { id, status } = notification.data.turn;
+  private onTurnCompleted(id: string, status: string | undefined): void {
     if (status !== 'completed') {
       // Not proof of reading, and not proof of the opposite: forget the turn.
       this.recorded.delete(id);
