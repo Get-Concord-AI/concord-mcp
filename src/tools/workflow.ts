@@ -733,6 +733,7 @@ export function registerWorkflowTools(
           ...workspaceStructured(workspace),
           scope: result.scope,
           task: result.context.task,
+          owner_liveness: result.context.ownerLiveness,
           updates: result.context.updates,
           latest_handoff: result.context.latestHandoff ?? null,
           latest_review: result.context.latestReview ?? null,

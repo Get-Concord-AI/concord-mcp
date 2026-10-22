@@ -211,7 +211,7 @@ export function handleReassignTask(
   if (task.agentId !== actor.agentId) {
     if (input.force !== true || !isHumanSupervisor(actor, task)) {
       throw new Error(
-        `Only the current owner or a registered agent for human owner ${task.owner ?? '(none)'} can force-reassign ${task.taskId}.`,
+        `Only the current owner or a registered agent for human owner ${task.owner ?? '(none)'} can force-reassign ${task.taskId}. Use transfer_work with action: 'reassign' and force: true.`,
       );
     }
   }
