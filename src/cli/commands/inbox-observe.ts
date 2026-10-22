@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import type { Repositories } from '../../db/index.js';
 import { hookSessionId } from '../../domain/identity.js';
-import { idsInPrompt, idsReadInTranscript, sessionKey } from '../../domain/receipts.js';
+import { idsInPrompt, scanTranscript, sessionKey } from '../../domain/receipts.js';
 
 /**
  * What a session's own hooks reveal about the messages it was handed.
@@ -83,6 +83,34 @@ function conversationFile(hook: ObservedHook): string | undefined {
 const ASK_USER_TOOL = 'AskUserQuestion';
 /** The most of a transcript read per hook: unread messages are recent. */
 const TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
+/**
+ * Harnesses write their logs asynchronously, so a hook can run just before the
+ * model's latest entry lands. When a message is in the transcript with nothing
+ * from the model after it yet, read the file again a few times.
+ */
+const TRANSCRIPT_RETRIES = 4;
+const TRANSCRIPT_RETRY_MS = 250;
+
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Ids the transcript at `path` proves were read, waiting briefly for a late write. */
+function readFromTranscript(path: string, candidates: readonly string[]): string[] {
+  const read = new Set<string>();
+  let remaining = [...candidates];
+  for (let attempt = 0; attempt <= TRANSCRIPT_RETRIES && remaining.length > 0; attempt += 1) {
+    if (attempt > 0) pause(TRANSCRIPT_RETRY_MS);
+    const text = readTail(path);
+    if (text === undefined) break;
+    const scan = scanTranscript(text, remaining);
+    for (const id of scan.read) read.add(id);
+    // Only a message already shown, with the model's turn still to land, is worth waiting for.
+    if (scan.pending.length === 0) break;
+    remaining = scan.pending;
+  }
+  return [...read];
+}
 
 export interface Observation {
   /** Messages this event proved the agent's model was shown. */
@@ -151,11 +179,10 @@ function observeRead(
   const transcriptPath = conversationFile(hook);
   if (transcriptPath !== undefined) {
     const remaining = candidates.filter((id) => !read.includes(id));
-    const text = remaining.length === 0 ? undefined : readTail(transcriptPath);
-    if (text !== undefined) {
+    if (remaining.length > 0) {
       read.push(
         ...repos.agentMessages
-          .markRead(agentId, session, idsReadInTranscript(text, remaining), 'transcript')
+          .markRead(agentId, session, readFromTranscript(transcriptPath, remaining), 'transcript')
           .map((message) => message.messageId),
       );
     }

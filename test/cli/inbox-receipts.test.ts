@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -781,5 +782,50 @@ describe('hook-only sessions that think for a while', () => {
     const message = repos.agentMessages.get(messageId);
     expect(message?.status).toBe('replied');
     expect(message?.readAt).not.toBeNull();
+  });
+});
+
+describe('transcripts written a moment late', () => {
+  it("waits briefly for the model's entry when the message is already in the log", () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'copilot-cli');
+    const messageId = send(repos, 'late log', 'k1');
+    drainInbox(repos, 'beta', 'copilot-cli', undefined, {
+      session: sessionKey(SESSION),
+      via: 'hook',
+    });
+    const path = transcript([{ type: 'hook.end', output: `[concord from alpha id=${messageId}]` }]);
+    // Another process flushes the model's turn just after the hook starts reading.
+    const entry = JSON.stringify({ type: 'assistant.message', content: 'ok' });
+    spawn(
+      process.execPath,
+      [
+        '-e',
+        `setTimeout(() => require('node:fs').appendFileSync(${JSON.stringify(path)}, ${JSON.stringify(`${entry}\n`)}), 300)`,
+      ],
+      { stdio: 'ignore' },
+    ).unref();
+
+    observeHookEvent(repos, 'beta', hook({ hook_event_name: 'Stop', transcript_path: path }));
+    expect(status(repos, messageId)).toBe('read');
+  });
+
+  it('does not wait when nothing in the log is still waiting on the model', () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'copilot-cli');
+    send(repos, 'not in the log yet', 'k1');
+    drainInbox(repos, 'beta', 'copilot-cli', undefined, {
+      session: sessionKey(SESSION),
+      via: 'hook',
+    });
+    const path = transcript([{ type: 'assistant.message', content: 'unrelated' }]);
+
+    const started = Date.now();
+    observeHookEvent(repos, 'beta', hook({ hook_event_name: 'Stop', transcript_path: path }));
+    expect(Date.now() - started).toBeLessThan(200);
   });
 });

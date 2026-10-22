@@ -200,7 +200,19 @@ function transcriptEntries(text: string): ParsedEntry[] {
  * merely queued), and the model wrote something after it.
  */
 export function idsReadInTranscript(text: string, candidates: readonly string[]): string[] {
-  if (candidates.length === 0) return [];
+  return scanTranscript(text, candidates).read;
+}
+
+/**
+ * Like `idsReadInTranscript`, but also which candidates the transcript shows
+ * with nothing from the model after them yet: a harness that writes its log a
+ * moment late can be read again for those.
+ */
+export function scanTranscript(
+  text: string,
+  candidates: readonly string[],
+): { read: string[]; pending: string[] } {
+  if (candidates.length === 0) return { read: [], pending: [] };
   const wanted = new Set(candidates);
   const shown = new Set<string>();
   const read = new Set<string>();
@@ -215,5 +227,5 @@ export function idsReadInTranscript(text: string, candidates: readonly string[])
       if (wanted.has(id) && !read.has(id)) shown.add(id);
     }
   }
-  return [...read];
+  return { read: [...read], pending: [...shown] };
 }
