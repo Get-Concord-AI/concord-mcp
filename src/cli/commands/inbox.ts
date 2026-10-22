@@ -446,6 +446,10 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     .option('--provider <name>', 'Client the agent runs in', 'claude-code')
     .option('--from-hook', 'Read the session id from a hook payload on stdin (Codex)')
     .option(
+      '--payload-stdin',
+      'Read a hook payload on stdin for read receipts only; identity still comes from --agent',
+    )
+    .option(
       '--format <format>',
       'post-tool-use and stop emit hook JSON; monitor emits one line per message; json emits raw records',
       'json',
@@ -466,7 +470,9 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       // payload (read evidence, subagent marker) is safe to read even without
       // --from-hook. Identity still comes from it only with --from-hook.
       const hookPayload =
-        options.fromHook === true || HOOK_FORMATS.includes(options.format)
+        options.fromHook === true ||
+        options.payloadStdin === true ||
+        HOOK_FORMATS.includes(options.format)
           ? (readHookPayload() ?? '')
           : undefined;
       const agentId = resolveInboxOwner(options.agent, process.env, {
