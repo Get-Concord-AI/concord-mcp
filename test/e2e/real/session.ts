@@ -77,6 +77,14 @@ export class HarnessRun {
     };
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
+    // Say so when the harness never started or quit early: a silent, empty
+    // transcript is otherwise all a failure shows.
+    child.once('error', (error) => {
+      run.output += `\n[spawn ${command} failed: ${error.message}]\n`;
+    });
+    child.once('exit', (code, signal) => {
+      run.output += `\n[${command} exited: code=${String(code)} signal=${String(signal)}]\n`;
+    });
     return run;
   }
 
@@ -121,7 +129,8 @@ export class HarnessRun {
     } catch {
       // Headless runs have no screen log.
     }
-    return `${this.output}${screen}`.slice(-4000);
+    const where = `[screen log ${this.log}: ${screen === '' ? 'empty or missing' : `${String(screen.length)} bytes`}]\n`;
+    return `${where}${this.output}${stripControls(screen)}`.slice(-4000);
   }
 
   /**

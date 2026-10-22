@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+
 import { afterEach, beforeEach, describe, expect, inject, it, onTestFailed } from 'vitest';
 import { z } from 'zod';
 
@@ -143,6 +145,16 @@ for (const harness of REAL_HARNESSES) {
           console.error(`--- ${harness.name} output ---\n${run.transcript()}`);
         console.error(
           `--- model turns ---\n${model.turns.map((turn) => JSON.stringify(turn.step)).join('\n')}`,
+        );
+        // Leftover sessions from earlier cases are the usual suspect when one never starts.
+        const ps = spawnSync('ps', ['-eo', 'pid,ppid,etime,args'], { encoding: 'utf8' });
+        console.error(
+          `--- processes ---\n${ps.stdout
+            .split('\n')
+            .filter((line) =>
+              /claude|codex|copilot|grok|goose|concord|watch-inbox|pty-run/u.test(line),
+            )
+            .join('\n')}`,
         );
       });
     });
