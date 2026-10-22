@@ -53,6 +53,7 @@ const EVENT_NAMES: Readonly<Record<string, string>> = {
   post_tool_use: 'PostToolUse',
   notification: 'Notification',
   stop: 'Stop',
+  session_end: 'SessionEnd',
 };
 
 function eventName(hook: ObservedHook): string | undefined {
@@ -170,6 +171,8 @@ function observeRead(
  *   notification, mean the session is about to block on its user. Recorded so
  *   a sender can be told; delivery is never held on it, because dismissing a
  *   prompt with Esc or Deny fires no hook to clear it.
+ * - `SessionEnd`: whatever this session was handed and never read goes back
+ *   to the queue.
  * - `SessionStart` from `startup` is a new session for this agent: anything
  *   delivered to an earlier session but never read is queued again. A
  *   `resume` restores the earlier session along with what it was holding, so
@@ -198,6 +201,15 @@ export function observeHookEvent(
       if (hook.source === 'startup') {
         requeued = repos.agentMessages
           .requeueUnread(agentId, session)
+          .map((message) => message.messageId);
+      }
+      break;
+    case 'SessionEnd':
+      // A session that ended will never read what it was handed but did not
+      // show. Requeued, it reaches this agent's next session or expires.
+      if (session !== null) {
+        requeued = repos.agentMessages
+          .requeueSession(agentId, session)
           .map((message) => message.messageId);
       }
       break;

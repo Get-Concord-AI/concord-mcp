@@ -8,6 +8,7 @@ import {
   visibleTaskMessages,
   type AgentInboxView,
   type ThreadView,
+  type Viewer,
 } from './inspect-messages.js';
 
 export type InspectWorkResult =
@@ -31,7 +32,12 @@ export function handleInspectWork(
   if (scoped.length > 1) {
     throw new Error('inspect_work accepts only one of task_id, agent_id, or message_id.');
   }
-  const viewer = sessionAgentId ?? input.agent_id;
+  const viewer: Viewer | undefined =
+    sessionAgentId !== undefined
+      ? { agentId: sessionAgentId, verified: true }
+      : input.agent_id === undefined
+        ? undefined
+        : { agentId: input.agent_id, verified: false };
   if (input.task_id !== undefined) {
     const context = handleGetTaskContext(repos, { task_id: input.task_id });
     return {
@@ -45,7 +51,11 @@ export function handleInspectWork(
   if (input.agent_id !== undefined) {
     return {
       scope: 'agent',
-      communication: inspectAgentInbox(repos, input.agent_id, sessionAgentId),
+      communication: inspectAgentInbox(
+        repos,
+        input.agent_id,
+        viewer ?? { agentId: input.agent_id, verified: false },
+      ),
     };
   }
   return { scope: 'workspace', state: handleGetWorkState(repos) };

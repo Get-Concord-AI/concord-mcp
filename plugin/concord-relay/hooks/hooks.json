@@ -65,6 +65,16 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "concord inbox observe"
+          }
+        ]
+      }
     ]
   }
 }

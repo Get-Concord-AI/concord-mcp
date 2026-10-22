@@ -114,12 +114,10 @@ describe('inbox privacy', () => {
     expect(() => handleInspectWork(repos, { message_id: root }, 'gamma')).toThrow(/does not exist/);
   });
 
-  it('withholds content when it cannot tell who is asking', () => {
+  it('shows a caller it cannot identify nothing at all', () => {
     const messageId = send(repos, 'alpha', 'beta', 'k1');
-    const result = handleInspectWork(repos, { message_id: messageId });
-    if (result.scope !== 'message') throw new Error('expected message scope');
 
-    expect(result.thread[0]?.content).toMatch(/withheld/);
+    expect(() => handleInspectWork(repos, { message_id: messageId })).toThrow(/pass your agent_id/);
     expect(repos.agentMessages.get(messageId)?.status).toBe('sent');
   });
 
@@ -129,6 +127,12 @@ describe('inbox privacy', () => {
     const named = handleInspectWork(repos, { message_id: messageId, agent_id: 'beta' });
     if (named.scope !== 'message') throw new Error('expected message scope');
     expect(named.thread[0]?.content).toBe('alpha to beta');
+    // Naming yourself is trusted for reading, never for changing a receipt.
+    expect(repos.agentMessages.get(messageId)?.status).toBe('sent');
+    const inbox = handleInspectWork(repos, { agent_id: 'beta' });
+    if (inbox.scope !== 'agent') throw new Error('expected agent scope');
+    expect(inbox.communication.inbox).toHaveLength(1);
+    expect(repos.agentMessages.get(messageId)?.status).toBe('sent');
     // A visible session always wins over a named one.
     expect(() =>
       handleInspectWork(repos, { message_id: messageId, agent_id: 'beta' }, 'gamma'),

@@ -30,7 +30,13 @@ export type DeliveryVia = (typeof deliveryViaValues)[number];
 const deliveryViaSchema = z.enum(deliveryViaValues);
 
 /** What proved a message reached the recipient model's input. */
-export const readEvidenceValues = ['prompt', 'transcript', 'turn_completed', 'inspect'] as const;
+export const readEvidenceValues = [
+  'prompt',
+  'transcript',
+  'turn_completed',
+  'inspect',
+  'reply',
+] as const;
 export type ReadEvidence = (typeof readEvidenceValues)[number];
 export const readEvidenceSchema = z.enum(readEvidenceValues);
 

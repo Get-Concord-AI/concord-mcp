@@ -627,7 +627,7 @@ describe('simplified workflow MCP contract', () => {
 
       const inspected = await harness.client.callTool({
         name: 'inspect_work',
-        arguments: { message_id: message?.messageId },
+        arguments: { message_id: message?.messageId, agent_id: 'codex:sender' },
       });
       expect(inspected.isError).not.toBe(true);
       expect(JSON.stringify(inspected)).toContain('delivered');

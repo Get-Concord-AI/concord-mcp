@@ -13,11 +13,16 @@ CONCORD_INBOX_POLL_SECONDS="${CONCORD_INBOX_POLL_SECONDS:-2}"
 
 # A monitor orphaned by a crashed or killed harness would keep draining
 # messages into a pipe nobody reads, marking them delivered to a dead session.
-# Once its parent is gone this process is reparented to init (pid 1).
+# The harness is whatever started this script: once it is gone, or this
+# process has been reparented to someone else (init, or a subreaper such as
+# systemd --user), stop. A harness that is itself pid 1 (a container) keeps
+# working, because the parent never changes.
+HARNESS_PID="${PPID}"
 harness_alive() {
   local parent
+  kill -0 "${HARNESS_PID}" 2>/dev/null || return 1
   parent="$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')"
-  [ -n "${parent}" ] && [ "${parent}" != "1" ]
+  [ -z "${parent}" ] || [ "${parent}" = "${HARNESS_PID}" ]
 }
 
 # Identity needs no configuration: Claude Code exports CLAUDE_CODE_SESSION_ID

@@ -556,3 +556,65 @@ describe('Copilot CLI read evidence', () => {
     expect(status(repos, messageId)).toBe('read');
   });
 });
+
+describe('review follow-ups', () => {
+  let repos: Repositories;
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'claude-code');
+  });
+
+  it("returns a session's unread deliveries to the queue when that session ends", () => {
+    const messageId = send(repos, 'never shown', 'k1');
+    monitorDrain(repos);
+
+    const observed = observeHookEvent(repos, 'beta', hook({ hook_event_name: 'SessionEnd' }));
+    expect(observed.requeued).toEqual([messageId]);
+    expect(status(repos, messageId)).toBe('sent');
+  });
+
+  it('does not count a synthetic assistant entry as the model having read anything', () => {
+    const messageId = send(repos, 'ping', 'k1');
+    const [line] = renderMonitorLines(monitorDrain(repos));
+    const path = transcript([
+      ...notificationEntries(line ?? ''),
+      {
+        type: 'assistant',
+        isApiErrorMessage: true,
+        message: { model: '<synthetic>', role: 'assistant' },
+      },
+    ]);
+    observeHookEvent(repos, 'beta', hook({ hook_event_name: 'Stop', transcript_path: path }));
+    expect(status(repos, messageId)).toBe('delivered');
+  });
+
+  it('does not treat an id the model itself wrote as the message being shown', () => {
+    const messageId = send(repos, 'ping', 'k1');
+    monitorDrain(repos);
+    const path = transcript([
+      {
+        type: 'assistant',
+        message: { role: 'assistant', content: `[concord from alpha id=${messageId}]` },
+      },
+      { type: 'assistant', message: { role: 'assistant', content: 'more' } },
+    ]);
+    observeHookEvent(repos, 'beta', hook({ hook_event_name: 'Stop', transcript_path: path }));
+    expect(status(repos, messageId)).toBe('delivered');
+  });
+
+  it('records the read a reply proves, not just the reply', () => {
+    const messageId = send(repos, 'question?', 'k1');
+    monitorDrain(repos);
+    handleSendAgentMessage(repos, {
+      operation: 'reply',
+      agentId: 'beta',
+      replyToMessageId: messageId,
+      content: 'answer',
+      idempotencyKey: 'r1',
+    });
+    expect(events(repos, messageId)).toEqual(['sent', 'delivered', 'read', 'replied']);
+  });
+});

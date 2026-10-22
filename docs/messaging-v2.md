@@ -194,6 +194,30 @@ only for messages they sent or received.
 a security boundary against a local process that can open
 `.concord/concord.db` directly.
 
+## Known limits
+
+- **Privacy is a cooperative boundary, not a security one.** It keeps agents
+  that follow the rules out of each other's mail. Any process with a shell can
+  run `concord messages` (all content, by design, for the human) or open
+  `.concord/concord.db`.
+- **A self-named reader never changes a receipt.** Where Concord cannot see the
+  session (Codex's MCP server), `inspect_work` trusts the `agent_id` you give
+  for reading your own mail, but only a session Concord identified itself
+  marks anything read. A caller naming nobody is shown nothing.
+- **Requeue needs a stable agent id.** By default an agent id is derived from
+  the session id, so a fresh session is a new agent and cannot inherit the old
+  one's mail. Requeue on `startup` helps operator-named agents
+  (`CONCORD_AGENT_ID`). For everyone, `SessionEnd` returns what that session
+  was handed but never read to ✓, so the sender sees the truth and the message
+  expires instead of sitting at ✓✓ forever. A session killed outright fires no
+  `SessionEnd` and stays at ✓✓.
+- **One live session per named agent is assumed.** Two terminals sharing a
+  `CONCORD_AGENT_ID` can each be handed a message: delivery is at-least-once,
+  and the id in every header lets an agent spot a repeat.
+- **`/clear`, `compact` and `--continue`** are not requeue triggers. If a
+  harness gives the continued session a new session id, read evidence for
+  messages delivered to the old one cannot be credited to the new one.
+
 ## Checking deliverability
 
 `inspect_work` stays the only read tool. No new tools are added. Every outbox

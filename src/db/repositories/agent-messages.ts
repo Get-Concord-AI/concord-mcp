@@ -77,6 +77,13 @@ export interface AgentMessageRepository {
    * session is unknown is left alone: it may be this very session's.
    */
   requeueUnread(agentId: string, session: string | null): AgentMessageRecord[];
+  /**
+   * Return what `session` itself was handed but never read to the queue: the
+   * session ended, so it never will read it. Sent again, it reaches the
+   * agent's next session or expires, and the sender sees ✓ rather than a ✓✓
+   * that will never turn read.
+   */
+  requeueSession(agentId: string, session: string): AgentMessageRecord[];
   /** Fail every `sent` message past its expiry. */
   expireStale(now?: Date): AgentMessageRecord[];
   listByTask(taskId: string): AgentMessageRecord[];
@@ -179,6 +186,12 @@ export function createAgentMessageRepository(
     WHERE recipient_agent_id = @agent_id AND status = 'delivered'
       AND delivered_via IN ('monitor', 'hook', 'adapter')
       AND delivered_session IS NOT NULL AND delivered_session IS NOT @session
+    ORDER BY created_at, message_id
+  `);
+  const listSessionUnreadStmt = db.prepare(`
+    SELECT * FROM agent_messages
+    WHERE recipient_agent_id = @agent_id AND status = 'delivered'
+      AND delivered_via IN ('monitor', 'hook', 'adapter') AND delivered_session = @session
     ORDER BY created_at, message_id
   `);
   const requeueStmt = db.prepare(`
@@ -286,7 +299,14 @@ export function createAgentMessageRepository(
   }
 
   function requeueUnread(agentId: string, session: string | null): AgentMessageRecord[] {
-    const raw: unknown = listRequeueableStmt.all({ agent_id: agentId, session });
+    return requeueRows(listRequeueableStmt.all({ agent_id: agentId, session }));
+  }
+
+  function requeueSession(agentId: string, session: string): AgentMessageRecord[] {
+    return requeueRows(listSessionUnreadStmt.all({ agent_id: agentId, session }));
+  }
+
+  function requeueRows(raw: unknown): AgentMessageRecord[] {
     const requeued: AgentMessageRecord[] = [];
     // A requeued message gets a fresh day to be taken again.
     const expiresAt = new Date(Date.now() + MESSAGE_TTL_MS).toISOString();
@@ -324,6 +344,7 @@ export function createAgentMessageRepository(
   const markReadTransaction = db.transaction(markRead);
   const markReadByInspectTransaction = db.transaction(markReadByInspect);
   const requeueTransaction = db.transaction(requeueUnread);
+  const requeueSessionTransaction = db.transaction(requeueSession);
   const expireTransaction = db.transaction(expireStale);
 
   return {
@@ -378,6 +399,9 @@ export function createAgentMessageRepository(
     },
     requeueUnread(agentId, session) {
       return requeueTransaction.immediate(agentId, session);
+    },
+    requeueSession(agentId, session) {
+      return requeueSessionTransaction.immediate(agentId, session);
     },
     expireStale(now) {
       return expireTransaction.immediate(now);
@@ -435,12 +459,17 @@ export function createAgentMessageRepository(
       return stored;
     },
     markReplied(messageId) {
+      const before = get(messageId);
       const result = markRepliedStmt.run({
         message_id: messageId,
         now: new Date().toISOString(),
       });
       const stored = requireMessage(messageId);
-      if (result.changes > 0) recordEvent(messageId, 'replied');
+      if (result.changes > 0) {
+        // A reply is proof of reading, so the timeline shows both.
+        if (before?.readAt === null) recordEvent(messageId, 'read', 'reply');
+        recordEvent(messageId, 'replied');
+      }
       return stored;
     },
     recordEvent,

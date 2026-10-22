@@ -100,8 +100,24 @@ export function idsInPrompt(prompt: string): string[] {
   return renderedMessageIds(prompt);
 }
 
+/**
+ * An assistant entry the harness wrote itself rather than the model: Claude
+ * Code records API errors and interrupted turns as `<synthetic>` assistant
+ * messages. Those prove nothing about what the model was sent.
+ */
+function isSyntheticEntry(entry: Record<string, unknown>): boolean {
+  if (entry['isApiErrorMessage'] === true) return true;
+  const message = entry['message'];
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    Reflect.get(message, 'model') === '<synthetic>'
+  );
+}
+
 /** A transcript entry the model wrote, in any harness's format. */
 function isModelEntry(entry: Record<string, unknown>): boolean {
+  if (isSyntheticEntry(entry)) return false;
   const role = (value: unknown): unknown =>
     typeof value === 'object' && value !== null ? Reflect.get(value, 'role') : undefined;
   const type = entry['type'];
