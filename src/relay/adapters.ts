@@ -77,5 +77,7 @@ function receiptFrom(value: unknown): string | undefined {
   for (const key of ['turnId', 'turn_id', 'id']) {
     if (typeof parsed.data[key] === 'string') return parsed.data[key];
   }
-  return undefined;
+  // Codex 0.16x answers turn/start with `{ turn: { id, ... } }`.
+  const turn = z.object({ id: z.string() }).loose().safeParse(parsed.data['turn']);
+  return turn.success ? turn.data.id : undefined;
 }
