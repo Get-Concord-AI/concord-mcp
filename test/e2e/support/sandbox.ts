@@ -78,6 +78,12 @@ export class Sandbox {
   readonly home: string;
   readonly repo: string;
   readonly bin: string;
+  /**
+   * The sandbox's own temp directory. Harnesses keep locks and session state
+   * under TMPDIR (Claude Code does), so sharing the runner's /tmp lets one
+   * session that is slow to exit hold up the next one.
+   */
+  readonly tmp: string;
   readonly shimDir: string;
 
   private constructor(
@@ -90,6 +96,7 @@ export class Sandbox {
     this.repo = join(root, 'repo');
     this.bin = join(root, 'bin');
     this.shimDir = join(root, 'shim');
+    this.tmp = join(root, 'tmp');
   }
 
   /**
@@ -107,7 +114,13 @@ export class Sandbox {
     killSandboxProcesses(root);
     rmSync(root, { recursive: true, force: true });
     const sandbox = new Sandbox(root, prefix, options.realHarnesses ?? []);
-    for (const directory of [sandbox.home, sandbox.repo, sandbox.bin, sandbox.shimDir]) {
+    for (const directory of [
+      sandbox.home,
+      sandbox.repo,
+      sandbox.bin,
+      sandbox.shimDir,
+      sandbox.tmp,
+    ]) {
       mkdirSync(directory, { recursive: true });
     }
     for (const harness of options.realHarnesses === undefined ? SHIMMED : []) {
@@ -140,6 +153,7 @@ export class Sandbox {
         '/bin',
       ].join(':'),
       LANG: 'C.UTF-8',
+      TMPDIR: this.tmp,
       CONCORD_NO_UPDATE_CHECK: '1',
       CONCORD_TELEMETRY_DISABLED: '1',
       CONCORD_E2E_SHIM_DIR: this.shimDir,

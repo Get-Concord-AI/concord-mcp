@@ -1,3 +1,4 @@
+import { MESSAGING_V2_MIGRATION } from './messaging-v2-migration.js';
 import { PROJECT_SCOPE_MIGRATION } from './project-scope-migration.js';
 
 /**
@@ -235,4 +236,37 @@ export const migrations: readonly string[] = [
   `,
   // 012 — tasks are unique per project, so one store can hold several.
   PROJECT_SCOPE_MIGRATION,
+  // 013 — `delivered` means handed to the recipient's harness; `seen_at` means
+  // the agent was actually shown it. A harness monitor can drain a message
+  // while the session is blocked on its user, so the two can differ. Messages
+  // delivered before this migration were counted as seen on delivery. The
+  // events table is rebuilt because SQLite cannot widen a CHECK in place.
+  `
+  ALTER TABLE agent_messages ADD COLUMN seen_at TEXT;
+  UPDATE agent_messages SET seen_at = delivered_at WHERE delivered_at IS NOT NULL;
+
+  CREATE TABLE agent_message_events_013 (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id  TEXT NOT NULL REFERENCES agent_messages(message_id),
+    event       TEXT NOT NULL,
+    detail      TEXT,
+    created_at  TEXT NOT NULL,
+    CHECK (event IN ('accepted', 'delivered', 'seen', 'requeued', 'replied', 'failed'))
+  );
+  INSERT INTO agent_message_events_013 SELECT * FROM agent_message_events;
+  DROP TABLE agent_message_events;
+  ALTER TABLE agent_message_events_013 RENAME TO agent_message_events;
+  CREATE INDEX idx_agent_message_events_message
+    ON agent_message_events(message_id, id);
+  `,
+  // 014 — when the session behind an endpoint last stopped to wait on its user
+  // (a question or permission prompt), as reported by its own hooks. Shown to
+  // senders; never used to hold delivery, since dismissing a prompt fires no
+  // hook and a stale flag must not cost the agent its messages.
+  `
+  ALTER TABLE agent_endpoints ADD COLUMN awaiting_user_since TEXT;
+  `,
+  // 015 — messaging v2: sent/delivered/read/replied receipts, per-session
+  // delivery attribution, and expiry for messages nobody ever took.
+  MESSAGING_V2_MIGRATION,
 ];

@@ -4,7 +4,8 @@ Usage: python3 pty-run.py <logfile> <cmd> [args...]
 
 Interactive harness sessions are the only ones that sit idle at a prompt, so
 idle delivery can only be tested inside a terminal. Output is appended to
-<logfile>. Terminal capability queries a TUI blocks on at start-up (cursor
+<logfile>. Bytes written to <logfile>.keys are typed into the terminal (the
+file is removed once typed), so a test can answer a prompt. Terminal capability queries a TUI blocks on at start-up (cursor
 position, device attributes, colours, keyboard protocol) are answered the way
 a typical terminal would.
 """
@@ -43,8 +44,13 @@ signal.signal(signal.SIGTERM, stop)
 # read too; the longest query is 7 bytes.
 KEEP = max(len(query) for query, _ in REPLIES) - 1
 tail = b''
+keys = log + '.keys'
 with open(log, 'ab') as out:
     while True:
+        if os.path.exists(keys):
+            with open(keys, 'rb') as typed:
+                os.write(fd, typed.read())
+            os.remove(keys)
         ready, _, _ = select.select([fd], [], [], 0.2)
         if not ready:
             continue

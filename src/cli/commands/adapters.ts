@@ -11,6 +11,8 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { relayAddress } from '../../relay/address.js';
 import { CodexAppServerAdapter } from '../../relay/adapters.js';
 import { CodexDaemonClient } from '../../relay/codex-client.js';
+import { CodexReadTracker } from '../../relay/codex-read-tracker.js';
+import { sessionKey } from '../../domain/receipts.js';
 import { startAgentRelay } from '../../relay/server.js';
 import {
   installGlobalAdapters,
@@ -33,15 +35,36 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
   const context = openContext(process.cwd());
   ensureAgentRegistered(context.repos, { agentId, kind: 'codex' }, context.repoRoot);
   const client = new CodexDaemonClient();
+  // Read receipts: the model answered, or the turn completed, with a pushed message as input.
+  const session = sessionKey(threadId);
+  const reads = new CodexReadTracker(threadId, (messageIds, evidence) => {
+    try {
+      // The read may land before the sender has recorded the push as
+      // delivered; reading it proves delivery too, so record both.
+      context.repos.agentMessages.markReadByEvidence(agentId, messageIds, {
+        evidence,
+        via: 'adapter',
+        session,
+      });
+    } catch (error) {
+      process.stderr.write(
+        `Concord: could not record a read receipt: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
+  });
+  client.onNotification((notification) => {
+    reads.notify(notification);
+  });
   await client.connect();
   await client.resumeThread(threadId);
-  const adapter = new CodexAppServerAdapter(client, threadId, () => client.currentTurnId());
+  const adapter = new CodexAppServerAdapter(client, threadId, () => client.currentTurnId(), reads);
   const relay = await startAgentRelay({
     repos: context.repos,
     agentId,
     address: relayAddress(context.concordPath, agentId),
     adapter,
     pullFallback: true,
+    session,
   });
   const stop = (): void => {
     void relay.close().finally(() => {

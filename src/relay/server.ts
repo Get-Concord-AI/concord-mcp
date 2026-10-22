@@ -28,6 +28,8 @@ export interface AgentRelayServerOptions {
   adapter: AgentSessionAdapter;
   ttlMs?: number;
   pullFallback?: boolean;
+  /** The opaque key of the session this relay delivers into. */
+  session?: string;
 }
 
 export interface RunningAgentRelay {
@@ -169,6 +171,7 @@ export async function startAgentRelay(
             provider: options.adapter.provider,
             delivery: deliveryMode,
             ...(receipt === undefined ? {} : { receipt }),
+            ...(options.session === undefined ? {} : { session: options.session }),
           });
         } catch (error) {
           respond(socket, {

@@ -40,6 +40,23 @@ deterministic and need no accounts.
 | Grok        | PostToolUse hook                           | persistent `monitor` the model starts when asked  |
 | Goose       | sends; messages to it are refused honestly | —                                                 |
 
+### Receipts
+
+Every receipt scenario checks sent → delivered → read → replied from the
+sender's side (`Probe.receipt`, `inspect_work message_id`) and appends a row to
+`.e2e/receipt-report.jsonl`, written before the scenario asserts, so a run ends
+with a table of exactly what each harness did. A message whose body starts with
+`SILENT-` is read but never answered by the fake brain, so a read tick can only
+come from read evidence, never from a reply. Claude Code also covers a message
+held behind `AskUserQuestion` (answered, and dismissed with Esc), a crash while
+holding one (✓✓ falls back to ✓, then a fresh session takes it back), and one
+agent being kept out of another's mail. `codex-adapter.e2e.test.ts` pins the
+Codex adapter's own read path (`clientUserMessageId` + completed turn) against a
+real `codex app-server`.
+
+Bytes written to `<log>.keys` are typed into a pseudo-terminal session
+(`HarnessRun.type`), and `HarnessRun.untilScreen` waits for text on its screen.
+
 Interactive sessions run in a pseudo-terminal (`real/pty-run.py`, Python 3).
 A harness that is not installed is skipped. `CONCORD_E2E_REAL_HARNESSES=all`
 (or a comma list) makes them required, which CI does after

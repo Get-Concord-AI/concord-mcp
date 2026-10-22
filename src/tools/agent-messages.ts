@@ -9,6 +9,7 @@ import {
   type TaskRecord,
 } from '../db/index.js';
 import {
+  awaitingUserOutlook,
   deliveryOutlook,
   effectiveEndpointCapabilities,
   supportsImmediateDelivery,
@@ -50,6 +51,8 @@ export interface DeliveryReceipt {
   provider: string;
   delivery: 'inject' | 'steer';
   receipt?: string | undefined;
+  /** The recipient session's opaque key, when the host knows it. */
+  session?: string | undefined;
 }
 
 export interface AgentMessageDispatcher {
@@ -74,6 +77,27 @@ export function endpointPromptable(
   );
 }
 
+/** A retried send of a message that already left the queue: say where it got to. */
+function replayOutlook(message: AgentMessageRecord): string {
+  if (message.status === 'replied') return 'This message was already delivered and answered.';
+  return message.status === 'read'
+    ? 'This message was already delivered, and that agent has read it.'
+    : 'This message was already handed to that agent, which has not read it yet.';
+}
+
+/**
+ * The outlook for a message that waits in the queue because nothing can take
+ * it right now. A registered agent whose session is not live may come back
+ * (a resumed session, or an operator-named agent's next session).
+ */
+function queuedOutlook(recipientAgentId: string, message: AgentMessageRecord): string {
+  return (
+    `Sent (✓) and queued: ${recipientAgentId} has no live session to take it now. It will be ` +
+    `delivered when that agent's session next checks in, or fail as expired at ` +
+    `${message.expiresAt ?? 'its expiry'}. Check its receipt with inspect_work message_id.`
+  );
+}
+
 function required(value: string | undefined, field: string, operation: string): string {
   if (value === undefined) {
     throw new Error(`${field} is required when update_work operation is ${operation}.`);
@@ -95,6 +119,8 @@ export function handleSendAgentMessage(
   repos: Repositories,
   input: SendAgentMessageInput,
 ): SendAgentMessageResult {
+  // Expiry is lazy: apply it before a retry reports where a message got to.
+  repos.agentMessages.sweepStale();
   const sender = repos.agents.get(input.agentId);
   if (sender === undefined) {
     throw new AgentMessageDeliveryError(
@@ -124,7 +150,9 @@ export function handleSendAgentMessage(
       `Agent ${input.agentId} is not the recipient of ${parent.messageId}.`,
     );
   }
-  if (parent?.status === 'failed' || parent?.status === 'pending') {
+  // Its recipient knows the id, so it was shown the message; a `sent` parent
+  // here was only requeued after reaching it, and the reply proves it read it.
+  if (parent?.status === 'failed') {
     throw new AgentMessageDeliveryError(
       'unauthorized',
       parent.messageId,
@@ -184,13 +212,12 @@ export function handleSendAgentMessage(
         replay.errorDetail ?? `Message ${replay.messageId} previously failed delivery.`,
       );
     }
-    if (replay.status !== 'pending') {
-      const known = repos.agentEndpoints.getByAgent(recipientAgentId);
+    if (replay.status !== 'sent') {
       return {
         message: replay,
         idempotentReplay: true,
         task: task ?? null,
-        outlook: deliveryOutlook(effectiveEndpointCapabilities(known)),
+        outlook: replayOutlook(replay),
         delivery: 'delivered',
         immediateMode: null,
       };
@@ -209,37 +236,36 @@ export function handleSendAgentMessage(
       idempotencyKey: input.idempotencyKey,
     });
   }
-  const endpoint = repos.agentEndpoints.getByAgent(recipientAgentId);
-  if (endpoint === undefined) {
-    fail(
-      repos,
-      message,
-      'target_not_promptable',
-      `Agent ${recipientAgentId} has no prompt endpoint.`,
-    );
-  }
-  if (!endpointPromptable(endpoint)) {
-    fail(
-      repos,
-      message,
-      'target_unreachable',
-      `Agent ${recipientAgentId} is registered but its session is no longer live.`,
-    );
-  }
-
-  // The pending row is the queue. Delivery is recorded when the recipient
-  // actually reads it, so `delivered` never overstates what the agent has seen.
+  // The sent row is the queue, even for a recipient with no live session:
+  // it is delivered when that agent's session next drains, or expires.
+  // Delivery is recorded when the recipient's session takes it, so
+  // `delivered` never overstates what reached it.
   if (parent !== undefined) {
     repos.agentMessages.markReplied(parent.messageId);
   }
   repos.agents.touch(input.agentId);
   const activityTask =
     !idempotentReplay && task !== undefined ? tasks.touchActivity(task.taskId) : task;
+  const endpoint = repos.agentEndpoints.getByAgent(recipientAgentId);
+  if (endpoint === undefined || !endpointPromptable(endpoint)) {
+    return {
+      message,
+      idempotentReplay,
+      task: activityTask ?? null,
+      outlook: queuedOutlook(recipientAgentId, message),
+      delivery: 'queued_pull',
+      immediateMode: null,
+    };
+  }
+  const outlook = deliveryOutlook(effectiveEndpointCapabilities(endpoint));
   return {
     message,
     idempotentReplay,
     task: activityTask ?? null,
-    outlook: deliveryOutlook(effectiveEndpointCapabilities(endpoint)),
+    outlook:
+      endpoint.awaitingUserSince === null
+        ? outlook
+        : `${outlook} ${awaitingUserOutlook(endpoint.awaitingUserSince)}`,
     delivery: 'queued_pull',
     immediateMode: null,
   };
@@ -264,7 +290,7 @@ export async function handleSendAgentMessageWithDelivery(
   dispatcher: AgentMessageDispatcher,
 ): Promise<SendAgentMessageResult> {
   const result = handleSendAgentMessage(repos, input);
-  if (result.message.status !== 'pending') return result;
+  if (result.message.status !== 'sent') return result;
 
   const endpoint = repos.agentEndpoints.getByAgent(result.message.recipientAgentId);
   const capabilities = effectiveEndpointCapabilities(endpoint);
@@ -278,6 +304,7 @@ export async function handleSendAgentMessageWithDelivery(
       result.message.messageId,
       receipt.provider,
       receipt.receipt ?? receipt.delivery,
+      { session: receipt.session ?? null, via: 'adapter' },
     );
     return {
       ...result,
@@ -312,6 +339,8 @@ export interface AgentCommunicationView {
   promptable: boolean;
   provider: string | null;
   capabilities: string[];
+  /** When its session last stopped to wait on its user; null once it moved on. */
+  awaitingUserSince: string | null;
   inbox: AgentMessageRecord[];
   outbox: AgentMessageRecord[];
 }
@@ -330,6 +359,7 @@ export function inspectAgentCommunication(
     promptable: endpointPromptable(endpoint),
     provider: endpoint?.provider ?? null,
     capabilities: effectiveEndpointCapabilities(endpoint),
+    awaitingUserSince: endpoint?.awaitingUserSince ?? null,
     inbox: messages.filter((message) => message.recipientAgentId === agentId),
     outbox: messages.filter((message) => message.senderAgentId === agentId),
   };

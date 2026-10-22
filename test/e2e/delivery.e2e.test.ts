@@ -1,11 +1,15 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { afterAll, afterEach, beforeAll, describe, expect, inject, it } from 'vitest';
 
 import { CodexSession } from './drivers/codex.js';
+import { CursorSession } from './drivers/cursor.js';
 import { DRIVEN, DRIVERS, type DrivenHarness } from './drivers/index.js';
 import type { HarnessSession } from './drivers/session.js';
 import type { Channel, Delivered } from './support/messages.js';
 import { Sandbox } from './support/sandbox.js';
-import { inspectAgent, nonce, prompt, reply, untilIdleReachable } from './support/scenario.js';
+import { nonce, prompt, receiptOf, reply, untilIdleReachable } from './support/scenario.js';
 
 /**
  * Every harness sends to every harness, with the recipient busy (mid-turn) and,
@@ -39,7 +43,7 @@ const EXPECTED: Record<DrivenHarness, { busy: Expectation; idle?: Expectation }>
       via: 'monitor',
       delivery: 'queued_pull',
       immediateMode: null,
-      outlook: /can be injected now/u,
+      outlook: /live receiver picks it up/u,
     },
   },
   codex: {
@@ -174,6 +178,8 @@ describe('cross-harness message delivery', () => {
     expect(arrived).toEqual([
       { messageId: sent.message_id, sender: from.agentId, content: body, via: expected.via },
     ]);
+    // The sender can see it got there: ✓✓, or already read where the channel proves it.
+    expect(['delivered', 'read']).toContain((await receiptOf(from, sent.message_id))?.status);
 
     // Exactly once: no other channel hands it over again.
     const later = [...(await to.receiveBusy()), ...(await to.endTurn()).messages];
@@ -189,6 +195,34 @@ describe('cross-harness message delivery', () => {
     expect(
       received.map(({ messageId, sender, content }) => ({ messageId, sender, content })),
     ).toEqual([{ messageId: replied.message_id, sender: to.agentId, content: answer }]);
+    // Checked last: viewing the thread shows the sender the reply, which counts as reading it.
+    expect((await receiptOf(from, sent.message_id))?.status).toBe('replied');
+  });
+
+  it('reads a Cursor delivery from the transcript its stop hook names', async () => {
+    const to = new CursorSession(sandbox);
+    sessions.push(to);
+    await to.start();
+    const from = open('claude-code');
+    await from.start();
+    const sent = await prompt(from, to, nonce('to-cursor-read'));
+    expect(copiesOf(await to.receiveBusy(), sent.message_id)).toHaveLength(1);
+    expect((await receiptOf(from, sent.message_id))?.status).toBe('delivered');
+
+    // The follow-up turn showed the model the message, and it answered.
+    const transcript = join(sandbox.root, 'cursor-transcript.jsonl');
+    writeFileSync(
+      transcript,
+      [
+        { role: 'user', content: `[concord from ${from.agentId} id=${sent.message_id}]` },
+        { role: 'assistant', content: 'noted' },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n'),
+    );
+    to.transcriptPath = transcript;
+    await to.endTurn();
+    expect((await receiptOf(from, sent.message_id))?.status).toBe('read');
   });
 
   const UNREACHABLE_IDLE = DRIVEN.filter((harness) => EXPECTED[harness].idle === undefined);
@@ -209,10 +243,9 @@ describe('cross-harness message delivery', () => {
 
       // Nothing hands it over while the session sits idle.
       await new Promise((resolve) => setTimeout(resolve, 2_000));
-      const waiting = await inspectAgent(from, to);
-      expect(waiting.inbox.find((message) => message.messageId === sent.message_id)?.status).toBe(
-        'pending',
-      );
+      const waiting = await receiptOf(from, sent.message_id);
+      expect(waiting?.status).toBe('sent');
+      expect(waiting?.receipt.ticks).toBe('✓');
 
       // The next turn's first busy-path hook delivers it.
       expect(copiesOf(await to.receiveBusy(), sent.message_id)).toEqual([

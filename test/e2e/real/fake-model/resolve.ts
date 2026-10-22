@@ -52,6 +52,8 @@ export function resolve(intent: Intent, tools: readonly string[]): Step {
       }
       return { kind: 'tool', name: shell, input: { command: intent.command } };
     }
+    case 'tool':
+      return { kind: 'tool', name: intent.name, input: intent.input };
     case 'text':
       return { kind: 'text', text: intent.text };
   }

@@ -125,6 +125,7 @@ describe('local IPC relay', () => {
           threadId: 'thread-1',
           expectedTurnId: 'turn-7',
           input: [{ type: 'text', text: 'Use the new constraint.' }],
+          clientUserMessageId: 'm1',
         },
       },
     ]);
@@ -219,7 +220,7 @@ describe('local IPC relay', () => {
         new SocketAgentMessageDispatcher(),
       );
       expect(result.delivery).toBe('queued_pull');
-      expect(result.message.status).toBe('pending');
+      expect(result.message.status).toBe('sent');
       expect(result.outlook).toMatch(/remains queued/i);
     } finally {
       await relay.close();

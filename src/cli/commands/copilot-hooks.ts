@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 import { z } from 'zod';
 
 import type { CloudRuntime } from '../../cloud/runtime.js';
@@ -14,6 +16,8 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { launchDetachedConcord } from '../detached-host.js';
 import { drainFromCloud, registerInCloud, watching } from './cloud-inbox.js';
 import type { MessageSpool } from './copilot-spool.js';
+import { copilotHome } from '../../install/copilot-config.js';
+import { hookSession, observeHookEvent } from './inbox-observe.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
 import { sessionStartMessage, type RosterLine } from './session-start-message.js';
 
@@ -39,7 +43,9 @@ const payloadSchema = z.object({ cwd: z.string().optional() }).loose();
 export interface CopilotHookBackend {
   register(agentId: string, cwd: string): Promise<void>;
   roster(agentId: string): Promise<RosterLine[]>;
-  drain(agentId: string): Promise<DeliverableMessage[]>;
+  drain(agentId: string, rawJson?: string): Promise<DeliverableMessage[]>;
+  /** Record read evidence this hook carries (local store only; the cloud gets it from its client). */
+  observe?(agentId: string, rawJson: string): void;
   /** Start a live host for a launcher session, unless one already serves it (#261). */
   startLiveHost(agentId: string, sessionId: string, serverAddress: string): void;
 }
@@ -55,6 +61,29 @@ function hostArgs(agentId: string, sessionId: string, serverAddress: string): st
     '--server',
     serverAddress,
   ];
+}
+
+/**
+ * Copilot's hook payload names no transcript, but every session logs what the
+ * model was sent and wrote (`user.message`, `assistant.message`) to
+ * `<COPILOT_HOME>/session-state/<sessionId>/events.jsonl`.
+ */
+export function withCopilotTranscript(
+  rawJson: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const sessionId = hookSessionId(rawJson);
+  if (sessionId === undefined) return rawJson;
+  try {
+    const parsed = z.record(z.string(), z.json()).safeParse(JSON.parse(rawJson));
+    if (!parsed.success) return rawJson;
+    return JSON.stringify({
+      transcript_path: join(copilotHome(env), 'session-state', sessionId, 'events.jsonl'),
+      ...parsed.data,
+    });
+  } catch {
+    return rawJson;
+  }
 }
 
 /** The workspace a Copilot hook is for: its payload's `cwd`, else the process's. */
@@ -87,14 +116,18 @@ export function localCopilotBackend(repos: Repositories, repoRoot: string): Copi
       Promise.resolve(
         buildRoster(repos.agents.list(), Date.now()).filter((entry) => entry.agentId !== agentId),
       ),
-    drain: (agentId) => {
+    drain: (agentId, rawJson) => {
       // A live host is the session's single consumer: it pushes, and sweeps up
       // anything a push missed. Draining here too could show a message twice.
       if (hosted(agentId)) {
         repos.agents.touch(agentId);
         return Promise.resolve([]);
       }
-      return Promise.resolve(drainInbox(repos, agentId, KIND));
+      const session = rawJson === undefined ? null : hookSession(rawJson);
+      return Promise.resolve(drainInbox(repos, agentId, KIND, undefined, { session, via: 'hook' }));
+    },
+    observe: (agentId, rawJson) => {
+      observeHookEvent(repos, agentId, withCopilotTranscript(rawJson));
     },
     startLiveHost: (agentId, sessionId, serverAddress) => {
       if (!hosted(agentId)) {
@@ -179,10 +212,13 @@ export async function copilotSessionStart(
 async function waiting(
   context: CopilotHookContext,
   agentId: string,
+  rawJson: string,
 ): Promise<DeliverableMessage[]> {
   const spooled = context.spool.take(agentId);
   try {
-    return [...spooled, ...(await context.backend.drain(agentId))];
+    // Evidence first, so a message is never read by the hook that delivers it.
+    context.backend.observe?.(agentId, rawJson);
+    return [...spooled, ...(await context.backend.drain(agentId, rawJson))];
   } catch {
     return spooled;
   }
@@ -214,7 +250,7 @@ export async function copilotPostToolUse(
 ): Promise<string> {
   const agentId = agentIdFor(rawJson, context.env);
   if (agentId === undefined) return '{}';
-  const messages = await waiting(context, agentId);
+  const messages = await waiting(context, agentId, rawJson);
   if (messages.length === 0) return '{}';
   const shown = fittingPrefix(messages, POST_TOOL_CONTEXT_LIMIT);
   context.spool.put(agentId, messages.slice(shown.length));
@@ -237,7 +273,7 @@ export async function copilotAgentStop(
 ): Promise<string> {
   const agentId = agentIdFor(rawJson, context.env);
   if (agentId === undefined) return '{}';
-  const messages = await waiting(context, agentId);
+  const messages = await waiting(context, agentId, rawJson);
   if (messages.length === 0) return '{}';
   return JSON.stringify({
     decision: 'block',

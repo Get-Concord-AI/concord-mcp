@@ -56,6 +56,7 @@ const claudeCode: RealHarness = {
       JSON.stringify({
         ...state,
         hasCompletedOnboarding: true,
+        autoUpdates: false,
         theme: 'dark',
         customApiKeyResponses: { approved: [FAKE_KEY.slice(-20)], rejected: [] },
         projects: {
@@ -79,7 +80,14 @@ const claudeCode: RealHarness = {
       }),
     );
   },
-  env: (model) => ({ ANTHROPIC_BASE_URL: model.origin, ANTHROPIC_API_KEY: FAKE_KEY }),
+  env: (model) => ({
+    ANTHROPIC_BASE_URL: model.origin,
+    ANTHROPIC_API_KEY: FAKE_KEY,
+    // Keep the pinned binary pinned: a session that auto-updates replaces the
+    // install mid-run, and every later case then finds no `claude` to start.
+    // (Not CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: it stops plugin monitors too.)
+    DISABLE_AUTOUPDATER: '1',
+  }),
   headless: (prompt) => [
     'claude',
     '-p',

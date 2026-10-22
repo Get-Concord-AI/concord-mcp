@@ -15,7 +15,8 @@ import {
   antigravityMonitorNudge,
 } from '../../domain/antigravity-monitor.js';
 import { receiverActive } from '../../domain/delivery.js';
-import { renderInboxBody } from '../../domain/pull-inbox.js';
+import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
+import { sessionKey } from '../../domain/receipts.js';
 import { buildRoster } from '../../domain/presence.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
@@ -39,6 +40,7 @@ import {
   runCopilotHook,
   type CopilotHookBackend,
 } from './copilot-hooks.js';
+import { observeHookEvent } from './inbox-observe.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
 import { antigravitySessionStartMessage, sessionStartMessage } from './session-start-message.js';
 import type { CloudRuntime } from '../../cloud/runtime.js';
@@ -217,6 +219,23 @@ export function handleAntigravitySessionStart(
 }
 
 /**
+ * Read evidence the hook carries first (a transcript, where Antigravity gives
+ * one), then deliver what is waiting to this conversation.
+ */
+function observeThenDrain(
+  repos: Repositories,
+  agentId: string,
+  rawJson: string,
+  sessionId: string,
+): DeliverableMessage[] {
+  observeHookEvent(repos, agentId, rawJson);
+  return drainInbox(repos, agentId, 'antigravity', undefined, {
+    session: sessionKey(sessionId),
+    via: 'hook',
+  });
+}
+
+/**
  * Handle Antigravity PreInvocation hook: extracts conversationId, registers
  * presence, drains pending inbox messages, and injects them as userMessages,
  * asking the agent to start its idle monitor when none is watching.
@@ -238,7 +257,7 @@ export function handleAntigravityPreInvocation(
   const agentId = identity.agentId;
   ensureAgentRegistered(repos, identity, workspace);
 
-  const messages = drainInbox(repos, agentId, 'antigravity');
+  const messages = observeThenDrain(repos, agentId, rawJson, sessionId);
   const watching = receiverActive(repos.agentEndpoints.getByAgent(agentId));
   return {
     output: JSON.stringify({
@@ -260,7 +279,7 @@ export function handleAntigravityStop(repos: Repositories, rawJson: string): { o
     return { output: JSON.stringify({}) };
   }
   const agentId = agentIdForSession('antigravity', sessionId);
-  const messages = drainInbox(repos, agentId, 'antigravity');
+  const messages = observeThenDrain(repos, agentId, rawJson, sessionId);
   if (messages.length === 0) {
     return { output: JSON.stringify({}) };
   }

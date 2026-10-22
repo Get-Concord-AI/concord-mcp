@@ -3,6 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { z } from 'zod';
 
 import { VERSION } from '../version.js';
+import { parseCodexNotification, type CodexNotification } from './codex-notifications.js';
 
 const responseSchema = z
   .object({
@@ -11,10 +12,6 @@ const responseSchema = z
     error: z.object({ message: z.string() }).loose().optional(),
   })
   .loose();
-const notificationSchema = z
-  .object({ method: z.string(), params: z.record(z.string(), z.unknown()).optional() })
-  .loose();
-const turnSchema = z.object({ id: z.string() }).loose();
 
 function chunkText(chunk: unknown): string {
   if (typeof chunk === 'string') return chunk;
@@ -35,6 +32,7 @@ export class CodexDaemonClient {
   private buffer = '';
   private readonly pending = new Map<number, PendingRequest>();
   private activeTurnId: string | undefined;
+  private readonly listeners: ((notification: CodexNotification) => void)[] = [];
 
   constructor(
     private readonly command = 'codex',
@@ -44,6 +42,11 @@ export class CodexDaemonClient {
 
   currentTurnId(): string | undefined {
     return this.activeTurnId;
+  }
+
+  /** Receive every app-server notification (item and turn events). */
+  onNotification(listener: (notification: CodexNotification) => void): void {
+    this.listeners.push(listener);
   }
 
   async connect(): Promise<void> {
@@ -155,12 +158,11 @@ export class CodexDaemonClient {
       else pending.resolve(response.data.result);
       return;
     }
-    const notification = notificationSchema.safeParse(value);
-    if (!notification.success) return;
-    const turn = turnSchema.safeParse(notification.data.params?.['turn']);
-    if (!turn.success) return;
-    if (notification.data.method === 'turn/started') this.activeTurnId = turn.data.id;
-    if (notification.data.method === 'turn/completed' && this.activeTurnId === turn.data.id) {
+    const notification = parseCodexNotification(value);
+    if (notification === undefined) return;
+    for (const listener of this.listeners) listener(notification);
+    if (notification.method === 'turn/started') this.activeTurnId = notification.turn.id;
+    if (notification.method === 'turn/completed' && this.activeTurnId === notification.turn.id) {
       this.activeTurnId = undefined;
     }
   }

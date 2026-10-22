@@ -67,12 +67,28 @@ function decodeReach(capabilities: readonly string[]): Reach[] {
  */
 export function deliveryOutlook(capabilities: readonly string[]): string {
   if (capabilities.includes('inject') && capabilities.includes('steer')) {
-    return 'It can be injected now, whether working or idle: a busy turn is steered and an idle session starts a turn.';
+    // Queued, not pushed: a receiver in that session pulls it within seconds.
+    return (
+      "It is queued, and that agent's live receiver picks it up within seconds whether it is " +
+      'working or idle: a busy turn is steered and an idle session starts a turn.'
+    );
   }
   return decodeReach(capabilities).includes('idle')
     ? 'It will arrive on its own, whether that agent is working or idle.'
     : 'That agent only checks between steps of its own work, so an idle session ' +
         'will not see this until its next turn.';
+}
+
+/**
+ * Added to a sender's outlook when the recipient's session last reported
+ * stopping for its user. Hedged on purpose: dismissing a prompt reports
+ * nothing, so the flag can outlive the wait it describes.
+ */
+export function awaitingUserOutlook(since: string): string {
+  return (
+    `That agent stopped to wait on its user at ${since} (a question or permission prompt); ` +
+    'if it is still waiting, it will not see this until they respond.'
+  );
 }
 
 /** Whether the endpoint should be contacted instead of waiting for a pull. */

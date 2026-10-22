@@ -37,14 +37,18 @@ function concordExecutable() {
   return process.env.CONCORD_EXECUTABLE?.trim() || 'concord';
 }
 
-function runConcord(root, args, output = false) {
+function runConcord(root, args, output = false, input = undefined) {
   const result = spawnCommandSync(concordExecutable(), args, {
     cwd: root,
     env: process.env,
     encoding: 'utf8',
     timeout: 12_000,
     windowsHide: true,
-    stdio: output ? ['ignore', 'pipe', 'pipe'] : 'ignore',
+    ...(input === undefined ? {} : { input }),
+    stdio: [
+      input === undefined ? 'ignore' : 'pipe',
+      ...(output ? ['pipe', 'pipe'] : ['ignore', 'ignore']),
+    ],
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -141,10 +145,23 @@ async function main() {
 
   if (mode === 'stop') {
     register(root, agentId);
+    // The payload goes along so the drain can record which session took the
+    // messages and read evidence from the session transcript.
     const output = runConcord(
       root,
-      ['inbox', 'drain', '--agent', agentId, '--provider', 'cursor', '--format', 'json'],
+      [
+        'inbox',
+        'drain',
+        '--agent',
+        agentId,
+        '--provider',
+        'cursor',
+        '--payload-stdin',
+        '--format',
+        'json',
+      ],
       true,
+      JSON.stringify(payload),
     );
     const parsed = JSON.parse(output || '[]');
     if (!Array.isArray(parsed) || parsed.length === 0) {

@@ -10,8 +10,13 @@ import type { JsonObject } from '../../support/mcp.js';
  * 3. `start_work` once;
  * 4. send a message when the prompt says `tell <agent>: <text>`;
  * 5. start the inbox monitor when a hook asks for one (Grok);
- * 6. run `sleep N` when the prompt says so, to stay busy mid-turn;
- * 7. otherwise end the turn.
+ * 6. ask the user a question (Claude Code's AskUserQuestion) when the prompt
+ *    says `ask the user`, which blocks the turn until someone answers;
+ * 7. run `sleep N` when the prompt says so, to stay busy mid-turn;
+ * 8. otherwise end the turn.
+ *
+ * A message whose body starts with `SILENT-` is read but never answered, so a
+ * test can see a read receipt that no reply could have caused.
  *
  * Dialect adapters translate requests into a `Conversation` and the chosen
  * `Intent` into a concrete tool call for that harness.
@@ -45,8 +50,12 @@ export type Intent =
   | { kind: 'concord'; operation: 'start_work' | 'update_work'; input: JsonObject }
   | { kind: 'monitor'; command: string }
   | { kind: 'shell'; command: string }
+  | { kind: 'tool'; name: string; input: JsonObject }
   | { kind: 'text'; text: string };
 
+/** Messages the brain reads but never answers. */
+export const SILENT = 'SILENT-';
+const ASK_USER = 'AskUserQuestion';
 const FRAME = /\[concord from (\S+) id=([^\s\]]+)[^\]]*\]\s*([^\n<]*)/gu;
 const AGENT_ID = /this session is agent `([^`]+)`/u;
 const MONITOR_ASK = /persistent `monitor`[^`]*`(concord inbox watch [^`]+)`/gu;
@@ -78,7 +87,10 @@ export function decide(conversation: Conversation): Intent {
     calledTool(conversation, 'update_work').map((call) => call.input['reply_to_message_id']),
   );
   const pending = [...conversation.text.matchAll(FRAME)].find(
-    (frame) => frame[2] !== undefined && !replied.has(frame[2]),
+    (frame) =>
+      frame[2] !== undefined &&
+      !replied.has(frame[2]) &&
+      !(frame[3] ?? '').trim().startsWith(SILENT),
   );
   if (reachable && pending?.[2] !== undefined) {
     return {
@@ -125,6 +137,30 @@ export function decide(conversation: Conversation): Intent {
   const monitor = [...conversation.text.matchAll(MONITOR_ASK)].at(-1)?.[1];
   if (monitor !== undefined && calledTool(conversation, 'monitor').length === 0) {
     return { kind: 'monitor', command: monitor };
+  }
+
+  if (
+    conversation.prompt.includes('ask the user') &&
+    conversation.tools.includes(ASK_USER) &&
+    calledTool(conversation, ASK_USER).length === 0
+  ) {
+    return {
+      kind: 'tool',
+      name: ASK_USER,
+      input: {
+        questions: [
+          {
+            question: 'Proceed with the plan?',
+            header: 'Proceed',
+            multiSelect: false,
+            options: [
+              { label: 'Yes', description: 'Go ahead' },
+              { label: 'No', description: 'Stop here' },
+            ],
+          },
+        ],
+      },
+    };
   }
 
   const sleep = /run sleep (\d+)/u.exec(conversation.prompt)?.[1];

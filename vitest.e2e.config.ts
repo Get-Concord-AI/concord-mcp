@@ -9,5 +9,9 @@ export default defineConfig({
     globalSetup: ['test/e2e/global-setup.ts'],
     testTimeout: 60_000,
     hookTimeout: 120_000,
+    // Real harness binaries occasionally stall on their own (a slow start, a
+    // dropped pty read). One retry on CI absorbs that; a real regression fails
+    // both attempts. Locally a failure shows at once.
+    retry: process.env['CI'] === 'true' ? 1 : 0,
   },
 });

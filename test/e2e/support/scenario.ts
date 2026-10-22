@@ -26,7 +26,6 @@ const agentViewSchema = z
   .object({
     promptable: z.boolean(),
     capabilities: z.array(z.string()),
-    inbox: z.array(z.object({ messageId: z.string(), status: z.string() }).loose()),
   })
   .loose();
 
@@ -64,6 +63,34 @@ export function reply(from: HarnessSession, messageId: string, content: string):
 /** What `observer` can see of `target`'s endpoint and inbox. */
 export function inspectAgent(observer: HarnessSession, target: HarnessSession) {
   return observer.call('inspect_work', { agent_id: target.agentId }, agentViewSchema);
+}
+
+const threadSchema = z
+  .object({
+    thread: z.array(
+      z
+        .object({
+          messageId: z.string(),
+          status: z.string(),
+          receipt: z.object({ ticks: z.string() }).loose(),
+        })
+        .loose(),
+    ),
+  })
+  .loose();
+
+/**
+ * Where a message `sender` sent got to, read from the sender's own view of
+ * the thread: another agent's inbox is private to it.
+ */
+export async function receiptOf(sender: HarnessSession, messageId: string) {
+  // Naming the reader matters only where Concord cannot see the session (Codex).
+  const view = await sender.call(
+    'inspect_work',
+    { message_id: messageId, agent_id: sender.agentId },
+    threadSchema,
+  );
+  return view.thread.find((message) => message.messageId === messageId);
 }
 
 /** Wait until `target` advertises a live receiver that reaches it while idle. */
