@@ -124,12 +124,35 @@ export class HarnessRun {
     return `${this.output}${screen}`.slice(-4000);
   }
 
-  stop(): void {
-    if (this.child.pid === undefined) return;
-    try {
-      process.kill(-this.child.pid, 'SIGTERM');
-    } catch {
-      // Already exited.
+  /**
+   * Stop the session and wait until it has really gone, so the next case
+   * never starts while this one still holds a port, a lock or a pty: SIGTERM
+   * first, then SIGKILL for anything still alive after a few seconds.
+   */
+  async stop(): Promise<void> {
+    const pid = this.child.pid;
+    if (pid === undefined || this.child.exitCode !== null) return;
+    const exited = new Promise<void>((resolve) => {
+      this.child.once('exit', () => {
+        resolve();
+      });
+    });
+    const signal = (name: NodeJS.Signals): void => {
+      try {
+        process.kill(-pid, name);
+      } catch {
+        // Already exited.
+      }
+    };
+    signal('SIGTERM');
+    const timer = new Promise<'timeout'>((resolve) =>
+      setTimeout(() => {
+        resolve('timeout');
+      }, 5_000),
+    );
+    if ((await Promise.race([exited, timer])) === 'timeout') {
+      signal('SIGKILL');
+      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2_000))]);
     }
   }
 }

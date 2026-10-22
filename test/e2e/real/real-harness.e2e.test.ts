@@ -150,7 +150,7 @@ for (const harness of REAL_HARNESSES) {
     afterEach(async () => {
       const { model, sandbox, probe, runs } = fixtures;
       try {
-        for (const run of runs) run.stop();
+        await Promise.all(runs.map((run) => run.stop()));
         await probe?.close();
       } finally {
         try {
