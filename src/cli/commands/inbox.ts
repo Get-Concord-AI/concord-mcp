@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 import type { Command } from '@commander-js/extra-typings';
 
@@ -212,7 +212,12 @@ export async function watchInbox(
 function readHookPayload(): string | undefined {
   if (process.stdin.isTTY) return undefined;
   try {
-    return readFileSync(0, 'utf8');
+    const payload = readFileSync(0, 'utf8');
+    // TEMP-DEBUG-HOOKS
+    const dump = process.env['CONCORD_DEBUG_HOOK_LOG'];
+    if (dump !== undefined)
+      appendFileSync(dump, `${process.argv.slice(2).join(' ')}\t${payload.replace(/\n/gu, ' ')}\n`);
+    return payload;
   } catch {
     return undefined;
   }

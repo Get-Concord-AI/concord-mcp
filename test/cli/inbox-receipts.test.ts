@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { renderStatusText } from '../../src/artifacts/work-state-view.js';
+import { withCopilotTranscript } from '../../src/cli/commands/copilot-hooks.js';
 import { observeHookEvent } from '../../src/cli/commands/inbox-observe.js';
 import { resolveInboxOwner } from '../../src/cli/agent-identity.js';
 import { drainInbox, registerPullEndpoint } from '../../src/cli/commands/inbox.js';
@@ -517,6 +518,41 @@ describe('read evidence in other harnesses', () => {
         transcriptPath: join(dir, 'updates.jsonl'),
       }),
     );
+    expect(status(repos, messageId)).toBe('read');
+  });
+});
+
+describe('Copilot CLI read evidence', () => {
+  it('finds the session log Copilot keeps and reads a message the model answered after', () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'copilot-cli');
+    const messageId = send(repos, 'pushed prompt', 'k1');
+    drainInbox(repos, 'beta', 'copilot-cli', undefined, {
+      session: sessionKey(SESSION),
+      via: 'hook',
+    });
+    const home = mkdtempSync(join(tmpdir(), 'concord-copilot-'));
+    const log = join(home, 'session-state', SESSION);
+    mkdirSync(log, { recursive: true });
+    writeFileSync(
+      join(log, 'events.jsonl'),
+      [
+        {
+          type: 'user.message',
+          data: { content: `[concord from alpha id=${messageId}]\npushed prompt` },
+        },
+        { type: 'assistant.message', data: { content: 'on it' } },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n'),
+    );
+
+    const payload = withCopilotTranscript(JSON.stringify({ sessionId: SESSION, cwd: home }), {
+      COPILOT_HOME: home,
+    });
+    observeHookEvent(repos, 'beta', payload);
     expect(status(repos, messageId)).toBe('read');
   });
 });

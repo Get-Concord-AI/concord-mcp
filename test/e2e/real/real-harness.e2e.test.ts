@@ -244,7 +244,9 @@ for (const harness of REAL_HARNESSES) {
 
         const body = nonce(`${harness.name}-idle`);
         const sent = await probe.send(agentId, body);
-        expect(sent.outlook).toMatch(/arrive on its own|live receiver picks it up|started a new turn/u);
+        expect(sent.outlook).toMatch(
+          /arrive on its own|live receiver picks it up|started a new turn/u,
+        );
 
         const answer = await probe.received(
           (message) => message.replyToMessageId === sent.message_id,

@@ -50,4 +50,3 @@ export function handleInspectWork(
   }
   return { scope: 'workspace', state: handleGetWorkState(repos) };
 }
-

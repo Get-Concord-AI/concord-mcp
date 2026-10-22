@@ -106,6 +106,8 @@ function isModelEntry(entry: Record<string, unknown>): boolean {
     typeof value === 'object' && value !== null ? Reflect.get(value, 'role') : undefined;
   const type = entry['type'];
   if (type === 'assistant' || type === 'gemini' || type === 'model') return true;
+  // Copilot CLI's session log.
+  if (type === 'assistant.message') return true;
   const roles = [entry['role'], role(entry['message']), role(entry['payload'])];
   return roles.some((value) => value === 'assistant' || value === 'model');
 }

@@ -68,7 +68,7 @@ function eventName(hook: ObservedHook): string | undefined {
  */
 function conversationFile(hook: ObservedHook): string | undefined {
   const path = hook.transcript_path ?? hook.transcriptPath ?? undefined;
-  if (path === undefined || path === null || path === '') return undefined;
+  if (path === undefined || path === '') return undefined;
   if (basename(path) === 'updates.jsonl') {
     const history = join(dirname(path), 'chat_history.jsonl');
     if (existsSync(history)) return history;
