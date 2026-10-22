@@ -85,8 +85,8 @@ const claudeCode: RealHarness = {
     ANTHROPIC_API_KEY: FAKE_KEY,
     // Keep the pinned binary pinned: a session that auto-updates replaces the
     // install mid-run, and every later case then finds no `claude` to start.
+    // (Not CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: it stops plugin monitors too.)
     DISABLE_AUTOUPDATER: '1',
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
   }),
   headless: (prompt) => [
     'claude',
