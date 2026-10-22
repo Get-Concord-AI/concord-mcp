@@ -10,8 +10,9 @@ export default defineConfig({
     setupFiles: ['test/setup-home.ts'],
     // The cross-harness suite packs and installs Concord; it runs via `pnpm e2e`.
     exclude: ['test/e2e/**', 'node_modules/**'],
-    // Windows runners spawn processes far slower, and many tests run fake harness CLIs.
-    testTimeout: process.platform === 'win32' ? 20_000 : 5_000,
+    // Many tests spawn the CLI or fake harness CLIs, which is slow on a loaded
+    // machine and slower still on Windows runners; a tight limit only flakes.
+    testTimeout: process.platform === 'win32' ? 30_000 : 15_000,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

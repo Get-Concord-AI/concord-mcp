@@ -164,6 +164,53 @@ describe('messaging v2 migration', () => {
   });
 });
 
+describe('messaging v2 migration from the #208 branch', () => {
+  it('carries seen_at over as read, and keeps unseen deliveries delivered', () => {
+    const filename = join(mkdtempSync(join(tmpdir(), 'concord-v14-')), 'v14.db');
+    const legacy = new Database(filename);
+    for (let index = 0; index < 14; index += 1) {
+      legacy.exec(migrations[index] ?? '');
+      legacy.pragma(`user_version = ${String(index + 1)}`);
+    }
+    const at = '2026-01-01T00:00:00.000Z';
+    const agent = legacy.prepare(
+      "INSERT INTO agents (agent_id, kind, first_seen, last_seen) VALUES (?, 'claude-code', ?, ?)",
+    );
+    agent.run('alpha', at, at);
+    agent.run('beta', at, at);
+    const message = legacy.prepare(
+      `INSERT INTO agent_messages (
+        message_id, sender_agent_id, recipient_agent_id, content, status,
+        idempotency_key, created_at, delivered_at, seen_at
+      ) VALUES (?, 'alpha', 'beta', 'hi', 'delivered', ?, ?, ?, ?)`,
+    );
+    message.run('m-seen', 'k1', at, at, at);
+    message.run('m-unseen', 'k2', at, at, null);
+    legacy
+      .prepare(
+        "INSERT INTO agent_message_events (message_id, event, created_at) VALUES ('m-seen', 'seen', ?)",
+      )
+      .run(at);
+    legacy.close();
+
+    const upgraded = openDatabase(filename);
+    const rows = z
+      .array(
+        z.object({ message_id: z.string(), status: z.string(), read_at: z.string().nullable() }),
+      )
+      .parse(
+        upgraded.prepare('SELECT message_id, status, read_at FROM agent_messages ORDER BY 1').all(),
+      );
+    expect(rows).toEqual([
+      { message_id: 'm-seen', status: 'read', read_at: at },
+      { message_id: 'm-unseen', status: 'delivered', read_at: null },
+    ]);
+    expect(
+      upgraded.prepare("SELECT event FROM agent_message_events WHERE message_id = 'm-seen'").all(),
+    ).toEqual([{ event: 'read' }]);
+  });
+});
+
 describe('row parsing', () => {
   it('round-trips a string array through serialize/parse', () => {
     expect(parseStringArray(serializeStringArray(['a', 'b']))).toEqual(['a', 'b']);

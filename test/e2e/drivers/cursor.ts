@@ -38,6 +38,9 @@ export class CursorSession extends HarnessSession {
     return this.sandbox.env(this.sessionEnv);
   }
 
+  /** The conversation file the stop hook names, as Cursor passes `transcript_path`. */
+  transcriptPath: string | undefined;
+
   private payload(event: string, extra: JsonObject = {}): JsonObject {
     return {
       conversation_id: this.sessionId,
@@ -75,7 +78,11 @@ export class CursorSession extends HarnessSession {
   async endTurn(): Promise<EndTurn> {
     const results = await this.runHooks(
       hookCommands(cursorHooks(this.sandbox.home), 'stop'),
-      this.payload('stop', { status: 'completed', loop_count: 0 }),
+      this.payload('stop', {
+        status: 'completed',
+        loop_count: 0,
+        ...(this.transcriptPath === undefined ? {} : { transcript_path: this.transcriptPath }),
+      }),
       this.env(),
     );
     const messages = deliveredFrom(

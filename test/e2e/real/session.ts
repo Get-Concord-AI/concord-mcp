@@ -15,6 +15,32 @@ import { sentSchema, type Sent } from '../support/scenario.js';
 import type { FakeModel } from './fake-model/server.js';
 import type { RealHarness } from './harnesses.js';
 
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+
+/** Drop CSI (`ESC [ … letter`) and OSC (`ESC ] … BEL|ESC \\`) sequences from a screen log. */
+function stripControls(raw: string): string {
+  let out = '';
+  for (let index = 0; index < raw.length; index += 1) {
+    if (raw[index] !== ESC) {
+      out += raw[index] ?? '';
+      continue;
+    }
+    const kind = raw[index + 1];
+    index += 1;
+    if (kind === '[') {
+      while (index + 1 < raw.length && !/[a-zA-Z~]/u.test(raw[index + 1] ?? '')) index += 1;
+      index += 1;
+    } else if (kind === ']') {
+      while (index + 1 < raw.length && raw[index + 1] !== BEL && raw[index + 1] !== ESC) {
+        index += 1;
+      }
+      index += raw[index + 1] === ESC ? 2 : 1;
+    }
+  }
+  return out;
+}
+
 const PTY_RUN = join(dirname(fileURLToPath(import.meta.url)), 'pty-run.py');
 
 /** A real harness process: headless for one turn, or interactive in a pseudo-terminal. */
@@ -32,6 +58,7 @@ export class HarnessRun {
     model: FakeModel,
     mode: 'headless' | 'interactive',
     prompt: string,
+    extraEnv: Record<string, string> = {},
   ): HarnessRun {
     const argv = mode === 'headless' ? harness.headless(prompt) : harness.interactive(prompt);
     const log = join(sandbox.root, `${harness.name}-${mode}-${randomUUID().slice(0, 6)}.log`);
@@ -40,7 +67,7 @@ export class HarnessRun {
     if (command === undefined) throw new Error(`${harness.name} has no ${mode} command.`);
     const child = spawn(command, args, {
       cwd: sandbox.repo,
-      env: sandbox.env(harness.env(model)),
+      env: sandbox.env({ ...harness.env(model), ...extraEnv }),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
@@ -51,6 +78,34 @@ export class HarnessRun {
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
     return run;
+  }
+
+  /** Wait until the pseudo-terminal screen shows `text`. */
+  async untilScreen(text: string, description: string, timeoutMs = 60_000): Promise<void> {
+    await eventually(
+      () => (this.screen().includes(text) ? true : undefined),
+      description,
+      timeoutMs,
+    );
+  }
+
+  /** The whole screen log so far, without terminal control sequences. */
+  screen(): string {
+    try {
+      return stripControls(readFileSync(this.log, 'utf8'));
+    } catch {
+      return '';
+    }
+  }
+
+  /** Kill the whole session without warning, as a crash would: no hook gets to run. */
+  crash(): void {
+    if (this.child.pid === undefined) return;
+    try {
+      process.kill(-this.child.pid, 'SIGKILL');
+    } catch {
+      // Already exited.
+    }
   }
 
   /** Type into a pseudo-terminal session (see pty-run.py). */
@@ -128,6 +183,11 @@ export class Probe {
       `a ${kind} session to register`,
       timeoutMs,
     );
+  }
+
+  /** Call any Concord tool as the probe, for checks the helpers below do not cover. */
+  call<T>(tool: string, args: Record<string, string>, schema: z.ZodType<T>): Promise<T> {
+    return this.mcp.call(tool, args, schema);
   }
 
   /** What the probe can see of another agent's endpoint and inbox. */

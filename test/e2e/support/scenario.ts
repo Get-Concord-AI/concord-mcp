@@ -85,7 +85,12 @@ const threadSchema = z
  * the thread: another agent's inbox is private to it.
  */
 export async function receiptOf(sender: HarnessSession, messageId: string) {
-  const view = await sender.call('inspect_work', { message_id: messageId }, threadSchema);
+  // Naming the reader matters only where Concord cannot see the session (Codex).
+  const view = await sender.call(
+    'inspect_work',
+    { message_id: messageId, agent_id: sender.agentId },
+    threadSchema,
+  );
   return view.thread.find((message) => message.messageId === messageId);
 }
 

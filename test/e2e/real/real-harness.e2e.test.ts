@@ -24,6 +24,8 @@ function required(harness: RealHarness): boolean {
   return wanted === 'all' || wanted.split(',').includes(harness.name);
 }
 
+const privateViewSchema = z.object({ private: z.boolean(), outbox: z.array(z.unknown()) }).loose();
+
 const endpointSchema = z
   .object({ promptable: z.boolean(), capabilities: z.array(z.string()) })
   .loose();
@@ -159,9 +161,13 @@ for (const harness of REAL_HARNESSES) {
       }
     });
 
-    function launch(mode: 'headless' | 'interactive', prompt: string): HarnessRun {
+    function launch(
+      mode: 'headless' | 'interactive',
+      prompt: string,
+      env: Record<string, string> = {},
+    ): HarnessRun {
       const { model, sandbox } = ready();
-      const run = HarnessRun.start(sandbox, harness, model, mode, prompt);
+      const run = HarnessRun.start(sandbox, harness, model, mode, prompt, env);
       fixtures.runs.push(run);
       return run;
     }
@@ -320,8 +326,7 @@ for (const harness of REAL_HARNESSES) {
         const run = launch('interactive', 'begin, then ask the user');
         const agentId = await probe.sessionOf(harness.name);
         await untilCalled(model, 'AskUserQuestion');
-        // Let the picker render and the turn block on it.
-        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        await run.untilScreen('Enter to select', 'the question picker to open');
 
         const sent = await probe.send(agentId, nonce(`${SILENT}${harness.name}-held`));
         const row = {
@@ -354,6 +359,117 @@ for (const harness of REAL_HARNESSES) {
         expect(['prompt', 'transcript']).toContain(read.readEvidence);
       },
       240_000,
+    );
+
+    it.skipIf(harness.name !== 'claude-code')(
+      'reads a held message once the user presses Esc on the question, which fires no hook',
+      async () => {
+        const { model, probe } = ready();
+        const run = launch('interactive', 'begin, then ask the user');
+        const agentId = await probe.sessionOf(harness.name);
+        await untilCalled(model, 'AskUserQuestion');
+        await run.untilScreen('Enter to select', 'the question picker to open');
+
+        const sent = await probe.send(agentId, nonce(`${SILENT}${harness.name}-esc`));
+        const row = {
+          harness: harness.name,
+          scenario: 'Esc on AskUserQuestion',
+          atSend: sent.status,
+        };
+        await receiptReaching(probe, row, sent.message_id, ['delivered']);
+        await new Promise((resolve) => setTimeout(resolve, 6_000));
+        expect((await probe.receipt(sent.message_id)).status).toBe('delivered');
+
+        run.type('\u001b');
+        const read = await receiptReaching(
+          probe,
+          { ...row, notes: 'after Esc' },
+          sent.message_id,
+          ['read'],
+          90_000,
+        );
+        await untilModelSaw(model, sent.message_id);
+        expect(read.readEvidence).toBe('prompt');
+      },
+      240_000,
+    );
+
+    it.skipIf(harness.name !== 'claude-code')(
+      'shows ✓ once a crashed session is unreachable, and a fresh session takes the message back',
+      async () => {
+        const { model, probe } = ready();
+        // A named agent outlives its session, which is what makes requeue useful.
+        const named = { CONCORD_AGENT_ID: `${harness.name}:named-${nonce('a').slice(-6)}` };
+        const agentId = named.CONCORD_AGENT_ID;
+        const first = launch('interactive', 'begin, then ask the user', named);
+        await untilCalled(model, 'AskUserQuestion');
+        await first.untilScreen('Enter to select', 'the question picker to open');
+
+        const sent = await probe.send(agentId, nonce(`${SILENT}${harness.name}-crash`));
+        const row = { harness: harness.name, scenario: 'crash while holding', atSend: sent.status };
+        await receiptReaching(probe, row, sent.message_id, ['delivered']);
+
+        // A crash runs no SessionEnd; the orphaned monitor stops and both
+        // leases lapse, so the receipt falls back to a single tick.
+        first.crash();
+        const unreachable = await receiptReaching(
+          probe,
+          { ...row, notes: 'after kill -9' },
+          sent.message_id,
+          ['sent'],
+          150_000,
+        );
+        expect(unreachable.events).toContain('requeued');
+
+        // The agent comes back in a fresh session: it gets the message and reads it.
+        launch('interactive', 'begin', named);
+        const read = await receiptReaching(
+          probe,
+          { ...row, notes: 'fresh session' },
+          sent.message_id,
+          ['read'],
+          120_000,
+        );
+        expect(read.events.filter((event) => event === 'delivered')).toHaveLength(2);
+      },
+      360_000,
+    );
+
+    it.skipIf(harness.name !== 'claude-code')(
+      "keeps one agent out of another's mail across real sessions",
+      async () => {
+        const { model, probe, sandbox } = ready();
+        launch('interactive', 'begin');
+        const agentId = await probe.sessionOf(harness.name);
+        await untilTurnEnds(model, 3_000);
+        const sent = await probe.send(agentId, nonce(`${SILENT}${harness.name}-private`));
+        await receiptReaching(
+          probe,
+          { harness: harness.name, scenario: 'privacy', atSend: sent.status },
+          sent.message_id,
+          ['read'],
+          90_000,
+        );
+
+        const outsider = await Probe.start(sandbox);
+        try {
+          const view = await outsider.call(
+            'inspect_work',
+            { agent_id: probe.agentId },
+            privateViewSchema,
+          );
+          expect(view.private).toBe(true);
+          expect(view.outbox).toEqual([]);
+          await expect(
+            outsider.call('inspect_work', { message_id: sent.message_id }, privateViewSchema),
+          ).rejects.toThrow(/does not exist/u);
+          // Looking never changes a receipt.
+          expect((await probe.receipt(sent.message_id)).status).toBe('read');
+        } finally {
+          await outsider.close();
+        }
+      },
+      180_000,
     );
 
     it.skipIf(harness.name !== 'goose')(
