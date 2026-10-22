@@ -37,6 +37,7 @@ export const readEvidenceValues = [
   'prompt',
   'transcript',
   'turn_completed',
+  'model_output',
   'inspect',
   'reply',
 ] as const;

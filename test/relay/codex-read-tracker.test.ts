@@ -17,6 +17,11 @@ const item = (turnId: string, clientId: string | null, text = 'hello') => ({
   turnId,
   item: { type: 'userMessage', clientId, content: [{ type: 'text', text }] },
 });
+const modelItem = (turnId: string, type = 'agentMessage') => ({
+  threadId: 'thread-1',
+  turnId,
+  item: { type, id: `${turnId}-${type}` },
+});
 const completed = (id: string, status = 'completed', threadId = 'thread-1') => ({
   threadId,
   turn: { id, status },
@@ -29,6 +34,41 @@ describe('CodexReadTracker', () => {
     t.notify('item/completed', item('turn-1', 'm1'));
     expect(reads).toEqual([]);
     t.notify('turn/completed', completed('turn-1'));
+    expect(reads).toEqual([['m1']]);
+  });
+
+  it('reads a pushed message as soon as the model starts its own item after it', () => {
+    const reads: [string[], string][] = [];
+    const t = new CodexReadTracker('thread-1', (ids, evidence) => {
+      reads.push([ids, evidence]);
+    });
+    t.expect('m1');
+    t.notify('item/started', item('turn-1', 'm1'));
+    t.notify('item/started', modelItem('turn-1', 'reasoning'));
+    expect(reads).toEqual([[['m1'], 'model_output']]);
+    // The turn completing later reports nothing new.
+    t.notify('turn/completed', completed('turn-1'));
+    expect(reads).toHaveLength(1);
+  });
+
+  it('does not count model output that started before a steered message landed', () => {
+    const { reads, tracker: t } = tracker();
+    t.expect('m1');
+    t.notify('item/started', modelItem('turn-1', 'commandExecution'));
+    t.notify('item/completed', item('turn-1', 'm1'));
+    // The command finishing was sampled without the message.
+    t.notify('item/completed', modelItem('turn-1', 'commandExecution'));
+    expect(reads).toEqual([]);
+    t.notify('item/started', modelItem('turn-1', 'agentMessage'));
+    expect(reads).toEqual([['m1']]);
+  });
+
+  it('reads a message the model answered even if the turn is then interrupted', () => {
+    const { reads, tracker: t } = tracker();
+    t.expect('m1');
+    t.notify('item/completed', item('turn-1', 'm1'));
+    t.notify('item/started', modelItem('turn-1'));
+    t.notify('turn/completed', completed('turn-1', 'interrupted'));
     expect(reads).toEqual([['m1']]);
   });
 
@@ -48,7 +88,7 @@ describe('CodexReadTracker', () => {
     expect(reads).toEqual([['m1']]);
   });
 
-  it('leaves an interrupted or failed turn unread', () => {
+  it('leaves an interrupted or failed turn with no model output unread', () => {
     const { reads, tracker: t } = tracker();
     t.expect('m1');
     t.expect('m2');

@@ -35,14 +35,14 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
   const context = openContext(process.cwd());
   ensureAgentRegistered(context.repos, { agentId, kind: 'codex' }, context.repoRoot);
   const client = new CodexDaemonClient();
-  // Read receipts: the turn that took a pushed message completed with it as input.
+  // Read receipts: the model answered, or the turn completed, with a pushed message as input.
   const session = sessionKey(threadId);
-  const reads = new CodexReadTracker(threadId, (messageIds) => {
+  const reads = new CodexReadTracker(threadId, (messageIds, evidence) => {
     try {
-      // The turn may complete before the sender has recorded the push as
-      // delivered; completing it proves delivery too, so record both.
+      // The read may land before the sender has recorded the push as
+      // delivered; reading it proves delivery too, so record both.
       context.repos.agentMessages.markReadByEvidence(agentId, messageIds, {
-        evidence: 'turn_completed',
+        evidence,
         via: 'adapter',
         session,
       });
