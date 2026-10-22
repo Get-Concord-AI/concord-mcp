@@ -42,6 +42,14 @@ const foreignKeyViolationsSchema = z.array(z.unknown());
  */
 function runMigrations(db: ConcordDatabase): void {
   const applied = readUserVersion(db);
+  if (applied > migrations.length) {
+    // A newer Concord upgraded this store; this build would misread its rows.
+    throw new Error(
+      `This Concord database was upgraded by a newer Concord (schema ${String(applied)}; ` +
+        `this build knows ${String(migrations.length)}). Upgrade concord, then restart ` +
+        'any agent sessions started before the upgrade.',
+    );
+  }
   for (let index = applied; index < migrations.length; index += 1) {
     const migration = migrations[index];
     if (migration === undefined) {

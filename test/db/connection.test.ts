@@ -46,6 +46,15 @@ describe('openDatabase', () => {
     expect(columns).toEqual(['recipient_agent_id', 'status', 'created_at', 'message_id']);
   });
 
+  it('refuses a database a newer Concord already upgraded', () => {
+    const filename = join(mkdtempSync(join(tmpdir(), 'concord-newer-')), 'newer.db');
+    const newer = new Database(filename);
+    newer.pragma(`user_version = ${String(migrations.length + 1)}`);
+    newer.close();
+
+    expect(() => openDatabase(filename)).toThrow(/upgraded by a newer Concord/);
+  });
+
   it('upgrades a version-6 database without losing legacy task ownership', () => {
     const filename = join(mkdtempSync(join(tmpdir(), 'concord-upgrade-')), 'legacy.db');
     const legacy = new Database(filename);
