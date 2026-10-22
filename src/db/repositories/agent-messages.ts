@@ -345,18 +345,23 @@ export function createAgentMessageRepository(
   }
 
   function requeueUnread(agentId: string, session: string | null): AgentMessageRecord[] {
-    return requeueRows(listRequeueableStmt.all({ agent_id: agentId, session }));
+    const raw: unknown = listRequeueableStmt.all({ agent_id: agentId, session });
+    return requeueRows(rawListSchema.parse(raw).map(parseAgentMessageRow));
   }
 
   function requeueSession(agentId: string, session: string): AgentMessageRecord[] {
-    return requeueRows(listSessionUnreadStmt.all({ agent_id: agentId, session }));
+    const raw: unknown = listSessionUnreadStmt.all({ agent_id: agentId, session });
+    return requeueRows(rawListSchema.parse(raw).map(parseAgentMessageRow));
   }
 
-  function requeueRows(raw: unknown, reason?: string): AgentMessageRecord[] {
+  function requeueRows(
+    messages: readonly AgentMessageRecord[],
+    reason?: string,
+  ): AgentMessageRecord[] {
     const requeued: AgentMessageRecord[] = [];
     // A requeued message gets a fresh day to be taken again.
     const expiresAt = new Date(Date.now() + MESSAGE_TTL_MS).toISOString();
-    for (const message of rawListSchema.parse(raw).map(parseAgentMessageRow)) {
+    for (const message of messages) {
       const result = requeueStmt.run({ message_id: message.messageId, expires_at: expiresAt });
       if (result.changes === 0) continue;
       recordEvent(message.messageId, 'requeued', reason ?? message.deliveredSession);
@@ -366,8 +371,9 @@ export function createAgentMessageRepository(
   }
 
   function sweepStale(now: Date = new Date()): AgentMessageRecord[] {
+    const raw: unknown = listUnreachableStmt.all({ now: now.toISOString() });
     const unreachable = requeueRows(
-      listUnreachableStmt.all({ now: now.toISOString() }),
+      rawListSchema.parse(raw).map(parseAgentMessageRow),
       'unreachable',
     );
     return [...unreachable, ...expireSent(now)];

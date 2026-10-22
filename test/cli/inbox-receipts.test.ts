@@ -66,14 +66,17 @@ function status(repos: Repositories, messageId: string): string | undefined {
   return repos.agentMessages.get(messageId)?.status;
 }
 
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+type TranscriptEntry = Record<string, Json>;
+
 /** A Claude Code transcript as JSONL, written to a temp file. */
-function transcript(entries: readonly Record<string, unknown>[]): string {
+function transcript(entries: readonly TranscriptEntry[]): string {
   const path = join(mkdtempSync(join(tmpdir(), 'concord-transcript-')), 'session.jsonl');
   writeFileSync(path, entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n');
   return path;
 }
 
-function notificationEntries(line: string): Record<string, unknown>[] {
+function notificationEntries(line: string): TranscriptEntry[] {
   return [
     {
       type: 'queue-operation',
