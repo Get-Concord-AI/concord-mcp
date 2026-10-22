@@ -21,6 +21,8 @@ export const relayResponseSchema = z.discriminatedUnion('ok', [
     provider: z.string().min(1),
     delivery: z.enum(['inject', 'steer']),
     receipt: z.string().optional(),
+    /** The recipient session's opaque key, so the delivery can be credited and requeued. */
+    session: z.string().optional(),
   }),
   z.object({
     version: z.literal(RELAY_PROTOCOL_VERSION),

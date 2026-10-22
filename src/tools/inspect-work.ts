@@ -28,6 +28,8 @@ export function handleInspectWork(
   input: InspectWorkInput,
   sessionAgentId?: string,
 ): InspectWorkResult {
+  // Expiry is lazy: apply it before any receipt is shown or changed.
+  repos.agentMessages.expireStale();
   const scoped = [input.task_id, input.message_id].filter((value) => value !== undefined);
   if (scoped.length > 1) {
     throw new Error('inspect_work accepts only one of task_id, agent_id, or message_id.');

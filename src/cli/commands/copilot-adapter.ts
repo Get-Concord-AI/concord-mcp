@@ -1,3 +1,4 @@
+import { sessionKey } from '../../domain/receipts.js';
 import { spawn } from 'node:child_process';
 
 import type { CloudRuntime } from '../../cloud/runtime.js';
@@ -189,6 +190,7 @@ export async function hostCopilot(
     address: relayAddress(context.concordPath, agentId),
     adapter,
     pullFallback: true,
+    session: sessionKey(sessionId),
   });
   let sweeping = false;
   const sweeper = setInterval(() => {

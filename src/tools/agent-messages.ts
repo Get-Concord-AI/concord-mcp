@@ -51,6 +51,8 @@ export interface DeliveryReceipt {
   provider: string;
   delivery: 'inject' | 'steer';
   receipt?: string | undefined;
+  /** The recipient session's opaque key, when the host knows it. */
+  session?: string | undefined;
 }
 
 export interface AgentMessageDispatcher {
@@ -117,6 +119,8 @@ export function handleSendAgentMessage(
   repos: Repositories,
   input: SendAgentMessageInput,
 ): SendAgentMessageResult {
+  // Expiry is lazy: apply it before a retry reports where a message got to.
+  repos.agentMessages.expireStale();
   const sender = repos.agents.get(input.agentId);
   if (sender === undefined) {
     throw new AgentMessageDeliveryError(
@@ -298,6 +302,7 @@ export async function handleSendAgentMessageWithDelivery(
       result.message.messageId,
       receipt.provider,
       receipt.receipt ?? receipt.delivery,
+      { session: receipt.session ?? null, via: 'adapter' },
     );
     return {
       ...result,

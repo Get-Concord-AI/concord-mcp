@@ -39,7 +39,13 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
   const session = sessionKey(threadId);
   const reads = new CodexReadTracker(threadId, (messageIds) => {
     try {
-      context.repos.agentMessages.markRead(agentId, session, messageIds, 'turn_completed');
+      // The turn may complete before the sender has recorded the push as
+      // delivered; completing it proves delivery too, so record both.
+      context.repos.agentMessages.markReadByEvidence(agentId, messageIds, {
+        evidence: 'turn_completed',
+        via: 'adapter',
+        session,
+      });
     } catch (error) {
       process.stderr.write(
         `Concord: could not record a read receipt: ${error instanceof Error ? error.message : String(error)}\n`,
@@ -58,6 +64,7 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
     address: relayAddress(context.concordPath, agentId),
     adapter,
     pullFallback: true,
+    session,
   });
   const stop = (): void => {
     void relay.close().finally(() => {

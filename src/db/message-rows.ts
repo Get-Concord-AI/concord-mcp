@@ -9,6 +9,9 @@ import { z } from 'zod';
  *   replied    the recipient answered it (implies read)
  *   failed     it never reached anyone: expired, or the recipient vanished
  */
+/** A message nobody takes within this long fails as `expired`. */
+export const MESSAGE_TTL_MS = 24 * 60 * 60 * 1000;
+
 export const agentMessageStatusValues = ['sent', 'delivered', 'read', 'replied', 'failed'] as const;
 export type AgentMessageStatus = (typeof agentMessageStatusValues)[number];
 const agentMessageStatusSchema = z.enum(agentMessageStatusValues);

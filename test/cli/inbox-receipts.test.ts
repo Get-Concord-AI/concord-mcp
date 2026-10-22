@@ -16,6 +16,7 @@ import { renderedMessageIds, renderMonitorLines } from '../../src/domain/pull-in
 import { sessionKey, toReceipt } from '../../src/domain/receipts.js';
 import { handleSendAgentMessage } from '../../src/tools/agent-messages.js';
 import { handleGetWorkState } from '../../src/tools/get-work-state.js';
+import { handleInspectWork } from '../../src/tools/workflow.js';
 
 function registerAgent(repos: Repositories, agentId: string): void {
   repos.agents.upsert({
@@ -630,5 +631,64 @@ describe('SessionEnd from /clear', () => {
 
     observeHookEvent(repos, 'beta', hook({ hook_event_name: 'SessionEnd', reason: 'clear' }));
     expect(status(repos, messageId)).toBe('delivered');
+  });
+});
+
+describe('greptile follow-ups', () => {
+  let repos: Repositories;
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+  });
+
+  it('expires a message on inspect or retry, without waiting for a drain', () => {
+    const messageId = send(repos, 'too late', 'k1');
+    repos.db
+      .prepare('UPDATE agent_messages SET expires_at = ? WHERE message_id = ?')
+      .run('2000-01-01T00:00:00.000Z', messageId);
+
+    // The recipient inspecting it can no longer turn it read.
+    handleInspectWork(repos, { message_id: messageId }, 'beta');
+    expect(status(repos, messageId)).toBe('failed');
+    expect(() =>
+      handleSendAgentMessage(repos, {
+        operation: 'prompt',
+        agentId: 'alpha',
+        toAgentId: 'beta',
+        content: 'too late',
+        idempotencyKey: 'k1',
+      }),
+    ).toThrow(/expired/);
+  });
+
+  it('keeps an adapter read that lands before the sender records the push', () => {
+    const messageId = send(repos, 'fast turn', 'k1');
+    const session = sessionKey('thread-1');
+
+    repos.agentMessages.markReadByEvidence('beta', [messageId], {
+      evidence: 'turn_completed',
+      via: 'adapter',
+      session,
+    });
+    // The sender's late markDelivered must not undo it.
+    repos.agentMessages.markDelivered(messageId, 'codex', 'inject', { session, via: 'adapter' });
+    const message = repos.agentMessages.get(messageId);
+    expect(message?.status).toBe('read');
+    expect(message?.deliveredSession).toBe(session);
+    expect(events(repos, messageId)).toEqual(['sent', 'delivered', 'read']);
+  });
+
+  it('records the session a push was delivered into, so it can be requeued', () => {
+    const messageId = send(repos, 'pushed', 'k1');
+    repos.agentMessages.markDelivered(messageId, 'codex', 'inject', {
+      session: sessionKey('thread-old'),
+      via: 'adapter',
+    });
+
+    expect(
+      repos.agentMessages.requeueUnread('beta', sessionKey('thread-new')).map((m) => m.messageId),
+    ).toEqual([messageId]);
   });
 });

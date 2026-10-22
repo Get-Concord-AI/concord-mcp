@@ -8,7 +8,7 @@
  * CHECK in place, so both tables are rebuilt.
  *
  * Open messages get a 24 hour expiry from when they were sent, matching
- * MESSAGE_TTL_MS in domain/receipts.ts.
+ * MESSAGE_TTL_MS in db/message-rows.ts.
  */
 export const MESSAGING_V2_MIGRATION = `
   CREATE TABLE agent_messages_015 (

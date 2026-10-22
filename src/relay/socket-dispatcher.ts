@@ -73,6 +73,7 @@ export class SocketAgentMessageDispatcher implements AgentMessageDispatcher {
             provider: response.provider,
             delivery: response.delivery,
             ...(response.receipt === undefined ? {} : { receipt: response.receipt }),
+            ...(response.session === undefined ? {} : { session: response.session }),
           });
         } catch (error) {
           finish(error instanceof Error ? error : new Error(String(error)));

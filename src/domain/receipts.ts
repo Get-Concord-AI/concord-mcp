@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import { z } from 'zod';
+
 import { renderedMessageIds } from './pull-inbox.js';
 
 /**
@@ -13,9 +15,6 @@ import { renderedMessageIds } from './pull-inbox.js';
  * naming its id: the prompt that started a turn, the session transcript, or a
  * Codex turn that completed with it as input.
  */
-
-/** A message nobody takes within this long fails as `expired`. */
-export const MESSAGE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export type Ticks = '✓' | '✓✓' | 'read' | 'replied' | 'failed';
 
@@ -100,72 +99,98 @@ export function idsInPrompt(prompt: string): string[] {
   return renderedMessageIds(prompt);
 }
 
+const roleSchema = z.object({ role: z.string().optional() }).loose();
+
+/** The fields of a transcript entry, in any harness's format, that read evidence needs. */
+const transcriptEntrySchema = z
+  .object({
+    type: z.string().optional(),
+    role: z.string().optional(),
+    isApiErrorMessage: z.boolean().optional(),
+    message: z
+      .object({ role: z.string().optional(), model: z.string().optional() })
+      .loose()
+      .optional()
+      .catch(undefined),
+    payload: roleSchema.optional().catch(undefined),
+  })
+  .loose();
+type TranscriptEntry = z.infer<typeof transcriptEntrySchema>;
+
+/** Gemini records a whole session as one JSON document with a `messages` array. */
+const transcriptDocumentSchema = z.object({ messages: z.array(z.json()) }).loose();
+
+/** One entry, with the text it was read from so message headers can be found in it. */
+interface ParsedEntry {
+  entry: TranscriptEntry;
+  text: string;
+}
+
 /**
  * An assistant entry the harness wrote itself rather than the model: Claude
  * Code records API errors and interrupted turns as `<synthetic>` assistant
  * messages. Those prove nothing about what the model was sent.
  */
-function isSyntheticEntry(entry: Record<string, unknown>): boolean {
-  if (entry['isApiErrorMessage'] === true) return true;
-  const message = entry['message'];
-  return (
-    typeof message === 'object' &&
-    message !== null &&
-    Reflect.get(message, 'model') === '<synthetic>'
-  );
+function isSyntheticEntry(entry: TranscriptEntry): boolean {
+  return entry.isApiErrorMessage === true || entry.message?.model === '<synthetic>';
 }
 
 /** A transcript entry the model wrote, in any harness's format. */
-function isModelEntry(entry: Record<string, unknown>): boolean {
+function isModelEntry(entry: TranscriptEntry): boolean {
   if (isSyntheticEntry(entry)) return false;
-  const role = (value: unknown): unknown =>
-    typeof value === 'object' && value !== null ? Reflect.get(value, 'role') : undefined;
-  const type = entry['type'];
-  if (type === 'assistant' || type === 'gemini' || type === 'model') return true;
-  // Copilot CLI's session log.
-  if (type === 'assistant.message') return true;
-  const roles = [entry['role'], role(entry['message']), role(entry['payload'])];
-  return roles.some((value) => value === 'assistant' || value === 'model');
+  const { type } = entry;
+  // Claude Code and Grok (`assistant`), Gemini (`gemini`), Copilot CLI (`assistant.message`).
+  if (
+    type === 'assistant' ||
+    type === 'gemini' ||
+    type === 'model' ||
+    type === 'assistant.message'
+  ) {
+    return true;
+  }
+  return [entry.role, entry.message?.role, entry.payload?.role].some(
+    (role) => role === 'assistant' || role === 'model',
+  );
 }
 
 /**
  * An entry that only queues text for later (Claude Code writes a held monitor
  * notification as `queue-operation` before the model is ever shown it).
  */
-function isQueuedOnly(entry: Record<string, unknown>): boolean {
-  return entry['type'] === 'queue-operation';
+function isQueuedOnly(entry: TranscriptEntry): boolean {
+  return entry.type === 'queue-operation';
 }
 
-function transcriptEntries(text: string): Record<string, unknown>[] {
-  const asObject = (value: unknown): Record<string, unknown> | undefined =>
-    typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? Object.fromEntries(Object.entries(value))
-      : undefined;
+function parseEntry(text: string): ParsedEntry | undefined {
+  try {
+    const raw: unknown = JSON.parse(text);
+    const parsed = transcriptEntrySchema.safeParse(raw);
+    return parsed.success ? { entry: parsed.data, text } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function transcriptEntries(text: string): ParsedEntry[] {
   const trimmed = text.trim();
-  // Gemini records a session as one JSON document with a `messages` array.
   if (trimmed.startsWith('{') && !trimmed.includes('\n{')) {
     try {
-      const whole = asObject(JSON.parse(trimmed));
-      const messages = whole?.['messages'];
-      if (Array.isArray(messages)) {
-        return messages.flatMap((message): Record<string, unknown>[] => {
-          const entry = asObject(message);
+      const raw: unknown = JSON.parse(trimmed);
+      const document = transcriptDocumentSchema.safeParse(raw);
+      if (document.success) {
+        return document.data.messages.flatMap((message) => {
+          const entry = parseEntry(JSON.stringify(message));
           return entry === undefined ? [] : [entry];
         });
       }
-      if (whole !== undefined) return [whole];
     } catch {
       // Fall through to JSONL.
     }
   }
-  return text.split('\n').flatMap((line): Record<string, unknown>[] => {
+  return text.split('\n').flatMap((line) => {
     if (line.trim() === '') return [];
-    try {
-      const entry = asObject(JSON.parse(line));
-      return entry === undefined ? [] : [entry];
-    } catch {
-      return [];
-    }
+    const entry = parseEntry(line);
+    return entry === undefined ? [] : [entry];
   });
 }
 
@@ -179,14 +204,14 @@ export function idsReadInTranscript(text: string, candidates: readonly string[])
   const wanted = new Set(candidates);
   const shown = new Set<string>();
   const read = new Set<string>();
-  for (const entry of transcriptEntries(text)) {
+  for (const { entry, text: entryText } of transcriptEntries(text)) {
     if (isModelEntry(entry)) {
       for (const id of shown) read.add(id);
       shown.clear();
       continue;
     }
     if (isQueuedOnly(entry)) continue;
-    for (const id of renderedMessageIds(JSON.stringify(entry))) {
+    for (const id of renderedMessageIds(entryText)) {
       if (wanted.has(id) && !read.has(id)) shown.add(id);
     }
   }

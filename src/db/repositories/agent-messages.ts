@@ -11,8 +11,8 @@ import {
   type AgentMessageRecord,
   type DeliveryVia,
   type ReadEvidence,
+  MESSAGE_TTL_MS,
 } from '../rows.js';
-import { MESSAGE_TTL_MS } from '../../domain/receipts.js';
 
 export interface NewAgentMessage {
   messageId: string;
@@ -70,6 +70,17 @@ export interface AgentMessageRepository {
    * (inspect_work). Sent ones count as delivered too, whatever session holds them.
    */
   markReadByInspect(agentId: string, messageIds: readonly string[]): AgentMessageRecord[];
+  /**
+   * Evidence that itself proves delivery (a Codex turn that completed with the
+   * message as input): a message still `sent` is recorded as delivered to
+   * `session` first, so the read is never lost to a sender that has not yet
+   * recorded its push.
+   */
+  markReadByEvidence(
+    agentId: string,
+    messageIds: readonly string[],
+    options: { evidence: ReadEvidence; via: DeliveryVia; session: string | null },
+  ): AgentMessageRecord[];
   /**
    * Return every message delivered to a named session other than `session`
    * and never read to the queue, so this agent's new session receives it
@@ -168,7 +179,8 @@ export function createAgentMessageRepository(
   `);
   const inspectDeliverStmt = db.prepare(`
     UPDATE agent_messages
-    SET status = 'delivered', delivered_at = @now, delivered_via = 'inspect'
+    SET status = 'delivered', delivered_at = @now, delivered_via = @via,
+        delivered_session = COALESCE(delivered_session, @session)
     WHERE message_id = @message_id AND recipient_agent_id = @agent_id AND status = 'sent'
   `);
   const inspectReadStmt = db.prepare(`
@@ -278,16 +290,24 @@ export function createAgentMessageRepository(
     return read;
   }
 
-  function markReadByInspect(agentId: string, messageIds: readonly string[]): AgentMessageRecord[] {
+  function markReadByEvidence(
+    agentId: string,
+    messageIds: readonly string[],
+    options: { evidence: ReadEvidence; via: DeliveryVia; session: string | null },
+  ): AgentMessageRecord[] {
+    expireStale();
     const read: AgentMessageRecord[] = [];
     for (const messageId of new Set(messageIds)) {
       const now = new Date().toISOString();
       const params = { message_id: messageId, agent_id: agentId, now };
-      if (inspectDeliverStmt.run(params).changes > 0) {
-        recordEvent(messageId, 'delivered', 'inspect');
+      if (
+        inspectDeliverStmt.run({ ...params, via: options.via, session: options.session }).changes >
+        0
+      ) {
+        recordEvent(messageId, 'delivered', options.via);
       }
       if (inspectReadStmt.run(params).changes === 0) continue;
-      recordEvent(messageId, 'read', 'inspect');
+      recordEvent(messageId, 'read', options.evidence);
       read.push(requireMessage(messageId));
     }
     return read;
@@ -342,7 +362,7 @@ export function createAgentMessageRepository(
   // sender, and fail its write upgrade with SQLITE_BUSY_SNAPSHOT.
   const claimTransaction = db.transaction(claimPending);
   const markReadTransaction = db.transaction(markRead);
-  const markReadByInspectTransaction = db.transaction(markReadByInspect);
+  const markReadByEvidenceTransaction = db.transaction(markReadByEvidence);
   const requeueTransaction = db.transaction(requeueUnread);
   const requeueSessionTransaction = db.transaction(requeueSession);
   const expireTransaction = db.transaction(expireStale);
@@ -395,7 +415,14 @@ export function createAgentMessageRepository(
       return markReadTransaction.immediate(agentId, session, messageIds, evidence);
     },
     markReadByInspect(agentId, messageIds) {
-      return markReadByInspectTransaction.immediate(agentId, messageIds);
+      return markReadByEvidenceTransaction.immediate(agentId, messageIds, {
+        evidence: 'inspect',
+        via: 'inspect',
+        session: null,
+      });
+    },
+    markReadByEvidence(agentId, messageIds, options) {
+      return markReadByEvidenceTransaction.immediate(agentId, messageIds, options);
     },
     requeueUnread(agentId, session) {
       return requeueTransaction.immediate(agentId, session);
