@@ -321,7 +321,7 @@ describe('messaging v2 receipts', () => {
       .prepare('UPDATE agent_messages SET expires_at = ? WHERE message_id = ?')
       .run('2000-01-01T00:00:00.000Z', messageId);
 
-    expect(repos.agentMessages.expireStale().map((message) => message.messageId)).toEqual([
+    expect(repos.agentMessages.sweepStale().map((message) => message.messageId)).toEqual([
       messageId,
     ]);
     const message = repos.agentMessages.get(messageId);
@@ -690,5 +690,47 @@ describe('greptile follow-ups', () => {
     expect(
       repos.agentMessages.requeueUnread('beta', sessionKey('thread-new')).map((m) => m.messageId),
     ).toEqual([messageId]);
+  });
+});
+
+describe('unreachable recipients show a single tick', () => {
+  let repos: Repositories;
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'claude-code');
+  });
+
+  function leases(endpoint: string, receiver: string | null): void {
+    repos.db
+      .prepare(
+        'UPDATE agent_endpoints SET expires_at = ?, receiver_expires_at = ? WHERE agent_id = ?',
+      )
+      .run(endpoint, receiver, 'beta');
+  }
+
+  it('returns a held message to ✓ once the session that took it is gone', () => {
+    const messageId = send(repos, 'held by a crashed session', 'k1');
+    monitorDrain(repos);
+    leases('2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z');
+
+    repos.agentMessages.sweepStale();
+    expect(status(repos, messageId)).toBe('sent');
+    expect(repos.agentMessages.listEvents(messageId).at(-1)).toMatchObject({
+      event: 'requeued',
+      detail: 'unreachable',
+    });
+  });
+
+  it('keeps it ✓✓ while the session is alive, even blocked on its user', () => {
+    const messageId = send(repos, 'held behind a question', 'k1');
+    monitorDrain(repos);
+    // The endpoint lease lapsed between hooks, but the monitor still heartbeats.
+    leases('2000-01-01T00:00:00.000Z', '2999-01-01T00:00:00.000Z');
+
+    repos.agentMessages.sweepStale();
+    expect(status(repos, messageId)).toBe('delivered');
   });
 });

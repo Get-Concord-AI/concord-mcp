@@ -120,7 +120,7 @@ export function handleSendAgentMessage(
   input: SendAgentMessageInput,
 ): SendAgentMessageResult {
   // Expiry is lazy: apply it before a retry reports where a message got to.
-  repos.agentMessages.expireStale();
+  repos.agentMessages.sweepStale();
   const sender = repos.agents.get(input.agentId);
   if (sender === undefined) {
     throw new AgentMessageDeliveryError(

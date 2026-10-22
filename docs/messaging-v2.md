@@ -82,6 +82,18 @@ A recipient only has to be a **registered** agent. If it has no live receiver:
 - Expiry is applied lazily whenever a send, drain or inspect touches the
   message, so no daemon is needed.
 
+### Unreachable recipients show ✓
+
+Like a phone that is switched off, a recipient whose session is gone shows a
+single tick. Before any receipt is shown or changed, Concord sweeps:
+
+- a **delivered, unread** message whose recipient has neither a live endpoint
+  lease nor a live receiver (monitor) lease goes back to `sent`, with a
+  `requeued` event (`unreachable`). Nobody holds it any more; it is delivered
+  again if the agent comes back, or expires.
+- A session that is alive but blocked on its user keeps heartbeating its
+  monitor, so its held messages correctly stay ✓✓.
+
 ## Read detection: evidence, not timing
 
 Agents never call anything to acknowledge a message. A message becomes `read`
@@ -214,7 +226,9 @@ a security boundary against a local process that can open
   (`CONCORD_AGENT_ID`). For everyone, `SessionEnd` returns what that session
   was handed but never read to ✓, so the sender sees the truth and the message
   expires instead of sitting at ✓✓ forever. A session killed outright (crash,
-  `kill -9`) fires no `SessionEnd`, so its unread deliveries stay at ✓✓.
+  `kill -9`) fires no `SessionEnd`; once its endpoint and receiver leases have
+  both lapsed (about 90 seconds), its unread deliveries go back to ✓ as well
+  (see below).
   `SessionEnd` from `/clear` does not requeue: the process and its monitor
   live on, and would only hand the message straight back.
 - **One live session per named agent is assumed.** Two terminals sharing a

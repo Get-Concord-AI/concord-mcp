@@ -95,8 +95,15 @@ export interface AgentMessageRepository {
    * that will never turn read.
    */
   requeueSession(agentId: string, session: string): AgentMessageRecord[];
-  /** Fail every `sent` message past its expiry. */
-  expireStale(now?: Date): AgentMessageRecord[];
+  /**
+   * Settle what time alone has decided, before any receipt is shown:
+   * - a delivered, unread message whose recipient is no longer reachable (no
+   *   live endpoint and no live receiver: its session ended without saying
+   *   so) goes back to `sent`, because nobody holds it any more;
+   * - a `sent` message past its expiry fails as `expired`.
+   * Returns the messages that changed.
+   */
+  sweepStale(now?: Date): AgentMessageRecord[];
   listByTask(taskId: string): AgentMessageRecord[];
   listThread(messageId: string): AgentMessageRecord[];
   markDelivered(
@@ -213,6 +220,20 @@ export function createAgentMessageRepository(
         expires_at = MAX(COALESCE(expires_at, ''), @expires_at)
     WHERE message_id = @message_id AND status = 'delivered'
   `);
+  // A session blocked on its user still heartbeats its monitor, so it stays
+  // reachable and its held messages stay delivered. Only a session with
+  // neither a live endpoint lease nor a live receiver lease is gone.
+  const listUnreachableStmt = db.prepare(`
+    SELECT m.* FROM agent_messages m
+    LEFT JOIN agent_endpoints e ON e.agent_id = m.recipient_agent_id
+    WHERE m.status = 'delivered' AND m.delivered_via IN ('monitor', 'hook', 'adapter')
+      AND (
+        e.agent_id IS NULL OR e.status <> 'connected'
+        OR (e.expires_at IS NOT NULL AND e.expires_at < @now
+            AND (e.receiver_expires_at IS NULL OR e.receiver_expires_at < @now))
+      )
+    ORDER BY m.created_at, m.message_id
+  `);
   const listExpiredStmt = db.prepare(`
     SELECT message_id FROM agent_messages WHERE status = 'sent' AND expires_at < ?
   `);
@@ -242,7 +263,7 @@ export function createAgentMessageRepository(
     provider: string,
     options: ClaimOptions,
   ): AgentMessageRecord[] {
-    expireStale();
+    sweepStale();
     const raw: unknown = listPendingStmt.all(agentId);
     const claimed: AgentMessageRecord[] = [];
     for (const row of rawListSchema.parse(raw).map(parseAgentMessageRow)) {
@@ -295,7 +316,7 @@ export function createAgentMessageRepository(
     messageIds: readonly string[],
     options: { evidence: ReadEvidence; via: DeliveryVia; session: string | null },
   ): AgentMessageRecord[] {
-    expireStale();
+    sweepStale();
     const read: AgentMessageRecord[] = [];
     for (const messageId of new Set(messageIds)) {
       const now = new Date().toISOString();
@@ -326,20 +347,28 @@ export function createAgentMessageRepository(
     return requeueRows(listSessionUnreadStmt.all({ agent_id: agentId, session }));
   }
 
-  function requeueRows(raw: unknown): AgentMessageRecord[] {
+  function requeueRows(raw: unknown, reason?: string): AgentMessageRecord[] {
     const requeued: AgentMessageRecord[] = [];
     // A requeued message gets a fresh day to be taken again.
     const expiresAt = new Date(Date.now() + MESSAGE_TTL_MS).toISOString();
     for (const message of rawListSchema.parse(raw).map(parseAgentMessageRow)) {
       const result = requeueStmt.run({ message_id: message.messageId, expires_at: expiresAt });
       if (result.changes === 0) continue;
-      recordEvent(message.messageId, 'requeued', message.deliveredSession);
+      recordEvent(message.messageId, 'requeued', reason ?? message.deliveredSession);
       requeued.push(requireMessage(message.messageId));
     }
     return requeued;
   }
 
-  function expireStale(now: Date = new Date()): AgentMessageRecord[] {
+  function sweepStale(now: Date = new Date()): AgentMessageRecord[] {
+    const unreachable = requeueRows(
+      listUnreachableStmt.all({ now: now.toISOString() }),
+      'unreachable',
+    );
+    return [...unreachable, ...expireSent(now)];
+  }
+
+  function expireSent(now: Date): AgentMessageRecord[] {
     const raw: unknown = listExpiredStmt.all(now.toISOString());
     const ids = z.array(z.object({ message_id: z.string() })).parse(raw);
     const expired: AgentMessageRecord[] = [];
@@ -365,7 +394,7 @@ export function createAgentMessageRepository(
   const markReadByEvidenceTransaction = db.transaction(markReadByEvidence);
   const requeueTransaction = db.transaction(requeueUnread);
   const requeueSessionTransaction = db.transaction(requeueSession);
-  const expireTransaction = db.transaction(expireStale);
+  const sweepTransaction = db.transaction(sweepStale);
 
   return {
     create(message) {
@@ -430,8 +459,8 @@ export function createAgentMessageRepository(
     requeueSession(agentId, session) {
       return requeueSessionTransaction.immediate(agentId, session);
     },
-    expireStale(now) {
-      return expireTransaction.immediate(now);
+    sweepStale(now) {
+      return sweepTransaction.immediate(now);
     },
     listByTask(taskId) {
       const raw: unknown = listByTaskStmt.all(project, taskId);
