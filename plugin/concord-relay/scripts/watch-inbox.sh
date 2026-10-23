@@ -10,6 +10,11 @@ set -uo pipefail
 
 CONCORD_BIN="${CONCORD_BIN:-concord}"
 CONCORD_INBOX_POLL_SECONDS="${CONCORD_INBOX_POLL_SECONDS:-2}"
+# How long to wait between startup-gate retries, and how many to make before
+# giving up. A resume contends on SQLite for a moment, so the default is a
+# patient 30 attempts a second apart.
+CONCORD_INBOX_GATE_SECONDS="${CONCORD_INBOX_GATE_SECONDS:-1}"
+CONCORD_INBOX_GATE_ATTEMPTS="${CONCORD_INBOX_GATE_ATTEMPTS:-30}"
 
 # A monitor orphaned by a crashed or killed harness would keep draining
 # messages into a pipe nobody reads, marking them delivered to a dead session.
@@ -38,10 +43,33 @@ harness_alive() {
 # into this process, and `concord inbox drain` derives the agent id from it.
 # CONCORD_AGENT_ID overrides it when a human wants to name the agents.
 
-# Once installed, this plugin loads in every session, most of which have nothing
-# to do with Concord. Exit immediately rather than leaving a poll loop spawning
-# a subprocess every couple of seconds for the life of an unrelated project.
-if ! "${CONCORD_BIN}" inbox status >/dev/null 2>&1; then
+# Wait for this directory to look like a Concord workspace. A resume can start
+# the monitor while the previous session's process is still shutting down, so
+# `inbox status` may fail transiently (SQLITE_BUSY) even though the workspace
+# exists. Exiting on the first failure would silently kill delivery for the
+# rest of the session.
+#
+# `inbox status` answers 0 for a workspace, 2 for "definitely not one", and 1
+# when it could not tell. Only 2 is final; 1 is retried, because an unrelated
+# project must still exit fast rather than poll for the life of the session.
+gate_attempts=0
+while true; do
+  "${CONCORD_BIN}" inbox status >/dev/null 2>&1
+  gate_status=$?
+  if [ "${gate_status}" -eq 0 ] || [ "${gate_status}" -eq 2 ]; then
+    break
+  fi
+  gate_attempts=$((gate_attempts + 1))
+  if [ "${gate_attempts}" -ge "${CONCORD_INBOX_GATE_ATTEMPTS}" ]; then
+    # Still cannot tell after half a minute; assume this project does not use
+    # Concord rather than leaving a poll loop running forever.
+    exit 0
+  fi
+  sleep "${CONCORD_INBOX_GATE_SECONDS}"
+done
+
+# Exit 2 means the directory is not a Concord workspace at all.
+if [ "${gate_status}" -eq 2 ]; then
   exit 0
 fi
 
