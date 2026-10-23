@@ -162,7 +162,7 @@ jobs:
       - name: Package
         run: bash scripts/build-standalone.sh
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: standalone-${{ matrix.target }}
           path: release/
