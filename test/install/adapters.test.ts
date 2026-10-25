@@ -1,17 +1,12 @@
 import { installGooseMcpConfig } from '../../src/install/goose-config.js';
 import { spawnSync } from 'node:child_process';
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+
+import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
 
 import {
   installGlobalAdapters,
@@ -32,9 +27,7 @@ describe('global harness adapters', () => {
       ['cursor', '3.13.10'],
       ['gemini', '0.55.1'],
     ]) {
-      const path = join(bin, executable ?? 'missing');
-      writeFileSync(path, `#!/bin/sh\necho ${version ?? '0.0.0'}\n`);
-      chmodSync(path, 0o755);
+      writeFakeVersion(bin, executable ?? 'missing', version ?? '0.0.0');
     }
     const env = { HOME: home, PATH: bin };
 
@@ -54,9 +47,7 @@ describe('global harness adapters', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-cursor-hooks-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
-    const cursor = join(bin, 'cursor');
-    writeFileSync(cursor, '#!/bin/sh\necho 3.13.10\n');
-    chmodSync(cursor, 0o755);
+    writeFakeVersion(bin, 'cursor', '3.13.10');
     const configPath = join(home, '.cursor', 'hooks.json');
     mkdirSync(join(home, '.cursor'));
     writeFileSync(
@@ -79,12 +70,19 @@ describe('global harness adapters', () => {
     const root = mkdtempSync(join(tmpdir(), 'concord-cursor-receiver-'));
     mkdirSync(join(root, '.concord'));
     writeFileSync(join(root, '.concord', 'concord.db'), '');
-    const fakeConcord = join(root, 'fake-concord');
-    writeFileSync(
-      fakeConcord,
-      '#!/bin/sh\nif [ "$2" = "drain" ]; then printf \'[{"messageId":"msg-1","senderAgentId":"gemini:peer","taskId":"TASK-1","content":"hello cursor"}]\'; fi\n',
+    const drained = [
+      {
+        messageId: 'msg-1',
+        senderAgentId: 'gemini:peer',
+        taskId: 'TASK-1',
+        content: 'hello cursor',
+      },
+    ];
+    const fakeConcord = writeFakeCommand(
+      root,
+      'fake-concord',
+      `if (process.argv[3] === 'drain') process.stdout.write(${JSON.stringify(JSON.stringify(drained))});\n`,
     );
-    chmodSync(fakeConcord, 0o755);
 
     const hook = join(process.cwd(), 'plugin', 'cursor', 'concord-relay', 'cursor-hook.mjs');
     const result = spawnSync(process.execPath, [hook, 'stop'], {
@@ -116,6 +114,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'harness-monitor',
+      'managed-controller',
     ]);
   });
 
@@ -124,9 +123,7 @@ describe('global harness adapters', () => {
     const project = mkdtempSync(join(tmpdir(), 'concord-gemini-project-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
-    const gemini = join(bin, 'gemini');
-    writeFileSync(gemini, '#!/bin/sh\necho 0.55.1\n');
-    chmodSync(gemini, 0o755);
+    writeFakeVersion(bin, 'gemini', '0.55.1');
     const env = { HOME: home, PATH: bin };
     installGlobalAdapters(import.meta.url, env, undefined, LASTING);
 
@@ -179,9 +176,7 @@ describe('global harness adapters', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-cursor-old-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
-    const cursor = join(bin, 'cursor');
-    writeFileSync(cursor, '#!/bin/sh\necho 2.9.0\n');
-    chmodSync(cursor, 0o755);
+    writeFakeVersion(bin, 'cursor', '2.9.0');
 
     const report = statusGlobalAdapters({ HOME: home, PATH: bin });
     expect(report.find((entry) => entry.harness === 'cursor')).toMatchObject({
@@ -198,9 +193,7 @@ describe('global harness adapters', () => {
       ['cursor', '3.13.10'],
       ['gemini', '0.55.1'],
     ]) {
-      const path = join(bin, executable ?? 'missing');
-      writeFileSync(path, `#!/bin/sh\necho ${version ?? '0.0.0'}\n`);
-      chmodSync(path, 0o755);
+      writeFakeVersion(bin, executable ?? 'missing', version ?? '0.0.0');
     }
     const occupied = join(home, '.cursor', 'extensions', 'get-concord-ai.concord-relay');
     mkdirSync(occupied, { recursive: true });
@@ -256,9 +249,7 @@ describe('global harness adapters', () => {
     const bin = join(home, 'bin');
     mkdirSync(bin);
 
-    const goose = join(bin, 'goose');
-    writeFileSync(goose, '#!/bin/sh\necho 1.51.0\n');
-    chmodSync(goose, 0o755);
+    writeFakeVersion(bin, 'goose', '1.51.0');
 
     const env = { HOME: home, PATH: bin };
 
@@ -299,16 +290,14 @@ describe('global harness adapters', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-antigravity-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
-    const agy = join(bin, 'agy');
-    writeFileSync(agy, '#!/bin/sh\necho 1.0.0\n');
-    chmodSync(agy, 0o755);
+    writeFakeVersion(bin, 'agy', '1.0.0');
 
     const env = { HOME: home, PATH: bin };
     const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
 
     expect(report.find((entry) => entry.harness === 'antigravity')).toMatchObject({
       status: 'installed',
-      capabilities: ['pull', 'busy'],
+      capabilities: ['pull', 'steer', 'idle', 'busy', 'monitor-command'],
     });
 
     const mcpConfig = readFileSync(join(home, '.gemini', 'config', 'mcp_config.json'), 'utf8');

@@ -6,6 +6,124 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-23
+
+Messaging v2: WhatsApp-style receipts and private inboxes (#279). See
+`docs/messaging-v2.md` for the full design.
+
+### Upgrading
+
+- **Restart every agent session after upgrading.** The first run of 0.16.0
+  upgrades the local Concord databases (migration 015), and the upgrade is one
+  way. A session still running 0.15.0 fails to send against the upgraded store.
+  From this release on, an older build refuses a newer store with a clear
+  message instead of a database error.
+- Claude Code users: update the concord-relay plugin to get its new hooks
+  (`SessionEnd`, `UserPromptSubmit`, `AskUserQuestion` and `Notification`).
+
+### Breaking changes
+
+- Message statuses are now `sent`, `delivered`, `read`, `replied` and
+  `failed`. Existing `pending` messages become `sent`, and messages already
+  seen become `read`.
+- `inspect_work` with another agent's `agent_id` returns presence only. Its
+  inbox and outbox are left out, and threads the caller took no part in read
+  as not found.
+- `concord inbox drain --agent` refuses an agent that is not the current
+  session's own.
+- Sending to a registered agent that is offline queues the message (✓)
+  instead of failing with `target_unreachable`. Unread messages expire after
+  24 hours.
+
+### Added
+
+- **Delivery receipts.** Every message shows ✓ once Concord has stored it,
+  ✓✓ once the recipient's session took it, read once that session's model was
+  shown it, and replied. Senders can check at any time with `inspect_work
+message_id`, and `update_work` returns the receipt with each send.
+- **Read detection from evidence, never timing.** Claude Code (prompt and
+  transcript), Codex (hooks, and the adapter's own turn events, including
+  model output mid-turn), Grok, Copilot CLI, Cursor and Antigravity each mark
+  a message read only when the session shows its model had it. A message held
+  behind an `AskUserQuestion` prompt stays ✓✓ until the user answers or
+  dismisses it.
+- **Unreachable sessions fall back to ✓.** When a session holding an unread
+  message ends or crashes, the message returns to the queue and reaches the
+  agent's next session.
+- **`concord messages`**: a read-only list of local messages with their
+  receipts, for people. It never changes a receipt.
+- **Waiting on the user.** `inspect_work` shows when an agent's session has
+  stopped to ask its user something.
+- Manual setup guide for MCP clients without a Concord adapter (#243, #260).
+
+### Fixed
+
+- The Claude Code monitor follows its harness through shell wrappers, and
+  exits once the harness is gone.
+- Senders are no longer told a queued message "can be injected now".
+
+### Changed
+
+- The e2e suites cover receipts for every harness pair, plus Claude Code's
+  question prompt, Esc, a crashed session and inbox privacy, and the Codex
+  adapter against a real app-server. Each test sandbox gets its own temp
+  directory, and Claude Code no longer auto-updates mid-run.
+
+## [0.15.0] - 2026-10-21
+
+### Added
+
+- **GitHub Copilot CLI support.** `concord setup` registers Concord in
+  `~/.copilot/mcp-config.json` and `.github/mcp.json`, writes instructions into
+  `.github/copilot-instructions.md`, and installs the adapter when `copilot` is
+  on PATH. Copilot exposes no session id to MCP servers, so identity comes from
+  the per-call `agent_id` or `CONCORD_AGENT_ID` (#177).
+- **Wake idle Copilot CLI sessions.** `concord adapters copilot [args...]`
+  starts Copilot (1.0.100 or later) with its embedded server and attaches a
+  Concord host, so peer messages steer a busy turn or start a turn while the
+  session is idle, like `concord adapters codex`. Plain `copilot` sessions keep
+  hook delivery (#261, #262).
+- **Google Antigravity support.** Concord detects the `agy` CLI and the
+  Antigravity IDE, registers its MCP server with its own agent kind, and
+  installs lifecycle hooks (`.agents/hooks.json`, or
+  `~/.gemini/config/hooks.json` for global adapters) that give each
+  conversation its agent id and deliver messages mid-turn (#187, #220).
+- **Wake idle Antigravity sessions.** Antigravity now runs a one-shot
+  `concord inbox watch --once` monitor in the background, and the first model
+  call of a turn asks for it when none is running, so an idle `agy` session
+  wakes when a peer writes (#271, #274).
+- **Install without npm.** `curl -fsSL https://getconcord.ai/install.sh | sh`
+  installs a self-contained build with its own Node runtime on macOS and Linux
+  (x64 and arm64). Update notices, `concord setup`'s upgrade, and the Goose
+  extension follow the install method instead of assuming npm. Adapter links
+  keep working across standalone upgrades (#226).
+
+### Fixed
+
+- **Codex controller messages show who sent them.** Messages delivered by
+  `concord adapters codex` now carry the `[concord from <agent> id=<id>]`
+  header like every other channel, so the receiving session can reply to them
+  (#264).
+- **Copilot messages are framed once.** The Copilot live host no longer adds a
+  second header to relay messages (#273).
+- **Idle wake on macOS with long temp paths.** When the relay socket path
+  would exceed the Unix socket limit (as under Copilot's per-session
+  `TMPDIR`), Concord falls back to `/tmp/concord-relay-<uid>`, and refuses a
+  relay directory owned by another user (#272).
+- **CLI empty states name the current tools.** `concord handoff` and
+  `concord review-packet` point to `finish_work` instead of the removed
+  `handoff` tool (#240, #245).
+
+### Changed
+
+- End-to-end tests run in CI. A simulated cross-harness suite runs on Ubuntu
+  and macOS, and a real-harness suite drives the Claude Code, Codex, Grok,
+  Goose and Copilot CLI binaries against a scripted fake model on Ubuntu. CI
+  also verifies on Windows (#196, #266, #270, #275).
+- Documentation updates: Node minimum, `concord check`/`watch`, `events.jsonl`,
+  Goose tools, Cursor agent discovery, and README setup files for Goose and
+  Antigravity.
+
 ## [0.14.2] - 2026-10-19
 
 ### Added
@@ -529,7 +647,9 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.2...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.15.0...v0.16.0
+[0.15.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.2...v0.15.0
 [0.14.2]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.13.0...v0.14.0

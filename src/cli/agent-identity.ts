@@ -57,3 +57,25 @@ export function sessionStartIdentity(
   }
   return resolveIdentity(env, { kind: 'claude-code' });
 }
+
+/**
+ * The agent whose inbox this process may take messages from. Draining marks
+ * messages delivered, so naming another agent with `--agent` would consume its
+ * mail: when this process can see its own session, `--agent` must agree with
+ * it. Where no session is visible (a Grok or Cursor monitor, a script), the
+ * named agent is trusted, as everywhere else Concord cannot see the caller.
+ */
+export function resolveInboxOwner(
+  explicit: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+  options: ResolveIdentityOptions = {},
+): string {
+  const agentId = resolveAgentId(explicit, env, options);
+  const own = resolveIdentity(env, options);
+  if (own !== undefined && own.agentId !== agentId) {
+    throw new Error(
+      `This session is agent ${own.agentId}; it cannot take messages addressed to ${agentId}.`,
+    );
+  }
+  return agentId;
+}

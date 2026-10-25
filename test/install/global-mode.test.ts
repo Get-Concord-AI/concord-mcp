@@ -1,11 +1,4 @@
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +8,12 @@ import { readUserConfig, writeUserConfig } from '../../src/config/user-config.js
 import { resolveGlobalChoice, runSetup } from '../../src/cli/commands/setup.js';
 import { BLOCK_START, removeBlock, upsertBlock } from '../../src/install/block.js';
 import { applyGlobalMode } from '../../src/install/global-mode.js';
+import { writeFakeCommand } from '../helpers/fake-command.js';
+
+const CLAUDE_LOGGING_CALLS = `import { appendFileSync } from 'node:fs';
+import { join } from 'node:path';
+appendFileSync(join(process.env.HOME ?? '', 'claude-calls'), process.argv.slice(2).join(' ') + '\\n');
+`;
 
 const HARNESSES = ['claude', 'codex', 'cursor', 'gemini', 'grok', 'goose', 'agy'] as const;
 
@@ -24,10 +23,7 @@ function machine(harnesses: readonly string[] = HARNESSES): NodeJS.ProcessEnv & 
   const bin = join(home, 'bin');
   mkdirSync(bin);
   for (const name of harnesses) {
-    const script =
-      name === 'claude' ? '#!/bin/sh\necho "$@" >> "$HOME/claude-calls"\n' : '#!/bin/sh\n';
-    writeFileSync(join(bin, name), script);
-    chmodSync(join(bin, name), 0o755);
+    writeFakeCommand(bin, name, name === 'claude' ? CLAUDE_LOGGING_CALLS : '');
   }
   return { HOME: home, PATH: bin, CODEX_HOME: join(home, '.codex') };
 }
@@ -100,8 +96,11 @@ describe('applyGlobalMode', () => {
   it('warns when Claude Code cannot remove the server, but not when it is already gone', () => {
     const env = machine([]);
     const claude = (output: string): void => {
-      writeFileSync(join(env.HOME, 'bin', 'claude'), `#!/bin/sh\necho '${output}'\nexit 1\n`);
-      chmodSync(join(env.HOME, 'bin', 'claude'), 0o755);
+      writeFakeCommand(
+        join(env.HOME, 'bin'),
+        'claude',
+        `console.log(${JSON.stringify(output)});\nprocess.exitCode = 1;\n`,
+      );
     };
     const registrations = ['claude'];
     claude('No MCP server named "concord" in user scope');

@@ -15,7 +15,13 @@ const JSON_TARGETS: readonly string[] = [
   '.mcp.json',
   join('.cursor', 'mcp.json'),
   join('.agents', 'mcp_config.json'),
+  join('.github', 'mcp.json'),
 ];
+/** Harness kind each project file pins, for files only one harness reads. */
+const PINNED_KINDS: ReadonlyMap<string, string> = new Map([
+  [join('.agents', 'mcp_config.json'), 'antigravity'],
+  [join('.github', 'mcp.json'), 'copilot-cli'],
+]);
 const GEMINI_CONFIG_PATH = join('.gemini', 'settings.json');
 const GROK_CONFIG_PATH = join('.grok', 'config.toml');
 const GROK_FENCE_START = '# concord:mcp-start';
@@ -231,11 +237,12 @@ function writeMcpConfig(repoRoot: string, relPath: string): string {
 
   let updated: string;
   try {
-    const extraEnv =
-      relPath === join('.agents', 'mcp_config.json')
-        ? { CONCORD_AGENT_KIND: 'antigravity' }
-        : undefined;
-    updated = upsertMcpServer(existing, repoRoot, extraEnv);
+    const kind = PINNED_KINDS.get(relPath);
+    updated = upsertMcpServer(
+      existing,
+      repoRoot,
+      kind === undefined ? undefined : { CONCORD_AGENT_KIND: kind },
+    );
   } catch {
     throw new McpConfigParseError(relPath);
   }
@@ -269,8 +276,9 @@ function writeGeminiConfig(repoRoot: string): string {
 
 /**
  * Register Concord in every project-scoped client config under `repoRoot`:
- * Claude Code, Cursor, Gemini CLI, and Grok Build. Codex uses its user-scoped
- * TOML installer because that harness does not expose a project MCP file.
+ * Claude Code, Cursor, Antigravity, Copilot CLI, Gemini CLI, and Grok Build.
+ * Codex uses its user-scoped TOML installer because that harness does not
+ * expose a project MCP file.
  */
 export function installMcpConfigs(repoRoot: string): string[] {
   return [

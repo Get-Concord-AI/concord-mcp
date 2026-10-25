@@ -37,7 +37,11 @@ export type {
 } from './repositories/ownership-events.js';
 export type { NewAgent, AgentRepository } from './repositories/agents.js';
 export type { NewAgentEndpoint, AgentEndpointRepository } from './repositories/agent-endpoints.js';
-export type { NewAgentMessage, AgentMessageRepository } from './repositories/agent-messages.js';
+export type {
+  ClaimOptions,
+  NewAgentMessage,
+  AgentMessageRepository,
+} from './repositories/agent-messages.js';
 export type {
   TaskRecord,
   TaskStatus,

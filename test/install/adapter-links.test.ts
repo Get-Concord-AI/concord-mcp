@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -28,6 +28,7 @@ import {
   packagedPath,
   repairAdapterLinks,
 } from '../../src/install/adapters/links.js';
+import { writeFakeVersion } from '../helpers/fake-command.js';
 
 /** A stand-in package layout: <root>/plugin/concord-relay + a caller module. */
 function packagedTree(): { root: string; moduleUrl: string; source: string } {
@@ -105,9 +106,16 @@ describe('adapter links', () => {
 
   it('treats temp directories and the npx cache as throwaway', () => {
     expect(isEphemeralPath(join(tmpdir(), 'checkout', 'plugin'))).toBe(true);
-    expect(isEphemeralPath('/private/tmp/claude-501/scratchpad/pr200/plugin')).toBe(true);
-    expect(isEphemeralPath('/home/a/.npm/_npx/abc/node_modules/x/plugin')).toBe(true);
-    expect(isEphemeralPath('/home/a/.nvm/versions/node/v24/lib/node_modules/x/plugin')).toBe(false);
+    if (process.platform !== 'win32') {
+      expect(isEphemeralPath('/private/tmp/claude-501/scratchpad/pr200/plugin')).toBe(true);
+    }
+    const home = join(sep, 'home', 'a');
+    expect(isEphemeralPath(join(home, '.npm', '_npx', 'abc', 'node_modules', 'x', 'plugin'))).toBe(
+      true,
+    );
+    expect(
+      isEphemeralPath(join(home, '.nvm', 'versions', 'node', 'v24', 'lib', 'node_modules', 'x')),
+    ).toBe(false);
   });
 
   it('reports a dangling link with where it points and where it should', () => {
@@ -155,7 +163,7 @@ describe('adapter links', () => {
   it('reports a broken link even when the Claude version is unsupported', () => {
     const { moduleUrl } = packagedTree();
     mkdirSync(join(home, 'bin'));
-    writeFileSync(join(home, 'bin', 'claude'), '#!/bin/sh\necho 1.0.0\n', { mode: 0o755 });
+    writeFakeVersion(join(home, 'bin'), 'claude', '1.0.0');
     mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
     symlinkSync(join(home, 'gone'), target);
 

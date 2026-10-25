@@ -4,12 +4,20 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { dump, load } from 'js-yaml';
 
+import { standaloneInstall } from '../config/install-mode.js';
 import { userHome } from '../config/paths.js';
 
 const EXTENSIONS_KEY = 'extensions';
 const CONCORD_EXTENSION_KEY = 'concord-relay';
-const CONCORD_SERVER_COMMAND = 'npx';
-const CONCORD_SERVER_ARGS = ['-y', '@concord-ai/concord-mcp'];
+const NPX_SERVER_ARGS = ['-y', '@concord-ai/concord-mcp'];
+
+/** A standalone install has no npm, so Goose launches its own launcher instead of npx. */
+function concordServerLaunch(): { cmd: string; args: string[] } {
+  const standalone = standaloneInstall();
+  return standalone === undefined
+    ? { cmd: 'npx', args: [...NPX_SERVER_ARGS] }
+    : { cmd: join(standalone.binDir, 'concord-mcp'), args: [] };
+}
 
 export function gooseConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   const appData = env['APPDATA']?.trim();
@@ -74,8 +82,7 @@ export function installGooseMcpConfig(env: NodeJS.ProcessEnv = process.env): voi
     type: 'stdio',
     name: CONCORD_EXTENSION_KEY,
     description: 'Concord shared work-state for coding agents',
-    cmd: CONCORD_SERVER_COMMAND,
-    args: [...CONCORD_SERVER_ARGS],
+    ...concordServerLaunch(),
     timeout: 300,
   };
 

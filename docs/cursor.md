@@ -75,7 +75,7 @@ the agent. On `stop`, Concord also drains queued messages and returns them as
 Cursor's supported `followup_message` fallback.
 
 Start a new Cursor chat after installing or reloading the window. Its agent id
-appears in the hook-provided context and in `concord inbox list`.
+appears in the hook-provided context and in `concord who`.
 
 Only the running monitor advertises idle reachability. If Cursor does not re-arm
 it, that lease expires and senders are told delivery must wait for Cursor's next

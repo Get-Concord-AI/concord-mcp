@@ -3,10 +3,14 @@ node_modules/
 
 # Build output
 dist/
+release/
 *.tsbuildinfo
 
 # Test coverage
 coverage/
+
+# Cross-harness e2e sandboxes (pnpm e2e)
+.e2e/
 
 # Local agent and Concord state (machine-specific, never committed)
 .claude/

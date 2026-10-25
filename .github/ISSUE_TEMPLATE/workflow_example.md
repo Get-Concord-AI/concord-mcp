@@ -11,7 +11,7 @@ Which client(s) and agents? What kind of project?
 
 ## How you use Concord
 
-What does your claim_work / handoff / review_ready flow look like?
+What does your `start_work` → `update_work` → `transfer_work` / `finish_work` flow look like?
 
 ## What worked / what broke
 

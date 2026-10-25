@@ -28,6 +28,11 @@ export interface AgentEndpointRepository {
   heartbeat(endpointId: string, expiresAt?: string | null): AgentEndpointRecord | undefined;
   heartbeatReceiver(endpointId: string, expiresAt: string): AgentEndpointRecord | undefined;
   clearReceiver(endpointId: string): AgentEndpointRecord | undefined;
+  /**
+   * Record that `agentId`'s session stopped to wait on its user (`since`), or
+   * moved on (`null`). Keeps the first timestamp of an ongoing wait.
+   */
+  setAwaitingUser(agentId: string, since: string | null): void;
   disconnect(endpointId: string): AgentEndpointRecord | undefined;
 }
 
@@ -71,6 +76,14 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
     UPDATE agent_endpoints
     SET receiver_expires_at = @receiver_expires_at, updated_at = @now
     WHERE endpoint_id = @endpoint_id
+  `);
+  const setAwaitingUserStmt = db.prepare(`
+    UPDATE agent_endpoints
+    SET awaiting_user_since = CASE
+      WHEN @since IS NULL THEN NULL
+      ELSE COALESCE(awaiting_user_since, @since)
+    END
+    WHERE agent_id = @agent_id
   `);
   const clearReceiverStmt = db.prepare(`
     UPDATE agent_endpoints
@@ -134,6 +147,9 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
     clearReceiver(endpointId) {
       clearReceiverStmt.run({ endpoint_id: endpointId, now: new Date().toISOString() });
       return get(endpointId);
+    },
+    setAwaitingUser(agentId, since) {
+      setAwaitingUserStmt.run({ agent_id: agentId, since });
     },
     disconnect(endpointId) {
       disconnectStmt.run({ endpoint_id: endpointId, now: new Date().toISOString() });

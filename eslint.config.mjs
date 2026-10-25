@@ -9,6 +9,7 @@ export default tseslint.config(
       'dist/',
       'coverage/',
       'node_modules/',
+      '.e2e/',
       'examples/whack-a-mole/fixture/',
       'examples/whack-a-mole/finished/',
     ],
@@ -20,7 +21,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['eslint.config.mjs', 'vitest.config.ts'],
+          allowDefaultProject: ['eslint.config.mjs', 'vitest.config.ts', 'vitest.e2e.config.ts'],
         },
         tsconfigRootDir: import.meta.dirname,
       },

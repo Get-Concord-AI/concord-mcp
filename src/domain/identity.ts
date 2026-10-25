@@ -39,6 +39,8 @@ export const SESSION_SOURCES: readonly SessionSource[] = [
   { kind: 'claude-code', envVar: 'CLAUDE_CODE_SESSION_ID' },
   { kind: 'grok', envVar: 'GROK_SESSION_ID' },
   { kind: 'goose', envVar: 'AGENT_SESSION_ID' },
+  // Copilot CLI hands its MCP servers the same id its hooks receive as `sessionId`.
+  { kind: 'copilot-cli', envVar: 'COPILOT_AGENT_SESSION_ID' },
   // Set in Google Antigravity IDE environments (Windows, Linux, macOS).
   // Headless agy CLI does not pass these variables to child processes; sessions
   // there resolve through hookPayload (SessionStart / PreInvocation hooks).
@@ -107,6 +109,26 @@ export function hookSessionId(rawJson: string): string | undefined {
     result.data.sessionId
   )?.trim();
   return sessionId === undefined || sessionId === '' ? undefined : sessionId;
+}
+
+/**
+ * The raw session id this process runs in, from a hook payload or the
+ * client's environment. Independent of `CONCORD_AGENT_ID`: an operator-named
+ * agent still runs in one session at a time, and receipts are per session.
+ */
+export function resolveSessionId(
+  env: NodeJS.ProcessEnv,
+  options: ResolveIdentityOptions = {},
+): string | undefined {
+  if (options.hookPayload !== undefined) {
+    const fromHook = hookSessionId(options.hookPayload);
+    if (fromHook !== undefined) return fromHook;
+  }
+  for (const source of sourcesFor(options.kind)) {
+    const sessionId = env[source.envVar]?.trim();
+    if (sessionId !== undefined && sessionId !== '') return sessionId;
+  }
+  return undefined;
 }
 
 export interface ResolveIdentityOptions {

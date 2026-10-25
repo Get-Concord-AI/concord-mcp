@@ -70,6 +70,7 @@ describe('installMcpConfigs', () => {
       '.mcp.json',
       join('.cursor', 'mcp.json'),
       join('.agents', 'mcp_config.json'),
+      join('.github', 'mcp.json'),
       join('.gemini', 'settings.json'),
       join('.grok', 'config.toml'),
     ]);
@@ -80,18 +81,19 @@ describe('installMcpConfigs', () => {
       const escapedRoot = JSON.stringify(root).slice(1, -1);
       expect(content.includes(root) || content.includes(escapedRoot)).toBe(true);
     }
-    const antigravityConfig = z
-      .object({
-        mcpServers: z.object({
-          concord: z.object({
-            env: z.object({
-              CONCORD_AGENT_KIND: z.string(),
-            }),
+    const pinnedKind = (relPath: string): string | undefined =>
+      z
+        .object({
+          mcpServers: z.object({
+            concord: z.object({ env: z.object({ CONCORD_AGENT_KIND: z.string().optional() }) }),
           }),
-        }),
-      })
-      .parse(JSON.parse(readFileSync(join(root, '.agents', 'mcp_config.json'), 'utf8')));
-    expect(antigravityConfig.mcpServers.concord.env.CONCORD_AGENT_KIND).toBe('antigravity');
+        })
+        .parse(JSON.parse(readFileSync(join(root, relPath), 'utf8'))).mcpServers.concord.env
+        .CONCORD_AGENT_KIND;
+    expect(pinnedKind(join('.agents', 'mcp_config.json'))).toBe('antigravity');
+    expect(pinnedKind(join('.github', 'mcp.json'))).toBe('copilot-cli');
+    // Read by more than one harness, so each resolves its own session instead.
+    expect(pinnedKind('.mcp.json')).toBeUndefined();
     const gemini = z
       .object({
         tools: z.object({ shell: z.object({ backgroundCompletionBehavior: z.string() }) }),
