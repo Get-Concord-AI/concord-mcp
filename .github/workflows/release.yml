@@ -180,7 +180,7 @@ jobs:
           # A resumed release rebuilds the tagged code npm already has, not the branch.
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.resume_version) || github.ref }}
 
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           pattern: standalone-*
           path: release/
