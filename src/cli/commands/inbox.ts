@@ -120,6 +120,40 @@ export function drainInbox(
   return claimed.map(toDeliverable);
 }
 
+/** What a session should be shown before it blocks on its user. */
+export interface BeforeUserWait {
+  /** Handed to this session by a monitor whose notification the harness is still holding. */
+  held: DeliverableMessage[];
+  /** Still queued, claimed now for this session. */
+  claimed: DeliverableMessage[];
+}
+
+/**
+ * Everything `agentId`'s session has not been shown, just before it blocks on
+ * a question. Claude Code holds a monitor notification
+ * until the user answers, so a message the monitor already took counts here
+ * too: delivered to this session, with no read evidence yet. Run read
+ * observation first, so a message the model has already seen is left out.
+ *
+ * When there is anything to show, the hook denies the call and the user is
+ * not asked yet, so the waiting-on-user flag is cleared.
+ */
+export function drainBeforeUserWait(
+  repos: Repositories,
+  agentId: string,
+  provider: string,
+  session: string | null,
+): BeforeUserWait {
+  // Listed before claiming, so a message claimed below is not also counted as held.
+  const held = repos.agentMessages.listUnreadForSession(agentId, session).map(toDeliverable);
+  const claimed = drainInbox(repos, agentId, provider, capabilityFor(provider), {
+    session,
+    via: 'hook',
+  });
+  if (held.length > 0 || claimed.length > 0) repos.agentEndpoints.setAwaitingUser(agentId, null);
+  return { held, claimed };
+}
+
 /** The opaque key of the session this command runs for, when it can tell. */
 export function currentSession(provider: string, hookPayload: string | undefined): string | null {
   const raw = resolveSessionId(process.env, {
@@ -316,6 +350,7 @@ function recordDeliveredMessages(
 const HOOK_FORMATS: readonly string[] = [
   'post-tool-use',
   'stop',
+  'pre-tool-use',
   'gemini-after-tool',
   'gemini-after-agent',
 ];
@@ -327,7 +362,11 @@ const DRAIN_FORMATS: readonly string[] = [
   'gemini-after-agent',
   'post-tool-use',
   'stop',
+  'pre-tool-use',
 ];
+
+/** Formats that run just before the session blocks on its user. */
+const BEFORE_USER_WAIT_FORMATS: readonly string[] = ['pre-tool-use'];
 
 /** Writes drained messages in a hook's or a monitor's format. */
 function writeMessages(format: string, messages: readonly DeliverableMessage[]): void {
@@ -347,7 +386,7 @@ function writeMessages(format: string, messages: readonly DeliverableMessage[]):
     process.stdout.write(renderGeminiAfterAgent(messages));
     return;
   }
-  if (format === 'post-tool-use' || format === 'stop') {
+  if (format === 'post-tool-use' || format === 'stop' || format === 'pre-tool-use') {
     process.stdout.write(renderHookPayload(format, messages));
     return;
   }
@@ -482,7 +521,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     )
     .option(
       '--format <format>',
-      'post-tool-use and stop emit hook JSON; monitor emits one line per message; json emits raw records',
+      'post-tool-use, stop and pre-tool-use emit hook JSON; monitor emits one line per message; json emits raw records',
       'json',
     )
     .action(async (options) => {
@@ -544,6 +583,20 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       // is itself about to deliver.
       if (hookPayload !== undefined) {
         observeHookEvent(context.repos, agentId, hookPayload, options.provider);
+      }
+      if (BEFORE_USER_WAIT_FORMATS.includes(options.format)) {
+        const { held, claimed } = drainBeforeUserWait(
+          context.repos,
+          agentId,
+          options.provider,
+          currentSession(options.provider, hookPayload),
+        );
+        // Held messages were counted when the monitor took them.
+        recordDeliveredMessages(telemetry, claimed);
+        if (held.length > 0 || claimed.length > 0) {
+          writeMessages(options.format, [...held, ...claimed]);
+        }
+        return;
       }
       const messages = drainInbox(
         context.repos,
