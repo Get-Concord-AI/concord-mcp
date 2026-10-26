@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { load } from 'js-yaml';
+import { z } from 'zod';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   gooseConfigInstalled,
@@ -11,8 +13,14 @@ import {
   uninstallGooseConfig,
 } from '../../src/install/goose-config.js';
 
+const temporaryHomes: string[] = [];
+afterEach(() => {
+  for (const home of temporaryHomes.splice(0)) rmSync(home, { recursive: true, force: true });
+});
+
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), 'concord-goose-test-'));
+  temporaryHomes.push(home);
   const env = { HOME: home };
   const path = gooseConfigPath(env);
   return { env, path };
@@ -47,15 +55,43 @@ describe('Goose configuration', () => {
 
   it('installs a relay and removes only that entry', () => {
     const { env, path } = fixture();
-    writeYaml(path, 'extensions:\n  other:\n    enabled: true\n');
+    writeYaml(
+      path,
+      'model: user-model\nextensions:\n  other:\n    enabled: true\n    cmd: python3\n    args: [other.py]\n',
+    );
+    const configSchema = z.object({
+      model: z.string(),
+      extensions: z.record(
+        z.string(),
+        z.object({ enabled: z.boolean(), cmd: z.string(), args: z.array(z.string()) }).loose(),
+      ),
+    });
     installGooseMcpConfig(env);
     expect(gooseConfigInstalled(env)).toBe(true);
-    expect(readFileSync(path, 'utf8')).toContain('other:');
+    const installed = configSchema.parse(load(readFileSync(path, 'utf8')));
+    expect(installed.model).toBe('user-model');
+    expect(installed.extensions['other']).toMatchObject({
+      enabled: true,
+      cmd: 'python3',
+      args: ['other.py'],
+    });
+    const relay = installed.extensions['concord-relay'];
+    expect(relay).toMatchObject({ enabled: true, type: 'stdio' });
+    expect(relay?.cmd).toBeTruthy();
+    if (relay?.cmd === 'npx') {
+      expect(relay.args).toEqual(['-y', '@concord-ai/concord-mcp']);
+    } else {
+      expect(relay?.cmd).toMatch(/concord-mcp$/u);
+      expect(relay?.args).toEqual([]);
+    }
+
     uninstallGooseConfig(env);
     expect(gooseConfigInstalled(env)).toBe(false);
     const remaining = readFileSync(path, 'utf8');
-    expect(remaining).toContain('other:');
-    expect(remaining).not.toContain('concord-relay:');
+    expect(configSchema.parse(load(remaining))).toEqual({
+      model: 'user-model',
+      extensions: { other: { enabled: true, cmd: 'python3', args: ['other.py'] } },
+    });
     uninstallGooseConfig(env);
     expect(readFileSync(path, 'utf8')).toBe(remaining);
   });
