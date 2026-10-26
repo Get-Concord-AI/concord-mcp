@@ -42,6 +42,15 @@ describe('renderEventsJsonl', () => {
       },
     ];
     const output = renderEventsJsonl(events);
+    // Assert the exact serialized lines before Zod parsing: parsing would strip
+    // unexpected extra fields and hide changes to field order or the JSONL format.
+    expect(output).toBe(
+      [
+        '{"task_id":"TASK-1","tool":"claim_work","status":"success","detail":"started","created_at":"2026-10-20T01:00:00Z"}',
+        '{"task_id":null,"tool":"handoff","status":"error","detail":null,"created_at":"2026-10-20T02:00:00Z"}',
+        '',
+      ].join('\n'),
+    );
     expect(output.endsWith('\n')).toBe(true);
     const lines = output.slice(0, -1).split('\n');
     expect(lines).toHaveLength(2);
