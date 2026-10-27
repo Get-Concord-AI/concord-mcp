@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
 
 import {
+  devinSupportsDedicatedMcpConfig,
   installGlobalAdapters,
   statusGlobalAdapters,
   uninstallGlobalAdapters,
@@ -18,6 +19,81 @@ import {
 const LASTING = (): boolean => false;
 
 describe('global harness adapters', () => {
+  it('accepts Devin versions with dedicated MCP config support only', () => {
+    expect(devinSupportsDedicatedMcpConfig('Devin CLI v3000.3')).toBe(true);
+    expect(devinSupportsDedicatedMcpConfig('Devin CLI v3000.3.1')).toBe(true);
+    expect(devinSupportsDedicatedMcpConfig('Devin CLI v3000.2.99')).toBe(false);
+    expect(devinSupportsDedicatedMcpConfig('unknown version')).toBe(false);
+  });
+
+  it('reports older Devin CLI versions as unsupported and skips their MCP config', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-devin-old-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'devin', 'Devin CLI v3000.2.9');
+
+    const report = installGlobalAdapters(
+      import.meta.url,
+      { HOME: home, PATH: bin },
+      undefined,
+      LASTING,
+    );
+
+    expect(report.find((entry) => entry.harness === 'devin')).toMatchObject({
+      detected: true,
+      status: 'unsupported_version',
+      capabilities: [],
+    });
+    expect(existsSync(join(home, '.config', 'devin', 'mcp_config.json'))).toBe(false);
+  });
+
+  it('installs Devin MCP config and reports supported CLI versions as ready', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-devin-current-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'devin', 'Devin CLI v3000.3');
+
+    const report = installGlobalAdapters(
+      import.meta.url,
+      { HOME: home, PATH: bin },
+      undefined,
+      LASTING,
+    );
+
+    expect(report.find((entry) => entry.harness === 'devin')).toMatchObject({
+      detected: true,
+      status: 'installed',
+    });
+    expect(readFileSync(join(home, '.config', 'devin', 'mcp_config.json'), 'utf8')).toContain(
+      'concord-mcp',
+    );
+    expect(readFileSync(join(home, '.config', 'devin', 'config.json'), 'utf8')).toContain(
+      'concord hook devin-session-start',
+    );
+    writeFileSync(join(home, '.config', 'devin', 'config.json'), '{}');
+    expect(
+      statusGlobalAdapters({ HOME: home, PATH: bin }).find((entry) => entry.harness === 'devin'),
+    ).toMatchObject({ status: 'action_required', capabilities: [] });
+  });
+
+  it('runs Devin shims from paths containing spaces when checking the version', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-devin-spaces-'));
+    const bin = join(home, 'Jane Doe bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'devin', 'Devin CLI v3000.3');
+
+    const report = installGlobalAdapters(
+      import.meta.url,
+      { HOME: home, PATH: bin },
+      undefined,
+      LASTING,
+    );
+
+    const devin = report.find((entry) => entry.harness === 'devin');
+    expect(devin?.status).toBe('installed');
+    expect(devin?.capabilities).toContain('pull');
+  });
+
   it('installs every detected file-based adapter independently', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-adapters-home-'));
     const bin = join(home, 'bin');
