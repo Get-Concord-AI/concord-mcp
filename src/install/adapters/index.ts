@@ -9,6 +9,17 @@ import {
 } from '../../domain/harness-config.js';
 import { userHome } from '../../config/paths.js';
 import { spawnCommandSync } from '../spawn-command.js';
+import {
+  devinMcpInstalled,
+  installDevinMcpConfig,
+  uninstallDevinMcpConfig,
+} from '../devin-config.js';
+import {
+  devinUserHooksInstalled,
+  installDevinUserHooks,
+  removeDevinUserHooks,
+} from '../devin-user-hooks.js';
+import { devinHooksInstalled } from '../devin-hooks.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import {
   copilotConfigInstalled,
@@ -17,7 +28,6 @@ import {
   installCopilotMcpConfig,
   uninstallCopilotConfig,
 } from '../copilot-config.js';
-import { devinMcpInstalled } from '../devin-config.js';
 import {
   gooseConfigInstalled,
   installGooseMcpConfig,
@@ -91,7 +101,7 @@ export function run(
   const result = spawnCommandSync(command, args, { env, timeout: 15_000 });
   return {
     ok: result.status === 0,
-    output: `${result.stdout}${result.stderr}`.trim(),
+    output: result.error?.message ?? `${result.stdout}${result.stderr}`.trim(),
   };
 }
 
@@ -108,6 +118,24 @@ export function atLeast(actual: readonly number[], required: readonly number[]):
     if (left !== right) return left > right;
   }
   return true;
+}
+
+/** Devin introduced dedicated MCP config files in v3000.3; its CLI omits the patch sometimes. */
+export function devinSupportsDedicatedMcpConfig(versionOutput: string): boolean {
+  const match = /v?(\d+)\.(\d+)(?:\.(\d+))?/iu.exec(versionOutput);
+  if (match === null) return false;
+  return atLeast(
+    [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)],
+    HARNESS_CONFIGS.devin.minimumVersion,
+  );
+}
+
+export function devinCliSupportsDedicatedMcpConfig(env: NodeJS.ProcessEnv): boolean {
+  const executable = executablePath(HARNESS_CONFIGS.devin.executable, env);
+  return (
+    executable !== undefined &&
+    devinSupportsDedicatedMcpConfig(run(executable, ['--version'], env).output)
+  );
 }
 
 /** The running package, and which paths count as throwaway checkouts. */
@@ -641,6 +669,40 @@ function statusCopilot(env: NodeJS.ProcessEnv): AdapterReport {
   };
 }
 
+function statusDevin(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterReport {
+  const config = HARNESS_CONFIGS.devin;
+  const executable = executablePath(config.executable, env);
+  const supported = executable !== undefined && devinCliSupportsDedicatedMcpConfig(env);
+  const mcpInstalled =
+    devinMcpInstalled(env) || (repoRoot !== undefined && devinMcpInstalled(env, repoRoot));
+  const hooksInstalled =
+    devinUserHooksInstalled(env) || (repoRoot !== undefined && devinHooksInstalled(repoRoot));
+  const installed = supported && mcpInstalled && hooksInstalled;
+  if (executable !== undefined && !supported) {
+    return {
+      harness: config.name,
+      detected: true,
+      status: 'unsupported_version',
+      monitor: config.monitor.kind,
+      capabilities: [],
+      detail: config.unsupportedDetail,
+    };
+  }
+  return {
+    harness: config.name,
+    detected: executable !== undefined,
+    status: executable === undefined ? 'not_detected' : installed ? 'installed' : 'action_required',
+    monitor: config.monitor.kind,
+    capabilities: installed ? [...config.installedCapabilities] : [],
+    detail:
+      executable === undefined
+        ? 'Devin CLI was not found on PATH.'
+        : installed
+          ? config.installedDetail
+          : 'Devin CLI needs the Concord MCP server and lifecycle hooks installed.',
+  };
+}
+
 export function statusGlobalAdapters(
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
@@ -650,31 +712,6 @@ export function statusGlobalAdapters(
   return harnessNames.map((harness) =>
     statusAdapter(harness, env, repoRoot, moduleUrl, isEphemeral),
   );
-}
-
-/** Devin CLI is configured per project by `concord setup`; there is no global adapter yet. */
-function statusDevin(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterReport {
-  const config = HARNESS_CONFIGS.devin;
-  const base = { harness: config.name, monitor: config.monitor.kind };
-  if (executablePath(config.executable, env) === undefined) {
-    return {
-      ...base,
-      detected: false,
-      status: 'not_detected',
-      capabilities: [],
-      detail: 'Devin CLI was not found on PATH.',
-    };
-  }
-  const installed = repoRoot !== undefined && devinMcpInstalled(env, repoRoot);
-  return {
-    ...base,
-    detected: true,
-    status: installed ? 'installed' : 'action_required',
-    capabilities: installed ? [...config.installedCapabilities] : [],
-    detail: installed
-      ? config.installedDetail
-      : 'Run `concord setup` in this project to register Concord with Devin CLI.',
-  };
 }
 
 /** One harness's adapter health, without probing the others. */
@@ -810,6 +847,13 @@ export function installAdapter(
       installCopilotHooks(env);
       return;
     }
+    case 'devin': {
+      if (devinCliSupportsDedicatedMcpConfig(env)) {
+        installDevinMcpConfig(env);
+        installDevinUserHooks(env);
+      }
+      return;
+    }
   }
 }
 
@@ -882,6 +926,8 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   } catch {
     // Malformed or unreadable hooks config is left untouched.
   }
+  uninstallDevinMcpConfig(env);
+  removeDevinUserHooks(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);
