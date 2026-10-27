@@ -65,20 +65,45 @@ export function findLeftovers(repoRoot: string, env: NodeJS.ProcessEnv): Leftove
 }
 
 /** A path quoted for a POSIX shell. */
-function shellQuote(path: string): string {
+function posixQuote(path: string): string {
   return `'${path.replace(/'/gu, `'\\''`)}'`;
 }
 
+/** A path quoted for PowerShell, which doubles a single quote inside one. */
+function powershellQuote(path: string): string {
+  return `'${path.replace(/'/gu, "''")}'`;
+}
+
 /**
- * The commands that move leftovers aside, for the user to run. A store keeps
- * SQLite's pairing (`concord.db.archived-wal`, never `concord.db-wal.archived`),
+ * One move, in the shell of the platform: `mv -n` on POSIX and `Move-Item`
+ * without `-Force` on Windows, so neither ever replaces an existing file.
+ */
+function moveCommand(from: string, to: string, platform: NodeJS.Platform): string {
+  return platform === 'win32'
+    ? `Move-Item -LiteralPath ${powershellQuote(from)} -Destination ${powershellQuote(to)}`
+    : `mv -n ${posixQuote(from)} ${posixQuote(to)}`;
+}
+
+/**
+ * The commands that move leftovers aside, for the user to run. Each run names
+ * a fresh archive (`.archived-<time>`), and the commands refuse to overwrite,
+ * so an earlier archive is never replaced. A store keeps SQLite's pairing
+ * (`concord.db.archived-<time>-wal`, never `concord.db-wal.archived-<time>`),
  * so a log still holding committed work stays with its database.
  */
-export function moveAsideCommands(leftovers: readonly Leftover[]): string[] {
+export function moveAsideCommands(
+  leftovers: readonly Leftover[],
+  now: Date = new Date(),
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const stamp = now
+    .toISOString()
+    .replace(/[-:]/gu, '')
+    .replace(/\.\d+Z$/u, 'Z');
   return leftovers.flatMap((leftover) =>
     leftover.files.map((file) => {
       const suffix = file.slice(leftover.path.length);
-      return `mv ${shellQuote(file)} ${shellQuote(`${leftover.path}.archived${suffix}`)}`;
+      return moveCommand(file, `${leftover.path}.archived-${stamp}${suffix}`, platform);
     }),
   );
 }
@@ -165,7 +190,9 @@ export async function buildCloudDoctorReport(
     for (const leftover of leftovers) lines.push(`  ${leftover.path}: ${leftover.description}`);
     lines.push(
       '  Nothing reads these while this machine is linked. Once every Concord session ' +
-        'started before the link has ended, you can move them aside (nothing is deleted):',
+        `started before the link has ended, you can move them aside (nothing is deleted)${
+          process.platform === 'win32' ? ', in PowerShell' : ''
+        }:`,
       ...moveAsideCommands(leftovers).map((command) => `    ${command}`),
     );
   }

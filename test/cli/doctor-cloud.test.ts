@@ -26,6 +26,8 @@ import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { fakeCloud, ok } from '../cloud/fake-cloud.js';
 
 const API = 'https://api.concord.test';
+/** A literal string inside a regular expression. */
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 const META = {
   apiVersion: 1,
   capabilities: [...REQUIRED_CAPABILITIES],
@@ -104,8 +106,18 @@ describe('doctor on a linked machine', () => {
     expect(listed.output).toContain(`${resolved}: this repository's local store, 1 open task(s)`);
     expect(listed.output).toContain('a repository link from before Concord 0.17');
     // SQLite's pairing is kept, so a log holding committed work stays with its database.
-    expect(listed.output).toContain(`mv '${resolved}' '${resolved}.archived'`);
-    expect(listed.output).toContain(`mv '${resolved}-wal' '${resolved}.archived-wal'`);
+    expect(listed.output).toMatch(
+      new RegExp(
+        `mv -n '${escape(resolved)}' '${escape(resolved)}\\.archived-\\d{8}T\\d{6}Z'`,
+        'u',
+      ),
+    );
+    expect(listed.output).toMatch(
+      new RegExp(
+        `mv -n '${escape(resolved)}-wal' '${escape(resolved)}\\.archived-\\d{8}T\\d{6}Z-wal'`,
+        'u',
+      ),
+    );
     // Leftovers are information, not a failure, and doctor moves nothing itself.
     expect(listed.healthy).toBe(true);
     expect(existsSync(store)).toBe(true);
@@ -114,12 +126,34 @@ describe('doctor on a linked machine', () => {
     );
   });
 
-  it('quotes paths in the commands it suggests', () => {
-    expect(
-      moveAsideCommands([
-        { path: "/tmp/it's/concord.db", description: '', files: ["/tmp/it's/concord.db"] },
-      ]),
-    ).toEqual([`mv '/tmp/it'\\''s/concord.db' '/tmp/it'\\''s/concord.db.archived'`]);
+  it('suggests commands that never overwrite, in the shell of the platform', () => {
+    const at = new Date('2026-10-27T16:00:00.000Z');
+    const quoted = [
+      { path: "/tmp/it's/concord.db", description: '', files: ["/tmp/it's/concord.db"] },
+    ];
+    expect(moveAsideCommands(quoted, at, 'darwin')).toEqual([
+      `mv -n '/tmp/it'\\''s/concord.db' '/tmp/it'\\''s/concord.db.archived-20261027T160000Z'`,
+    ]);
+
+    const windows = [
+      {
+        path: "C:\\Users\\o'neil\\.concord\\global.db",
+        description: '',
+        files: [
+          "C:\\Users\\o'neil\\.concord\\global.db",
+          "C:\\Users\\o'neil\\.concord\\global.db-wal",
+        ],
+      },
+    ];
+    expect(moveAsideCommands(windows, at, 'win32')).toEqual([
+      "Move-Item -LiteralPath 'C:\\Users\\o''neil\\.concord\\global.db' -Destination 'C:\\Users\\o''neil\\.concord\\global.db.archived-20261027T160000Z'",
+      "Move-Item -LiteralPath 'C:\\Users\\o''neil\\.concord\\global.db-wal' -Destination 'C:\\Users\\o''neil\\.concord\\global.db.archived-20261027T160000Z-wal'",
+    ]);
+
+    // Another run later names another archive.
+    expect(moveAsideCommands(quoted, new Date('2026-11-01T09:30:00.000Z'), 'linux')[0]).toContain(
+      '.archived-20261101T093000Z',
+    );
   });
 
   it('reports a store it cannot read rather than failing', () => {
