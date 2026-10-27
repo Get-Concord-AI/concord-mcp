@@ -169,7 +169,9 @@ describe('doctor on a linked machine', () => {
   it('reports a store it cannot read rather than failing', () => {
     mkdirSync(join(repo, '.concord'), { recursive: true });
     writeFileSync(join(repo, '.concord', 'concord.db'), 'not a database');
-    expect(findLeftovers(repo, env)[0]?.description).toContain('unreadable by this version');
+    expect(findLeftovers(repo, env)[0]?.description).toContain(
+      'open tasks not counted (in use, or unreadable by this version)',
+    );
   });
 
   it('is what `concord doctor` runs on a linked machine', async () => {
