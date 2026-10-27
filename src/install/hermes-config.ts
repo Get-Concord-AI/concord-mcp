@@ -1,6 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import {
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -47,12 +50,20 @@ function readConfig(path: string): Mapping {
 function writeConfig(path: string, config: Mapping): void {
   const target = existsSync(path) ? realpathSync(path) : path;
   mkdirSync(dirname(target), { recursive: true });
-  const temporary = `${target}.${String(process.pid)}.tmp`;
+  // A unique, exclusive temporary file prevents clobbering a pre-existing file or symlink.
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  let temporaryCreated = false;
   try {
-    writeFileSync(temporary, dump(config, { lineWidth: 100, noRefs: true }), { mode: 0o600 });
+    const fd = openSync(temporary, 'wx', 0o600);
+    temporaryCreated = true;
+    try {
+      writeFileSync(fd, dump(config, { lineWidth: 100, noRefs: true }));
+    } finally {
+      closeSync(fd);
+    }
     renameSync(temporary, target);
   } finally {
-    rmSync(temporary, { force: true });
+    if (temporaryCreated) rmSync(temporary, { force: true });
   }
 }
 

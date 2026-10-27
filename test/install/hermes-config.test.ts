@@ -4,7 +4,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -100,6 +102,21 @@ describe('Hermes MCP config', () => {
     expect(remaining).toContain('model: test');
     uninstallHermesMcpConfig(env);
     expect(readFileSync(path, 'utf8')).toBe(remaining);
+  });
+
+  it('writes private settings atomically without leaving temporary files', () => {
+    const { env, path } = fixture();
+    seed(path, 'model: original\n');
+    chmodSync(path, 0o644);
+
+    installHermesMcpConfig(env);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dirname(path))).toEqual(['config.yaml']);
+    expect(readFileSync(path, 'utf8')).toContain('model: original');
+
+    uninstallHermesMcpConfig(env);
+    expect(readdirSync(dirname(path))).toEqual(['config.yaml']);
+    expect(readFileSync(path, 'utf8')).toContain('model: original');
   });
 
   it('rejects a different npx package as installed', () => {
