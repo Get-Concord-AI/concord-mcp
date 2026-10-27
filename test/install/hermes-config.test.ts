@@ -110,7 +110,10 @@ describe('Hermes MCP config', () => {
     chmodSync(path, 0o644);
 
     installHermesMcpConfig(env);
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    // Windows does not expose POSIX mode bits through statSync; check 0600 on POSIX.
+    if (process.platform !== 'win32') {
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+    }
     expect(readdirSync(dirname(path))).toEqual(['config.yaml']);
     expect(readFileSync(path, 'utf8')).toContain('model: original');
 
