@@ -33,6 +33,7 @@ import {
 import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
 import { copilotServerAddress } from './copilot-adapter.js';
 import { fileSpool } from './copilot-spool.js';
+import { isDevinHookEvent, runDevinHook } from './devin-hooks.js';
 import {
   cloudCopilotBackend,
   copilotWorkspace,
@@ -303,61 +304,6 @@ function readStdin(): string {
   }
 }
 
-function runDevinHook(event: string): void {
-  const raw = readStdin();
-  const identity = resolveIdentity(process.env, { kind: 'devin', hookPayload: raw });
-  if (identity === undefined) {
-    process.stdout.write('{}\n');
-    return;
-  }
-  const repoRoot = process.env['DEVIN_PROJECT_DIR'] ?? process.cwd();
-  const repos = openContext(repoRoot).repos;
-  if (event === 'devin-session-start') {
-    ensureAgentRegistered(repos, identity, repoRoot);
-    registerPullEndpoint(repos, identity.agentId, 'devin');
-    const message = sessionStartMessage(
-      identity.agentId,
-      buildRoster(repos.agents.list(), Date.now()),
-      true,
-    );
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: message },
-      }) + '\n',
-    );
-    return;
-  }
-  if (event === 'devin-user-prompt-submit') {
-    process.stdout.write(
-      devinPromptSubmitOutput(drainInbox(repos, identity.agentId, 'devin')) + '\n',
-    );
-    return;
-  }
-  if (event === 'devin-session-end') {
-    endDevinSession(repos, identity.agentId);
-    process.stdout.write('{}\n');
-    return;
-  }
-  process.stderr.write(`Unknown Devin hook event: ${event}\n`);
-  process.exitCode = 1;
-}
-
-/** Devin forwards an empty additionalContext to the model, which rejects the whole request. */
-export function devinPromptSubmitOutput(messages: readonly DeliverableMessage[]): string {
-  if (messages.length === 0) return JSON.stringify({});
-  return JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'UserPromptSubmit',
-      additionalContext: renderInboxBody(messages),
-    },
-  });
-}
-
-export function endDevinSession(repos: Repositories, agentId: string): void {
-  const endpoint = repos.agentEndpoints.getByAgent(agentId);
-  if (endpoint !== undefined) repos.agentEndpoints.disconnect(endpoint.endpointId);
-}
-
 export function registerHookCommand(program: Command, telemetry?: TelemetryRecorder): void {
   program
     .command('hook <event>')
@@ -367,8 +313,8 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     )
     .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {
-      if (event.startsWith('devin-')) {
-        runDevinHook(event);
+      if (isDevinHookEvent(event)) {
+        process.stdout.write(`${await runDevinHook(event, readStdin())}\n`);
         return;
       }
       if (options.client === 'copilot-cli') {
