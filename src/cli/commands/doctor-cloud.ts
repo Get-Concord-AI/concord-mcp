@@ -56,27 +56,40 @@ export function findLeftovers(repoRoot: string, env: NodeJS.ProcessEnv): Leftove
   return leftovers;
 }
 
+/** What moving leftovers aside did. */
+export interface ArchiveReport {
+  readonly moved: string[];
+  /** Stores a running process still has open, left exactly as they were. */
+  readonly inUse: string[];
+}
+
 /**
  * Moves leftovers aside with an `.archived-<time>` suffix, only when the user
  * asks. Nothing is deleted: a store's open work, including any still in its
- * write-ahead log, stays readable for whoever wants it back.
+ * write-ahead log, stays readable for whoever wants it back, and a store some
+ * process still has open is not touched.
  */
-export function archiveLeftovers(leftovers: readonly Leftover[], now: Date = new Date()): string[] {
+export function archiveLeftovers(
+  leftovers: readonly Leftover[],
+  now: Date = new Date(),
+): ArchiveReport {
   const suffix = `.archived-${now
     .toISOString()
     .replace(/[-:]/gu, '')
     .replace(/\.\d+Z$/u, 'Z')}`;
-  const moved: string[] = [];
+  const report: ArchiveReport = { moved: [], inUse: [] };
   for (const leftover of leftovers) {
     const archived = `${leftover.path}${suffix}`;
     if (leftover.store) {
-      moved.push(...archiveStore(leftover.path, archived));
+      const result = archiveStore(leftover.path, archived);
+      if (result.kind === 'moved') report.moved.push(...result.paths);
+      else report.inUse.push(leftover.path);
     } else if (existsSync(leftover.path)) {
       renameSync(leftover.path, archived);
-      moved.push(archived);
+      report.moved.push(archived);
     }
   }
-  return moved;
+  return report;
 }
 
 /** Agent ids that name more than one agent: messages to them cannot be delivered. */
@@ -163,7 +176,14 @@ export async function buildCloudDoctorReport(
   } else {
     for (const leftover of leftovers) lines.push(`  ${leftover.path}: ${leftover.description}`);
     if (await deps.cleanLocal(leftovers)) {
-      for (const path of archiveLeftovers(leftovers)) lines.push(`  moved aside -> ${path}`);
+      const archived = archiveLeftovers(leftovers);
+      for (const path of archived.moved) lines.push(`  moved aside -> ${path}`);
+      for (const path of archived.inUse) {
+        lines.push(
+          `  left in place: ${path} is open in a running Concord process; stop it, then run ` +
+            '`concord doctor --clean-local` again',
+        );
+      }
     } else {
       lines.push('  `concord doctor --clean-local` moves these aside; nothing is deleted.');
     }

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -142,7 +143,10 @@ describe('doctor on a linked machine', () => {
     writer.close();
     expect(statSync(join(repo, '.concord', 'concord.db-wal')).size).toBeGreaterThan(0);
 
-    const moved = archiveLeftovers(findLeftovers(repo, env), new Date('2026-10-27T16:00:00.000Z'));
+    const { moved } = archiveLeftovers(
+      findLeftovers(repo, env),
+      new Date('2026-10-27T16:00:00.000Z'),
+    );
 
     const archived = join(repo, '.concord', 'concord.db.archived-20261027T160000Z');
     expect(moved[0]).toBe(archived);
@@ -151,12 +155,38 @@ describe('doctor on a linked machine', () => {
     expect(existsSync(join(repo, '.concord', 'concord.db-wal'))).toBe(false);
   });
 
+  it('leaves a store a running process has open exactly as it is', async () => {
+    const store = join(repo, '.concord', 'concord.db');
+    mkdirSync(join(repo, '.concord'), { recursive: true });
+    const live = new Database(store);
+    live.pragma('journal_mode = WAL');
+    live.exec("CREATE TABLE tasks (status TEXT); INSERT INTO tasks VALUES ('active');");
+    try {
+      const result = await report(cloud().fetch, true);
+      expect(result.output).toContain(
+        `left in place: ${realpathSync(store)} is open in a running Concord process`,
+      );
+      expect(existsSync(store)).toBe(true);
+      expect(readdirSync(join(repo, '.concord')).some((name) => name.includes('archived'))).toBe(
+        false,
+      );
+    } finally {
+      live.close();
+    }
+    // Once it is closed, the same request moves it.
+    expect((await report(cloud().fetch, true)).output).toContain('moved aside ->');
+    expect(existsSync(store)).toBe(false);
+  });
+
   it('keeps an unreadable store paired with its companions by SQLite’s naming', () => {
     mkdirSync(join(repo, '.concord'), { recursive: true });
     for (const name of ['concord.db', 'concord.db-wal', 'concord.db-shm']) {
       writeFileSync(join(repo, '.concord', name), 'not a database');
     }
-    const moved = archiveLeftovers(findLeftovers(repo, env), new Date('2026-10-27T16:00:00.000Z'));
+    const { moved } = archiveLeftovers(
+      findLeftovers(repo, env),
+      new Date('2026-10-27T16:00:00.000Z'),
+    );
     expect(moved.map((path) => path.slice(repo.length))).toEqual([
       '/.concord/concord.db.archived-20261027T160000Z',
       '/.concord/concord.db.archived-20261027T160000Z-wal',
