@@ -24,7 +24,10 @@ export type ArchiveResult =
  *   leaving its work in one place;
  * - on Windows the rename itself fails while the store is open.
  *
- * Either way the store is reported in use and left where it was. Every file
+ * Either way the store is reported in use and left where it was. And no
+ * Concord process opens a new store at the old path afterwards: on a linked
+ * machine `openContext` refuses, and a server started before the link refuses
+ * further opens (`WorkspaceManager`'s `refuseOpen`). Every file
  * moves under the names SQLite pairs (`archived-wal`, never `-wal.archived`),
  * or none does. A file SQLite cannot read is moved as it is, and never opened
  * for writing: closing a writable connection to such a file deletes the

@@ -1,4 +1,4 @@
-import { linkedMachine } from '../cloud/target.js';
+import { LINKED_MACHINE_MESSAGE, linkedMachine } from '../cloud/target.js';
 import { resolveRepoRoot, workspaceIdForRoot } from '../config/paths.js';
 import { openRepositories, type Repositories } from '../db/index.js';
 import { localStore, resolveStore, type StoreLocation } from '../workspaces/store.js';
@@ -15,15 +15,6 @@ export interface OpenContextOptions {
   /** Open the repository's own `.concord/` even when global mode would choose otherwise. */
   readonly local?: boolean;
 }
-
-/**
- * Why a command that reads the local store does nothing on a linked machine:
- * its work lives in Concord Cloud.
- */
-export const LINKED_MACHINE_MESSAGE =
-  'This machine works through Concord Cloud, so there is no local Concord store here. ' +
-  'See your workspace at https://app.getconcord.ai, or run `concord cloud unlink` to use ' +
-  'local Concord on this machine.';
 
 /**
  * Resolve the repo root with the same priority as MCP and open that workspace.

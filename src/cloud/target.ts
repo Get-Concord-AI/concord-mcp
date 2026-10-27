@@ -49,6 +49,15 @@ export function linkedMachine(env: NodeJS.ProcessEnv): LinkedMachine | undefined
 }
 
 /**
+ * Why nothing opens a local store on a linked machine: its work lives in
+ * Concord Cloud.
+ */
+export const LINKED_MACHINE_MESSAGE =
+  'This machine works through Concord Cloud, so there is no local Concord store here. ' +
+  'See your workspace at https://app.getconcord.ai, or run `concord cloud unlink` to use ' +
+  'local Concord on this machine.';
+
+/**
  * The host of the projects for repositories with no remote. Not a real host:
  * it only has to be a key the cloud accepts that no git remote ever produces.
  */

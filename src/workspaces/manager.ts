@@ -27,6 +27,12 @@ export interface WorkspaceManagerOptions {
   open?: (databaseFilename: string, project: string) => Repositories;
   /** Where a root's state lives; the repository's own store unless global mode applies. */
   resolveStore?: (repoRoot: string) => StoreLocation;
+  /**
+   * Why no store may be opened now, checked before each first open: a server
+   * started while its machine was unlinked keeps running after a login links
+   * it, and must not open a local store there.
+   */
+  refuseOpen?: () => string | undefined;
 }
 
 /**
@@ -40,12 +46,14 @@ export class WorkspaceManager {
   readonly #allowedRoots: Set<string> | undefined;
   readonly #open: (databaseFilename: string, project: string) => Repositories;
   readonly #resolveStore: (repoRoot: string) => StoreLocation;
+  readonly #refuseOpen: () => string | undefined;
   #activeWorkspaceId: string;
   #selections = 0;
 
   constructor(initialRoot: string, options: WorkspaceManagerOptions = {}) {
     this.#open = options.open ?? openRepositories;
     this.#resolveStore = options.resolveStore ?? ((root) => resolveStore(root, process.env));
+    this.#refuseOpen = options.refuseOpen ?? (() => undefined);
     this.#allowedRoots =
       options.allowedRoots === undefined
         ? undefined
@@ -106,6 +114,8 @@ export class WorkspaceManager {
     let context = this.#contexts.get(workspaceId);
     const firstOpen = context === undefined;
     if (context === undefined) {
+      const refusal = this.#refuseOpen();
+      if (refusal !== undefined) throw new Error(refusal);
       const store = this.#resolveStore(repoRoot);
       context = {
         workspaceId,

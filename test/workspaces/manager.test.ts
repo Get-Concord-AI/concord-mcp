@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,21 @@ function repoDir(label: string): string {
 }
 
 describe('WorkspaceManager', () => {
+  it('opens no further store once its machine is linked, keeping the ones it has', () => {
+    const first = repoDir('first');
+    const second = repoDir('second');
+    let linked = false;
+    const manager = new WorkspaceManager(first, {
+      refuseOpen: () => (linked ? 'This machine works through Concord Cloud' : undefined),
+    });
+
+    linked = true;
+    expect(() => manager.join(second)).toThrow(/works through Concord Cloud/u);
+    expect(existsSync(join(second, '.concord'))).toBe(false);
+    // A store it already holds stays usable: `archiveStore` sees it is open.
+    expect(manager.join(first).repoRoot).toBe(first);
+  });
+
   it('can start outside a repository and explicitly join one later', () => {
     const launchRoot = mkdtempSync(join(tmpdir(), 'concord-mcp-launch-root-'));
     const repoRoot = repoDir('joined-after-launch');

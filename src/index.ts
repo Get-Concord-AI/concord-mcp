@@ -4,6 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { startBackgroundAdapterCheck } from './adapter-check.js';
 import { writeArtifacts } from './artifacts/index.js';
 import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/proxy.js';
+import { LINKED_MACHINE_MESSAGE, linkedMachine } from './cloud/target.js';
 import { startBackgroundUpdateCheck } from './update-notifier.js';
 import { resolveCheckoutRoot, resolveRepoRoot } from './config/paths.js';
 import { resolveIdentity } from './domain/identity.js';
@@ -39,7 +40,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, process.env);
+  const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, process.env, {
+    // Started unlinked, this server outlives a later `cloud login`; from then
+    // on it opens no further local store (see `archiveStore`).
+    refuseOpen: () =>
+      linkedMachine(process.env) === undefined ? undefined : LINKED_MACHINE_MESSAGE,
+  });
   if (identity !== undefined) {
     ensureAgentRegistered(workspaceManager.current().repos, identity, repoRoot);
   }
