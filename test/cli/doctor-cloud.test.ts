@@ -178,6 +178,23 @@ describe('doctor on a linked machine', () => {
     expect(existsSync(store)).toBe(false);
   });
 
+  it('puts back what moved when one of the files cannot be moved', () => {
+    mkdirSync(join(repo, '.concord'), { recursive: true });
+    for (const name of ['concord.db', 'concord.db-wal']) {
+      writeFileSync(join(repo, '.concord', name), 'not a database');
+    }
+    // Something already in the way of the log's archived name.
+    const blocker = join(repo, '.concord', 'concord.db.archived-20261027T160000Z-wal');
+    mkdirSync(join(blocker, 'occupied'), { recursive: true });
+
+    expect(() =>
+      archiveLeftovers(findLeftovers(repo, env), new Date('2026-10-27T16:00:00.000Z')),
+    ).toThrow();
+    expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(true);
+    expect(existsSync(join(repo, '.concord', 'concord.db-wal'))).toBe(true);
+    expect(existsSync(join(repo, '.concord', 'concord.db.archived-20261027T160000Z'))).toBe(false);
+  });
+
   it('keeps an unreadable store paired with its companions by SQLite’s naming', () => {
     mkdirSync(join(repo, '.concord'), { recursive: true });
     for (const name of ['concord.db', 'concord.db-wal', 'concord.db-shm']) {
