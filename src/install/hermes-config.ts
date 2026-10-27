@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { z } from 'zod';
 
+import { standaloneInstall } from '../config/install-mode.js';
 import { userHome } from '../config/paths.js';
 
 type YamlValue = string | number | boolean | null | YamlValue[] | { [key: string]: YamlValue };
@@ -31,6 +32,15 @@ const yamlValueSchema: z.ZodType<YamlValue> = z.lazy(() =>
 const mappingSchema = z.record(z.string(), yamlValueSchema);
 type Mapping = z.infer<typeof mappingSchema>;
 const SERVER_KEY = 'concord';
+const NPX_SERVER_ARGS = ['-y', '@concord-ai/concord-mcp'];
+
+/** Standalone installs launch directly: they may have neither npm nor npx on PATH. */
+function concordServerLaunch(): { command: string; args: string[] } {
+  const standalone = standaloneInstall();
+  return standalone === undefined
+    ? { command: 'npx', args: [...NPX_SERVER_ARGS] }
+    : { command: join(standalone.binDir, 'concord-mcp'), args: [] };
+}
 
 export function hermesConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env['HERMES_HOME']?.trim();
@@ -74,12 +84,14 @@ export function hermesConfigInstalled(env: NodeJS.ProcessEnv = process.env): boo
     const servers = mappingSchema.safeParse(readConfig(path)['mcp_servers']);
     if (!servers.success) return false;
     const entry = mappingSchema.safeParse(servers.data[SERVER_KEY]);
+    if (!entry.success) return false;
+    const launcher = concordServerLaunch();
+    const args = entry.data['args'];
     return (
-      entry.success &&
       entry.data['enabled'] !== false &&
-      entry.data['command'] === 'npx' &&
-      Array.isArray(entry.data['args']) &&
-      entry.data['args'].includes('@concord-ai/concord-mcp')
+      entry.data['command'] === launcher.command &&
+      Array.isArray(args) &&
+      (launcher.command === 'npx' ? args.includes('@concord-ai/concord-mcp') : args.length === 0)
     );
   } catch {
     return false;
@@ -96,8 +108,7 @@ export function installHermesMcpConfig(env: NodeJS.ProcessEnv = process.env): vo
     mcp_servers: {
       ...servers,
       [SERVER_KEY]: {
-        command: 'npx',
-        args: ['-y', '@concord-ai/concord-mcp'],
+        ...concordServerLaunch(),
         enabled: true,
       },
     },
