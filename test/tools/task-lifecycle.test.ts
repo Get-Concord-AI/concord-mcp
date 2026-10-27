@@ -156,7 +156,17 @@ describe('versioned task lifecycle', () => {
         reason: 'take over',
         force: true,
       }),
-    ).toThrow(/human owner alex/u);
+    ).toThrow(/human owner alex can force-reassign TASK-1\.$/u);
+
+    expect(() =>
+      handleReassignTask(repos, {
+        task_id: 'TASK-1',
+        to_agent_id: 'codex:target',
+        agent_id: 'codex:supervisor',
+        expected_version: 1,
+        reason: 'take over',
+      }),
+    ).toThrow(/force: true\.$/u);
 
     const reassigned = handleReassignTask(repos, {
       task_id: 'TASK-1',

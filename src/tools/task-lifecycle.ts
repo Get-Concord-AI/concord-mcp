@@ -210,8 +210,10 @@ export function handleReassignTask(
   const task = taskAtVersion(repos, input.task_id, input.expected_version);
   if (task.agentId !== actor.agentId) {
     if (input.force !== true || !isHumanSupervisor(actor, task)) {
+      const hint =
+        input.force === true ? '' : " Use transfer_work with action: 'reassign' and force: true.";
       throw new Error(
-        `Only the current owner or a registered agent for human owner ${task.owner ?? '(none)'} can force-reassign ${task.taskId}. Use transfer_work with action: 'reassign' and force: true.`,
+        `Only the current owner or a registered agent for human owner ${task.owner ?? '(none)'} can force-reassign ${task.taskId}.${hint}`,
       );
     }
   }
