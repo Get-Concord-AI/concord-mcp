@@ -64,10 +64,11 @@ describe('doctor on a linked machine', () => {
       ['GET /v1/agents', () => ok({ agents })],
     ]);
 
-  const report = (fetch = cloud().fetch) =>
+  const report = (fetch = cloud().fetch, platform: NodeJS.Platform = 'darwin') =>
     buildCloudDoctorReport(repo, env, {
       fetch,
       originRemote: () => 'git@github.com:acme/app.git',
+      platform,
     });
 
   it('checks the cloud and never creates a local store', async () => {
@@ -115,6 +116,15 @@ describe('doctor on a linked machine', () => {
     expect(listed.output).toMatch(
       new RegExp(
         `mv -n '${escape(resolved)}-wal' '${escape(resolved)}\\.archived-\\d{8}T\\d{6}Z-wal'`,
+        'u',
+      ),
+    );
+    // On Windows, the same moves in PowerShell.
+    const onWindows = (await report(cloud().fetch, 'win32')).output;
+    expect(onWindows).toContain('move them aside (nothing is deleted), in PowerShell:');
+    expect(onWindows).toMatch(
+      new RegExp(
+        `Move-Item -LiteralPath '${escape(resolved)}-wal' -Destination '${escape(resolved)}\\.archived-\\d{8}T\\d{6}Z-wal'`,
         'u',
       ),
     );

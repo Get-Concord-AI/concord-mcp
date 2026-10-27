@@ -149,6 +149,8 @@ async function agentLines(
 export interface CloudDoctorDeps {
   readonly fetch: Fetch;
   readonly originRemote: OriginRemote;
+  /** Whose shell the suggested commands are for; this machine's unless a test says otherwise. */
+  readonly platform?: NodeJS.Platform;
 }
 
 /** The cloud half of the doctor report, and whether everything it checks is healthy. */
@@ -161,6 +163,7 @@ export async function buildCloudDoctorReport(
   },
 ): Promise<{ readonly output: string; readonly healthy: boolean }> {
   const repoRoot = resolveRepoRoot(cwd, env);
+  const platform = deps.platform ?? process.platform;
   const credentials = readCredentials(env);
   const api =
     credentials === undefined
@@ -191,9 +194,9 @@ export async function buildCloudDoctorReport(
     lines.push(
       '  Nothing reads these while this machine is linked. Once every Concord session ' +
         `started before the link has ended, you can move them aside (nothing is deleted)${
-          process.platform === 'win32' ? ', in PowerShell' : ''
+          platform === 'win32' ? ', in PowerShell' : ''
         }:`,
-      ...moveAsideCommands(leftovers).map((command) => `    ${command}`),
+      ...moveAsideCommands(leftovers, new Date(), platform).map((command) => `    ${command}`),
     );
   }
 
