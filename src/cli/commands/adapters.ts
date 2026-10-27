@@ -1,6 +1,5 @@
 import type { Command } from '@commander-js/extra-typings';
 import { spawn } from 'node:child_process';
-import { createServer } from 'node:net';
 
 import { z } from 'zod';
 
@@ -12,6 +11,8 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { relayAddress } from '../../relay/address.js';
 import { CodexAppServerAdapter } from '../../relay/adapters.js';
 import { CodexDaemonClient } from '../../relay/codex-client.js';
+import { CodexReadTracker } from '../../relay/codex-read-tracker.js';
+import { sessionKey } from '../../domain/receipts.js';
 import { startAgentRelay } from '../../relay/server.js';
 import {
   installGlobalAdapters,
@@ -20,22 +21,50 @@ import {
   uninstallGlobalAdapters,
 } from '../../install/adapters/index.js';
 import { openContext } from '../context.js';
+import { availablePort } from '../local-port.js';
 import { hostCodexInCloud } from './cloud-codex.js';
+import {
+  copilotServerAddress,
+  hostCopilot,
+  hostCopilotInCloud,
+  launchCopilot,
+} from './copilot-adapter.js';
 import { cloudAccess } from './cloud-inbox.js';
 
 async function hostCodex(agentId: string, threadId: string): Promise<void> {
   const context = openContext(process.cwd());
   ensureAgentRegistered(context.repos, { agentId, kind: 'codex' }, context.repoRoot);
   const client = new CodexDaemonClient();
+  // Read receipts: the model answered, or the turn completed, with a pushed message as input.
+  const session = sessionKey(threadId);
+  const reads = new CodexReadTracker(threadId, (messageIds, evidence) => {
+    try {
+      // The read may land before the sender has recorded the push as
+      // delivered; reading it proves delivery too, so record both.
+      context.repos.agentMessages.markReadByEvidence(agentId, messageIds, {
+        evidence,
+        via: 'adapter',
+        session,
+      });
+    } catch (error) {
+      process.stderr.write(
+        `Concord: could not record a read receipt: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
+  });
+  client.onNotification((notification) => {
+    reads.notify(notification);
+  });
   await client.connect();
   await client.resumeThread(threadId);
-  const adapter = new CodexAppServerAdapter(client, threadId, () => client.currentTurnId());
+  const adapter = new CodexAppServerAdapter(client, threadId, () => client.currentTurnId(), reads);
   const relay = await startAgentRelay({
     repos: context.repos,
     agentId,
     address: relayAddress(context.concordPath, agentId),
     adapter,
     pullFallback: true,
+    session,
   });
   const stop = (): void => {
     void relay.close().finally(() => {
@@ -48,25 +77,6 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
   await new Promise<void>((resolve) => {
     process.once('beforeExit', () => {
       resolve();
-    });
-  });
-}
-
-async function availablePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (address === null || typeof address === 'string') {
-        server.close();
-        reject(new Error('Could not allocate a local Codex app-server port.'));
-        return;
-      }
-      server.close((error) => {
-        if (error !== undefined) reject(error);
-        else resolve(address.port);
-      });
     });
   });
 }
@@ -190,6 +200,29 @@ export function registerAdaptersCommand(program: Command): void {
     .description('Launch Codex through a Concord-reachable local app-server')
     .argument('[args...]', 'Arguments forwarded to the Codex TUI')
     .action(async (args) => launchCodex(args, repoRoot()));
+  adapters
+    .command('copilot')
+    .description('Launch Copilot CLI with idle wake-up through its local embedded server')
+    .argument('[args...]', 'Arguments forwarded to the Copilot TUI')
+    // Copilot's own flags (-i, --allow-tool, ...) are forwarded, not parsed here.
+    .allowUnknownOption()
+    .action(async (args) => launchCopilot(args));
+  adapters
+    .command('host-copilot', { hidden: true })
+    .requiredOption('--agent <id>')
+    .requiredOption('--session <id>')
+    .option('--server <address>', "Embedded server address; defaults to the launcher's")
+    .action(async (options) => {
+      const address = options.server ?? copilotServerAddress();
+      if (address === undefined) throw new Error('No Copilot embedded server address.');
+      const access = cloudAccess(process.cwd());
+      if (access.kind === 'unusable') throw new Error(`Concord Cloud: ${access.reason}`);
+      if (access.kind === 'cloud') {
+        await hostCopilotInCloud(access.runtime, options.agent, options.session, address);
+        return;
+      }
+      await hostCopilot(options.agent, options.session, address);
+    });
   adapters
     .command('host-codex', { hidden: true })
     .requiredOption('--agent <id>')

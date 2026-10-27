@@ -59,6 +59,15 @@ which runs the full verification gate, publishes to npm via OIDC (with automatic
 provenance), and creates a GitHub Release with generated notes. If the `release`
 environment has required reviewers, the run pauses for approval first.
 
+Alongside the npm publish, a `standalone` matrix job builds a self-contained
+tarball per platform (darwin-arm64/x64, linux-x64/arm64) with
+[`scripts/build-standalone.sh`](./scripts/build-standalone.sh). The GitHub
+Release is created only after the publish and every tarball succeed, and
+carries the tarballs, their `.sha256` files, and `install.sh`; until then the
+curl installer keeps serving the previous release. If a standalone job fails,
+rerun it and the release job follows. The bundled
+Node version is the `CONCORD_NODE_VERSION` default in that script.
+
 ## Notes
 
 - Keep [`CHANGELOG.md`](./CHANGELOG.md) up to date under `[Unreleased]`; move

@@ -10,7 +10,13 @@ import {
   resolveIdentity,
   UNRESOLVED_IDENTITY_MESSAGE,
 } from '../../domain/identity.js';
-import { renderInboxBody } from '../../domain/pull-inbox.js';
+import {
+  antigravityInjectSteps,
+  antigravityMonitorNudge,
+} from '../../domain/antigravity-monitor.js';
+import { receiverActive } from '../../domain/delivery.js';
+import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
+import { sessionKey } from '../../domain/receipts.js';
 import { buildRoster } from '../../domain/presence.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
@@ -25,6 +31,16 @@ import {
   handleCloudSessionStart,
 } from './cloud-hooks.js';
 import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
+import { copilotServerAddress } from './copilot-adapter.js';
+import { fileSpool } from './copilot-spool.js';
+import {
+  cloudCopilotBackend,
+  copilotWorkspace,
+  localCopilotBackend,
+  runCopilotHook,
+  type CopilotHookBackend,
+} from './copilot-hooks.js';
+import { observeHookEvent } from './inbox-observe.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
 import { antigravitySessionStartMessage, sessionStartMessage } from './session-start-message.js';
 import type { CloudRuntime } from '../../cloud/runtime.js';
@@ -203,8 +219,26 @@ export function handleAntigravitySessionStart(
 }
 
 /**
+ * Read evidence the hook carries first (a transcript, where Antigravity gives
+ * one), then deliver what is waiting to this conversation.
+ */
+function observeThenDrain(
+  repos: Repositories,
+  agentId: string,
+  rawJson: string,
+  sessionId: string,
+): DeliverableMessage[] {
+  observeHookEvent(repos, agentId, rawJson);
+  return drainInbox(repos, agentId, 'antigravity', undefined, {
+    session: sessionKey(sessionId),
+    via: 'hook',
+  });
+}
+
+/**
  * Handle Antigravity PreInvocation hook: extracts conversationId, registers
- * presence, drains pending inbox messages, and injects them as userMessages.
+ * presence, drains pending inbox messages, and injects them as userMessages,
+ * asking the agent to start its idle monitor when none is watching.
  */
 export function handleAntigravityPreInvocation(
   repos: Repositories,
@@ -223,17 +257,14 @@ export function handleAntigravityPreInvocation(
   const agentId = identity.agentId;
   ensureAgentRegistered(repos, identity, workspace);
 
-  const messages = drainInbox(repos, agentId, 'antigravity');
-  if (messages.length === 0) {
-    return { output: JSON.stringify({ injectSteps: [] }) };
-  }
+  const messages = observeThenDrain(repos, agentId, rawJson, sessionId);
+  const watching = receiverActive(repos.agentEndpoints.getByAgent(agentId));
   return {
     output: JSON.stringify({
-      injectSteps: [
-        {
-          userMessage: `[concord] Incoming message(s):\n\n${renderInboxBody(messages)}`,
-        },
-      ],
+      injectSteps: antigravityInjectSteps(
+        messages,
+        antigravityMonitorNudge(rawJson, agentId, watching),
+      ),
     }),
   };
 }
@@ -248,7 +279,7 @@ export function handleAntigravityStop(repos: Repositories, rawJson: string): { o
     return { output: JSON.stringify({}) };
   }
   const agentId = agentIdForSession('antigravity', sessionId);
-  const messages = drainInbox(repos, agentId, 'antigravity');
+  const messages = observeThenDrain(repos, agentId, rawJson, sessionId);
   if (messages.length === 0) {
     return { output: JSON.stringify({}) };
   }
@@ -277,10 +308,18 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     .command('hook <event>')
     .description(
       'Run a Concord hook. events: pre-tool-use (PreToolUse overlap gate), ' +
-        'session-start (SessionStart presence auto-register), pre-invocation, and stop.',
+        'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, and stop.',
     )
-    .option('--client <client>', 'Client calling the hook (e.g. antigravity, claude)')
+    .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {
+      if (options.client === 'copilot-cli') {
+        await runCopilotClientHook(event);
+        return;
+      }
+      // Copilot CLI also runs the hooks in a project's .claude/settings.json.
+      // Its own session-start hook registers the session under the right kind;
+      // this one would mint a claude-code id for a session that is not one.
+      if (event === 'session-start' && (process.env['COPILOT_CLI'] ?? '') !== '') return;
       // For Antigravity hooks, read stdin once and derive the workspace from
       // the payload's workspacePaths.  Global hooks run with cwd set to
       // ~/.gemini/config, so the payload is the only reliable source.
@@ -360,6 +399,45 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
         process.exitCode = 2;
       }
     });
+}
+
+/** A Copilot CLI hook, against Concord Cloud when the repository is linked. */
+async function runCopilotClientHook(event: string): Promise<void> {
+  const input = readStdin();
+  const workspace = copilotWorkspace(input);
+  const access = cloudAccess(workspace, { timeoutMs: HOOK_TIMEOUT_MS });
+  if (access.kind === 'unusable') {
+    // Never a local workspace in its place, and never a blocked session.
+    process.stderr.write(`Concord Cloud could not be reached: ${access.reason}\n`);
+    process.stdout.write('{}\n');
+    return;
+  }
+  let backend: CopilotHookBackend;
+  let repoRoot: string;
+  if (access.kind === 'cloud') {
+    backend = cloudCopilotBackend(access.runtime);
+    repoRoot = access.runtime.repoRoot;
+  } else {
+    const context = openContext(workspace);
+    backend = localCopilotBackend(context.repos, context.repoRoot);
+    repoRoot = context.repoRoot;
+  }
+  const output = await runCopilotHook(
+    {
+      backend,
+      spool: fileSpool(repoRoot),
+      env: process.env,
+      serverAddress: copilotServerAddress(),
+    },
+    event,
+    input,
+  );
+  if (output === undefined) {
+    process.stderr.write(`Unknown hook event for copilot-cli: ${event}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`${output}\n`);
 }
 
 /**

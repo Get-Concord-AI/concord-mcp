@@ -58,7 +58,7 @@ describe('runSetup', () => {
     expect(existsSync(join(dir, '.gitignore'))).toBe(false);
     expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('start_work');
     expect(readFileSync(join(dir, '.cursor', 'mcp.json'), 'utf8')).toContain(
-      `"CONCORD_REPO_ROOT": "${dir}"`,
+      `"CONCORD_REPO_ROOT": ${JSON.stringify(dir)}`,
     );
   });
 

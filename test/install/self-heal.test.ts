@@ -1,10 +1,11 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import { ensureHarnessAdapter } from '../../src/install/adapters/self-heal.js';
+import { writeFakeVersion } from '../helpers/fake-command.js';
 
 // Links into this checkout count as lasting even when it lives under /tmp.
 const LASTING = (): boolean => false;
@@ -14,8 +15,7 @@ function claudeMachine(): { env: NodeJS.ProcessEnv; link: string } {
   const home = mkdtempSync(join(tmpdir(), 'concord-self-heal-'));
   const bin = join(home, 'bin');
   mkdirSync(bin);
-  writeFileSync(join(bin, 'claude'), '#!/bin/sh\necho 2.1.223\n');
-  chmodSync(join(bin, 'claude'), 0o755);
+  writeFakeVersion(bin, 'claude', '2.1.223');
   const env = { HOME: home, PATH: bin, CLAUDE_CONFIG_DIR: join(home, '.claude') };
   return { env, link: join(home, '.claude', 'skills', 'concord-relay') };
 }

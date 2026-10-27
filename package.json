@@ -1,6 +1,6 @@
 {
   "name": "@concord-ai/concord-mcp",
-  "version": "0.14.2",
+  "version": "0.16.0",
   "description": "Cross-harness communication and shared work-state for coding agents through MCP.",
   "mcpName": "io.github.Get-Concord-AI/concord-mcp",
   "keywords": [
@@ -50,6 +50,7 @@
     "version": "node scripts/sync-version.mjs && git add src/version.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "vitest run --config vitest.e2e.config.ts",
     "demo": "pnpm build && bash examples/whack-a-mole/run.sh",
     "demo:stop": "bash examples/whack-a-mole/stop.sh",
     "prepublishOnly": "npm run build"
@@ -61,7 +62,7 @@
     "commander": "^15.0.0",
     "ink": "8.0.0",
     "js-yaml": "^5.4.3",
-    "react": "19.3.0",
+    "react": "19.3.1",
     "react-devtools-core": "8.0.0",
     "zod": "^4.4.3"
   },
@@ -81,7 +82,7 @@
     "vitest": "^5.0.1"
   },
   "pnpm": {
-    "onlyBuiltDependencies": [
+    "ignoredBuiltDependencies": [
       "better-sqlite3"
     ]
   }

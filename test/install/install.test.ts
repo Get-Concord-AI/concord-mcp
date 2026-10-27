@@ -32,7 +32,7 @@ describe('upsertBlock', () => {
 });
 
 describe('installConcord', () => {
-  it('writes all five client targets', () => {
+  it('writes every supported client target', () => {
     const root = mkdtempSync(join(tmpdir(), 'concord-install-'));
     const written = installConcord(root);
     expect(written).toEqual([
@@ -40,6 +40,7 @@ describe('installConcord', () => {
       'AGENTS.md',
       join('.codex', 'concord.md'),
       join('.cursor', 'rules', 'concord.mdc'),
+      join('.github', 'copilot-instructions.md'),
       join('.agents', 'rules', 'concord.md'),
     ]);
     for (const relPath of written) {

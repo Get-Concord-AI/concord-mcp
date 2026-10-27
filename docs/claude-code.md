@@ -59,3 +59,20 @@ Generated `HANDOFF.md` and `REVIEW_PACKET.md` land in `.concord/`.
 polls for the lifetime of an interactive session, so a line of output wakes an
 idle Claude session; PostToolUse and Stop hooks cover messages received while a
 turn is active or ending. Existing sessions need one restart after installation.
+
+Claude Code holds a monitor notification while the agent is blocked on its user
+(an `AskUserQuestion` picker or a permission prompt), so a message the monitor
+drained is `delivered` (✓✓) but not yet `read`. It becomes read only on
+evidence naming its id: the prompt that starts a turn with the notification
+(UserPromptSubmit), or the session transcript showing the message followed by
+model output (checked at PostToolUse and Stop). A turn merely ending proves
+nothing. A reply also counts as read. If the session ends first, its unread
+messages go back to sent (SessionEnd), and a fresh session for the same agent
+(`CONCORD_AGENT_ID`) receives them again on startup. `claude --resume`
+restores the held notification instead, so it is not resent.
+
+The same hooks record when a session stops to wait on its user. `concord status`
+and `inspect_work` show it, and a sender's outlook warns that the message will
+not be read until the user responds. Dismissing a prompt with Esc or Deny fires
+no hook, so the flag clears at the session's next prompt, tool call, or turn
+end; it is advisory and never holds delivery.

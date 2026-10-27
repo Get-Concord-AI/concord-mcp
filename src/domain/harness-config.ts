@@ -14,6 +14,7 @@ export const harnessNames = [
   'grok',
   'goose',
   'antigravity',
+  'copilot-cli',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -203,18 +204,38 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     executable: 'agy',
     minimumVersion: [1, 0, 0],
     defaultCapability: busyPull,
-    monitorCapability: busyPull,
+    monitorCapability: idlePull,
     monitor: {
       kind: 'harness-monitor',
-      lifecycle: 'native',
+      lifecycle: 'one-shot',
       completion: 'native',
-      background: false,
-      verified: false,
+      command: 'concord inbox watch --agent <agent-id> --provider antigravity --once',
+      background: true,
+      verified: true,
+      backgroundShell: { supported: true, completionStartsTurn: true },
     },
-    installedCapabilities: ['pull', 'busy'],
+    installedCapabilities: ['pull', 'steer', 'idle', 'busy', 'monitor-command'],
     installedDetail:
-      'Lifecycle hooks register session identity and drain inbox messages into turns; rules are available.',
+      'A one-shot Antigravity background command wakes the idle agent with each message; lifecycle hooks register identity and drain messages into busy turns.',
     unsupportedDetail: 'Antigravity executable not found or environment not detected.',
+  },
+  'copilot-cli': {
+    name: 'copilot-cli',
+    executable: 'copilot',
+    minimumVersion: [1, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: idleInject,
+    monitor: {
+      kind: 'managed-controller',
+      lifecycle: 'managed',
+      completion: 'controller',
+      background: true,
+      verified: true,
+    },
+    installedCapabilities: ['pull', 'inject', 'steer', 'idle', 'busy'],
+    installedDetail:
+      'Sessions started with `concord adapters copilot` are steered and woken through the embedded server; plain `copilot` sessions get hook delivery after tool calls and at turn end.',
+    unsupportedDetail: 'Copilot CLI does not meet the verified hooks baseline (1.0.0).',
   },
 };
 
@@ -245,6 +266,7 @@ export function renderHarnessMonitorInstructions(): string {
   const cursor = HARNESS_CONFIGS.cursor.monitor.command ?? '';
   const gemini = HARNESS_CONFIGS.gemini.monitor.command ?? '';
   const grok = HARNESS_CONFIGS.grok.monitor.command ?? '';
+  const antigravity = HARNESS_CONFIGS.antigravity.monitor.command ?? '';
   return `Replace <agent-id> with the id the SessionStart hook printed for this session.
 A monitor may not inherit the session's environment, so it cannot work the id out itself.
 
@@ -258,5 +280,9 @@ answer the emitted peer message and immediately start a fresh background monitor
 In Gemini CLI, start the exact monitor command supplied by the SessionStart hook
 (\`${gemini}\`) with \`run_shell_command\` and \`is_background: true\`. Project
 settings inject background completion into the agent. Answer the peer message,
-then immediately start a fresh background monitor.`;
+then immediately start a fresh background monitor.
+
+In Antigravity, start exactly one background command for \`${antigravity}\`
+and end the turn without waiting on it. Its completion wakes the idle session:
+answer the peer message, then immediately start a fresh background monitor.`;
 }

@@ -515,6 +515,8 @@ export interface AgentEndpointRecord {
   lastSeen: string;
   expiresAt: string | null;
   receiverExpiresAt: string | null;
+  /** When the session last stopped to wait on its user; null once it moved on. */
+  awaitingUserSince: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -531,6 +533,7 @@ const agentEndpointDbRowSchema = z.object({
   last_seen: z.string(),
   expires_at: z.string().nullable(),
   receiver_expires_at: z.string().nullable(),
+  awaiting_user_since: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -549,119 +552,10 @@ export function parseAgentEndpointRow(raw: unknown): AgentEndpointRecord {
     lastSeen: row.last_seen,
     expiresAt: row.expires_at,
     receiverExpiresAt: row.receiver_expires_at,
+    awaitingUserSince: row.awaiting_user_since,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-export const agentMessageStatusValues = ['pending', 'delivered', 'replied', 'failed'] as const;
-export type AgentMessageStatus = (typeof agentMessageStatusValues)[number];
-const agentMessageStatusSchema = z.enum(agentMessageStatusValues);
-
-export const agentMessageErrorCodeValues = [
-  'target_unreachable',
-  'target_not_promptable',
-  'capability_unavailable',
-  'unauthorized',
-  'delivery_timeout',
-] as const;
-export type AgentMessageErrorCode = (typeof agentMessageErrorCodeValues)[number];
-const agentMessageErrorCodeSchema = z.enum(agentMessageErrorCodeValues);
-
-export interface AgentMessageRecord {
-  messageId: string;
-  /** The project `taskId` belongs to; messages themselves span the store. */
-  project: string;
-  taskId: string | null;
-  senderAgentId: string;
-  recipientAgentId: string;
-  replyToMessageId: string | null;
-  content: string;
-  deliveryMode: 'steer';
-  status: AgentMessageStatus;
-  provider: string | null;
-  providerReceipt: string | null;
-  errorCode: AgentMessageErrorCode | null;
-  errorDetail: string | null;
-  idempotencyKey: string;
-  createdAt: string;
-  deliveredAt: string | null;
-  repliedAt: string | null;
-  failedAt: string | null;
-}
-
-const agentMessageDbRowSchema = z.object({
-  message_id: z.string(),
-  project: z.string(),
-  task_id: z.string().nullable(),
-  sender_agent_id: z.string(),
-  recipient_agent_id: z.string(),
-  reply_to_message_id: z.string().nullable(),
-  content: z.string(),
-  delivery_mode: z.literal('steer'),
-  status: agentMessageStatusSchema,
-  provider: z.string().nullable(),
-  provider_receipt: z.string().nullable(),
-  error_code: agentMessageErrorCodeSchema.nullable(),
-  error_detail: z.string().nullable(),
-  idempotency_key: z.string(),
-  created_at: z.string(),
-  delivered_at: z.string().nullable(),
-  replied_at: z.string().nullable(),
-  failed_at: z.string().nullable(),
-});
-
-export function parseAgentMessageRow(raw: unknown): AgentMessageRecord {
-  const row = agentMessageDbRowSchema.parse(raw);
-  return {
-    messageId: row.message_id,
-    project: row.project,
-    taskId: row.task_id,
-    senderAgentId: row.sender_agent_id,
-    recipientAgentId: row.recipient_agent_id,
-    replyToMessageId: row.reply_to_message_id,
-    content: row.content,
-    deliveryMode: row.delivery_mode,
-    status: row.status,
-    provider: row.provider,
-    providerReceipt: row.provider_receipt,
-    errorCode: row.error_code,
-    errorDetail: row.error_detail,
-    idempotencyKey: row.idempotency_key,
-    createdAt: row.created_at,
-    deliveredAt: row.delivered_at,
-    repliedAt: row.replied_at,
-    failedAt: row.failed_at,
-  };
-}
-
-export const agentMessageEventValues = ['accepted', 'delivered', 'replied', 'failed'] as const;
-export type AgentMessageEvent = (typeof agentMessageEventValues)[number];
-const agentMessageEventSchema = z.enum(agentMessageEventValues);
-
-export interface AgentMessageEventRecord {
-  id: number;
-  messageId: string;
-  event: AgentMessageEvent;
-  detail: string | null;
-  createdAt: string;
-}
-
-const agentMessageEventDbRowSchema = z.object({
-  id: z.number().int(),
-  message_id: z.string(),
-  event: agentMessageEventSchema,
-  detail: z.string().nullable(),
-  created_at: z.string(),
-});
-
-export function parseAgentMessageEventRow(raw: unknown): AgentMessageEventRecord {
-  const row = agentMessageEventDbRowSchema.parse(raw);
-  return {
-    id: row.id,
-    messageId: row.message_id,
-    event: row.event,
-    detail: row.detail,
-    createdAt: row.created_at,
-  };
-}
+export * from './message-rows.js';

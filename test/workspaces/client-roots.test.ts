@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,6 +20,7 @@ import {
   WorkspaceManager,
   routedRepositories,
 } from '../../src/workspaces/manager.js';
+import { writeFakeCommand } from '../helpers/fake-command.js';
 
 function dir(label: string): string {
   return realpathSync(mkdtempSync(join(tmpdir(), `concord-${label}-`)));
@@ -221,13 +222,11 @@ describe('Cursor session context', () => {
     expect(status).toMatchObject({ workspace_id: workspaceIdForRoot(root), store: 'global' });
     expect(status['instructions']).toContain('start_work');
 
-    const fakeConcord = join(home, 'fake-concord');
-    writeFileSync(join(home, 'status.json'), JSON.stringify(status));
-    writeFileSync(
-      fakeConcord,
-      `#!/bin/sh\nif [ "$2" = "status" ]; then cat '${join(home, 'status.json')}'; fi\n`,
+    const fakeConcord = writeFakeCommand(
+      home,
+      'fake-concord',
+      `if (process.argv[3] === 'status') process.stdout.write(${JSON.stringify(JSON.stringify(status))});\n`,
     );
-    chmodSync(fakeConcord, 0o755);
     const hook = join(process.cwd(), 'plugin', 'cursor', 'concord-relay', 'cursor-hook.mjs');
     const result = spawnSync(process.execPath, [hook, 'session-start'], {
       env: { ...process.env, CONCORD_EXECUTABLE: fakeConcord },

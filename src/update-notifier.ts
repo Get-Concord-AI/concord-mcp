@@ -4,11 +4,12 @@ import { dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
+import { updateCommand } from './config/install-mode.js';
+
 const REGISTRY_URL = 'https://registry.npmjs.org/@concord-ai%2fconcord-mcp/latest';
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 400;
 const BACKGROUND_FETCH_TIMEOUT_MS = 5_000;
-export const UPDATE_COMMAND = 'npm install -g @concord-ai/concord-mcp@latest';
 
 const registryResponseSchema = z.object({ version: z.string() });
 const updateCacheSchema = z.object({
@@ -151,7 +152,7 @@ export function updateCacheFile(env: NodeJS.ProcessEnv = process.env): string {
 export function formatUpdateNotice(currentVersion: string, latestVersion: string): string {
   return [
     `Update available: Concord ${currentVersion} → ${latestVersion}`,
-    `Run: ${UPDATE_COMMAND}`,
+    `Run: ${updateCommand()}`,
   ].join('\n');
 }
 
@@ -171,7 +172,7 @@ export async function findAvailableUpdate(
   });
   return latestVersion === undefined
     ? undefined
-    : { currentVersion, latestVersion, command: UPDATE_COMMAND };
+    : { currentVersion, latestVersion, command: updateCommand() };
 }
 
 /** Start a non-blocking check whose result can be read by a later tool call. */
