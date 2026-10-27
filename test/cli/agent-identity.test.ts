@@ -84,8 +84,9 @@ describe('Devin session instructions', () => {
     const message = sessionStartMessage('devin:1234abcd', [], true);
 
     expect(message).toContain(
-      'include `agent_id: "devin:1234abcd"` on every Concord MCP tool call',
+      'include `agent_id: "devin:1234abcd"` on start_work, update_work, transfer_work, and finish_work',
     );
+    expect(message).toContain('leave it off to see the workspace');
     expect(message).not.toContain('without you passing an id');
     expect(resolveActorId(undefined, 'devin:1234abcd')).toBe('devin:1234abcd');
   });

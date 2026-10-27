@@ -97,12 +97,34 @@ function objectEnd(clean: string, open: number, key: string): number {
   throw new Error(`Unclosed ${key} object`);
 }
 
-function objectRange(text: string, key: string): ObjectRange | undefined {
+/**
+ * The object value of `key` directly inside the root object. A key of the same
+ * name nested deeper (say a server named "hooks" under `mcpServers`) is not it.
+ */
+function rootObjectRange(text: string, key: string): ObjectRange | undefined {
   const clean = uncomment(text);
-  const match = new RegExp(`"${key}"\\s*:\\s*\\{`, 'u').exec(clean);
-  if (match === null) return undefined;
-  const open = match.index + match[0].lastIndexOf('{');
-  return { key: match.index, open, close: objectEnd(clean, open, key) };
+  const rootOpen = clean.indexOf('{');
+  if (rootOpen === -1) return undefined;
+  let depth = 0;
+  for (let index = rootOpen; index < clean.length; index += 1) {
+    const char = clean[index];
+    if (char === '{' || char === '[') depth += 1;
+    else if (char === '}' || char === ']') depth -= 1;
+    else if (char === '"') {
+      let end = index + 1;
+      while (end < clean.length && !(clean[end] === '"' && !isEscaped(clean, end))) end += 1;
+      if (depth === 1 && clean.slice(index + 1, end) === key) {
+        const value = /^\s*:\s*\{/u.exec(clean.slice(end + 1));
+        if (value !== null) {
+          const open = end + value[0].length;
+          return { key: index, open, close: objectEnd(clean, open, key) };
+        }
+      }
+      index = end;
+    }
+    if (depth === 0) return undefined;
+  }
+  return undefined;
 }
 
 function parsedObject(text: string): JsonObject {
@@ -177,7 +199,7 @@ export function upsertDevinUserHooksConfig(existing: string | undefined): string
   }
   if (JSON.stringify(nextHooks) === JSON.stringify(hooks)) return source;
 
-  const range = objectRange(source, 'hooks');
+  const range = rootObjectRange(source, 'hooks');
   const next = formatNestedObject(
     nextHooks,
     range === undefined ? [] : commentsIn(source.slice(range.open, range.close + 1)),
@@ -209,7 +231,7 @@ export function removeDevinUserHooksConfig(existing: string): string {
     else nextHooks[event] = kept;
   }
   if (!changed) return existing;
-  const range = objectRange(existing, 'hooks');
+  const range = rootObjectRange(existing, 'hooks');
   if (range === undefined) return existing;
   if (Object.keys(nextHooks).length > 0) {
     const formatted = formatNestedObject(

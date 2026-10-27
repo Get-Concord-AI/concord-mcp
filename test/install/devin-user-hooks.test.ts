@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   removeDevinUserHooksConfig,
@@ -62,5 +63,29 @@ describe('Devin user hooks config', () => {
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'echo user' }] }],
       },
     });
+  });
+
+  it('touches only the root hooks object, never a nested key of the same name', () => {
+    const nested = { mcpServers: { hooks: { command: 'my-hook-server' } } };
+    const installed = upsertDevinUserHooksConfig(JSON.stringify(nested));
+    const parsed = z
+      .object({
+        mcpServers: z.object({ hooks: z.object({ command: z.string() }) }),
+        hooks: z.record(z.string(), z.array(z.unknown())),
+      })
+      .parse(JSON.parse(installed));
+
+    expect(parsed.mcpServers.hooks).toEqual({ command: 'my-hook-server' });
+    expect(Object.keys(parsed.hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'SessionEnd']);
+    expect(JSON.parse(removeDevinUserHooksConfig(installed))).toEqual(nested);
+
+    const both = JSON.stringify({
+      mcpServers: { hooks: { command: 'my-hook-server' } },
+      hooks: { Stop: [] },
+    });
+    const merged = upsertDevinUserHooksConfig(both);
+    expect(merged).toContain('{"command":"my-hook-server"}');
+    expect(merged).toContain('concord hook devin-session-start');
+    expect(JSON.parse(removeDevinUserHooksConfig(merged))).toEqual(JSON.parse(both));
   });
 });

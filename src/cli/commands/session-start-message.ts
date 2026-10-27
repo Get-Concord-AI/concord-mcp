@@ -29,7 +29,7 @@ export function sessionStartMessage(
 ): string {
   return [
     explicitAgentId
-      ? `Concord: this session is agent \`${agentId}\`. Devin's MCP server cannot see the hook session payload, so include \`agent_id: "${agentId}"\` on every Concord MCP tool call. Do not omit or invent an id.`
+      ? `Concord: this session is agent \`${agentId}\`. Devin's MCP server cannot see the hook session payload, so include \`agent_id: "${agentId}"\` on start_work, update_work, transfer_work, and finish_work calls. On inspect_work, \`agent_id\` selects whose inbox to read: leave it off to see the workspace, a task, or a message thread, and pass your own id only to read your inbox. Do not invent an id.`
       : `Concord: this session is agent \`${agentId}\`. Concord resolves that identity from your ` +
         'session on every tool call, so start_work, update_work, finish_work attribute your work ' +
         'and keep your presence live without you passing an id.',
