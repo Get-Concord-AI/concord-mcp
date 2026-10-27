@@ -1,7 +1,16 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { runDoctorCommand } from '../../src/cli/commands/doctor.js';
@@ -14,6 +23,7 @@ import {
 import { REQUIRED_CAPABILITIES } from '../../src/cloud/client.js';
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { openDatabase } from '../../src/db/connection.js';
+import { countTasksReadOnly } from '../../src/db/read-only.js';
 import { createRepositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { fakeCloud, ok } from '../cloud/fake-cloud.js';
@@ -116,16 +126,41 @@ describe('doctor on a linked machine', () => {
     expect(findLeftovers(repo, env)[0]?.description).toContain('unreadable by this version');
   });
 
-  it('moves a store with its SQLite companions', () => {
+  it('moves a store aside with work still in its write-ahead log, readable where it lands', () => {
+    // A store whose last commit is only in its WAL, as a local server started
+    // before login can leave it: copied while a connection holds the commit
+    // uncheckpointed.
+    const live = mkdtempSync(join(tmpdir(), 'concord-live-'));
+    const writer = new Database(join(live, 'concord.db'));
+    writer.pragma('journal_mode = WAL');
+    writer.pragma('wal_autocheckpoint = 0');
+    writer.exec("CREATE TABLE tasks (status TEXT); INSERT INTO tasks VALUES ('active');");
+    mkdirSync(join(repo, '.concord'), { recursive: true });
+    for (const name of ['concord.db', 'concord.db-wal']) {
+      copyFileSync(join(live, name), join(repo, '.concord', name));
+    }
+    writer.close();
+    expect(statSync(join(repo, '.concord', 'concord.db-wal')).size).toBeGreaterThan(0);
+
+    const moved = archiveLeftovers(findLeftovers(repo, env), new Date('2026-10-27T16:00:00.000Z'));
+
+    const archived = join(repo, '.concord', 'concord.db.archived-20261027T160000Z');
+    expect(moved[0]).toBe(archived);
+    expect(countTasksReadOnly(archived, ['active'])).toBe(1);
+    expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(false);
+    expect(existsSync(join(repo, '.concord', 'concord.db-wal'))).toBe(false);
+  });
+
+  it('keeps an unreadable store paired with its companions by SQLite’s naming', () => {
     mkdirSync(join(repo, '.concord'), { recursive: true });
     for (const name of ['concord.db', 'concord.db-wal', 'concord.db-shm']) {
-      writeFileSync(join(repo, '.concord', name), '');
+      writeFileSync(join(repo, '.concord', name), 'not a database');
     }
     const moved = archiveLeftovers(findLeftovers(repo, env), new Date('2026-10-27T16:00:00.000Z'));
     expect(moved.map((path) => path.slice(repo.length))).toEqual([
       '/.concord/concord.db.archived-20261027T160000Z',
-      '/.concord/concord.db-wal.archived-20261027T160000Z',
-      '/.concord/concord.db-shm.archived-20261027T160000Z',
+      '/.concord/concord.db.archived-20261027T160000Z-wal',
+      '/.concord/concord.db.archived-20261027T160000Z-shm',
     ]);
   });
 

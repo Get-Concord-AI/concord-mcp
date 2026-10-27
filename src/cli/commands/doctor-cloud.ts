@@ -4,6 +4,7 @@ import { listCloudAgents, type CloudAgent } from '../../cloud/runtime.js';
 import { obsoleteLinkPath, readCredentials } from '../../cloud/settings.js';
 import { databasePath, resolveRepoRoot } from '../../config/paths.js';
 import { globalDatabasePath } from '../../config/user-config.js';
+import { archiveStore } from '../../db/archive.js';
 import { countTasksReadOnly } from '../../db/read-only.js';
 import { CLAIMED_STATUSES } from '../../domain/overlap.js';
 import type { Fetch } from '../../cloud/client.js';
@@ -13,16 +14,17 @@ import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
 
 /**
  * `concord doctor` on a machine linked to Concord Cloud. It checks the link and
- * the cloud, and never opens a local store: opening one creates or migrates it,
- * which is how a doctor run once left a repository stranded off the cloud.
+ * the cloud, and never creates or migrates a local store: a doctor run that did
+ * once left a repository stranded off the cloud. Stores are only read, or moved
+ * aside when the user asks.
  */
 
 /** Local Concord state a linked machine no longer reads. */
 export interface Leftover {
   readonly path: string;
   readonly description: string;
-  /** SQLite companions that move with the store. */
-  readonly companions: readonly string[];
+  /** A SQLite store, which moves with its write-ahead log; otherwise a plain file. */
+  readonly store: boolean;
 }
 
 /** The leftovers for this folder and this machine, found without opening anything for writing. */
@@ -40,7 +42,7 @@ export function findLeftovers(repoRoot: string, env: NodeJS.ProcessEnv): Leftove
         description: `${store.label}, ${
           open === undefined ? 'unreadable by this version' : `${String(open)} open task(s)`
         }`,
-        companions: [`${store.path}-wal`, `${store.path}-shm`],
+        store: true,
       };
     });
   const link = obsoleteLinkPath(repoRoot);
@@ -48,15 +50,16 @@ export function findLeftovers(repoRoot: string, env: NodeJS.ProcessEnv): Leftove
     leftovers.push({
       path: link,
       description: 'a repository link from before Concord 0.17, which nothing reads',
-      companions: [],
+      store: false,
     });
   }
   return leftovers;
 }
 
 /**
- * Moves leftovers aside with an `.archived-<time>` suffix. Nothing is deleted:
- * a store's open work stays readable for whoever wants it back.
+ * Moves leftovers aside with an `.archived-<time>` suffix, only when the user
+ * asks. Nothing is deleted: a store's open work, including any still in its
+ * write-ahead log, stays readable for whoever wants it back.
  */
 export function archiveLeftovers(leftovers: readonly Leftover[], now: Date = new Date()): string[] {
   const suffix = `.archived-${now
@@ -65,10 +68,12 @@ export function archiveLeftovers(leftovers: readonly Leftover[], now: Date = new
     .replace(/\.\d+Z$/u, 'Z')}`;
   const moved: string[] = [];
   for (const leftover of leftovers) {
-    for (const path of [leftover.path, ...leftover.companions]) {
-      if (!existsSync(path)) continue;
-      renameSync(path, `${path}${suffix}`);
-      moved.push(`${path}${suffix}`);
+    const archived = `${leftover.path}${suffix}`;
+    if (leftover.store) {
+      moved.push(...archiveStore(leftover.path, archived));
+    } else if (existsSync(leftover.path)) {
+      renameSync(leftover.path, archived);
+      moved.push(archived);
     }
   }
   return moved;
