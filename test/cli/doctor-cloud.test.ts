@@ -23,6 +23,7 @@ import {
 } from '../../src/cli/commands/doctor-cloud.js';
 import { REQUIRED_CAPABILITIES } from '../../src/cloud/client.js';
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
+import { archiveStore } from '../../src/db/archive.js';
 import { openDatabase } from '../../src/db/connection.js';
 import { countTasksReadOnly } from '../../src/db/read-only.js';
 import { createRepositories } from '../../src/db/index.js';
@@ -176,6 +177,31 @@ describe('doctor on a linked machine', () => {
     // Once it is closed, the same request moves it.
     expect((await report(cloud().fetch, true)).output).toContain('moved aside ->');
     expect(existsSync(store)).toBe(false);
+  });
+
+  it('puts a store back when a process opens it while it is being moved', () => {
+    const store = join(repo, '.concord', 'concord.db');
+    mkdirSync(join(repo, '.concord'), { recursive: true });
+    const seed = new Database(store);
+    seed.pragma('journal_mode = WAL');
+    seed.exec("CREATE TABLE tasks (status TEXT); INSERT INTO tasks VALUES ('active');");
+    seed.close();
+    const archived = `${store}.archived-20261027T160000Z`;
+
+    // A process opens the store just as it moves: it now holds the archive.
+    let late: Database.Database | undefined;
+    const result = archiveStore(store, archived, () => {
+      late = new Database(archived);
+      late.prepare('SELECT COUNT(*) FROM tasks').get();
+    });
+
+    expect(result).toEqual({ kind: 'in-use' });
+    // Back where it was, so that process's later writes and every new open meet.
+    expect(existsSync(store)).toBe(true);
+    expect(existsSync(archived)).toBe(false);
+    late?.exec("INSERT INTO tasks VALUES ('active');");
+    late?.close();
+    expect(countTasksReadOnly(store, ['active'])).toBe(2);
   });
 
   it('puts back what moved when one of the files cannot be moved', () => {

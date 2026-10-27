@@ -13,23 +13,43 @@ export type ArchiveResult =
  * Moves a SQLite store to `archivedPath` so it stays readable there, committed
  * work included. Nothing is migrated: the schema stays whatever wrote the store.
  *
- * First, under SQLite's exclusive lock, the write-ahead log is folded into the
- * database. Every WAL-mode connection holds a shared lock, so the lock is
- * granted only when no other process has the store open; a store in use is
- * left exactly as it is. The lock is released before the files move, because
- * Windows cannot rename an open file. A process that opens the store in that
- * moment loses nothing: elsewhere its writes follow the renamed file, and on
- * Windows the rename fails and the store stays in place.
+ * A store is moved only when no other process has it open, checked with
+ * SQLite's exclusive lock: every WAL-mode connection holds a shared lock, so
+ * the lock is granted only to a sole user. Holding it, the write-ahead log is
+ * folded into the database. The lock is released for the move itself, because
+ * Windows cannot rename an open file, and taken again on the archive after it:
  *
- * Every file moves under the names SQLite pairs (`archived-wal`, never
- * `-wal.archived`), or none does. A file SQLite cannot read is moved as it is,
- * and never opened for writing: closing a writable connection to such a file
- * deletes the companions beside it.
+ * - a process that opened the store in between holds the archive now, so the
+ *   check fails and the files go back under the names that process is using,
+ *   leaving its work in one place;
+ * - on Windows the rename itself fails while the store is open.
+ *
+ * Either way the store is reported in use and left where it was. Every file
+ * moves under the names SQLite pairs (`archived-wal`, never `-wal.archived`),
+ * or none does. A file SQLite cannot read is moved as it is, and never opened
+ * for writing: closing a writable connection to such a file deletes the
+ * companions beside it.
+ *
+ * `afterMove` runs between the move and the check; tests use it to stand in for
+ * a process opening the store at that moment.
  */
-export function archiveStore(path: string, archivedPath: string): ArchiveResult {
-  if (isSqliteDatabase(path) && !foldWriteAheadLog(path)) return { kind: 'in-use' };
+export function archiveStore(
+  path: string,
+  archivedPath: string,
+  afterMove: () => void = () => undefined,
+): ArchiveResult {
+  const database = isSqliteDatabase(path);
+  if (database && !foldWriteAheadLog(path)) return { kind: 'in-use' };
   const paths = moveStoreFiles(path, archivedPath);
-  return paths === undefined ? { kind: 'in-use' } : { kind: 'moved', paths };
+  if (paths === undefined) return { kind: 'in-use' };
+  afterMove();
+  if (database && !foldWriteAheadLog(archivedPath)) {
+    if (moveStoreFiles(archivedPath, path) === undefined) {
+      throw new Error(`Could not put ${archivedPath} back at ${path}; it is open elsewhere.`);
+    }
+    return { kind: 'in-use' };
+  }
+  return { kind: 'moved', paths };
 }
 
 /** Folds the write-ahead log into the database; false when another process has it open. */
