@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-27
+
 ### Fixed
 
 - `concord doctor` on a linked machine no longer leaves `-shm` and `-wal` files
