@@ -42,7 +42,7 @@ async function main(): Promise<void> {
 
   const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, process.env, {
     // Started unlinked, this server outlives a later `cloud login`; from then
-    // on it opens no further local store (see `archiveStore`).
+    // on it opens no further local store, which no cloud agent could reach.
     refuseOpen: () =>
       linkedMachine(process.env) === undefined ? undefined : LINKED_MACHINE_MESSAGE,
   });

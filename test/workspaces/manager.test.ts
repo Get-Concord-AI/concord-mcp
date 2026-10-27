@@ -26,7 +26,7 @@ describe('WorkspaceManager', () => {
     linked = true;
     expect(() => manager.join(second)).toThrow(/works through Concord Cloud/u);
     expect(existsSync(join(second, '.concord'))).toBe(false);
-    // A store it already holds stays usable: `archiveStore` sees it is open.
+    // A store it already holds stays usable.
     expect(manager.join(first).repoRoot).toBe(first);
   });
 

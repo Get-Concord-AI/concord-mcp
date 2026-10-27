@@ -1,31 +1,26 @@
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   realpathSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { runDoctorCommand } from '../../src/cli/commands/doctor.js';
 import {
-  archiveLeftovers,
   buildCloudDoctorReport,
   duplicateAgentKeys,
   findLeftovers,
+  moveAsideCommands,
 } from '../../src/cli/commands/doctor-cloud.js';
 import { REQUIRED_CAPABILITIES } from '../../src/cloud/client.js';
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
-import { archiveStore } from '../../src/db/archive.js';
 import { openDatabase } from '../../src/db/connection.js';
-import { countTasksReadOnly } from '../../src/db/read-only.js';
 import { createRepositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { fakeCloud, ok } from '../cloud/fake-cloud.js';
@@ -67,11 +62,10 @@ describe('doctor on a linked machine', () => {
       ['GET /v1/agents', () => ok({ agents })],
     ]);
 
-  const report = (fetch = cloud().fetch, cleanLocal = false) =>
+  const report = (fetch = cloud().fetch) =>
     buildCloudDoctorReport(repo, env, {
       fetch,
       originRemote: () => 'git@github.com:acme/app.git',
-      cleanLocal: () => Promise.resolve(cleanLocal),
     });
 
   it('checks the cloud and never creates a local store', async () => {
@@ -96,145 +90,42 @@ describe('doctor on a linked machine', () => {
     expect(result.healthy).toBe(false);
   });
 
-  it('lists leftover local state with its open work, and moves it aside only when asked', async () => {
+  it('lists leftover local state with its open work, and the commands to move it aside', async () => {
     // A store from before the machine was linked, holding one open task.
     const store = join(repo, '.concord', 'concord.db');
     const repos = createRepositories(openDatabase(store));
     handleClaimWork(repos, { task_id: 'OLD-1', title: 'Old work', owner: 'me', agent: 'a' });
     repos.db.close();
+    writeFileSync(`${store}-wal`, '');
     writeFileSync(join(repo, '.concord', 'cloud.json'), '{ "local": true }\n');
 
     const listed = await report();
-    expect(listed.output).toContain(`${store}: this repository's local store, 1 open task(s)`);
+    const resolved = realpathSync(store);
+    expect(listed.output).toContain(`${resolved}: this repository's local store, 1 open task(s)`);
     expect(listed.output).toContain('a repository link from before Concord 0.17');
-    expect(listed.output).toContain('`concord doctor --clean-local` moves these aside');
-    // Leftovers are information, not a failure.
+    // SQLite's pairing is kept, so a log holding committed work stays with its database.
+    expect(listed.output).toContain(`mv '${resolved}' '${resolved}.archived'`);
+    expect(listed.output).toContain(`mv '${resolved}-wal' '${resolved}.archived-wal'`);
+    // Leftovers are information, not a failure, and doctor moves nothing itself.
     expect(listed.healthy).toBe(true);
     expect(existsSync(store)).toBe(true);
+    expect(readdirSync(join(repo, '.concord')).some((name) => name.includes('archived'))).toBe(
+      false,
+    );
+  });
 
-    const cleaned = await report(cloud().fetch, true);
-    expect(cleaned.output).toContain('moved aside ->');
-    expect(existsSync(store)).toBe(false);
-    // Moved, never deleted.
+  it('quotes paths in the commands it suggests', () => {
     expect(
-      readdirSync(join(repo, '.concord')).some((name) => name.startsWith('concord.db.archived-')),
-    ).toBe(true);
-    expect(findLeftovers(repo, env)).toEqual([]);
+      moveAsideCommands([
+        { path: "/tmp/it's/concord.db", description: '', files: ["/tmp/it's/concord.db"] },
+      ]),
+    ).toEqual([`mv '/tmp/it'\\''s/concord.db' '/tmp/it'\\''s/concord.db.archived'`]);
   });
 
   it('reports a store it cannot read rather than failing', () => {
     mkdirSync(join(repo, '.concord'), { recursive: true });
     writeFileSync(join(repo, '.concord', 'concord.db'), 'not a database');
     expect(findLeftovers(repo, env)[0]?.description).toContain('unreadable by this version');
-  });
-
-  it('moves a store aside with work still in its write-ahead log, readable where it lands', () => {
-    // A store whose last commit is only in its WAL, as a local server started
-    // before login can leave it: copied while a connection holds the commit
-    // uncheckpointed.
-    const live = mkdtempSync(join(tmpdir(), 'concord-live-'));
-    const writer = new Database(join(live, 'concord.db'));
-    writer.pragma('journal_mode = WAL');
-    writer.pragma('wal_autocheckpoint = 0');
-    writer.exec("CREATE TABLE tasks (status TEXT); INSERT INTO tasks VALUES ('active');");
-    mkdirSync(join(repo, '.concord'), { recursive: true });
-    for (const name of ['concord.db', 'concord.db-wal']) {
-      copyFileSync(join(live, name), join(repo, '.concord', name));
-    }
-    writer.close();
-    expect(statSync(join(repo, '.concord', 'concord.db-wal')).size).toBeGreaterThan(0);
-
-    const { moved } = archiveLeftovers(
-      findLeftovers(repo, env),
-      new Date('2026-10-27T16:00:00.000Z'),
-    );
-
-    const archived = join(repo, '.concord', 'concord.db.archived-20261027T160000Z');
-    expect(moved[0]).toBe(archived);
-    expect(countTasksReadOnly(archived, ['active'])).toBe(1);
-    expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(false);
-    expect(existsSync(join(repo, '.concord', 'concord.db-wal'))).toBe(false);
-  });
-
-  it('leaves a store a running process has open exactly as it is', async () => {
-    const store = join(repo, '.concord', 'concord.db');
-    mkdirSync(join(repo, '.concord'), { recursive: true });
-    const live = new Database(store);
-    live.pragma('journal_mode = WAL');
-    live.exec("CREATE TABLE tasks (status TEXT); INSERT INTO tasks VALUES ('active');");
-    try {
-      const result = await report(cloud().fetch, true);
-      expect(result.output).toContain(
-        `left in place: ${realpathSync(store)} is open in a running Concord process`,
-      );
-      expect(existsSync(store)).toBe(true);
-      expect(readdirSync(join(repo, '.concord')).some((name) => name.includes('archived'))).toBe(
-        false,
-      );
-    } finally {
-      live.close();
-    }
-    // Once it is closed, the same request moves it.
-    expect((await report(cloud().fetch, true)).output).toContain('moved aside ->');
-    expect(existsSync(store)).toBe(false);
-  });
-
-  it('puts a store back when a process opens it while it is being moved', () => {
-    const store = join(repo, '.concord', 'concord.db');
-    mkdirSync(join(repo, '.concord'), { recursive: true });
-    const seed = new Database(store);
-    seed.pragma('journal_mode = WAL');
-    seed.exec("CREATE TABLE tasks (status TEXT); INSERT INTO tasks VALUES ('active');");
-    seed.close();
-    const archived = `${store}.archived-20261027T160000Z`;
-
-    // A process opens the store just as it moves: it now holds the archive.
-    let late: Database.Database | undefined;
-    const result = archiveStore(store, archived, () => {
-      late = new Database(archived);
-      late.prepare('SELECT COUNT(*) FROM tasks').get();
-    });
-
-    expect(result).toEqual({ kind: 'in-use' });
-    // Back where it was, so that process's later writes and every new open meet.
-    expect(existsSync(store)).toBe(true);
-    expect(existsSync(archived)).toBe(false);
-    late?.exec("INSERT INTO tasks VALUES ('active');");
-    late?.close();
-    expect(countTasksReadOnly(store, ['active'])).toBe(2);
-  });
-
-  it('puts back what moved when one of the files cannot be moved', () => {
-    mkdirSync(join(repo, '.concord'), { recursive: true });
-    for (const name of ['concord.db', 'concord.db-wal']) {
-      writeFileSync(join(repo, '.concord', name), 'not a database');
-    }
-    // Something already in the way of the log's archived name.
-    const blocker = join(repo, '.concord', 'concord.db.archived-20261027T160000Z-wal');
-    mkdirSync(join(blocker, 'occupied'), { recursive: true });
-
-    expect(() =>
-      archiveLeftovers(findLeftovers(repo, env), new Date('2026-10-27T16:00:00.000Z')),
-    ).toThrow();
-    expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(true);
-    expect(existsSync(join(repo, '.concord', 'concord.db-wal'))).toBe(true);
-    expect(existsSync(join(repo, '.concord', 'concord.db.archived-20261027T160000Z'))).toBe(false);
-  });
-
-  it('keeps an unreadable store paired with its companions by SQLite’s naming', () => {
-    mkdirSync(join(repo, '.concord'), { recursive: true });
-    for (const name of ['concord.db', 'concord.db-wal', 'concord.db-shm']) {
-      writeFileSync(join(repo, '.concord', name), 'not a database');
-    }
-    const { moved } = archiveLeftovers(
-      findLeftovers(repo, env),
-      new Date('2026-10-27T16:00:00.000Z'),
-    );
-    expect(moved.map((path) => path.slice(repo.length))).toEqual([
-      '/.concord/concord.db.archived-20261027T160000Z',
-      '/.concord/concord.db.archived-20261027T160000Z-wal',
-      '/.concord/concord.db.archived-20261027T160000Z-shm',
-    ]);
   });
 
   it('is what `concord doctor` runs on a linked machine', async () => {

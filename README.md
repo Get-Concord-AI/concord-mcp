@@ -124,8 +124,8 @@ repository is `general`.
 `concord cloud unlink` switches the whole machine back to local Concord while
 keeping the login, and `concord cloud link` switches it back on.
 `concord cloud status` says which applies, and `concord doctor` checks the link,
-lists local state the machine no longer uses, and moves it aside with
-`--clean-local` (nothing is deleted).
+and lists local state the machine no longer uses, with the commands to move it
+aside once no session started before the link is running (nothing is deleted).
 
 </details>
 

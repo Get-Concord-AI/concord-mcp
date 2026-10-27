@@ -1,10 +1,9 @@
-import { existsSync, renameSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 
 import { listCloudAgents, type CloudAgent } from '../../cloud/runtime.js';
 import { obsoleteLinkPath, readCredentials } from '../../cloud/settings.js';
 import { databasePath, resolveRepoRoot } from '../../config/paths.js';
 import { globalDatabasePath } from '../../config/user-config.js';
-import { archiveStore } from '../../db/archive.js';
 import { countTasksReadOnly } from '../../db/read-only.js';
 import { CLAIMED_STATUSES } from '../../domain/overlap.js';
 import type { Fetch } from '../../cloud/client.js';
@@ -14,18 +13,25 @@ import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
 
 /**
  * `concord doctor` on a machine linked to Concord Cloud. It checks the link and
- * the cloud, and never creates or migrates a local store: a doctor run that did
- * once left a repository stranded off the cloud. Stores are only read, or moved
- * aside when the user asks.
+ * the cloud, and never creates, migrates or moves a local store: a doctor run
+ * that created one once left a repository stranded off the cloud.
+ *
+ * Leftover stores are reported, with the commands to move them aside, and left
+ * for the user to move. Nothing can stop another process opening a file, so a
+ * store moved by code could still be split by a session that opened it first;
+ * only the person running the machine knows when no such session remains.
  */
 
 /** Local Concord state a linked machine no longer reads. */
 export interface Leftover {
   readonly path: string;
   readonly description: string;
-  /** A SQLite store, which moves with its write-ahead log; otherwise a plain file. */
-  readonly store: boolean;
+  /** The files to move together: a store's write-ahead log and shared memory go with it. */
+  readonly files: readonly string[];
 }
+
+/** SQLite pairs a store with these by appending them to its name. */
+const COMPANION_SUFFIXES = ['-wal', '-shm'] as const;
 
 /** The leftovers for this folder and this machine, found without opening anything for writing. */
 export function findLeftovers(repoRoot: string, env: NodeJS.ProcessEnv): Leftover[] {
@@ -42,7 +48,9 @@ export function findLeftovers(repoRoot: string, env: NodeJS.ProcessEnv): Leftove
         description: `${store.label}, ${
           open === undefined ? 'unreadable by this version' : `${String(open)} open task(s)`
         }`,
-        store: true,
+        files: ['', ...COMPANION_SUFFIXES]
+          .map((suffix) => `${store.path}${suffix}`)
+          .filter((path) => existsSync(path)),
       };
     });
   const link = obsoleteLinkPath(repoRoot);
@@ -50,46 +58,29 @@ export function findLeftovers(repoRoot: string, env: NodeJS.ProcessEnv): Leftove
     leftovers.push({
       path: link,
       description: 'a repository link from before Concord 0.17, which nothing reads',
-      store: false,
+      files: [link],
     });
   }
   return leftovers;
 }
 
-/** What moving leftovers aside did. */
-export interface ArchiveReport {
-  readonly moved: string[];
-  /** Stores a running process still has open, left exactly as they were. */
-  readonly inUse: string[];
+/** A path quoted for a POSIX shell. */
+function shellQuote(path: string): string {
+  return `'${path.replace(/'/gu, `'\\''`)}'`;
 }
 
 /**
- * Moves leftovers aside with an `.archived-<time>` suffix, only when the user
- * asks. Nothing is deleted: a store's open work, including any still in its
- * write-ahead log, stays readable for whoever wants it back, and a store some
- * process still has open is not touched.
+ * The commands that move leftovers aside, for the user to run. A store keeps
+ * SQLite's pairing (`concord.db.archived-wal`, never `concord.db-wal.archived`),
+ * so a log still holding committed work stays with its database.
  */
-export function archiveLeftovers(
-  leftovers: readonly Leftover[],
-  now: Date = new Date(),
-): ArchiveReport {
-  const suffix = `.archived-${now
-    .toISOString()
-    .replace(/[-:]/gu, '')
-    .replace(/\.\d+Z$/u, 'Z')}`;
-  const report: ArchiveReport = { moved: [], inUse: [] };
-  for (const leftover of leftovers) {
-    const archived = `${leftover.path}${suffix}`;
-    if (leftover.store) {
-      const result = archiveStore(leftover.path, archived);
-      if (result.kind === 'moved') report.moved.push(...result.paths);
-      else report.inUse.push(leftover.path);
-    } else if (existsSync(leftover.path)) {
-      renameSync(leftover.path, archived);
-      report.moved.push(archived);
-    }
-  }
-  return report;
+export function moveAsideCommands(leftovers: readonly Leftover[]): string[] {
+  return leftovers.flatMap((leftover) =>
+    leftover.files.map((file) => {
+      const suffix = file.slice(leftover.path.length);
+      return `mv ${shellQuote(file)} ${shellQuote(`${leftover.path}.archived${suffix}`)}`;
+    }),
+  );
 }
 
 /** Agent ids that name more than one agent: messages to them cannot be delivered. */
@@ -133,8 +124,6 @@ async function agentLines(
 export interface CloudDoctorDeps {
   readonly fetch: Fetch;
   readonly originRemote: OriginRemote;
-  /** Whether to move leftovers aside; asked only when there are some. */
-  readonly cleanLocal: (leftovers: readonly Leftover[]) => Promise<boolean>;
 }
 
 /** The cloud half of the doctor report, and whether everything it checks is healthy. */
@@ -144,7 +133,6 @@ export async function buildCloudDoctorReport(
   deps: CloudDoctorDeps = {
     fetch,
     originRemote: gitOriginRemote,
-    cleanLocal: () => Promise.resolve(false),
   },
 ): Promise<{ readonly output: string; readonly healthy: boolean }> {
   const repoRoot = resolveRepoRoot(cwd, env);
@@ -175,18 +163,11 @@ export async function buildCloudDoctorReport(
     lines.push('  none');
   } else {
     for (const leftover of leftovers) lines.push(`  ${leftover.path}: ${leftover.description}`);
-    if (await deps.cleanLocal(leftovers)) {
-      const archived = archiveLeftovers(leftovers);
-      for (const path of archived.moved) lines.push(`  moved aside -> ${path}`);
-      for (const path of archived.inUse) {
-        lines.push(
-          `  left in place: ${path} is open in a running Concord process; stop it, then run ` +
-            '`concord doctor --clean-local` again',
-        );
-      }
-    } else {
-      lines.push('  `concord doctor --clean-local` moves these aside; nothing is deleted.');
-    }
+    lines.push(
+      '  Nothing reads these while this machine is linked. Once every Concord session ' +
+        'started before the link has ended, you can move them aside (nothing is deleted):',
+      ...moveAsideCommands(leftovers).map((command) => `    ${command}`),
+    );
   }
 
   return { output: lines.join('\n'), healthy: api.healthy && agents.healthy };

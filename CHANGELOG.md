@@ -37,12 +37,14 @@ login` links the machine; `concord cloud unlink` switches the whole machine to
     creates no local state;
   - `concord doctor` checks the login, the API, this folder's project and the
     organization's agent ids (an id shared by several agents cannot receive
-    messages), and lists local state the machine no longer uses.
-    `--clean-local` moves that state aside; nothing is deleted;
+    messages), and lists local state the machine no longer uses with the
+    commands to move it aside. Doctor never moves or deletes it itself;
   - commands that only read a local store (`handoff`, `review-packet`, `watch`,
     `dashboard`) say the machine works through the cloud instead of creating a
     store; `concord check` exits successfully with a note, so an edit hook never
-    denies every edit.
+    denies every edit;
+  - an MCP server started before the machine was linked opens no further local
+    store; restart sessions after linking so they work through the cloud.
 - The SessionStart line now says to use this machine's `concord` MCP server for
   Concord calls, never a chat app's Concord connector (claude.ai's, in Claude
   Code). Given a session's id, that connector registered a second agent under

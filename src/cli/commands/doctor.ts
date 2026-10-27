@@ -27,7 +27,7 @@ import { linkedMachine } from '../../cloud/target.js';
 import { resolveRepoRoot } from '../../config/paths.js';
 import { gitOriginRemote } from '../../workspaces/store.js';
 import { openContext, type CliContext } from '../context.js';
-import { buildCloudDoctorReport, type Leftover } from './doctor-cloud.js';
+import { buildCloudDoctorReport } from './doctor-cloud.js';
 import { askQuestion } from './setup.js';
 
 const instructionTargets = [
@@ -111,10 +111,6 @@ export function buildDoctorReport(
 export interface DoctorOptions {
   /** Re-point broken adapter links without asking. */
   fix?: boolean | undefined;
-  /** On a linked machine, move unused local state aside without asking. */
-  cleanLocal?: boolean | undefined;
-  /** Ask before moving unused local state aside; undefined when there is no terminal to ask on. */
-  confirmCleanup?: ((leftovers: readonly Leftover[]) => Promise<boolean>) | undefined;
   /** Ask before repairing; undefined when there is no terminal to ask on. */
   confirm?: ((repairs: readonly LinkRepair[]) => Promise<boolean>) | undefined;
   moduleUrl?: string | undefined;
@@ -161,10 +157,6 @@ export async function runDoctorCommand(
     const cloud = await buildCloudDoctorReport(cwd, env, {
       fetch,
       originRemote: gitOriginRemote,
-      cleanLocal: (leftovers) =>
-        options.cleanLocal === true
-          ? Promise.resolve(true)
-          : (options.confirmCleanup?.(leftovers) ?? Promise.resolve(false)),
     });
     return {
       output: [...preface, cloud.output, '', renderAdapterReport(adapters)].join('\n'),
@@ -209,16 +201,6 @@ function renderRepairs(repairs: readonly LinkRepair[]): string {
 }
 
 /** Yes by default; no answer leaves the links as they are. */
-/** No by default: moving state aside is the user's call. */
-async function confirmCleanup(leftovers: readonly Leftover[]): Promise<boolean> {
-  const lines = leftovers.map((leftover) => `  ${leftover.path}`);
-  process.stdout.write(
-    `This machine is linked to Concord Cloud, so this local state is unused:\n${lines.join('\n')}\n`,
-  );
-  const answer = await askQuestion('Move it aside (nothing is deleted)? [y/N] ');
-  return answer !== undefined && /^(?:y|yes)$/iu.test(answer.trim());
-}
-
 async function confirmRepair(repairs: readonly LinkRepair[]): Promise<boolean> {
   const lines = repairs.map(
     (repair) => `  ${repair.harness}: ${repair.target} -> ${repair.from ?? '(none)'}`,
@@ -233,17 +215,11 @@ export function registerDoctorCommand(program: Command): void {
     .command('doctor')
     .description('Check the workspace, or the Concord Cloud link, and report tool adoption')
     .option('--fix', 'Re-point broken harness adapter links at this installed package')
-    .option(
-      '--clean-local',
-      'On a machine linked to Concord Cloud, move unused local Concord state aside',
-    )
     .action(async (options) => {
       const interactive = process.stdin.isTTY && process.stdout.isTTY;
       const result = await runDoctorCommand(process.cwd(), process.env, {
         fix: options.fix,
-        cleanLocal: options.cleanLocal,
         confirm: interactive ? confirmRepair : undefined,
-        confirmCleanup: interactive ? confirmCleanup : undefined,
       });
       process.stdout.write(`${result.output}\n`);
       if (!result.healthy) process.exitCode = 1;
