@@ -114,6 +114,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'managed-controller',
+      'harness-monitor',
     ]);
   });
 

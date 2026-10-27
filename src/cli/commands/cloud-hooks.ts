@@ -23,7 +23,11 @@ import { renderInboxBody } from '../../domain/pull-inbox.js';
 import { sessionStartIdentity } from '../agent-identity.js';
 import { drainFromCloud, registerInCloud, watching } from './cloud-inbox.js';
 import type { HookDecision, SessionStartResult } from './hook.js';
-import { antigravitySessionStartMessage, sessionStartMessage } from './session-start-message.js';
+import {
+  antigravitySessionStartMessage,
+  sessionStartMessage,
+  type RosterLine,
+} from './session-start-message.js';
 
 /**
  * The Claude Code hooks in a repository linked to Concord Cloud: the edit
@@ -117,6 +121,23 @@ export async function decideCloudPreToolUse(
   };
 }
 
+/** Everyone else registered in the organization, as a session-start roster. */
+export async function cloudRoster(
+  runtime: CloudRuntime,
+  selfAgentKey: string,
+): Promise<RosterLine[]> {
+  const now = Date.now();
+  return (await listCloudAgents(runtime))
+    .filter((agent) => agent.agentKey !== selfAgentKey)
+    .map((agent) => ({
+      agentId: agent.agentKey,
+      liveness: deriveLiveness(agent.lastSeenAt, now),
+      status: agent.status,
+      summary: agent.summary,
+    }))
+    .filter((peer) => peer.liveness !== 'archived');
+}
+
 const sessionStartPayloadSchema = z
   .object({ session_id: z.string().optional(), cwd: z.string().optional() })
   .loose();
@@ -139,16 +160,7 @@ export async function handleCloudSessionStart(
     return { agentId: undefined, message: `Concord: ${UNRESOLVED_IDENTITY_MESSAGE}` };
   }
   await registerInCloud(runtime, identity.agentId, identity.kind, payload.cwd ?? process.cwd());
-  const now = Date.now();
-  const others = (await listCloudAgents(runtime))
-    .filter((agent) => agent.agentKey !== identity.agentId)
-    .map((agent) => ({
-      agentId: agent.agentKey,
-      liveness: deriveLiveness(agent.lastSeenAt, now),
-      status: agent.status,
-      summary: agent.summary,
-    }))
-    .filter((peer) => peer.liveness !== 'archived');
+  const others = await cloudRoster(runtime, identity.agentId);
   return { agentId: identity.agentId, message: sessionStartMessage(identity.agentId, others) };
 }
 
@@ -173,16 +185,7 @@ export async function handleCloudAntigravitySessionStart(
   const agentId = agentIdForSession('antigravity', sessionId);
   try {
     await registerInCloud(runtime, agentId, 'antigravity', cwd);
-    const now = Date.now();
-    const others = (await listCloudAgents(runtime))
-      .filter((agent) => agent.agentKey !== agentId)
-      .map((agent) => ({
-        agentId: agent.agentKey,
-        liveness: deriveLiveness(agent.lastSeenAt, now),
-        status: agent.status,
-        summary: agent.summary,
-      }))
-      .filter((peer) => peer.liveness !== 'archived');
+    const others = await cloudRoster(runtime, agentId);
     const msg = antigravitySessionStartMessage(agentId, others);
     return {
       agentId,

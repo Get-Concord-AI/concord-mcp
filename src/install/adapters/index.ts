@@ -17,6 +17,7 @@ import {
   installCopilotMcpConfig,
   uninstallCopilotConfig,
 } from '../copilot-config.js';
+import { devinMcpInstalled } from '../devin-config.js';
 import {
   gooseConfigInstalled,
   installGooseMcpConfig,
@@ -651,6 +652,31 @@ export function statusGlobalAdapters(
   );
 }
 
+/** Devin CLI is configured per project by `concord setup`; there is no global adapter yet. */
+function statusDevin(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterReport {
+  const config = HARNESS_CONFIGS.devin;
+  const base = { harness: config.name, monitor: config.monitor.kind };
+  if (executablePath(config.executable, env) === undefined) {
+    return {
+      ...base,
+      detected: false,
+      status: 'not_detected',
+      capabilities: [],
+      detail: 'Devin CLI was not found on PATH.',
+    };
+  }
+  const installed = repoRoot !== undefined && devinMcpInstalled(env, repoRoot);
+  return {
+    ...base,
+    detected: true,
+    status: installed ? 'installed' : 'action_required',
+    capabilities: installed ? [...config.installedCapabilities] : [],
+    detail: installed
+      ? config.installedDetail
+      : 'Run `concord setup` in this project to register Concord with Devin CLI.',
+  };
+}
+
 /** One harness's adapter health, without probing the others. */
 export function statusAdapter(
   harness: HarnessName,
@@ -677,6 +703,8 @@ export function statusAdapter(
       return statusAntigravity(env, repoRoot);
     case 'copilot-cli':
       return statusCopilot(env);
+    case 'devin':
+      return statusDevin(env, repoRoot);
   }
 }
 

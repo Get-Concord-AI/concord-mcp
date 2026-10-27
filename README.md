@@ -123,6 +123,7 @@ removes exactly what it added.
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
+| Devin CLI                          | Project-level setup via `concord setup`            |
 | Any other MCP-capable coding agent | [Manual setup](./docs/other-mcp-clients.md)        |
 
 > There is no universal `/concord` slash command — commands are client-specific.
