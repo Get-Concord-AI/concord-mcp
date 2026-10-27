@@ -1,5 +1,6 @@
 import { Command } from '@commander-js/extra-typings';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   codexAppServerConfigArgs,
@@ -143,13 +144,10 @@ describe('concord adapters codex CLI (#269)', () => {
 
     let received: string[] | undefined;
     codex.action((...actionArgs: unknown[]) => {
-      const [first] = actionArgs;
-      if (
-        Array.isArray(first) &&
-        first.every((entry): entry is string => typeof entry === 'string')
-      ) {
-        received = first;
-      }
+      received = z
+        .tuple([z.array(z.string())])
+        .rest(z.unknown())
+        .parse(actionArgs)[0];
     });
 
     await program.parseAsync(
