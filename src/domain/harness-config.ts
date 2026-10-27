@@ -15,6 +15,7 @@ export const harnessNames = [
   'goose',
   'antigravity',
   'copilot-cli',
+  'devin',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -236,6 +237,23 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Sessions started with `concord adapters copilot` are steered and woken through the embedded server; plain `copilot` sessions get hook delivery after tool calls and at turn end.',
     unsupportedDetail: 'Copilot CLI does not meet the verified hooks baseline (1.0.0).',
+  },
+  devin: {
+    name: 'devin',
+    executable: 'devin',
+    minimumVersion: [3000, 3, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'steer', 'busy'],
+    installedDetail: 'Devin CLI hooks register sessions and inject inbox messages on user prompts.',
+    unsupportedDetail: 'Devin CLI must be v3000.3 or newer for dedicated MCP config files.',
   },
 };
 

@@ -303,6 +303,56 @@ function readStdin(): string {
   }
 }
 
+function runDevinHook(event: string): void {
+  const raw = readStdin();
+  const identity = resolveIdentity(process.env, { kind: 'devin', hookPayload: raw });
+  if (identity === undefined) {
+    process.stdout.write('{}\n');
+    return;
+  }
+  const repoRoot = process.env['DEVIN_PROJECT_DIR'] ?? process.cwd();
+  const repos = openContext(repoRoot).repos;
+  if (event === 'devin-session-start') {
+    ensureAgentRegistered(repos, identity, repoRoot);
+    registerPullEndpoint(repos, identity.agentId, 'devin');
+    const message = sessionStartMessage(
+      identity.agentId,
+      buildRoster(repos.agents.list(), Date.now()),
+      true,
+    );
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: message },
+      }) + '\n',
+    );
+    return;
+  }
+  if (event === 'devin-user-prompt-submit') {
+    const messages = drainInbox(repos, identity.agentId, 'devin');
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: renderInboxBody(messages),
+        },
+      }) + '\n',
+    );
+    return;
+  }
+  if (event === 'devin-session-end') {
+    endDevinSession(repos, identity.agentId);
+    process.stdout.write('{}\n');
+    return;
+  }
+  process.stderr.write(`Unknown Devin hook event: ${event}\n`);
+  process.exitCode = 1;
+}
+
+export function endDevinSession(repos: Repositories, agentId: string): void {
+  const endpoint = repos.agentEndpoints.getByAgent(agentId);
+  if (endpoint !== undefined) repos.agentEndpoints.disconnect(endpoint.endpointId);
+}
+
 export function registerHookCommand(program: Command, telemetry?: TelemetryRecorder): void {
   program
     .command('hook <event>')
@@ -312,6 +362,10 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     )
     .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {
+      if (event.startsWith('devin-')) {
+        runDevinHook(event);
+        return;
+      }
       if (options.client === 'copilot-cli') {
         await runCopilotClientHook(event);
         return;
