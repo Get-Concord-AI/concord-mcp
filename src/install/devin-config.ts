@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { userHome } from '../config/paths.js';
 
 const SERVER = 'concord';
+const KIND_VAR = 'CONCORD_AGENT_KIND';
+const KIND = 'devin';
 type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 interface JsonObject {
   [key: string]: JsonValue;
@@ -117,6 +119,25 @@ function removeProperty(
   return `${text.slice(0, start)}${text.slice(property.close + 1)}`;
 }
 
+function isObject(value: JsonValue | undefined): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Devin starts its MCP servers with the environment it was launched from, so a
+ * Devin started inside a Claude Code terminal carries `CLAUDE_CODE_SESSION_ID`.
+ * Naming the kind keeps the server from adopting that session as its own; Devin
+ * exposes no session id of its own, so the agent_id the hook hands the model is used.
+ */
+function concordEntry(existing: JsonObject): JsonObject {
+  const env = existing['env'];
+  return {
+    ...existing,
+    command: 'concord-mcp',
+    env: { ...(isObject(env) ? env : {}), [KIND_VAR]: KIND },
+  };
+}
+
 export function upsertDevinMcpConfig(text: string | undefined): string {
   const source = text ?? '{}';
   const config = parsed(source);
@@ -127,7 +148,7 @@ export function upsertDevinMcpConfig(text: string | undefined): string {
   ) {
     throw new Error('mcpServers must be an object');
   }
-  const entry = '{ "command": "concord-mcp" }';
+  const entry = JSON.stringify(concordEntry({}));
   const range = propertyObject(source, 'mcpServers');
   if (range !== undefined) {
     const serverRange = propertyObject(source.slice(range.open, range.close + 1), SERVER);
@@ -135,8 +156,10 @@ export function upsertDevinMcpConfig(text: string | undefined): string {
       const start = range.open + serverRange.open;
       const end = range.open + serverRange.close;
       const old = parsed(source.slice(start, end + 1));
-      if (old['command'] === 'concord-mcp') return source;
-      return `${source.slice(0, start)}${entry}${source.slice(end + 1)}`;
+      const env = old['env'];
+      if (old['command'] === 'concord-mcp' && isObject(env) && env[KIND_VAR] === KIND)
+        return source;
+      return `${source.slice(0, start)}${JSON.stringify(concordEntry(old))}${source.slice(end + 1)}`;
     }
     const hasEntries = Object.keys(servers ?? {}).length > 0;
     const indent =

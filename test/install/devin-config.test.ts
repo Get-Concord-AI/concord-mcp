@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   devinMcpConfigPath,
@@ -12,6 +13,7 @@ import {
   uninstallDevinMcpConfig,
 } from '../../src/install/devin-config.js';
 import { installDevinHooks, removeDevinHooks } from '../../src/install/devin-hooks.js';
+import { resolveIdentity } from '../../src/domain/identity.js';
 
 const roots: string[] = [];
 function tempRoot(): string {
@@ -120,5 +122,40 @@ describe('Devin MCP config', () => {
     writeFileSync(path, '{ broken');
     expect(() => installDevinMcpConfig({}, root)).toThrow();
     expect(readFileSync(path, 'utf8')).toBe('{ broken');
+  });
+
+  it('names the Devin kind so an inherited Claude Code session is never adopted', () => {
+    const fresh = z
+      .object({
+        mcpServers: z.object({
+          concord: z.object({ command: z.string(), env: z.record(z.string(), z.string()) }),
+        }),
+      })
+      .parse(JSON.parse(upsertDevinMcpConfig(undefined))).mcpServers.concord;
+
+    expect(fresh).toEqual({ command: 'concord-mcp', env: { CONCORD_AGENT_KIND: 'devin' } });
+    // The server it starts reads only Devin's (absent) session sources, so the
+    // agent_id the session-start hook gave the model is the one used.
+    expect(
+      resolveIdentity({ CLAUDE_CODE_SESSION_ID: 'claude-session' }, { kind: 'devin' }),
+    ).toBeUndefined();
+  });
+
+  it('upgrades an earlier entry, keeping the user’s own env', () => {
+    const earlier = JSON.stringify({
+      mcpServers: { concord: { command: 'concord-mcp', env: { CONCORD_REPO_ROOT: '/repo' } } },
+    });
+
+    const upgraded = upsertDevinMcpConfig(earlier);
+
+    expect(JSON.parse(upgraded)).toEqual({
+      mcpServers: {
+        concord: {
+          command: 'concord-mcp',
+          env: { CONCORD_REPO_ROOT: '/repo', CONCORD_AGENT_KIND: 'devin' },
+        },
+      },
+    });
+    expect(upsertDevinMcpConfig(upgraded)).toBe(upgraded);
   });
 });
