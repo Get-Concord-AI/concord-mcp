@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { resolveAgentId, sessionStartIdentity } from '../../src/cli/agent-identity.js';
-import { resolveIdentity, UNRESOLVED_IDENTITY_MESSAGE } from '../../src/domain/identity.js';
+import { sessionStartMessage } from '../../src/cli/commands/session-start-message.js';
+import {
+  resolveActorId,
+  resolveIdentity,
+  UNRESOLVED_IDENTITY_MESSAGE,
+} from '../../src/domain/identity.js';
 
 const SESSION = 'a1b2c3d4-e5f6-7890';
 
@@ -71,5 +76,18 @@ describe('sessionStartIdentity', () => {
 
   it('has no identity to offer when neither the payload nor the environment names one', () => {
     expect(sessionStartIdentity(undefined, {})).toBeUndefined();
+  });
+});
+
+describe('Devin session instructions', () => {
+  it('tells Devin to pass the hook-derived identity to MCP calls', () => {
+    const message = sessionStartMessage('devin:1234abcd', [], true);
+
+    expect(message).toContain(
+      'include `agent_id: "devin:1234abcd"` on start_work, update_work, transfer_work, and finish_work',
+    );
+    expect(message).toContain('leave it off to see the workspace');
+    expect(message).not.toContain('without you passing an id');
+    expect(resolveActorId(undefined, 'devin:1234abcd')).toBe('devin:1234abcd');
   });
 });

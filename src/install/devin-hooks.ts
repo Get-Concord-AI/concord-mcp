@@ -94,6 +94,33 @@ export function installDevinHooks(repoRoot: string): string {
   return relative;
 }
 
+export function devinHooksInstalled(repoRoot: string): boolean {
+  const path = join(repoRoot, '.devin', 'hooks.v1.json');
+  if (!existsSync(path)) return false;
+  try {
+    const parsed = jsonValueSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    if (!isJsonObject(parsed)) return false;
+    return EVENTS.every((event) => {
+      const entries = parsed[event];
+      const command = commandFor(event);
+      return (
+        Array.isArray(entries) &&
+        entries.some(
+          (entry) =>
+            isJsonObject(entry) &&
+            Array.isArray(entry['hooks']) &&
+            entry['hooks'].some(
+              (hook) =>
+                isJsonObject(hook) && hook['type'] === 'command' && hook['command'] === command,
+            ),
+        )
+      );
+    });
+  } catch {
+    return false;
+  }
+}
+
 export function removeDevinHooks(repoRoot: string): string | undefined {
   const relative = join('.devin', 'hooks.v1.json');
   const path = join(repoRoot, relative);
