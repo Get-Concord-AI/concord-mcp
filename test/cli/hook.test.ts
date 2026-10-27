@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   antigravityWorkspace,
   decidePreToolUse,
+  devinPromptSubmitOutput,
   handleAntigravityPreInvocation,
   handleAntigravitySessionStart,
   handleAntigravityStop,
@@ -329,5 +330,36 @@ describe('antigravityWorkspace', () => {
 
   it('falls back to cwd on empty input', () => {
     expect(antigravityWorkspace('')).toBe(process.cwd());
+  });
+});
+
+describe('devinPromptSubmitOutput', () => {
+  it('adds no context when the inbox is empty, since Devin rejects an empty block', () => {
+    expect(devinPromptSubmitOutput([])).toBe('{}');
+  });
+
+  it('injects drained messages as UserPromptSubmit context', () => {
+    const output = z
+      .object({
+        hookSpecificOutput: z.object({
+          hookEventName: z.literal('UserPromptSubmit'),
+          additionalContext: z.string(),
+        }),
+      })
+      .parse(
+        JSON.parse(
+          devinPromptSubmitOutput([
+            {
+              messageId: 'm1',
+              senderAgentId: 'codex:peer',
+              taskId: null,
+              content: 'PINEAPPLE-42',
+              messageKind: 'prompt',
+              deliveryLatencyMs: null,
+            },
+          ]),
+        ),
+      );
+    expect(output.hookSpecificOutput.additionalContext).toContain('PINEAPPLE-42');
   });
 });

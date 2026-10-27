@@ -328,14 +328,8 @@ function runDevinHook(event: string): void {
     return;
   }
   if (event === 'devin-user-prompt-submit') {
-    const messages = drainInbox(repos, identity.agentId, 'devin');
     process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: 'UserPromptSubmit',
-          additionalContext: renderInboxBody(messages),
-        },
-      }) + '\n',
+      devinPromptSubmitOutput(drainInbox(repos, identity.agentId, 'devin')) + '\n',
     );
     return;
   }
@@ -346,6 +340,17 @@ function runDevinHook(event: string): void {
   }
   process.stderr.write(`Unknown Devin hook event: ${event}\n`);
   process.exitCode = 1;
+}
+
+/** Devin forwards an empty additionalContext to the model, which rejects the whole request. */
+export function devinPromptSubmitOutput(messages: readonly DeliverableMessage[]): string {
+  if (messages.length === 0) return JSON.stringify({});
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext: renderInboxBody(messages),
+    },
+  });
 }
 
 export function endDevinSession(repos: Repositories, agentId: string): void {
