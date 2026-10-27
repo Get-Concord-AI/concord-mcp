@@ -27,6 +27,12 @@ export interface WorkspaceManagerOptions {
   open?: (databaseFilename: string, project: string) => Repositories;
   /** Where a root's state lives; the repository's own store unless global mode applies. */
   resolveStore?: (repoRoot: string) => StoreLocation;
+  /**
+   * Why no store may be opened now, checked before each first open: a server
+   * started while its machine was unlinked keeps running after a login links
+   * it, and must not open a local store there.
+   */
+  refuseOpen?: () => string | undefined;
 }
 
 /**
@@ -40,13 +46,14 @@ export class WorkspaceManager {
   readonly #allowedRoots: Set<string> | undefined;
   readonly #open: (databaseFilename: string, project: string) => Repositories;
   readonly #resolveStore: (repoRoot: string) => StoreLocation;
+  readonly #refuseOpen: () => string | undefined;
   #activeWorkspaceId: string;
   #selections = 0;
-  #refusal: string | undefined;
 
   constructor(initialRoot: string, options: WorkspaceManagerOptions = {}) {
     this.#open = options.open ?? openRepositories;
     this.#resolveStore = options.resolveStore ?? ((root) => resolveStore(root, process.env));
+    this.#refuseOpen = options.refuseOpen ?? (() => undefined);
     this.#allowedRoots =
       options.allowedRoots === undefined
         ? undefined
@@ -82,22 +89,15 @@ export class WorkspaceManager {
   }
 
   /**
-   * The active workspace's root without throwing: undefined once refused.
+   * The active workspace's root without throwing.
    * For diagnostics such as telemetry, which must never block a reply.
    */
   get activeRoot(): string | undefined {
-    if (this.#refusal !== undefined) return undefined;
     return this.#contexts.get(this.#activeWorkspaceId)?.repoRoot;
-  }
-
-  /** Refuse every operation from now on, with `reason` as the error. */
-  refuse(reason: string): void {
-    this.#refusal = reason;
   }
 
   /** The active/default context used when an operation omits `workspace_id`. */
   current(): WorkspaceContext {
-    if (this.#refusal !== undefined) throw new Error(this.#refusal);
     const context = this.#contexts.get(this.#activeWorkspaceId);
     if (context === undefined) {
       throw new Error('Concord has no active workspace.');
@@ -114,6 +114,8 @@ export class WorkspaceManager {
     let context = this.#contexts.get(workspaceId);
     const firstOpen = context === undefined;
     if (context === undefined) {
+      const refusal = this.#refuseOpen();
+      if (refusal !== undefined) throw new Error(refusal);
       const store = this.#resolveStore(repoRoot);
       context = {
         workspaceId,

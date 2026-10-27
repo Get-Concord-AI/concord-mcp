@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { startBackgroundAdapterCheck } from './adapter-check.js';
 import { writeArtifacts } from './artifacts/index.js';
 import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/proxy.js';
-import { cloudTargetFor } from './cloud/target.js';
+import { LINKED_MACHINE_MESSAGE, linkedMachine } from './cloud/target.js';
 import { startBackgroundUpdateCheck } from './update-notifier.js';
 import { resolveCheckoutRoot, resolveRepoRoot } from './config/paths.js';
 import { resolveIdentity } from './domain/identity.js';
@@ -24,8 +24,8 @@ async function main(): Promise<void> {
   const kind = process.env['CONCORD_AGENT_KIND']?.trim();
   const identity = resolveIdentity(process.env, kind !== undefined && kind !== '' ? { kind } : {});
 
-  // A repository linked to Concord Cloud works through it: no local database,
-  // and no telemetry from this package for operations that are not local.
+  // A machine linked to Concord Cloud works through it everywhere: no local
+  // database, and no telemetry from this package for operations that are not local.
   const cloud = cloudSessionFor(
     repoRoot,
     process.env,
@@ -40,7 +40,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, process.env);
+  const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, process.env, {
+    // Started unlinked, this server outlives a later `cloud login`; from then
+    // on it opens no further local store, which no cloud agent could reach.
+    refuseOpen: () =>
+      linkedMachine(process.env) === undefined ? undefined : LINKED_MACHINE_MESSAGE,
+  });
   if (identity !== undefined) {
     ensureAgentRegistered(workspaceManager.current().repos, identity, repoRoot);
   }
@@ -66,9 +71,7 @@ async function main(): Promise<void> {
     // Nothing names the repository, so this server may have been started far
     // from it; ask the client which folder it has open.
     server.server.oninitialized = () => {
-      joinClientRoot(server.server, workspaceManager, {
-        isCloudLinked: (root) => cloudTargetFor(root, process.env) !== undefined,
-      })
+      joinClientRoot(server.server, workspaceManager)
         .then((joined) => {
           if (joined !== undefined && identity !== undefined) {
             ensureAgentRegistered(workspaceManager.current().repos, identity, joined.repoRoot);

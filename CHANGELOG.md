@@ -6,6 +6,58 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-27
+
+Concord Cloud is linked per machine, and nothing in a repository can take a
+repository off it.
+
+### Fixed
+
+- **A repository silently left Concord Cloud after `concord setup` or
+  `concord doctor`.** Both created `.concord/concord.db`, and a repository
+  holding a local store was kept local even on a signed-in machine. Agents
+  started there afterwards were on a local network of their own: they could not
+  send messages to, or receive them from, any agent on the cloud.
+- `concord doctor` no longer crashes with a stack trace on a store this version
+  cannot migrate; it reports the store as unreadable.
+
+### Changed
+
+- **Linking is a property of the machine.** A linked machine (signed in, and
+  not unlinked) works through Concord Cloud in every folder. `concord cloud
+login` links the machine; `concord cloud unlink` switches the whole machine to
+  local Concord while keeping the login; `concord cloud link` switches it back.
+  A machine that is not signed in works exactly as before.
+- On a linked machine:
+  - a repository with no remote is a project of its own on this machine
+    (`local.concord/<machine>/<folder>-<hash>`) rather than local;
+  - every folder outside a repository is in `general`, not only folders a
+    client names;
+  - `concord setup` installs instructions, MCP registrations and adapters but
+    creates no local state;
+  - `concord doctor` checks the login, the API, this folder's project and the
+    organization's agent ids (an id shared by several agents cannot receive
+    messages), and lists local state the machine no longer uses with the
+    commands to move it aside. Doctor never moves or deletes it itself;
+  - commands that only read a local store (`handoff`, `review-packet`, `watch`,
+    `dashboard`) say the machine works through the cloud instead of creating a
+    store; `concord check` exits successfully with a note, so an edit hook never
+    denies every edit;
+  - an MCP server started before the machine was linked opens no further local
+    store; restart sessions after linking so they work through the cloud.
+- The SessionStart line now says to use this machine's `concord` MCP server for
+  Concord calls, never a chat app's Concord connector (claude.ai's, in Claude
+  Code). Given a session's id, that connector registered a second agent under
+  it, and messages to the id could no longer be delivered.
+
+### Upgrading
+
+- A repository's `.concord/cloud.json` is ignored. A repository that ran
+  `concord cloud unlink` before works through the cloud on a linked machine,
+  and a repository linked with `--project` uses its own remote. `concord doctor`
+  lists any such file.
+- `concord cloud link --project` is gone.
+
 ## [0.16.0] - 2026-10-23
 
 Messaging v2: WhatsApp-style receipts and private inboxes (#279). See

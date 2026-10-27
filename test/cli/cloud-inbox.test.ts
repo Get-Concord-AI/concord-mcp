@@ -11,9 +11,9 @@ import {
   updateAgentState,
   type CloudRuntime,
 } from '../../src/cloud/runtime.js';
+import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import {
   cloudAccess,
-  cloudLinked,
   drainFromCloud,
   registerInCloud,
   watchCloud,
@@ -61,16 +61,21 @@ describe('cloud inbox', () => {
     };
   }
 
-  it('counts a repository as linked only when it has a cloud link', () => {
+  it('works through the cloud on a linked machine, whatever the repository holds', () => {
     // A home of its own: never the developer's real sign-in.
     const env = { CONCORD_REPO_ROOT: repoRoot, HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) };
-    expect(cloudLinked(repoRoot, env)).toBe(false);
+    // A link file from before 0.17 no longer makes anything cloud...
     mkdirSync(join(repoRoot, '.concord'), { recursive: true });
     writeFileSync(
       join(repoRoot, '.concord', 'cloud.json'),
       JSON.stringify({ apiUrl: 'https://api.example.test', projectKey: 'github.com/acme/app' }),
     );
-    expect(cloudLinked(repoRoot, env)).toBe(true);
+    expect(cloudAccess(repoRoot, {}, env).kind).toBe('local');
+    // ...the machine's link does, and a local store does not undo it.
+    writeCredentials(env, { apiUrl: 'https://api.example.test', apiKey: 'cc_test' });
+    ensureMachineKey(env, () => 'machine-1');
+    writeFileSync(join(repoRoot, '.concord', 'concord.db'), '');
+    expect(cloudAccess(repoRoot, {}, env).kind).toBe('cloud');
   });
 
   it('drains for a hook in one request once the agent is known', async () => {
@@ -143,17 +148,13 @@ describe('cloud inbox', () => {
     expect(JSON.stringify(endpoint?.body)).toContain('idle');
   });
 
-  it('reports a linked repository this machine cannot use, instead of failing', () => {
-    mkdirSync(join(repoRoot, '.concord'), { recursive: true });
-    writeFileSync(
-      join(repoRoot, '.concord', 'cloud.json'),
-      JSON.stringify({ apiUrl: 'https://api.example.test', projectKey: 'github.com/acme/app' }),
-    );
-    const home = mkdtempSync(join(tmpdir(), 'concord-home-'));
+  it('reports a link this machine cannot use, instead of falling back to local', () => {
+    const env = { CONCORD_REPO_ROOT: repoRoot, HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) };
+    // A key must never travel in the clear, so this login cannot be used.
+    writeCredentials(env, { apiUrl: 'http://api.example.test', apiKey: 'cc_test' });
+    ensureMachineKey(env, () => 'machine-1');
 
-    const access = cloudAccess(repoRoot, {}, { CONCORD_REPO_ROOT: repoRoot, HOME: home });
-
-    expect(access).toMatchObject({ kind: 'unusable' });
+    expect(cloudAccess(repoRoot, {}, env)).toMatchObject({ kind: 'unusable' });
   });
 
   it('keeps a running monitor’s idle reach, and its lease, when the session registers', async () => {

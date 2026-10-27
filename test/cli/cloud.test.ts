@@ -24,15 +24,8 @@ import {
   type CloudDeps,
 } from '../../src/cli/commands/cloud.js';
 import { REQUIRED_CAPABILITIES, type Fetch } from '../../src/cloud/client.js';
-import {
-  credentialsPath,
-  ensureMachineKey,
-  linkPath,
-  readLink,
-  readLocalChoice,
-  readMachineKey,
-  writeLink,
-} from '../../src/cloud/settings.js';
+import { credentialsPath, ensureMachineKey, readMachineKey } from '../../src/cloud/settings.js';
+import { linkedMachine } from '../../src/cloud/target.js';
 
 const API = 'https://api.concord.test';
 const KEY = 'cak_live_0123456789abcdef';
@@ -240,84 +233,71 @@ describe('concord cloud', () => {
     );
   });
 
-  it('links the repository by its normalised origin, and unlinks it', async () => {
-    expect(() => runCloudLink({}, deps)).toThrow(/Not logged in/);
+  it('links and unlinks the machine, keeping the login', async () => {
+    expect(() => runCloudLink(deps)).toThrow(/Not logged in/);
+    // Logging in links the machine.
+    expect(await runCloudLogin({ url: API }, deps)).toContain('This machine is linked');
+    expect(linkedMachine(deps.env)).toBeDefined();
+    expect(runCloudLink(deps)).toContain('already linked');
+
+    expect(runCloudUnlink(deps)).toContain('Unlinked this machine');
+    expect(linkedMachine(deps.env)).toBeUndefined();
+    expect(existsSync(credentialsPath(deps.env))).toBe(true);
+    expect(runCloudUnlink(deps)).toContain('not linked');
+    expect(await runCloudStatus(deps)).toContain('Machine: not linked (`concord cloud unlink`)');
+
+    expect(runCloudLink(deps)).toContain('Linked this machine');
+    expect(linkedMachine(deps.env)).toBeDefined();
+
+    // Logging in again links a machine that was unlinked.
+    runCloudUnlink(deps);
     await runCloudLogin({ url: API }, deps);
+    expect(linkedMachine(deps.env)).toBeDefined();
 
-    expect(runCloudLink({}, deps)).toContain('github.com/acme/app');
-    expect(readLink(repo)).toEqual({ apiUrl: API, projectKey: 'github.com/acme/app' });
-
-    // Signed in, the cloud is the default: unlinking records the choice to stay local.
-    expect(runCloudUnlink(deps)).toContain('stays local');
-    expect(readLink(repo)).toBeUndefined();
-    expect(readLocalChoice(repo)).toBe(true);
-    // A machine's choice, never committed: `.concord/` ignores itself.
-    expect(readFileSync(join(repo, '.concord', '.gitignore'), 'utf8')).toContain('*');
-    expect(runCloudUnlink(deps)).toContain('already stays local');
-    expect(await runCloudStatus(deps)).toContain('is local (`concord cloud unlink`');
-
-    // Linking again replaces the choice.
-    runCloudLink({}, deps);
-    expect(readLocalChoice(repo)).toBe(false);
-
-    // Signed out, unlinking just removes the link.
+    // Logging out leaves nothing linked.
     runCloudLogout(deps);
-    expect(runCloudUnlink(deps)).toContain('Unlinked');
-    expect(existsSync(linkPath(repo))).toBe(false);
-    expect(runCloudUnlink(deps)).toContain('was not linked');
+    expect(linkedMachine(deps.env)).toBeUndefined();
+    expect(await runCloudStatus(deps)).toContain('Machine: not linked (not signed in)');
   });
 
-  it('outside a repository, unlinks to local and links back to general', async () => {
+  it('never writes into the repository', async () => {
     await runCloudLogin({ url: API }, deps);
+    runCloudUnlink(deps);
+    runCloudLink(deps);
+    expect(existsSync(join(repo, '.concord'))).toBe(false);
+  });
+
+  it('says where each folder works on a linked machine', async () => {
+    await runCloudLogin({ url: API }, deps);
+    expect(await runCloudStatus(deps)).toContain('is github.com/acme/app on Concord Cloud');
+
+    const noOrigin = { ...deps, originRemote: () => undefined };
+    expect(await runCloudStatus(noOrigin)).toContain('is local.concord/');
+
     const folder = mkdtempSync(join(tmpdir(), 'concord-folder-'));
     const inFolder = { ...deps, cwd: folder, env: { ...deps.env, CONCORD_REPO_ROOT: folder } };
+    expect(await runCloudStatus(inFolder)).toContain('is general on Concord Cloud');
 
-    expect(await runCloudStatus(inFolder)).toContain('uses Concord Cloud as general');
-    expect(() => runCloudLink({}, inFolder)).toThrow(/nothing to link/);
-    expect(runCloudUnlink(inFolder)).toContain('stays local');
-    // Local state gathered while unlinked does not keep it local once linked.
-    writeFileSync(join(folder, '.concord', 'concord.db'), '');
-    expect(runCloudLink({}, inFolder)).toContain('general workspace again');
-    expect(await runCloudStatus(inFolder)).toContain('is linked to general');
+    runCloudUnlink(deps);
+    expect(await runCloudStatus(deps)).toContain('uses local Concord');
   });
 
-  it('says why a signed-in repository is local when this machine has no identity', async () => {
+  it('says why a signed-in machine is not linked when it has no identity', async () => {
     await runCloudLogin({ url: API }, deps);
     rmSync(join(home, '.concord', 'machine.json'));
     expect(await runCloudStatus(deps)).toContain('no Concord Cloud identity');
-  });
-
-  it('keeps a choice to stay local across a logout', async () => {
-    await runCloudLogin({ url: API }, deps);
-    runCloudUnlink(deps);
-    runCloudLogout(deps);
-    expect(runCloudUnlink(deps)).toContain('already stays local');
-    expect(readLocalChoice(repo)).toBe(true);
-  });
-
-  it('needs --project when there is no origin, and rejects a non-remote', async () => {
-    await runCloudLogin({ url: API }, deps);
-    const noOrigin = { ...deps, originRemote: () => undefined };
-    expect(() => runCloudLink({}, noOrigin)).toThrow(/--project/);
-    expect(() => runCloudLink({ project: 'not a remote' }, noOrigin)).toThrow(/not a git remote/);
-    expect(runCloudLink({ project: 'https://github.com/acme/other' }, noOrigin)).toContain(
-      'github.com/acme/other',
-    );
+    expect(() => runCloudLink(deps)).toThrow(/no Concord Cloud identity/);
   });
 
   it('reports status without revealing the key', async () => {
     expect(await runCloudStatus(deps)).toContain('Login: none');
     await runCloudLogin({ url: API }, deps);
-    runCloudLink({}, deps);
 
     const out = await runCloudStatus(deps);
-    expect(out).toContain('linked to github.com/acme/app');
+    expect(out).toContain('Machine: linked');
     expect(out).toContain('compatible');
     expect(out).toContain('Key: accepted');
     expect(out).not.toContain(KEY);
-
-    writeLink(repo, { apiUrl: 'https://other.concord.test', projectKey: 'github.com/acme/app' });
-    expect(await runCloudStatus(deps)).toContain('Warning: linked to https://other.concord.test');
 
     const keyCheckDown: Fetch = (input) =>
       input.endsWith('/v1/meta')

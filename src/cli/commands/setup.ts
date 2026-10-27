@@ -24,6 +24,8 @@ import {
   installMcpConfigs,
   removeGlobalCursorConcord,
 } from '../../install/mcp-config.js';
+import { cloudTargetFor } from '../../cloud/target.js';
+import { resolveRepoRoot, workspaceIdForRoot } from '../../config/paths.js';
 import { openContext } from '../context.js';
 import { findAvailableUpdate, type AvailableUpdate } from '../../update-notifier.js';
 import { VERSION } from '../../version.js';
@@ -44,10 +46,18 @@ export interface SetupOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+/**
+ * Where this repository's Concord state lives after setup: its local store, or
+ * Concord Cloud on a linked machine, where setup creates no local state.
+ */
+export type SetupState =
+  | { readonly kind: 'local'; readonly concordPath: string }
+  | { readonly kind: 'cloud'; readonly projectKey: string; readonly apiUrl: string };
+
 export interface SetupResult {
   repoRoot: string;
   workspaceId: string;
-  concordPath: string;
+  state: SetupState;
   written: string[];
   adapters: AdapterReport[];
   globalMode?: GlobalModeReport;
@@ -223,37 +233,50 @@ export function ensureConcordIgnored(concordPath: string): void {
   writeFileSync(gitignorePath, `${CONCORD_GITIGNORE}${current}`);
 }
 
-/** Set up one repository completely: state, instructions, and client registration. */
+/**
+ * Set up one repository completely: state, instructions, and client registration.
+ *
+ * Setup never decides where Concord works: that is the machine's link. On a
+ * linked machine it installs the harness side and creates no local store,
+ * which would be a second network no cloud agent could reach.
+ */
 export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   const env = options.env ?? process.env;
-  // Setting a repository up gives it its own store, whatever global mode says.
-  const ctx = openContext(cwd, env, { local: true });
+  const repoRoot = resolveRepoRoot(cwd, env);
+  const cloud = cloudTargetFor(repoRoot, env);
+  let state: SetupState;
+  if (cloud === undefined) {
+    // Setting a repository up gives it its own store, whatever global mode says.
+    const ctx = openContext(cwd, env, { local: true });
+    ensureConcordIgnored(ctx.concordPath);
+    writeArtifacts(ctx.concordPath, ctx.repos);
+    state = { kind: 'local', concordPath: ctx.concordPath };
+  } else {
+    state = { kind: 'cloud', ...cloud };
+  }
 
-  ensureConcordIgnored(ctx.concordPath);
-  writeArtifacts(ctx.concordPath, ctx.repos);
-
-  const written = installConcord(ctx.repoRoot);
+  const written = installConcord(repoRoot);
   let adapters: AdapterReport[] = [];
   if (options.claudeHooks === true) {
-    written.push(installClaudeHook(ctx.repoRoot));
+    written.push(installClaudeHook(repoRoot));
   }
   if (options.mcp !== false) {
-    written.push(installDevinHooks(ctx.repoRoot));
-    written.push(...installMcpConfigs(ctx.repoRoot));
-    written.push(installAntigravityHooks(ctx.repoRoot));
+    written.push(installDevinHooks(repoRoot));
+    written.push(...installMcpConfigs(repoRoot));
+    written.push(installAntigravityHooks(repoRoot));
     // Global mode owns a user-level Cursor entry; without it, one is a stale
     // registration that would shadow this repository's pinned one.
     const migratedCursorConfig =
       options.global === true ? undefined : removeGlobalCursorConcord(env);
     if (migratedCursorConfig !== undefined) written.push(migratedCursorConfig);
     written.push(installCodexMcpConfig(env));
-    written.push(installDevinMcpConfig(env, ctx.repoRoot));
+    written.push(installDevinMcpConfig(env, repoRoot));
   }
   // `env` is also the unit-test/config-path seam. Avoid touching unrelated
   // real harness homes unless adapter installation was explicitly requested.
   const installAdapters = options.adapters ?? (options.mcp !== false && options.env === undefined);
   if (installAdapters) {
-    adapters = installGlobalAdapters(import.meta.url, env, ctx.repoRoot);
+    adapters = installGlobalAdapters(import.meta.url, env, repoRoot);
     for (const adapter of adapters) {
       if (adapter.installedPath !== undefined) written.push(adapter.installedPath);
     }
@@ -286,9 +309,9 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
     written.push(...globalMode.written);
   }
   return {
-    repoRoot: ctx.repoRoot,
-    workspaceId: ctx.workspaceId,
-    concordPath: ctx.concordPath,
+    repoRoot,
+    workspaceId: workspaceIdForRoot(repoRoot),
+    state,
     // A file touched by two installers is still one file to the reader.
     written: [...new Set(written)],
     adapters,
@@ -343,7 +366,11 @@ export function registerSetupCommand(program: Command): void {
           `Concord setup complete\n` +
             `  repository: ${result.repoRoot}\n` +
             `  workspace:  ${result.workspaceId}\n` +
-            `  state:      ${result.concordPath}\n` +
+            `  state:      ${
+              result.state.kind === 'local'
+                ? result.state.concordPath
+                : `Concord Cloud, ${result.state.projectKey} (this machine is linked; no local state)`
+            }\n` +
             `  configured:\n`,
         );
         for (const path of result.written) {
@@ -356,7 +383,9 @@ export function registerSetupCommand(program: Command): void {
           process.stdout.write(
             global === true
               ? '\nGlobal mode on: agents use Concord in repositories without concord setup, ' +
-                  'recorded in ~/.concord/global.db.\n'
+                  (result.state.kind === 'cloud'
+                    ? 'through Concord Cloud while this machine is linked.\n'
+                    : 'recorded in ~/.concord/global.db.\n')
               : '\nGlobal mode off.\n',
           );
           for (const warning of result.globalMode.warnings) {

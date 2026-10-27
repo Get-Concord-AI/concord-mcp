@@ -32,6 +32,7 @@ import { resolveStore } from '../../workspaces/store.js';
 import { openContext } from '../context.js';
 import { launchDetachedConcord } from '../detached-host.js';
 import { isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
+import { CONCORD_SERVER_ONLY } from './session-start-message.js';
 import {
   cloudAccess,
   drainFromCloud,
@@ -225,7 +226,7 @@ export function registeredLine(agentId: string, provider: string): string {
   return (
     `Concord: this session is agent \`${agentId}\` and can receive live messages from other ` +
     `agents. If a Concord tool asks for agent_id, use "${agentId}"; do not invent a ` +
-    'different id.' +
+    `different id. ${CONCORD_SERVER_ONLY}` +
     (monitor === undefined ? '' : ` Start its inbox monitor with: \`${monitor}\`.`) +
     '\n'
   );

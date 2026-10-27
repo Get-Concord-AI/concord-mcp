@@ -1,17 +1,19 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  ensureMachineKey,
-  writeCredentials,
-  writeLink,
-  writeLocalChoice,
-} from '../../src/cloud/settings.js';
+import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { cloudSessionFor } from '../../src/cloud/proxy.js';
-import { cloudTargetFor } from '../../src/cloud/target.js';
+import {
+  cloudTargetFor,
+  linkedMachine,
+  MACHINE_PROJECT_HOST,
+  machineProjectKey,
+} from '../../src/cloud/target.js';
+import { writeUserConfig } from '../../src/config/user-config.js';
+import { normalizeProjectKey } from '../../src/domain/project-key.js';
 
 const API = 'https://api.concord.test';
 const ORIGIN = () => 'git@github.com:Acme/App.git';
@@ -21,73 +23,103 @@ describe('cloudTargetFor', () => {
   let home: string;
   let repo: string;
   let folder: string;
+  let env: NodeJS.ProcessEnv;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'concord-home-'));
     repo = mkdtempSync(join(tmpdir(), 'concord-repo-'));
     mkdirSync(join(repo, '.git'));
     folder = mkdtempSync(join(tmpdir(), 'concord-folder-'));
+    env = { HOME: home };
   });
 
   const signIn = (withMachine = true) => {
-    writeCredentials({ HOME: home }, { apiUrl: API, apiKey: 'ck_test' });
-    if (withMachine) ensureMachineKey({ HOME: home }, () => 'machine-1');
+    writeCredentials(env, { apiUrl: API, apiKey: 'ck_test' });
+    if (withMachine) ensureMachineKey(env, () => 'machine-1');
   };
 
-  it('is local while signed out, unless the repository is linked', () => {
-    expect(cloudTargetFor(repo, { HOME: home }, ORIGIN)).toBeUndefined();
-    writeLink(repo, { apiUrl: API, projectKey: 'github.com/acme/linked' });
-    expect(cloudTargetFor(repo, { HOME: home }, ORIGIN)).toEqual({
-      apiUrl: API,
-      projectKey: 'github.com/acme/linked',
-      source: 'link',
-    });
-  });
-
-  it('signed in, makes a repository its remote’s project by default', () => {
-    signIn();
-    expect(cloudTargetFor(repo, { HOME: home }, ORIGIN)).toEqual({
-      apiUrl: API,
-      projectKey: 'github.com/acme/app',
-      source: 'default',
-    });
-  });
-
-  it('keeps a repository local when it chose to, or has no remote to name it by', () => {
-    signIn();
-    expect(cloudTargetFor(repo, { HOME: home }, NO_ORIGIN)).toBeUndefined();
-    writeLocalChoice(repo);
-    expect(cloudTargetFor(repo, { HOME: home }, ORIGIN)).toBeUndefined();
-  });
-
-  it('puts a named folder outside any repository in general, and presumes nothing of an unnamed one', () => {
-    signIn();
-    expect(cloudTargetFor(folder, { HOME: home, CLAUDE_PROJECT_DIR: folder }, ORIGIN)).toEqual({
-      apiUrl: API,
-      projectKey: 'general',
-      source: 'default',
-    });
-    // Started elsewhere, a server may learn its repository from MCP roots.
-    expect(cloudTargetFor(folder, { HOME: home }, ORIGIN)).toBeUndefined();
-  });
-
-  it('keeps a repository that already holds local Concord state local', () => {
-    signIn();
+  /** Everything a repository could hold that once decided its routing. */
+  const strayRepoState = () => {
     mkdirSync(join(repo, '.concord'), { recursive: true });
     writeFileSync(join(repo, '.concord', 'concord.db'), '');
-    expect(cloudTargetFor(repo, { HOME: home }, ORIGIN)).toBeUndefined();
+    writeFileSync(join(repo, '.concord', 'cloud.json'), '{ "local": true }\n');
+  };
+
+  it('is local on a machine that is not signed in, whatever the repository holds', () => {
+    expect(cloudTargetFor(repo, env, ORIGIN)).toBeUndefined();
+    strayRepoState();
+    writeFileSync(
+      join(repo, '.concord', 'cloud.json'),
+      JSON.stringify({ apiUrl: API, projectKey: 'github.com/acme/linked' }),
+    );
+    expect(cloudTargetFor(repo, env, ORIGIN)).toBeUndefined();
   });
 
-  it('stays local, rather than failing, when this machine has no identity for a default', () => {
-    signIn(false);
-    expect(cloudTargetFor(repo, { HOME: home }, ORIGIN)).toBeUndefined();
-    expect(cloudSessionFor(repo, { HOME: home }, undefined)).toBeUndefined();
-  });
-
-  it('ignores a damaged link file rather than failing', () => {
+  it('on a linked machine, makes a repository its remote’s project', () => {
     signIn();
-    mkdirSync(join(repo, '.concord'), { recursive: true });
-    writeFileSync(join(repo, '.concord', 'cloud.json'), '{not json');
-    expect(cloudTargetFor(repo, { HOME: home }, ORIGIN)?.source).toBe('default');
+    expect(cloudTargetFor(repo, env, ORIGIN)).toEqual({
+      apiUrl: API,
+      projectKey: 'github.com/acme/app',
+    });
+  });
+
+  it('on a linked machine, ignores local stores and old per-repository choices', () => {
+    signIn();
+    strayRepoState();
+    expect(cloudTargetFor(repo, env, ORIGIN)).toEqual({
+      apiUrl: API,
+      projectKey: 'github.com/acme/app',
+    });
+  });
+
+  it('gives a repository with no remote a project of its own on this machine', () => {
+    signIn();
+    const target = cloudTargetFor(repo, env, NO_ORIGIN);
+    expect(target?.projectKey).toBe(machineProjectKey('machine-1', repo));
+    expect(target?.projectKey.startsWith(`${MACHINE_PROJECT_HOST}/`)).toBe(true);
+  });
+
+  it('puts any folder outside a repository in general', () => {
+    signIn();
+    expect(cloudTargetFor(folder, env, ORIGIN)).toEqual({ apiUrl: API, projectKey: 'general' });
+    expect(cloudTargetFor(folder, { ...env, CLAUDE_PROJECT_DIR: folder }, ORIGIN)).toEqual({
+      apiUrl: API,
+      projectKey: 'general',
+    });
+  });
+
+  it('is local after `cloud unlink`, and linked again after `cloud link`', () => {
+    signIn();
+    writeUserConfig(env, { cloudLink: false });
+    expect(cloudTargetFor(repo, env, ORIGIN)).toBeUndefined();
+    expect(linkedMachine(env)).toBeUndefined();
+    writeUserConfig(env, { cloudLink: true });
+    expect(cloudTargetFor(repo, env, ORIGIN)?.projectKey).toBe('github.com/acme/app');
+  });
+
+  it('stays local, rather than failing, when this machine has no identity', () => {
+    signIn(false);
+    expect(cloudTargetFor(repo, env, ORIGIN)).toBeUndefined();
+    expect(cloudSessionFor(repo, env, undefined)).toBeUndefined();
+  });
+});
+
+describe('machineProjectKey', () => {
+  it('is a key the cloud accepts unchanged, readable, and unique per machine and folder', () => {
+    const repo = '/Users/someone/scratch/My Experiment!';
+    const key = machineProjectKey('machine-1', repo);
+    expect(normalizeProjectKey(key)).toBe(key);
+    expect(key).toMatch(/^local\.concord\/[0-9a-f]{12}\/my-experiment-[0-9a-f]{8}$/u);
+    expect(machineProjectKey('machine-2', repo)).not.toBe(key);
+    expect(machineProjectKey('machine-1', '/elsewhere/My Experiment!')).not.toBe(key);
+    expect(key).not.toContain('machine-1');
+    expect(key).not.toContain('someone');
+  });
+
+  it('names a folder with nothing readable in it all the same', () => {
+    const key = machineProjectKey('machine-1', '/tmp/!!!');
+    expect(key).toMatch(/\/repo-[0-9a-f]{8}$/u);
+    expect(normalizeProjectKey(key)).toBe(key);
+    expect(basename(key)).not.toBe('');
   });
 });

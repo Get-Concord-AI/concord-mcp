@@ -2,11 +2,11 @@
 import { Command } from '@commander-js/extra-typings';
 import { performance } from 'node:perf_hooks';
 
+import { linkedMachine } from '../cloud/target.js';
 import { resolveRepoRoot } from '../config/paths.js';
 import { createTelemetryClient } from '../telemetry/client.js';
 import { VERSION } from '../version.js';
 import { registerCheckCommand } from './commands/check.js';
-import { cloudLinked } from './commands/cloud-inbox.js';
 import { registerCloudCommand } from './commands/cloud.js';
 import { registerAdaptersCommand } from './commands/adapters.js';
 import { registerDashboardCommand } from './commands/dashboard.js';
@@ -52,12 +52,12 @@ program.hook('preAction', (command, actionCommand) => {
   // `concord cloud …` acts on Concord Cloud, which records its own usage; the
   // open-source CLI emits no telemetry, success or error, for non-local
   // operations. Checked by parent, since `cloud status` shares its name with
-  // the local `status`. The inbox in a cloud-linked repository is the cloud's
-  // too.
+  // the local `status`. On a linked machine the inbox is the cloud's too.
   const parent = actionCommand.parent?.name();
   const nonLocal =
     parent === 'cloud' ||
-    ((parent === 'inbox' || CLOUD_SERVED.has(actionCommand.name())) && cloudLinked(workspaceRoot));
+    ((parent === 'inbox' || CLOUD_SERVED.has(actionCommand.name())) &&
+      linkedMachine(process.env) !== undefined);
   activeCommand = nonLocal
     ? undefined
     : { name: actionCommand.name(), startedAt: performance.now() };
