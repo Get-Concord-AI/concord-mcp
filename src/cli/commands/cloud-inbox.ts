@@ -16,7 +16,7 @@ import {
   type CloudAgentRef,
   type CloudRuntime,
 } from '../../cloud/runtime.js';
-import { cloudTargetFor } from '../../cloud/target.js';
+import { linkedMachine } from '../../cloud/target.js';
 import { resolveCheckoutRoot, resolveRepoRoot } from '../../config/paths.js';
 import { capabilityFor, encodeCapabilities, monitorCapabilityFor } from '../../domain/delivery.js';
 import type { DeliverableMessage } from '../../domain/pull-inbox.js';
@@ -28,15 +28,6 @@ import type { DeliverableMessage } from '../../domain/pull-inbox.js';
  * None of this records telemetry: these are not local operations, and the
  * cloud records its own usage.
  */
-
-/** Whether this directory works through Concord Cloud, by link or by default. */
-export function cloudLinked(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  try {
-    return cloudTargetFor(resolveRepoRoot(cwd, env), env) !== undefined;
-  } catch {
-    return false;
-  }
-}
 
 /** Where a command's work lives: locally, in the cloud, or in a link this machine cannot use. */
 export type CloudAccess =
@@ -55,7 +46,7 @@ export function cloudAccess(
   options: { readonly timeoutMs?: number } = {},
   env: NodeJS.ProcessEnv = process.env,
 ): CloudAccess {
-  if (!cloudLinked(cwd, env)) return { kind: 'local' };
+  if (linkedMachine(env) === undefined) return { kind: 'local' };
   try {
     // The checkout this command runs in, which in a linked worktree is not the
     // primary one holding the link: paths are made relative to it.
@@ -70,7 +61,7 @@ export function cloudAccess(
       options.timeoutMs === undefined ? {} : { deadline: Date.now() + options.timeoutMs };
     return { kind: 'cloud', runtime: { ...session, fetch, ...deadline } };
   } catch (error) {
-    // Linked, but not logged in, or logged in elsewhere: say so, never fall
+    // Linked, but with a login this machine cannot use: say so, never fall
     // back to a local inbox no other agent would see.
     return { kind: 'unusable', reason: error instanceof Error ? error.message : String(error) };
   }

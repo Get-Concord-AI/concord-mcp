@@ -1,7 +1,7 @@
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { basename } from 'node:path';
 
-import { databasePath } from '../config/paths.js';
-import { hasExplicitRepoRoot } from '../workspaces/client-roots.js';
+import { readUserConfig } from '../config/user-config.js';
 import {
   GENERAL_PROJECT,
   gitOriginRemote,
@@ -9,29 +9,70 @@ import {
   repositoryProjectKey,
   type OriginRemote,
 } from '../workspaces/store.js';
-import { readCredentials, readLink, readLocalChoice, readMachineKey } from './settings.js';
+import { readCredentials, readMachineKey, type CloudCredentials } from './settings.js';
 
 /**
- * Whether a workspace works through Concord Cloud, and as which project.
+ * Whether Concord works through Concord Cloud, and as which project.
  *
- * Signed in, the cloud is the default: a repository is its git remote's
- * project, as every clone of it names it, and anywhere outside a repository is
- * `general`, where agents that belong to no repository meet — when the client
- * names that folder (Claude Code's `CLAUDE_PROJECT_DIR`, or `CONCORD_REPO_ROOT`).
- * A server started elsewhere without one may yet learn its repository from MCP
- * roots, so it is not presumed to be outside one.
+ * Linking is a property of the machine, never of a repository. A linked machine
+ * — signed in, with a machine identity, and not unlinked — sends every Concord
+ * operation in every folder through the cloud, so its agents reach agents on
+ * any machine. An unlinked machine is plain local Concord.
  *
- * A repository can still choose for itself — `concord cloud link` names its
- * project, `concord cloud unlink` keeps it local — and these stay local too:
- * one already holding local Concord state (its open work must not vanish from
- * view; linking moves it on purpose), and one with no remote, which the cloud
- * has no shared name for.
+ * Nothing inside a repository takes part in the decision. A local store that
+ * `setup` or `doctor` left behind once silently kept a repository local on a
+ * linked machine, which split one machine's agents into two networks that
+ * could not message each other.
  */
 export interface CloudTarget {
   readonly apiUrl: string;
   readonly projectKey: string;
-  /** `link`: the repository's own link; `default`: the signed-in machine's default. */
-  readonly source: 'link' | 'default';
+}
+
+/** A machine that works through Concord Cloud, with what it needs to act there. */
+export interface LinkedMachine {
+  readonly credentials: CloudCredentials;
+  readonly machineKey: string;
+}
+
+/**
+ * This machine, when it is linked: signed in (`concord cloud login`), with the
+ * identity login gave it, and not switched off with `concord cloud unlink`.
+ */
+export function linkedMachine(env: NodeJS.ProcessEnv): LinkedMachine | undefined {
+  if (readUserConfig(env).cloudLink === false) return undefined;
+  const credentials = readCredentials(env);
+  const machineKey = readMachineKey(env);
+  return credentials === undefined || machineKey === undefined
+    ? undefined
+    : { credentials, machineKey };
+}
+
+/**
+ * The host of the projects for repositories with no remote. Not a real host:
+ * it only has to be a key the cloud accepts that no git remote ever produces.
+ */
+export const MACHINE_PROJECT_HOST = 'local.concord';
+
+function shortHash(value: string, length: number): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, length);
+}
+
+/**
+ * A repository with no remote, as a project of its own on this machine. It
+ * stays on the cloud, so its agents still reach every other agent, but nothing
+ * else shares its claims: two unrelated scratch repositories both editing
+ * `src/index.ts` must not block each other. The folder name keeps it readable
+ * in the dashboard; the hashes keep it unique without publishing the path or
+ * the machine key.
+ */
+export function machineProjectKey(machineKey: string, repoRoot: string): string {
+  const name = basename(repoRoot)
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/gu, '-')
+    .replace(/^[-.]+|[-.]+$/gu, '')
+    .slice(0, 40);
+  return `${MACHINE_PROJECT_HOST}/${shortHash(machineKey, 12)}/${name === '' ? 'repo' : name}-${shortHash(repoRoot, 8)}`;
 }
 
 /** Each repository's remote, asked of git once per process: hooks resolve this on every edit. */
@@ -41,26 +82,24 @@ function cachedOriginRemote(repoRoot: string): string | undefined {
   return remotes.get(repoRoot);
 }
 
+/**
+ * The cloud project a folder works in on a linked machine, or undefined on an
+ * unlinked one. A repository is its git remote's project, as every clone names
+ * it; one with no remote is a project of its own on this machine; anything
+ * outside a repository is `general`, where agents that belong to no repository
+ * meet.
+ */
 export function cloudTargetFor(
   repoRoot: string,
   env: NodeJS.ProcessEnv,
   originRemote: OriginRemote = cachedOriginRemote,
 ): CloudTarget | undefined {
-  const link = readLink(repoRoot);
-  if (link !== undefined) return { ...link, source: 'link' };
-  if (readLocalChoice(repoRoot) || existsSync(databasePath(repoRoot))) return undefined;
-
-  // A default needs this machine's identity to act on; without one it stays
-  // local, for every caller alike, rather than failing to start.
-  const credentials = readCredentials(env);
-  if (credentials === undefined || readMachineKey(env) === undefined) return undefined;
+  const machine = linkedMachine(env);
+  if (machine === undefined) return undefined;
 
   const projectKey = isRepository(repoRoot)
-    ? repositoryProjectKey(repoRoot, originRemote)
-    : hasExplicitRepoRoot(env)
-      ? GENERAL_PROJECT
-      : undefined;
-  return projectKey === undefined
-    ? undefined
-    : { apiUrl: credentials.apiUrl, projectKey, source: 'default' };
+    ? (repositoryProjectKey(repoRoot, originRemote) ??
+      machineProjectKey(machine.machineKey, repoRoot))
+    : GENERAL_PROJECT;
+  return { apiUrl: machine.credentials.apiUrl, projectKey };
 }

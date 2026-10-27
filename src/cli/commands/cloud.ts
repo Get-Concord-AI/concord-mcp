@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -12,33 +11,27 @@ import {
   fetchMeta,
   incompatibility,
   registerMachine,
-  sameApi,
   type Fetch,
 } from '../../cloud/client.js';
 import {
   ensureMachineKey,
   readCredentials,
-  readLink,
-  readLocalChoice,
   readMachineKey,
   removeCredentials,
-  removeLink,
   writeCredentials,
-  writeLink,
-  writeLocalChoice,
   type CloudCredentials,
 } from '../../cloud/settings.js';
 import { browserLogin, type BrowserLoginDeps } from '../../cloud/browser-login.js';
-import { cloudTargetFor } from '../../cloud/target.js';
+import { cloudTargetFor, linkedMachine } from '../../cloud/target.js';
 import { bearerFor } from '../../cloud/tokens.js';
-import { concordDir, databasePath, resolveRepoRoot } from '../../config/paths.js';
-import { normalizeProjectKey } from '../../domain/project-key.js';
-import { GENERAL_PROJECT, gitOriginRemote, isRepository } from '../../workspaces/store.js';
-import { ensureConcordIgnored } from './setup.js';
+import { resolveRepoRoot } from '../../config/paths.js';
+import { writeUserConfig } from '../../config/user-config.js';
+import { gitOriginRemote } from '../../workspaces/store.js';
 import { VERSION } from '../../version.js';
 
 /**
- * `concord cloud` — connecting this machine and a repository to Concord Cloud.
+ * `concord cloud` — connecting this machine to Concord Cloud. Linking is a
+ * property of the machine: linked, every folder works through the cloud.
  * Non-local operations, so the CLI records no telemetry for them.
  */
 
@@ -119,150 +112,125 @@ export async function runCloudLogin(
   }
 
   writeCredentials(deps.env, credentials);
+  // Signing in links the machine: that is what signing in is for.
+  writeUserConfig(deps.env, { cloudLink: true });
   return `Logged in to ${apiUrl} (API v${String(meta.apiVersion)}) ${
     'apiKey' in credentials ? `with key ${maskKey(credentials.apiKey)}` : 'through the browser'
-  }.`;
+  }. This machine is linked: its agents work through Concord Cloud in every folder.`;
 }
 
 export function runCloudLogout(deps: CloudDeps): string {
   return removeCredentials(deps.env)
-    ? 'Logged out; Concord is local again, except in linked repositories, which cannot reach ' +
-        'the cloud until you log in again.'
+    ? "Logged out; this machine's agents use local Concord again."
     : 'Not logged in.';
 }
 
-export function runCloudLink(options: { readonly project?: string }, deps: CloudDeps): string {
+/**
+ * Link this machine: from now on every Concord operation in every folder goes
+ * through Concord Cloud. Logging in links too; this undoes `unlink` without
+ * signing in again.
+ */
+export function runCloudLink(deps: CloudDeps): string {
   const credentials = readCredentials(deps.env);
   if (credentials === undefined) {
-    throw new Error('Not logged in; run `concord cloud login` first.');
+    throw new Error('Not logged in; run `concord cloud login`, which also links this machine.');
   }
+  if (readMachineKey(deps.env) === undefined) {
+    throw new Error('This machine has no Concord Cloud identity; run `concord cloud login` again.');
+  }
+  const wasLinked = linkedMachine(deps.env) !== undefined;
+  writeUserConfig(deps.env, { cloudLink: true });
+  return wasLinked
+    ? `This machine is already linked to ${credentials.apiUrl}.`
+    : `Linked this machine to ${credentials.apiUrl}: its agents work through Concord Cloud in every folder.`;
+}
 
-  const repoRoot = resolveRepoRoot(deps.cwd, deps.env);
-  // Outside a repository there is no project to name but `general`. Linking
-  // undoes an unlink — explicitly, since local state the folder gathered
-  // meanwhile would otherwise keep it local.
-  if (options.project === undefined && !isRepository(repoRoot)) {
-    if (!readLocalChoice(repoRoot)) {
-      throw new Error(
-        'Outside a repository there is nothing to link: a signed-in Claude Code session here ' +
-          "uses Concord Cloud's general workspace by default.",
-      );
-    }
-    writeLink(repoRoot, { apiUrl: credentials.apiUrl, projectKey: GENERAL_PROJECT });
-    return `${repoRoot} uses Concord Cloud's general workspace again.`;
+/** Unlink this machine: its agents use local Concord, and the login stays for `link`. */
+export function runCloudUnlink(deps: CloudDeps): string {
+  if (linkedMachine(deps.env) === undefined) {
+    return 'This machine is not linked; its agents already use local Concord.';
   }
-  const remote = options.project ?? deps.originRemote(repoRoot);
-  if (remote === undefined) {
-    throw new Error(
-      'This repository has no `origin` remote. Name it with --project <remote>, ' +
-        'such as github.com/org/repo, so every clone links to the same project.',
-    );
-  }
+  writeUserConfig(deps.env, { cloudLink: false });
+  return (
+    'Unlinked this machine: its agents use local Concord. You are still signed in; ' +
+    '`concord cloud link` reconnects it.'
+  );
+}
 
-  const projectKey = normalizeProjectKey(remote);
-  if (projectKey === null) {
-    throw new Error(`"${remote}" is not a git remote, such as github.com/org/repo.`);
+/** Whether this machine is linked, and if not, why. */
+export function machineLine(env: NodeJS.ProcessEnv): string {
+  if (linkedMachine(env) !== undefined) {
+    return "Machine: linked; every folder's agents work through Concord Cloud";
   }
+  if (readCredentials(env) === undefined) return 'Machine: not linked (not signed in)';
+  if (readMachineKey(env) === undefined) {
+    return 'Machine: not linked: it has no Concord Cloud identity; run `concord cloud login` again';
+  }
+  return 'Machine: not linked (`concord cloud unlink`); `concord cloud link` reconnects it';
+}
 
-  writeLink(repoRoot, { apiUrl: credentials.apiUrl, projectKey });
-  ensureConcordIgnored(concordDir(repoRoot));
-  return `Linked ${repoRoot} to ${projectKey} on ${credentials.apiUrl}.`;
+/** Where this folder's Concord work lives. */
+export function folderLine(
+  repoRoot: string,
+  deps: Pick<CloudDeps, 'env' | 'originRemote'>,
+): string {
+  const target = cloudTargetFor(repoRoot, deps.env, deps.originRemote);
+  return target === undefined
+    ? `Here: ${repoRoot} uses local Concord`
+    : `Here: ${repoRoot} is ${target.projectKey} on Concord Cloud`;
+}
+
+/** The saved login, with an API key masked. */
+export function loginLine(credentials: CloudCredentials | undefined): string {
+  return credentials === undefined
+    ? 'Login: none (run `concord cloud login`)'
+    : `Login: ${credentials.apiUrl} ${
+        'apiKey' in credentials
+          ? `with key ${maskKey(credentials.apiKey)}`
+          : 'signed in through the browser'
+      }`;
 }
 
 /**
- * Return a workspace to local Concord. Signed in, the cloud is the default, so
- * removing a link is not enough: the workspace records that it stays local.
+ * Whether the login's API answers and accepts its key: two checks, reported
+ * apart, so a failing key check never hides an API that answered.
  */
-export function runCloudUnlink(deps: CloudDeps): string {
-  const repoRoot = resolveRepoRoot(deps.cwd, deps.env);
-  // Checked first, signed in or not: a saved choice outlives a logout.
-  if (readLocalChoice(repoRoot)) return `${repoRoot} already stays local.`;
-  if (readCredentials(deps.env) !== undefined) {
-    writeLocalChoice(repoRoot);
-    // Never committed: the choice is this machine's, not every clone's.
-    ensureConcordIgnored(concordDir(repoRoot));
-    return `${repoRoot} stays local, though this machine is signed in; \`concord cloud link\` undoes this.`;
+export async function apiCheckLines(
+  credentials: CloudCredentials,
+  deps: Pick<CloudDeps, 'env' | 'fetch'>,
+): Promise<{ readonly lines: string[]; readonly healthy: boolean }> {
+  const lines: string[] = [];
+  let healthy = true;
+  try {
+    const meta = await fetchMeta(credentials.apiUrl, deps.fetch);
+    const problem = incompatibility(meta);
+    healthy &&= problem === null;
+    lines.push(
+      problem === null
+        ? `API: reachable, v${String(meta.apiVersion)}, compatible`
+        : `API: reachable but ${problem}`,
+    );
+  } catch (error) {
+    healthy = false;
+    lines.push(`API: unreachable (${error instanceof Error ? error.message : String(error)})`);
   }
-  return removeLink(repoRoot)
-    ? `Unlinked ${repoRoot}; Concord stays local here.`
-    : `${repoRoot} was not linked.`;
-}
-
-/** Where a workspace's Concord state is, and why. */
-function workspaceLine(repoRoot: string, deps: CloudDeps): string {
-  const target = cloudTargetFor(repoRoot, deps.env, deps.originRemote);
-  if (target?.source === 'link') {
-    return `Repository: ${repoRoot} is linked to ${target.projectKey} on ${target.apiUrl}`;
+  try {
+    const bearer = await bearerFor(deps.env, credentials.apiUrl, deps.fetch)();
+    const key = await checkKey(credentials.apiUrl, bearer, deps.fetch);
+    healthy &&= key === 'ok';
+    lines.push(key === 'ok' ? 'Key: accepted' : 'Key: rejected — log in again');
+  } catch (error) {
+    healthy = false;
+    lines.push(`Key: not checked (${error instanceof Error ? error.message : String(error)})`);
   }
-  if (target !== undefined) {
-    return `Repository: ${repoRoot} uses Concord Cloud as ${target.projectKey} (the default while signed in)`;
-  }
-  if (readLocalChoice(repoRoot)) {
-    return `Repository: ${repoRoot} is local (\`concord cloud unlink\`; \`concord cloud link\` undoes it)`;
-  }
-  if (readCredentials(deps.env) === undefined) {
-    return `Repository: ${repoRoot} is local (not signed in)`;
-  }
-  if (readMachineKey(deps.env) === undefined) {
-    return `Repository: ${repoRoot} is local: this machine has no Concord Cloud identity; run \`concord cloud login\` again`;
-  }
-  if (existsSync(databasePath(repoRoot))) {
-    return `Repository: ${repoRoot} is local: it holds local Concord state; \`concord cloud link\` moves it to the cloud`;
-  }
-  return isRepository(repoRoot)
-    ? `Repository: ${repoRoot} is local: it has no origin remote; name it with \`concord cloud link --project\``
-    : `Repository: ${repoRoot} is local: outside a repository, only a session that names its folder (Claude Code) uses the cloud's general workspace`;
+  return { lines, healthy };
 }
 
 export async function runCloudStatus(deps: CloudDeps): Promise<string> {
   const repoRoot = resolveRepoRoot(deps.cwd, deps.env);
   const credentials = readCredentials(deps.env);
-  const link = readLink(repoRoot);
-  const lines = [
-    credentials === undefined
-      ? 'Login: none (run `concord cloud login`)'
-      : `Login: ${credentials.apiUrl} ${
-          'apiKey' in credentials
-            ? `with key ${maskKey(credentials.apiKey)}`
-            : 'signed in through the browser'
-        }`,
-    workspaceLine(repoRoot, deps),
-  ];
-
-  if (
-    credentials !== undefined &&
-    link !== undefined &&
-    !sameApi(link.apiUrl, credentials.apiUrl)
-  ) {
-    lines.push(
-      `Warning: linked to ${link.apiUrl}, but logged in to ${credentials.apiUrl}; ` +
-        'the checks below are for the login, and cloud mode will refuse this pair.',
-    );
-  }
-
-  if (credentials !== undefined) {
-    // Two checks, reported apart, so a failing key check never hides an API
-    // that answered.
-    try {
-      const meta = await fetchMeta(credentials.apiUrl, deps.fetch);
-      const problem = incompatibility(meta);
-      lines.push(
-        problem === null
-          ? `API: reachable, v${String(meta.apiVersion)}, compatible`
-          : `API: reachable but ${problem}`,
-      );
-    } catch (error) {
-      lines.push(`API: unreachable (${error instanceof Error ? error.message : String(error)})`);
-    }
-    try {
-      const bearer = await bearerFor(deps.env, credentials.apiUrl, deps.fetch)();
-      const key = await checkKey(credentials.apiUrl, bearer, deps.fetch);
-      lines.push(key === 'ok' ? 'Key: accepted' : 'Key: rejected — log in again');
-    } catch (error) {
-      lines.push(`Key: not checked (${error instanceof Error ? error.message : String(error)})`);
-    }
-  }
-
+  const lines = [loginLine(credentials), machineLine(deps.env), folderLine(repoRoot, deps)];
+  if (credentials !== undefined) lines.push(...(await apiCheckLines(credentials, deps)).lines);
   return lines.join('\n');
 }
 
@@ -331,9 +299,7 @@ async function report(run: () => string | Promise<string>): Promise<void> {
 }
 
 export function registerCloudCommand(program: Command): void {
-  const cloud = program
-    .command('cloud')
-    .description('Connect this machine and repository to Concord Cloud');
+  const cloud = program.command('cloud').description('Connect this machine to Concord Cloud');
 
   cloud
     .command('login')
@@ -352,17 +318,16 @@ export function registerCloudCommand(program: Command): void {
 
   cloud
     .command('link')
-    .description('Link this repository to Concord Cloud')
-    .option('--project <remote>', 'the repository, when it has no origin remote')
-    .action((options) => report(() => runCloudLink(options, liveDeps())));
+    .description('Work through Concord Cloud in every folder on this machine (login does this too)')
+    .action(() => report(() => runCloudLink(liveDeps())));
 
   cloud
     .command('unlink')
-    .description('Keep this repository on local Concord, even while signed in')
+    .description('Use local Concord on this machine, staying signed in')
     .action(() => report(() => runCloudUnlink(liveDeps())));
 
   cloud
     .command('status')
-    .description('Show the login, link and whether the API is usable')
+    .description('Show the login, whether this machine is linked, and whether the API is usable')
     .action(() => report(() => runCloudStatus(liveDeps())));
 }

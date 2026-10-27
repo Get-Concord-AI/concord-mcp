@@ -16,9 +16,8 @@ import { CONCORD_SERVER_INSTRUCTIONS } from '../install/instructions.js';
 import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
 import { bearerFor, type Bearer } from './tokens.js';
-import { assertKeySafeUrl, sameApi } from './client.js';
-import { readCredentials, readMachineKey } from './settings.js';
-import { cloudTargetFor } from './target.js';
+import { assertKeySafeUrl } from './client.js';
+import { cloudTargetFor, linkedMachine } from './target.js';
 
 /**
  * Cloud mode for the MCP server: in a linked repository, `concord-mcp` forwards
@@ -48,9 +47,8 @@ export interface CloudSession {
 }
 
 /**
- * The cloud session for a workspace: undefined when it works locally (see
- * `cloudTargetFor`). A link this machine cannot use is an error rather than a
- * silent fall back to local state, which no other agent would see.
+ * The cloud session for a workspace: undefined on a machine that is not
+ * linked, which works locally (see `cloudTargetFor`).
  */
 export function cloudSessionFor(
   repoRoot: string,
@@ -58,30 +56,16 @@ export function cloudSessionFor(
   identity: AgentIdentity | undefined,
   checkoutRoot: string = repoRoot,
 ): CloudSession | undefined {
-  const link = cloudTargetFor(repoRoot, env);
-  if (link === undefined) return undefined;
+  const machine = linkedMachine(env);
+  const target = cloudTargetFor(repoRoot, env);
+  if (machine === undefined || target === undefined) return undefined;
 
-  const credentials = readCredentials(env);
-  const machineKey = readMachineKey(env);
-  if (credentials === undefined || machineKey === undefined) {
-    throw new Error(
-      `${repoRoot} is linked to Concord Cloud, but this machine is not logged in. ` +
-        'Run `concord cloud login`, or `concord cloud unlink` to work locally.',
-    );
-  }
-  if (!sameApi(credentials.apiUrl, link.apiUrl)) {
-    throw new Error(
-      `${repoRoot} is linked to ${link.apiUrl}, but this machine is logged in to ` +
-        `${credentials.apiUrl}. Log in to the linked API, or link again.`,
-    );
-  }
-
-  assertKeySafeUrl(credentials.apiUrl);
+  assertKeySafeUrl(target.apiUrl);
   return {
-    apiUrl: credentials.apiUrl,
-    bearer: bearerFor(env, credentials.apiUrl, fetch),
-    machineKey,
-    projectKey: link.projectKey,
+    apiUrl: target.apiUrl,
+    bearer: bearerFor(env, target.apiUrl, fetch),
+    machineKey: machine.machineKey,
+    projectKey: target.projectKey,
     repoRoot,
     checkoutRoot,
     identity,

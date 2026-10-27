@@ -21,6 +21,16 @@ export function rosterLines(others: readonly RosterLine[]): string[] {
   ];
 }
 
+/**
+ * Which tools the id is for. A harness can load a chat app's Concord connector
+ * (claude.ai's, in Claude Code) beside this machine's server. That connector
+ * acts as a separate agent, and one given this session's id once registered a
+ * second agent under it, after which no message to the id could be delivered.
+ */
+export const CONCORD_SERVER_ONLY =
+  "Make Concord calls with this machine's `concord` MCP server; a chat app's Concord " +
+  "connector (such as claude.ai's) is a separate agent and must never be given this id.";
+
 /** What a session is told at start: who it is, and who else is here. */
 export function sessionStartMessage(
   agentId: string,
@@ -29,10 +39,10 @@ export function sessionStartMessage(
 ): string {
   return [
     explicitAgentId
-      ? `Concord: this session is agent \`${agentId}\`. Devin's MCP server cannot see the hook session payload, so include \`agent_id: "${agentId}"\` on start_work, update_work, transfer_work, and finish_work calls. Leave it off inspect_work, where \`agent_id\` selects an agent inbox. Do not invent an id.`
+      ? `Concord: this session is agent \`${agentId}\`. Devin's MCP server cannot see the hook session payload, so include \`agent_id: "${agentId}"\` on start_work, update_work, transfer_work, and finish_work calls. Leave it off inspect_work, where \`agent_id\` selects an agent inbox. Do not invent an id. ${CONCORD_SERVER_ONLY}`
       : `Concord: this session is agent \`${agentId}\`. Concord resolves that identity from your ` +
         'session on every tool call, so start_work, update_work, finish_work attribute your work ' +
-        'and keep your presence live without you passing an id.',
+        `and keep your presence live without you passing an id. ${CONCORD_SERVER_ONLY}`,
     'You can receive live messages from other agents in this workspace; they arrive on their own ' +
       'as relayed context, so you never need to poll for them.',
     ...rosterLines(others),
@@ -52,7 +62,8 @@ export function antigravitySessionStartMessage(
   return [
     `Concord: this session is agent \`${agentId}\`. Pass agent_id: "${agentId}" on every ` +
       'write call (start_work, update_work, transfer_work, finish_work). ' +
-      'The MCP server cannot see your session, so it cannot fill this in for you.',
+      'The MCP server cannot see your session, so it cannot fill this in for you. ' +
+      CONCORD_SERVER_ONLY,
     'Messages from other agents reach a running turn automatically. To hear them while idle, ' +
       `start exactly one background command now: \`${monitor}\`. Do not wait on it or ` +
       'poll it. When it completes with a message, answer it, then immediately start a fresh ' +

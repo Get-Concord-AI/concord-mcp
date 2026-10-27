@@ -96,7 +96,7 @@ Concord writes look like:
 }
 ```
 
-In a repository linked to Concord Cloud, the hooks register and deliver through
+On a machine linked to Concord Cloud, the hooks register and deliver through
 the cloud instead of the local database.
 
 Validate installation with:

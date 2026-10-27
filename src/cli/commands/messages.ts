@@ -3,7 +3,7 @@ import type { Command } from '@commander-js/extra-typings';
 import type { AgentMessageRecord } from '../../db/index.js';
 import { describeReceipt, toReceipt } from '../../domain/receipts.js';
 import { openContext } from '../context.js';
-import { cloudLinked } from './cloud-inbox.js';
+import { linkedMachine } from '../../cloud/target.js';
 
 /**
  * The human's view of agent messaging: every message between this
@@ -63,7 +63,7 @@ export function registerMessagesCommand(program: Command): void {
     .option('--limit <n>', 'How many of the newest messages to show', String(DEFAULT_LIMIT))
     .option('--json', 'Print the records with their receipts as JSON')
     .action((options) => {
-      if (cloudLinked(process.cwd())) {
+      if (linkedMachine(process.env) !== undefined) {
         process.stdout.write(
           'This repository is linked to Concord Cloud; see its messages at https://app.getconcord.ai.\n',
         );

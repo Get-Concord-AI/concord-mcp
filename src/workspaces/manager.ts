@@ -42,7 +42,6 @@ export class WorkspaceManager {
   readonly #resolveStore: (repoRoot: string) => StoreLocation;
   #activeWorkspaceId: string;
   #selections = 0;
-  #refusal: string | undefined;
 
   constructor(initialRoot: string, options: WorkspaceManagerOptions = {}) {
     this.#open = options.open ?? openRepositories;
@@ -82,22 +81,15 @@ export class WorkspaceManager {
   }
 
   /**
-   * The active workspace's root without throwing: undefined once refused.
+   * The active workspace's root without throwing.
    * For diagnostics such as telemetry, which must never block a reply.
    */
   get activeRoot(): string | undefined {
-    if (this.#refusal !== undefined) return undefined;
     return this.#contexts.get(this.#activeWorkspaceId)?.repoRoot;
-  }
-
-  /** Refuse every operation from now on, with `reason` as the error. */
-  refuse(reason: string): void {
-    this.#refusal = reason;
   }
 
   /** The active/default context used when an operation omits `workspace_id`. */
   current(): WorkspaceContext {
-    if (this.#refusal !== undefined) throw new Error(this.#refusal);
     const context = this.#contexts.get(this.#activeWorkspaceId);
     if (context === undefined) {
       throw new Error('Concord has no active workspace.');
