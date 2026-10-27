@@ -46,7 +46,9 @@ export function findLeftovers(repoRoot: string, env: NodeJS.ProcessEnv): Leftove
       return {
         path: store.path,
         description: `${store.label}, ${
-          open === undefined ? 'unreadable by this version' : `${String(open)} open task(s)`
+          open === undefined
+            ? 'open tasks not counted (in use, or unreadable by this version)'
+            : `${String(open)} open task(s)`
         }`,
         files: ['', ...COMPANION_SUFFIXES]
           .map((suffix) => `${store.path}${suffix}`)

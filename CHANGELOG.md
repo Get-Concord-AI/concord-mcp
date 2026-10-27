@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-27
+
+### Fixed
+
+- `concord doctor` on a linked machine no longer leaves `-shm` and `-wal` files
+  beside the local stores it reports on. Even a read-only SQLite connection
+  creates them for a WAL-mode store, so doctor now counts a store's open tasks
+  from a temporary copy (log included) and leaves the folder as it found it.
+
 ## [0.17.0] - 2026-10-27
 
 Concord Cloud is linked per machine, and nothing in a repository can take a
