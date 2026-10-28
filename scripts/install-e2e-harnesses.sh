@@ -17,6 +17,8 @@ GROK_VERSION="1.0.60"
 GROK_SHA256="10e6af64b24724fc1074c373e906b9ad121110044dddcbd97ad43c3a25f96d5f"
 GOOSE_VERSION="v1.54.0"
 GOOSE_SHA256="bf01cb6359f7a2b1acb54ca4827e1d059b18aabb3d2b75202e21066cfd3a3396"
+HERMES_VERSION="0.22.5"
+HERMES_COMMIT="bf0203a794a07aac3ff764972ab9087baa4e4f4e"
 
 if [[ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ]]; then
   echo "install-e2e-harnesses.sh pins Linux x86_64 builds; install the CLIs yourself elsewhere." >&2
@@ -48,6 +50,17 @@ fetch "https://github.com/block/goose/releases/download/${GOOSE_VERSION}/goose-x
   "${GOOSE_SHA256}" "${WORK}/goose.tar.bz2"
 tar -xjf "${WORK}/goose.tar.bz2" -C "${WORK}" ./goose
 install -m 0755 "${WORK}/goose" "${BIN_DIR}/goose"
+
+# Hermes is installed from an immutable upstream release commit, into the runner's
+# disposable HOME. Its MCP config and gateway state are isolated per sandbox.
+curl -fsSL --retry 3 -o "${WORK}/hermes-install.sh" \
+  "https://raw.githubusercontent.com/NousResearch/hermes-agent/${HERMES_COMMIT}/scripts/install.sh"
+HERMES_HOME="${HOME}/.hermes"
+HERMES_INSTALL_DIR="${HERMES_HOME}/hermes-agent"
+bash "${WORK}/hermes-install.sh" \
+  --commit "${HERMES_COMMIT}" --dir "${HERMES_INSTALL_DIR}" --hermes-home "${HERMES_HOME}" \
+  --non-interactive --skip-browser --skip-computer-use
+"${BIN_DIR}/hermes" --version | grep -F "${HERMES_VERSION}" >/dev/null
 
 if [[ -n "${GITHUB_PATH:-}" ]]; then
   echo "${BIN_DIR}" >> "${GITHUB_PATH}"
