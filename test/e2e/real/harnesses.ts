@@ -21,7 +21,7 @@ import type { FakeModel } from './fake-model/server.js';
  * where idle delivery exists, an interactive one.
  */
 
-export type RealHarnessName = 'claude-code' | 'codex' | 'copilot-cli' | 'grok' | 'goose';
+export type RealHarnessName = 'claude-code' | 'codex' | 'copilot-cli' | 'grok' | 'goose' | 'hermes';
 
 export interface RealHarness {
   name: RealHarnessName;
@@ -256,7 +256,57 @@ const goose: RealHarness = {
   interactive: (prompt) => ['goose', 'run', '--no-session', '-t', prompt],
 };
 
-export const REAL_HARNESSES: readonly RealHarness[] = [claudeCode, codex, copilot, grok, goose];
+const hermes: RealHarness = {
+  name: 'hermes',
+  executable: 'hermes',
+  idle: 'none',
+  configure(sandbox, model) {
+    // Concord registers itself in Hermes' config.yaml; point the same file's
+    // model at the fake model's Anthropic Messages API.
+    const configPath = join(sandbox.home, '.hermes', 'config.yaml');
+    appendFileSync(
+      configPath,
+      [
+        '',
+        'model:',
+        '  default: claude-haiku-4-5',
+        '  provider: custom',
+        `  base_url: ${model.origin}/anthropic`,
+        '  api_mode: anthropic_messages',
+        '  api_key: fake',
+        '',
+      ].join('\n'),
+    );
+    // Hermes swaps `npx -y <pkg>` for a cached copy of the published package,
+    // so launch the build under test through a shim with another name.
+    goose.configure(sandbox, model);
+    const shim = join(sandbox.bin, 'concord-npx');
+    writeFileSync(
+      shim,
+      readFileSync(join(sandbox.bin, 'npx'), 'utf8').replace(
+        'exec concord-mcp',
+        `exec ${join(sandbox.prefix, 'bin', 'concord-mcp')}`,
+      ),
+    );
+    chmodSync(shim, 0o755);
+    writeFileSync(
+      configPath,
+      readFileSync(configPath, 'utf8').replace('command: npx', `command: ${shim}`),
+    );
+  },
+  env: () => ({}),
+  headless: (prompt) => ['hermes', '--yolo', '-z', prompt],
+  interactive: (prompt) => ['hermes', '--yolo', '-z', prompt],
+};
+
+export const REAL_HARNESSES: readonly RealHarness[] = [
+  claudeCode,
+  codex,
+  copilot,
+  grok,
+  goose,
+  hermes,
+];
 
 /** The host directory holding a harness's executable, if it is installed. */
 export function hostBinaryDir(executable: string): string | undefined {
