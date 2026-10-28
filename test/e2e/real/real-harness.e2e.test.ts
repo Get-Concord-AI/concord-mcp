@@ -154,7 +154,7 @@ for (const harness of REAL_HARNESSES) {
           `--- processes ---\n${ps.stdout
             .split('\n')
             .filter((line) =>
-              /claude|codex|copilot|grok|goose|concord|watch-inbox|pty-run/u.test(line),
+              /claude|codex|copilot|grok|goose|hermes|concord|watch-inbox|pty-run/u.test(line),
             )
             .join('\n')}`,
         );
@@ -488,11 +488,11 @@ for (const harness of REAL_HARNESSES) {
       180_000,
     );
 
-    it.skipIf(harness.name !== 'goose')(
+    it.skipIf(harness.name !== 'goose' && harness.name !== 'hermes')(
       'queues a message to a session it cannot deliver to, and still sends',
       async () => {
         const { probe } = ready();
-        const body = nonce('from-goose');
+        const body = nonce(`from-${harness.name}`);
         launch('headless', `begin, then tell ${probe.agentId}: ${body}`);
         const agentId = await probe.sessionOf(harness.name);
 
@@ -504,12 +504,12 @@ for (const harness of REAL_HARNESSES) {
 
         // A Goose session cannot take messages: v2 queues the message as sent
         // instead of failing, and says so, rather than pretending to deliver.
-        const queued = await probe.send(agentId, nonce('to-goose'));
+        const queued = await probe.send(agentId, nonce(`to-${harness.name}`));
         expect(queued.status).toBe('sent');
         expect(queued.outlook).toMatch(/no live session|only checks between steps/u);
         recordReceipt({
           harness: harness.name,
-          scenario: 'send to Goose',
+          scenario: `send to ${harness.name}`,
           atSend: queued.status,
           receipt: await probe.receipt(queued.message_id),
         });
