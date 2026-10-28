@@ -33,10 +33,10 @@ const mappingSchema = z.record(z.string(), yamlValueSchema);
 type Mapping = z.infer<typeof mappingSchema>;
 const SERVER_KEY = 'concord';
 const NPX_SERVER_ARGS = ['-y', '@concord-ai/concord-mcp'];
-const HERMES_AGENT_ID = 'hermes:${HERMES_SESSION_ID}';
+const HERMES_SESSION_ID = '${HERMES_SESSION_ID}';
 const HERMES_WORKSPACE = '${workspaceFolder}';
 const HERMES_SERVER_ENV = {
-  CONCORD_AGENT_ID: HERMES_AGENT_ID,
+  HERMES_SESSION_ID,
   CONCORD_AGENT_KIND: 'hermes',
   CONCORD_REPO_ROOT: HERMES_WORKSPACE,
 };
@@ -101,7 +101,7 @@ export function hermesConfigInstalled(env: NodeJS.ProcessEnv = process.env): boo
       Array.isArray(args) &&
       (launcher.command === 'npx' ? args.includes('@concord-ai/concord-mcp') : args.length === 0) &&
       serverEnv.success &&
-      serverEnv.data['CONCORD_AGENT_ID'] === HERMES_AGENT_ID &&
+      serverEnv.data['HERMES_SESSION_ID'] === HERMES_SESSION_ID &&
       serverEnv.data['CONCORD_AGENT_KIND'] === 'hermes' &&
       serverEnv.data['CONCORD_REPO_ROOT'] === HERMES_WORKSPACE
     );
