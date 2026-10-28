@@ -12,6 +12,7 @@ import {
   installGlobalAdapters,
   statusGlobalAdapters,
   uninstallGlobalAdapters,
+  versionTuple,
 } from '../../src/install/adapters/index.js';
 
 // Links into this checkout count as lasting even when it lives under /tmp.
@@ -446,5 +447,17 @@ describe('global harness adapters', () => {
     const agEntry = report.find((entry) => entry.harness === 'antigravity');
     expect(agEntry?.status).toBe('action_required');
     expect(agEntry?.detail).toContain('Concord lifecycle hooks remain installed');
+  });
+});
+
+
+describe('versionTuple', () => {
+  it('parses a v-prefixed version from Hermes output', () => {
+    expect(versionTuple('Hermes Agent v0.22.5')).toEqual([0, 22, 5]);
+    expect(versionTuple('v1.2.3')).toEqual([1, 2, 3]);
+  });
+
+  it('keeps rejecting version numbers embedded in identifiers', () => {
+    expect(versionTuple('HermesAgent0.22.5')).toBeUndefined();
   });
 });
