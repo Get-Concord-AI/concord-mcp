@@ -533,19 +533,30 @@ function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
 
 function statusHermes(env: NodeJS.ProcessEnv): AdapterReport {
   const config = HARNESS_CONFIGS.hermes;
-  const detected = executablePath(config.executable, env) !== undefined;
+  const executable = executablePath(config.executable, env);
+  const detected = executable !== undefined;
+  const version = detected ? versionTuple(run(executable, ['--version'], env).output) : undefined;
+  const supported = version !== undefined && atLeast(version, config.minimumVersion);
   const installed = hermesConfigInstalled(env);
   return {
     harness: config.name,
     detected,
-    status: !detected ? 'not_detected' : installed ? 'installed' : 'action_required',
+    status: !detected
+      ? 'not_detected'
+      : !supported
+        ? 'unsupported_version'
+        : installed
+          ? 'installed'
+          : 'action_required',
     monitor: config.monitor.kind,
-    capabilities: detected && installed ? [...config.installedCapabilities] : [],
+    capabilities: detected && supported && installed ? [...config.installedCapabilities] : [],
     detail: !detected
       ? 'Hermes CLI was not found on PATH.'
-      : installed
-        ? config.installedDetail
-        : 'Concord MCP server is not registered with Hermes.',
+      : !supported
+        ? config.unsupportedDetail
+        : installed
+          ? config.installedDetail
+          : 'Concord MCP is not registered with Hermes, or its session/workspace configuration is incomplete.',
   };
 }
 
@@ -787,9 +798,12 @@ export function installAdapter(
       }
       return;
     }
-    case 'hermes':
+    case 'hermes': {
+      const version = versionTuple(run(executable, ['--version'], env).output);
+      if (version === undefined || !atLeast(version, HARNESS_CONFIGS.hermes.minimumVersion)) return;
       installHermesMcpConfig(env);
       return;
+    }
     case 'goose': {
       const version = versionTuple(run(executable, ['--version'], env).output);
       if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
