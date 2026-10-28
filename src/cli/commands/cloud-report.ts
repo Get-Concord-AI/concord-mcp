@@ -22,10 +22,6 @@ import type { CloudDeps } from './cloud.js';
 /** The `schema` both JSON reports carry. */
 export const REPORT_SCHEMA = 1;
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /**
  * Whether the login's API answers and accepts its key: two checks, kept apart
  * so a failing key check never hides an API that answered.
@@ -46,7 +42,7 @@ export async function checkLogin(
     const meta = await fetchMeta(credentials.apiUrl, deps.fetch);
     api = { version: meta.apiVersion, problem: incompatibility(meta) };
   } catch (error) {
-    api = { unreachable: message(error) };
+    api = { unreachable: error instanceof Error ? error.message : String(error) };
   }
   let key: LoginCheck['key'];
   try {
@@ -54,7 +50,7 @@ export async function checkLogin(
     key =
       (await checkKey(credentials.apiUrl, bearer, deps.fetch)) === 'ok' ? 'accepted' : 'rejected';
   } catch (error) {
-    key = { unchecked: message(error) };
+    key = { unchecked: error instanceof Error ? error.message : String(error) };
   }
   return { api, key };
 }
