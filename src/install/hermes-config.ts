@@ -33,6 +33,13 @@ const mappingSchema = z.record(z.string(), yamlValueSchema);
 type Mapping = z.infer<typeof mappingSchema>;
 const SERVER_KEY = 'concord';
 const NPX_SERVER_ARGS = ['-y', '@concord-ai/concord-mcp'];
+const HERMES_AGENT_ID = 'hermes:${HERMES_SESSION_ID}';
+const HERMES_WORKSPACE = '${workspaceFolder}';
+const HERMES_SERVER_ENV = {
+  CONCORD_AGENT_ID: HERMES_AGENT_ID,
+  CONCORD_AGENT_KIND: 'hermes',
+  CONCORD_REPO_ROOT: HERMES_WORKSPACE,
+};
 
 /** Standalone installs launch directly: they may have neither npm nor npx on PATH. */
 function concordServerLaunch(): { command: string; args: string[] } {
@@ -87,11 +94,17 @@ export function hermesConfigInstalled(env: NodeJS.ProcessEnv = process.env): boo
     if (!entry.success) return false;
     const launcher = concordServerLaunch();
     const args = entry.data['args'];
+    const serverEnv = mappingSchema.safeParse(entry.data['env']);
     return (
       entry.data['enabled'] !== false &&
       entry.data['command'] === launcher.command &&
       Array.isArray(args) &&
-      (launcher.command === 'npx' ? args.includes('@concord-ai/concord-mcp') : args.length === 0)
+      (launcher.command === 'npx' ? args.includes('@concord-ai/concord-mcp') : args.length === 0) &&
+      entry.data['cwd'] === HERMES_WORKSPACE &&
+      serverEnv.success &&
+      serverEnv.data['CONCORD_AGENT_ID'] === HERMES_AGENT_ID &&
+      serverEnv.data['CONCORD_AGENT_KIND'] === 'hermes' &&
+      serverEnv.data['CONCORD_REPO_ROOT'] === HERMES_WORKSPACE
     );
   } catch {
     return false;
@@ -103,12 +116,18 @@ export function installHermesMcpConfig(env: NodeJS.ProcessEnv = process.env): vo
   const config = readConfig(path);
   const existing = config['mcp_servers'];
   const servers = existing === undefined ? {} : mappingSchema.parse(existing);
+  const previous = mappingSchema.safeParse(servers[SERVER_KEY]);
+  const previousEnv = previous.success ? mappingSchema.safeParse(previous.data['env']) : undefined;
+  const mergedEnv = previousEnv?.success ? previousEnv.data : {};
   writeConfig(path, {
     ...config,
     mcp_servers: {
       ...servers,
       [SERVER_KEY]: {
+        ...(previous.success ? previous.data : {}),
         ...concordServerLaunch(),
+        cwd: HERMES_WORKSPACE,
+        env: { ...mergedEnv, ...HERMES_SERVER_ENV },
         enabled: true,
       },
     },
