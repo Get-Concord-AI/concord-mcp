@@ -11,6 +11,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+
+import { load } from 'js-yaml';
 import { capabilityFor, monitorCapabilityFor } from '../../src/domain/delivery.js';
 import { dirname, join } from 'node:path';
 import {
@@ -51,27 +53,36 @@ describe('Hermes MCP config', () => {
     const bin = join(env.HOME, 'bin');
     mkdirSync(bin);
     const hermes = join(bin, 'hermes');
-    writeFileSync(hermes, '#!/bin/sh\necho hermes\n');
+    writeFileSync(hermes, '#!/bin/sh\necho Hermes Agent v0.22.5\n');
     chmodSync(hermes, 0o755);
     const runtimeEnv = { ...env, PATH: bin };
     expect(statusAdapter('hermes', runtimeEnv).status).toBe('action_required');
     installGlobalAdapters(import.meta.url, runtimeEnv);
     expect(statusAdapter('hermes', runtimeEnv)).toMatchObject({
       status: 'installed',
-      capabilities: [],
+      capabilities: ['pull', 'steer', 'busy'],
     });
-    expect(statusAdapter('hermes', runtimeEnv).detail).toContain(
-      'peer-message delivery is not yet supported',
-    );
+    expect(statusAdapter('hermes', runtimeEnv).detail).toContain('workspace');
     expect(capabilityFor('hermes')).toEqual({
       transport: 'pull',
-      reach: [],
-      operations: [],
+      reach: ['busy'],
+      operations: ['pull', 'steer'],
     });
     expect(monitorCapabilityFor('hermes')).toEqual({
       transport: 'pull',
-      reach: [],
-      operations: [],
+      reach: ['busy'],
+      operations: ['pull', 'steer'],
+    });
+    const parsed = load(readFileSync(path, 'utf8')) as {
+      mcp_servers: Record<string, { cwd: string; env: Record<string, string> }>;
+    };
+    expect(parsed.mcp_servers['concord']).toMatchObject({
+      cwd: '${workspaceFolder}',
+      env: {
+        CONCORD_AGENT_ID: 'hermes:${HERMES_SESSION_ID}',
+        CONCORD_AGENT_KIND: 'hermes',
+        CONCORD_REPO_ROOT: '${workspaceFolder}',
+      },
     });
     expect(existsSync(path)).toBe(true);
     uninstallGlobalAdapters(runtimeEnv);
