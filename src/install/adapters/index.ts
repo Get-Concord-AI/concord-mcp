@@ -538,25 +538,27 @@ function statusHermes(env: NodeJS.ProcessEnv): AdapterReport {
   const version = detected ? versionTuple(run(executable, ['--version'], env).output) : undefined;
   const supported = version !== undefined && atLeast(version, config.minimumVersion);
   const installed = hermesConfigInstalled(env);
+  const status: AdapterStatus = !detected
+    ? 'not_detected'
+    : !supported
+      ? 'unsupported_version'
+      : installed
+        ? 'installed'
+        : 'action_required';
+  const detail = !detected
+    ? 'Hermes CLI was not found on PATH.'
+    : !supported
+      ? config.unsupportedDetail
+      : installed
+        ? config.installedDetail
+        : 'Concord MCP is not registered with Hermes, or its session/workspace configuration is incomplete.';
   return {
     harness: config.name,
     detected,
-    status: !detected
-      ? 'not_detected'
-      : !supported
-        ? 'unsupported_version'
-        : installed
-          ? 'installed'
-          : 'action_required',
+    status,
     monitor: config.monitor.kind,
     capabilities: detected && supported && installed ? [...config.installedCapabilities] : [],
-    detail: !detected
-      ? 'Hermes CLI was not found on PATH.'
-      : !supported
-        ? config.unsupportedDetail
-        : installed
-          ? config.installedDetail
-          : 'Concord MCP is not registered with Hermes, or its session/workspace configuration is incomplete.',
+    detail,
   };
 }
 
