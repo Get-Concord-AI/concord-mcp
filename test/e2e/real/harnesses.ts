@@ -264,6 +264,7 @@ const hermes: RealHarness = {
     // Concord registers itself in Hermes' config.yaml; point the same file's
     // model at the fake model's Anthropic Messages API.
     const configPath = join(sandbox.home, '.hermes', 'config.yaml');
+    mkdirSync(dirname(configPath), { recursive: true });
     appendFileSync(
       configPath,
       [
