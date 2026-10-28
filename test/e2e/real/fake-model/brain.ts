@@ -68,7 +68,8 @@ function calledTool(conversation: Conversation, suffix: string): ToolCall[] {
 export function concordReachable(tools: readonly string[]): boolean {
   return (
     tools.some((tool) => tool.includes('concord') && tool.endsWith('update_work')) ||
-    tools.includes('use_tool')
+    tools.includes('use_tool') ||
+    tools.includes('tool_call')
   );
 }
 
