@@ -204,8 +204,8 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     name: 'hermes',
     executable: 'hermes',
     minimumVersion: [0, 0, 0],
-    defaultCapability: busyPull,
-    monitorCapability: busyPull,
+    defaultCapability: { transport: 'pull', reach: [], operations: [] },
+    monitorCapability: { transport: 'pull', reach: [], operations: [] },
     monitor: {
       kind: 'harness-monitor',
       lifecycle: 'one-shot',
@@ -213,9 +213,9 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
       background: false,
       verified: false,
     },
-    installedCapabilities: ['pull', 'busy'],
+    installedCapabilities: [],
     installedDetail:
-      'Concord MCP is registered with Hermes; task context can be pulled during active turns.',
+      'Concord MCP is configured in Hermes, but session identity and project workspace are not available; peer-message delivery is not yet supported.',
     unsupportedDetail: 'Hermes CLI is not available.',
   },
   antigravity: {
