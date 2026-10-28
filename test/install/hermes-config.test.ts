@@ -73,15 +73,17 @@ describe('Hermes MCP config', () => {
       reach: ['busy'],
       operations: ['pull', 'steer'],
     });
-    const parsed = load(readFileSync(path, 'utf8')) as {
-      mcp_servers: Record<string, { cwd: string; env: Record<string, string> }>;
-    };
-    expect(parsed.mcp_servers['concord']).toMatchObject({
-      cwd: '${workspaceFolder}',
-      env: {
-        CONCORD_AGENT_ID: 'hermes:${HERMES_SESSION_ID}',
-        CONCORD_AGENT_KIND: 'hermes',
-        CONCORD_REPO_ROOT: '${workspaceFolder}',
+    const parsed = load(readFileSync(path, 'utf8'));
+    expect(parsed).toMatchObject({
+      mcp_servers: {
+        concord: {
+          cwd: '${workspaceFolder}',
+          env: {
+            CONCORD_AGENT_ID: 'hermes:${HERMES_SESSION_ID}',
+            CONCORD_AGENT_KIND: 'hermes',
+            CONCORD_REPO_ROOT: '${workspaceFolder}',
+          },
+        },
       },
     });
     expect(existsSync(path)).toBe(true);
