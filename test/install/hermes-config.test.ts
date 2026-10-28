@@ -77,7 +77,6 @@ describe('Hermes MCP config', () => {
     expect(parsed).toMatchObject({
       mcp_servers: {
         concord: {
-          cwd: '${workspaceFolder}',
           env: {
             CONCORD_AGENT_ID: 'hermes:${HERMES_SESSION_ID}',
             CONCORD_AGENT_KIND: 'hermes',
