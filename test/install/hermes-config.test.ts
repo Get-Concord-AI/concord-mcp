@@ -52,9 +52,14 @@ describe('Hermes MCP config', () => {
     const { env, path } = fixture();
     const bin = join(env.HOME, 'bin');
     mkdirSync(bin);
-    const hermes = join(bin, 'hermes');
-    writeFileSync(hermes, '#!/bin/sh\necho Hermes Agent v0.22.5\n');
-    chmodSync(hermes, 0o755);
+    const hermes = join(bin, process.platform === 'win32' ? 'hermes.cmd' : 'hermes');
+    writeFileSync(
+      hermes,
+      process.platform === 'win32'
+        ? '@echo Hermes Agent v0.22.5\r\n'
+        : '#!/bin/sh\necho Hermes Agent v0.22.5\n',
+    );
+    if (process.platform !== 'win32') chmodSync(hermes, 0o755);
     const runtimeEnv = { ...env, PATH: bin };
     expect(statusAdapter('hermes', runtimeEnv).status).toBe('action_required');
     installGlobalAdapters(import.meta.url, runtimeEnv);
