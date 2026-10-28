@@ -62,6 +62,14 @@ function unwrap(block: Block): ToolCall {
       .safeParse(input);
     if (inner.success) return { name: inner.data.tool_name, input: inner.data.tool_input ?? {} };
   }
+  // Hermes reaches deferred tools through `tool_call` with a batch of one.
+  if (block.name === 'tool_call') {
+    const inner = z
+      .object({ calls: z.tuple([z.object({ name: z.string(), arguments: jsonObject })]) })
+      .safeParse(input);
+    if (inner.success)
+      return { name: inner.data.calls[0].name, input: inner.data.calls[0].arguments };
+  }
   return { name: block.name ?? '', input };
 }
 
