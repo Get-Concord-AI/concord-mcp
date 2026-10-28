@@ -145,6 +145,12 @@ for (const harness of REAL_HARNESSES) {
         timeoutMs: 120_000,
       });
       expect(setup.status, setup.stderr).toBe(0);
+      if (harness.name === 'hermes') {
+        // Explicitly exercise the global adapter installer in this isolated
+        // sandbox before the real Hermes binary reads its user config.
+        const adapters = await sandbox.concord(['adapters', 'install'], { env: harnessEnv });
+        expect(adapters.status, adapters.stderr).toBe(0);
+      }
       harness.configure(sandbox, model);
       fixtures.probe = await Probe.start(sandbox);
       onTestFailed(() => {
