@@ -100,7 +100,6 @@ export function hermesConfigInstalled(env: NodeJS.ProcessEnv = process.env): boo
       entry.data['command'] === launcher.command &&
       Array.isArray(args) &&
       (launcher.command === 'npx' ? args.includes('@concord-ai/concord-mcp') : args.length === 0) &&
-      entry.data['cwd'] === HERMES_WORKSPACE &&
       serverEnv.success &&
       serverEnv.data['CONCORD_AGENT_ID'] === HERMES_AGENT_ID &&
       serverEnv.data['CONCORD_AGENT_KIND'] === 'hermes' &&
@@ -126,7 +125,6 @@ export function installHermesMcpConfig(env: NodeJS.ProcessEnv = process.env): vo
       [SERVER_KEY]: {
         ...(previous.success ? previous.data : {}),
         ...concordServerLaunch(),
-        cwd: HERMES_WORKSPACE,
         env: { ...mergedEnv, ...HERMES_SERVER_ENV },
         enabled: true,
       },
