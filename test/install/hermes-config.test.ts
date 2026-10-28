@@ -59,8 +59,10 @@ describe('Hermes MCP config', () => {
     expect(statusAdapter('hermes', runtimeEnv)).toMatchObject({
       status: 'installed',
       capabilities: [],
-      detail: expect.stringContaining('peer-message delivery is not yet supported'),
     });
+    expect(statusAdapter('hermes', runtimeEnv).detail).toContain(
+      'peer-message delivery is not yet supported',
+    );
     expect(capabilityFor('hermes')).toEqual({ transport: 'pull', reach: [], operations: [] });
     expect(monitorCapabilityFor('hermes')).toEqual({ transport: 'pull', reach: [], operations: [] });
     expect(existsSync(path)).toBe(true);
