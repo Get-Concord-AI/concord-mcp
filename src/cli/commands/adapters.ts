@@ -112,6 +112,45 @@ export function codexManagedLaunchContext(
   return { cwd: repoRoot, env: codexManagedEnvironment(url, env) };
 }
 
+/**
+ * `-c` / `--config` overrides that must reach `codex app-server`.
+ * The remote TUI still gets the full argv (including `--profile` and
+ * TUI-only flags). Codex rejects `--profile` on app-server itself.
+ */
+export function codexAppServerConfigArgs(args: readonly string[]): string[] {
+  const forwarded: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === undefined) continue;
+
+    if (arg === '-c' || arg === '--config') {
+      forwarded.push(arg);
+      const value = args[index + 1];
+      if (value !== undefined && !value.startsWith('-')) {
+        forwarded.push(value);
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg.startsWith('-c=') || arg.startsWith('--config=')) {
+      forwarded.push(arg);
+    }
+  }
+  return forwarded;
+}
+
+/** Argv for the managed Codex app-server and remote TUI processes. */
+export function codexLaunchArgv(
+  url: string,
+  args: readonly string[],
+): { appServer: string[]; tui: string[] } {
+  return {
+    appServer: ['app-server', '--listen', url, ...codexAppServerConfigArgs(args)],
+    tui: ['--remote', url, ...args],
+  };
+}
+
 async function launchCodex(args: readonly string[], repoRoot: string): Promise<void> {
   const port = await availablePort();
   const url = `ws://127.0.0.1:${String(port)}`;
@@ -121,13 +160,14 @@ async function launchCodex(args: readonly string[], repoRoot: string): Promise<v
   // Codex intentionally filters the environment of MCP children, so also run
   // the complete managed tree from the resolved repository root.
   const context = codexManagedLaunchContext(repoRoot, url, process.env);
-  const server = spawn('codex', ['app-server', '--listen', url], {
+  const argv = codexLaunchArgv(url, args);
+  const server = spawn('codex', argv.appServer, {
     ...context,
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   try {
     await waitForCodexServer(url, server);
-    const tui = spawn('codex', ['--remote', url, ...args], {
+    const tui = spawn('codex', argv.tui, {
       ...context,
       stdio: 'inherit',
     });
@@ -199,6 +239,10 @@ export function registerAdaptersCommand(program: Command): void {
     .command('codex')
     .description('Launch Codex through a Concord-reachable local app-server')
     .argument('[args...]', 'Arguments forwarded to the Codex TUI')
+    // Codex's own flags (-c, --profile, --dangerously-bypass-..., ...) are
+    // forwarded, not parsed here. Only -c/--config also go to app-server
+    // (see codexAppServerConfigArgs); --profile stays on the remote TUI.
+    .allowUnknownOption()
     .action(async (args) => launchCodex(args, repoRoot()));
   adapters
     .command('copilot')
