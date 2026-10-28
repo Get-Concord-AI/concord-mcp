@@ -63,8 +63,16 @@ describe('Hermes MCP config', () => {
     expect(statusAdapter('hermes', runtimeEnv).detail).toContain(
       'peer-message delivery is not yet supported',
     );
-    expect(capabilityFor('hermes')).toEqual({ transport: 'pull', reach: [], operations: [] });
-    expect(monitorCapabilityFor('hermes')).toEqual({ transport: 'pull', reach: [], operations: [] });
+    expect(capabilityFor('hermes')).toEqual({
+      transport: 'pull',
+      reach: [],
+      operations: [],
+    });
+    expect(monitorCapabilityFor('hermes')).toEqual({
+      transport: 'pull',
+      reach: [],
+      operations: [],
+    });
     expect(existsSync(path)).toBe(true);
     uninstallGlobalAdapters(runtimeEnv);
     expect(statusAdapter('hermes', runtimeEnv).status).toBe('action_required');
