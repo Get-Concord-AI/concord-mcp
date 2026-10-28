@@ -7,7 +7,6 @@ import type { Command } from '@commander-js/extra-typings';
 
 import {
   assertKeySafeUrl,
-  checkKey,
   fetchMeta,
   incompatibility,
   registerMachine,
@@ -23,11 +22,16 @@ import {
 } from '../../cloud/settings.js';
 import { browserLogin, type BrowserLoginDeps } from '../../cloud/browser-login.js';
 import { cloudTargetFor, linkedMachine } from '../../cloud/target.js';
-import { bearerFor } from '../../cloud/tokens.js';
 import { resolveRepoRoot } from '../../config/paths.js';
 import { writeUserConfig } from '../../config/user-config.js';
 import { gitOriginRemote } from '../../workspaces/store.js';
 import { VERSION } from '../../version.js';
+import {
+  checkLogin,
+  cloudAgentsReport,
+  cloudStatusReport,
+  runCloudAgents,
+} from './cloud-report.js';
 
 /**
  * `concord cloud` — connecting this machine to Concord Cloud. Linking is a
@@ -199,31 +203,22 @@ export async function apiCheckLines(
   credentials: CloudCredentials,
   deps: Pick<CloudDeps, 'env' | 'fetch'>,
 ): Promise<{ readonly lines: string[]; readonly healthy: boolean }> {
-  const lines: string[] = [];
-  let healthy = true;
-  try {
-    const meta = await fetchMeta(credentials.apiUrl, deps.fetch);
-    const problem = incompatibility(meta);
-    healthy &&= problem === null;
-    lines.push(
-      problem === null
-        ? `API: reachable, v${String(meta.apiVersion)}, compatible`
-        : `API: reachable but ${problem}`,
-    );
-  } catch (error) {
-    healthy = false;
-    lines.push(`API: unreachable (${error instanceof Error ? error.message : String(error)})`);
-  }
-  try {
-    const bearer = await bearerFor(deps.env, credentials.apiUrl, deps.fetch)();
-    const key = await checkKey(credentials.apiUrl, bearer, deps.fetch);
-    healthy &&= key === 'ok';
-    lines.push(key === 'ok' ? 'Key: accepted' : 'Key: rejected — log in again');
-  } catch (error) {
-    healthy = false;
-    lines.push(`Key: not checked (${error instanceof Error ? error.message : String(error)})`);
-  }
-  return { lines, healthy };
+  const { api, key } = await checkLogin(credentials, deps);
+  return {
+    lines: [
+      'unreachable' in api
+        ? `API: unreachable (${api.unreachable})`
+        : api.problem === null
+          ? `API: reachable, v${String(api.version)}, compatible`
+          : `API: reachable but ${api.problem}`,
+      key === 'accepted'
+        ? 'Key: accepted'
+        : key === 'rejected'
+          ? 'Key: rejected — log in again'
+          : `Key: not checked (${key.unchecked})`,
+    ],
+    healthy: !('unreachable' in api) && api.problem === null && key === 'accepted',
+  };
 }
 
 export async function runCloudStatus(deps: CloudDeps): Promise<string> {
@@ -329,5 +324,24 @@ export function registerCloudCommand(program: Command): void {
   cloud
     .command('status')
     .description('Show the login, whether this machine is linked, and whether the API is usable')
-    .action(() => report(() => runCloudStatus(liveDeps())));
+    .option('--json', 'print it as JSON, for scripts')
+    .action((options) =>
+      report(async () =>
+        options.json === true
+          ? JSON.stringify(await cloudStatusReport(liveDeps()), null, 2)
+          : runCloudStatus(liveDeps()),
+      ),
+    );
+
+  cloud
+    .command('agents')
+    .description('List the agents Concord Cloud has seen on this machine')
+    .option('--json', 'print them as JSON, for scripts')
+    .action((options) =>
+      report(async () =>
+        options.json === true
+          ? JSON.stringify(await cloudAgentsReport(liveDeps()), null, 2)
+          : runCloudAgents(liveDeps()),
+      ),
+    );
 }

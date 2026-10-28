@@ -1,5 +1,4 @@
 import type { Command } from '@commander-js/extra-typings';
-import { spawn } from 'node:child_process';
 import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -26,6 +25,7 @@ import {
 } from '../../install/mcp-config.js';
 import { cloudTargetFor } from '../../cloud/target.js';
 import { resolveRepoRoot, workspaceIdForRoot } from '../../config/paths.js';
+import { runInteractive } from '../../install/spawn-command.js';
 import { openContext } from '../context.js';
 import { findAvailableUpdate, type AvailableUpdate } from '../../update-notifier.js';
 import { VERSION } from '../../version.js';
@@ -161,26 +161,15 @@ async function askToUpgrade(update: AvailableUpdate): Promise<boolean> {
 }
 
 function installUpdate(env: NodeJS.ProcessEnv): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    // A curl install has no npm; rerunning its installer replaces it in place.
-    const standalone = standaloneInstall();
-    const upgrade =
-      standalone === undefined
-        ? { command: npm, args: ['install', '-g', '@concord-ai/concord-mcp@latest'], env: {} }
-        : standaloneUpgrade(standalone);
-    const child = spawn(upgrade.command, upgrade.args, {
-      env: { ...env, ...upgrade.env },
-      shell: false,
-      stdio: 'inherit',
-    });
-    child.once('error', (error) => {
-      reject(error);
-    });
-    child.once('close', (code) => {
-      resolve(code ?? 1);
-    });
-  });
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  // A curl install has no npm; rerunning its installer replaces it in place.
+  const standalone = standaloneInstall();
+  const upgrade =
+    standalone === undefined
+      ? { command: npm, args: ['install', '-g', '@concord-ai/concord-mcp@latest'], env: {} }
+      : standaloneUpgrade(standalone);
+  // Through `runInteractive`, which sends Windows' `npm.cmd` through cmd.exe as Node requires.
+  return runInteractive(upgrade.command, upgrade.args, { ...env, ...upgrade.env });
 }
 
 /** Offer an explicit upgrade before setup writes repository or client configuration. */

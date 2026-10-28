@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-28
+
+### Added
+
+- `concord cloud status --json` and `concord cloud agents [--json]`: the login,
+  whether its API and key work, whether this machine is linked and this folder's
+  project, and the agents Concord Cloud has seen on this machine, as a stable
+  JSON contract (`schema: 1`) for scripts and setup tools.
+
+### Fixed
+
+- `concord setup`'s upgrade prompt now runs `npm.cmd` on Windows through
+  `cmd.exe`, which Node requires for batch files.
+
 ## [0.17.1] - 2026-10-27
 
 ### Fixed
