@@ -100,7 +100,7 @@ export function run(
 }
 
 export function versionTuple(output: string): number[] | undefined {
-  const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
+  const match = /\bv?(\d+)\.(\d+)\.(\d+)\b/iu.exec(output);
   if (match === null) return undefined;
   return match.slice(1).map((part) => Number.parseInt(part, 10));
 }
