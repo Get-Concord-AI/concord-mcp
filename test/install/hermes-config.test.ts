@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { capabilityFor, monitorCapabilityFor } from '../../src/domain/delivery.js';
 import { dirname, join } from 'node:path';
 import {
   installGlobalAdapters,
@@ -55,7 +56,13 @@ describe('Hermes MCP config', () => {
     const runtimeEnv = { ...env, PATH: bin };
     expect(statusAdapter('hermes', runtimeEnv).status).toBe('action_required');
     installGlobalAdapters(import.meta.url, runtimeEnv);
-    expect(statusAdapter('hermes', runtimeEnv).status).toBe('installed');
+    expect(statusAdapter('hermes', runtimeEnv)).toMatchObject({
+      status: 'installed',
+      capabilities: [],
+      detail: expect.stringContaining('peer-message delivery is not yet supported'),
+    });
+    expect(capabilityFor('hermes')).toEqual({ transport: 'pull', reach: [], operations: [] });
+    expect(monitorCapabilityFor('hermes')).toEqual({ transport: 'pull', reach: [], operations: [] });
     expect(existsSync(path)).toBe(true);
     uninstallGlobalAdapters(runtimeEnv);
     expect(statusAdapter('hermes', runtimeEnv).status).toBe('action_required');
