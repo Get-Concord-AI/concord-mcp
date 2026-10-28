@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, inject, it, onTestFailed } from 'vitest';
 import { z } from 'zod';
@@ -135,8 +136,12 @@ for (const harness of REAL_HARNESSES) {
         realHarnesses: [binaryDir],
       });
       fixtures.sandbox = sandbox;
+      const harnessEnv = {
+        ...harness.env(model),
+        ...(harness.name === 'hermes' ? { HERMES_HOME: join(sandbox.home, '.hermes') } : {}),
+      };
       const setup = await sandbox.concord(['setup'], {
-        env: harness.env(model),
+        env: harnessEnv,
         timeoutMs: 120_000,
       });
       expect(setup.status, setup.stderr).toBe(0);
@@ -181,7 +186,10 @@ for (const harness of REAL_HARNESSES) {
       env: Record<string, string> = {},
     ): HarnessRun {
       const { model, sandbox } = ready();
-      const run = HarnessRun.start(sandbox, harness, model, mode, prompt, env);
+      const run = HarnessRun.start(sandbox, harness, model, mode, prompt, {
+        ...env,
+        ...(harness.name === 'hermes' ? { HERMES_HOME: join(sandbox.home, '.hermes') } : {}),
+      });
       fixtures.runs.push(run);
       return run;
     }
