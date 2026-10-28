@@ -450,7 +450,6 @@ describe('global harness adapters', () => {
   });
 });
 
-
 describe('versionTuple', () => {
   it('parses a v-prefixed version from Hermes output', () => {
     expect(versionTuple('Hermes Agent v0.22.5')).toEqual([0, 22, 5]);
