@@ -78,7 +78,7 @@ describe('Hermes MCP config', () => {
       mcp_servers: {
         concord: {
           env: {
-            CONCORD_AGENT_ID: 'hermes:${HERMES_SESSION_ID}',
+            HERMES_SESSION_ID: '${HERMES_SESSION_ID}',
             CONCORD_AGENT_KIND: 'hermes',
             CONCORD_REPO_ROOT: '${workspaceFolder}',
           },
