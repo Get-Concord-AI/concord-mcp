@@ -89,6 +89,20 @@ describe('Hermes MCP config', () => {
     expect(statusAdapter('hermes', runtimeEnv).status).toBe('action_required');
   });
 
+  it('requires Hermes 0.22.5 for session/workspace interpolation', () => {
+    const { env, path } = fixture();
+    const bin = join(env.HOME, 'bin');
+    mkdirSync(bin);
+    const hermes = join(bin, 'hermes');
+    writeFileSync(hermes, '#!/bin/sh\necho Hermes Agent v0.21.4\n');
+    chmodSync(hermes, 0o755);
+    const runtimeEnv = { ...env, PATH: bin };
+
+    expect(statusAdapter('hermes', runtimeEnv).status).toBe('unsupported_version');
+    installGlobalAdapters(import.meta.url, runtimeEnv);
+    expect(existsSync(path)).toBe(false);
+  });
+
   it('uses the Hermes home override', () => {
     const { env } = fixture();
     expect(hermesConfigPath(env)).toBe(join(env.HOME, '.hermes', 'config.yaml'));
