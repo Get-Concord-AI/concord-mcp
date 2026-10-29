@@ -44,7 +44,10 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
     input.reported_outcome !== undefined &&
     !input.provenance?.some((entry) => entry.field === 'reported_outcome')
   ) {
-    throw new Error('reported_outcome provenance is required when reported_outcome is supplied.');
+    throw new Error(
+      'reported_outcome provenance is required when reported_outcome is supplied: add ' +
+        '{ "field": "reported_outcome", "source": "<CI run, PR, or reviewer>" } to provenance.',
+    );
   }
 
   const reviewReady = input.ready_for_review === true;
