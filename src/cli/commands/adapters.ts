@@ -29,6 +29,7 @@ import {
   hostCopilotInCloud,
   launchCopilot,
 } from './copilot-adapter.js';
+import { launchGemini } from './gemini-adapter.js';
 import { cloudAccess } from './cloud-inbox.js';
 
 async function hostCodex(agentId: string, threadId: string): Promise<void> {
@@ -251,6 +252,13 @@ export function registerAdaptersCommand(program: Command): void {
     // Copilot's own flags (-i, --allow-tool, ...) are forwarded, not parsed here.
     .allowUnknownOption()
     .action(async (args) => launchCopilot(args));
+  adapters
+    .command('gemini')
+    .description('Launch Gemini CLI with its Concord inbox monitor started on the first turn')
+    .argument('[args...]', 'Arguments forwarded to Gemini CLI')
+    // Gemini's own flags (-m, --approval-mode, -i, ...) are forwarded, not parsed here.
+    .allowUnknownOption()
+    .action(async (args) => launchGemini(args));
   adapters
     .command('host-copilot', { hidden: true })
     .requiredOption('--agent <id>')

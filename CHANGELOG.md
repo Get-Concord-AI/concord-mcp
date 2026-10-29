@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `concord adapters gemini`: starts Gemini CLI with a first turn that runs its
+  Concord inbox monitor, so a fresh session can be reached while idle before
+  the user types anything. A session started with plain `gemini` has no monitor
+  until its first turn. Gemini's own flags are forwarded, and a prompt passed
+  with `-i` or `-p` is left as given.
+
 ## [0.18.0] - 2026-10-28
 
 ### Added

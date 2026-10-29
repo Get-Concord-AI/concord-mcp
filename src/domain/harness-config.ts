@@ -159,7 +159,7 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     },
     installedCapabilities: ['pull', 'steer', 'idle', 'busy', 'monitor-command'],
     installedDetail:
-      'A one-shot Gemini background shell monitor injects its completion into the agent; lifecycle hooks provide busy-turn fallback.',
+      'A one-shot Gemini background shell monitor injects its completion into the agent; lifecycle hooks provide busy-turn fallback. Start with `concord adapters gemini` so the monitor runs before the first prompt.',
     unsupportedDetail:
       'Gemini CLI does not meet the verified background shell injection baseline (0.55.0).',
   },
