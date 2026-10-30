@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 
+import { z } from 'zod';
+
 import { writeFakeCommand } from './fake-command.js';
 
 /**
@@ -34,8 +36,5 @@ export function recordedInvocations(logPath: string): string[][] {
   return text
     .split('\n')
     .filter((line) => line !== '')
-    .map((line): string[] => {
-      const parsed: unknown = JSON.parse(line);
-      return Array.isArray(parsed) ? parsed.map(String) : [];
-    });
+    .map((line) => z.array(z.string()).parse(JSON.parse(line)));
 }

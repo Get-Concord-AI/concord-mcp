@@ -126,4 +126,21 @@ describe('OpenCodeServerClient', () => {
     await tick(300);
     expect(closed).toBe(true);
   });
+
+  it('never has two polls in flight, however slow the service is', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const slow: OpenCodeRequest = async (_method, path) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      inFlight -= 1;
+      return path === '/api/session/active' ? '{"data":{}}' : '{}';
+    };
+    client = new OpenCodeServerClient({ request: slow, sessionId: 'ses_1', pollEveryMs: 10 });
+    await client.connect();
+    await tick(400);
+
+    expect(peak).toBe(1);
+  });
 });

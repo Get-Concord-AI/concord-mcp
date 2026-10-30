@@ -34,6 +34,7 @@ export class OpenCodeServerClient implements PushPromptSession {
   private busy = false;
   private closed = false;
   private failedPolls = 0;
+  private polling = false;
   private timer: NodeJS.Timeout | undefined;
   private readonly closedListeners: (() => void)[] = [];
 
@@ -82,7 +83,10 @@ export class OpenCodeServerClient implements PushPromptSession {
     this.timer = undefined;
   }
 
+  /** One poll at a time: a slow service must not stack requests or reorder their answers. */
   private async poll(initial: boolean): Promise<void> {
+    if (this.polling) return;
+    this.polling = true;
     try {
       const reply = await this.options.request('GET', '/api/session/active');
       const parsed = activeSchema.parse(JSON.parse(reply));
@@ -92,6 +96,8 @@ export class OpenCodeServerClient implements PushPromptSession {
       if (initial) throw error instanceof Error ? error : new Error(String(error));
       this.failedPolls += 1;
       if (this.failedPolls >= MAX_FAILED_POLLS) this.shutDown();
+    } finally {
+      this.polling = false;
     }
   }
 

@@ -71,6 +71,15 @@ export function launchDirectory(args: readonly string[], cwd: string): string {
   return cwd;
 }
 
+/** The server the user pointed OpenCode at (`--server <url>` or `--server=<url>`), if any. */
+export function serverFrom(args: readonly string[]): string | undefined {
+  for (const [index, arg] of args.entries()) {
+    if (arg === '--server') return args[index + 1];
+    if (arg.startsWith('--server=')) return arg.slice('--server='.length);
+  }
+  return undefined;
+}
+
 /**
  * The command line for one hosted session, or `undefined` when the user picked
  * their own session (`--session`, `--continue`): the launcher then cannot know
@@ -117,13 +126,14 @@ export interface RunningHost {
   stop(): Promise<void>;
 }
 
-/** Host one OpenCode session's local relay until stopped. */
+/** Host one OpenCode session's local relay, in the workspace of `directory`, until stopped. */
 export async function startOpencodeHost(
   agentId: string,
   sessionId: string,
   request: OpenCodeRequest,
+  directory: string,
 ): Promise<RunningHost> {
-  const context = openContext(process.cwd());
+  const context = openContext(directory);
   ensureAgentRegistered(context.repos, { agentId, kind: KIND }, context.repoRoot);
   const client = new OpenCodeServerClient({ request, sessionId });
   await client.connect();
@@ -172,12 +182,13 @@ async function startHost(
   agentId: string,
   sessionId: string,
   request: OpenCodeRequest,
+  directory: string,
 ): Promise<RunningHost> {
-  const access = cloudAccess(process.cwd());
+  const access = cloudAccess(directory);
   if (access.kind === 'unusable') throw new Error(`Concord Cloud: ${access.reason}`);
   return access.kind === 'cloud'
     ? startOpencodeCloudHost(access.runtime, agentId, sessionId, request)
-    : startOpencodeHost(agentId, sessionId, request);
+    : startOpencodeHost(agentId, sessionId, request, directory);
 }
 
 function warn(message: string): void {
@@ -211,10 +222,13 @@ export async function launchOpencode(args: readonly string[]): Promise<void> {
       warn('you chose the session, so Concord cannot host it; starting OpenCode without it.');
     } else {
       const agentId = agentIdForSession(KIND, sessionId);
-      const request = openCodeApiRunner(executable);
+      // Concord must talk to the server OpenCode will connect to, or the session
+      // it prepares would not exist there; the workspace is the one OpenCode opens.
+      const request = openCodeApiRunner(executable, serverFrom(args));
+      const directory = launchDirectory(args, process.cwd());
       try {
-        await prepareSession(request, sessionId, agentId, launchDirectory(args, process.cwd()));
-        host = await startHost(agentId, sessionId, request);
+        await prepareSession(request, sessionId, agentId, directory);
+        host = await startHost(agentId, sessionId, request, directory);
         launch = plan;
         warn(`this OpenCode session is agent ${agentId}.`);
       } catch (error) {

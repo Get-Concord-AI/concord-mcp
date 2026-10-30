@@ -1,8 +1,10 @@
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   OpenCodeSessionAdapter,
@@ -11,9 +13,12 @@ import {
   newOpencodeSessionId,
   opencodeLaunchPlan,
   prepareSession,
+  serverFrom,
+  startOpencodeHost,
 } from '../../src/cli/commands/opencode-adapter.js';
 import { SWEEP_AFTER_MS, sweepStragglers } from '../../src/cli/commands/session-sweep.js';
 import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
+import { openContext } from '../../src/cli/context.js';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories } from '../../src/db/index.js';
 import { handleSendAgentMessage } from '../../src/tools/agent-messages.js';
@@ -74,11 +79,11 @@ describe('launchDirectory', () => {
 
 describe('prepareSession', () => {
   it('creates the session in the directory, then admits the identity without a turn', async () => {
-    const calls: { method: string; path: string; body: unknown }[] = [];
+    const calls: { method: string; path: string; body: string | undefined }[] = [];
 
     await prepareSession(
       (method, path, body) => {
-        calls.push({ method, path, body: body === undefined ? undefined : JSON.parse(body) });
+        calls.push({ method, path, body });
         return Promise.resolve('{}');
       },
       'ses_x',
@@ -86,7 +91,11 @@ describe('prepareSession', () => {
       '/work/repo',
     );
 
-    expect(calls).toEqual([
+    const sent = calls.map((call) => ({
+      ...call,
+      body: call.body === undefined ? undefined : z.json().parse(JSON.parse(call.body)),
+    }));
+    expect(sent).toEqual([
       {
         method: 'POST',
         path: '/api/session',
@@ -153,5 +162,33 @@ describe('OpenCodeSessionAdapter with the shared sweep', () => {
     expect(pushed[0]?.mode).toBe('steer');
     expect(pushed[0]?.content).toMatch(/Please review\.$/u);
     expect(repos.agentMessages.get(id)?.status).toBe('delivered');
+  });
+});
+
+describe('serverFrom', () => {
+  it('reads the server OpenCode will connect to, in either flag form', () => {
+    expect(serverFrom(['--server', 'http://localhost:4096'])).toBe('http://localhost:4096');
+    expect(serverFrom(['--auto', '--server=http://h:1'])).toBe('http://h:1');
+    expect(serverFrom(['--auto'])).toBeUndefined();
+  });
+});
+
+describe('startOpencodeHost', () => {
+  it('hosts in the workspace of the directory it is given, not the launcher’s', async () => {
+    const other = realpathSync(mkdtempSync(join(tmpdir(), 'concord-oc-host-')));
+    execFileSync('git', ['init', '-q'], { cwd: other });
+    const host = await startOpencodeHost(
+      'opencode:other01',
+      'ses_x',
+      () => Promise.resolve('{"data":{}}'),
+      other,
+    );
+    try {
+      expect(openContext(other).repos.agents.get('opencode:other01')?.agentId).toBe(
+        'opencode:other01',
+      );
+    } finally {
+      await host.stop();
+    }
   });
 });
