@@ -21,6 +21,7 @@ const JSON_TARGETS: readonly string[] = [
 const PINNED_KINDS: ReadonlyMap<string, string> = new Map([
   [join('.agents', 'mcp_config.json'), 'antigravity'],
   [join('.github', 'mcp.json'), 'copilot-cli'],
+  [join('.qwen', 'settings.json'), 'qwen'],
 ]);
 const GEMINI_CONFIG_PATH = join('.gemini', 'settings.json');
 const GROK_CONFIG_PATH = join('.grok', 'config.toml');
@@ -283,6 +284,7 @@ function writeGeminiConfig(repoRoot: string): string {
 export function installMcpConfigs(repoRoot: string): string[] {
   return [
     ...JSON_TARGETS.map((relPath) => writeMcpConfig(repoRoot, relPath)),
+    writeMcpConfig(repoRoot, join('.qwen', 'settings.json')),
     writeGeminiConfig(repoRoot),
     writeGrokMcpConfig(repoRoot),
   ];
