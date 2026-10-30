@@ -71,6 +71,7 @@ describe('installMcpConfigs', () => {
       join('.cursor', 'mcp.json'),
       join('.agents', 'mcp_config.json'),
       join('.github', 'mcp.json'),
+      join('.qwen', 'settings.json'),
       join('.gemini', 'settings.json'),
       join('.grok', 'config.toml'),
     ]);

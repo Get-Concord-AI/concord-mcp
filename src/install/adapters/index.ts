@@ -1,5 +1,6 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
+import { statusQwen } from './qwen.js';
 
 import {
   HARNESS_CONFIGS,
@@ -742,6 +743,8 @@ export function statusAdapter(
       return statusCopilot(env);
     case 'devin':
       return statusDevin(env, repoRoot);
+    case 'qwen':
+      return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
   }
 }
 

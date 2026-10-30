@@ -16,6 +16,7 @@ export const harnessNames = [
   'antigravity',
   'copilot-cli',
   'devin',
+  'qwen',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -254,6 +255,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedCapabilities: ['pull', 'steer', 'busy'],
     installedDetail: 'Devin CLI hooks register sessions and inject inbox messages on user prompts.',
     unsupportedDetail: 'Devin CLI must be v3000.3 or newer for dedicated MCP config files.',
+  },
+  qwen: {
+    name: 'qwen',
+    executable: 'qwen',
+    minimumVersion: [0, 26, 4],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
+    unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
   },
 };
 
