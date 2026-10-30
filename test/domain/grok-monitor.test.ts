@@ -24,6 +24,14 @@ describe('grokMonitorNudge', () => {
     expect(grokMonitorNudge(stop({ backgroundTasks: tasks }), AGENT)).toBeUndefined();
   });
 
+  it('trusts the active receiver lease with free-text Grok monitor descriptions', () => {
+    const tasks = [
+      { id: 't1', type: 'monitor', status: 'running', description: '[monitor] Concord inbox' },
+    ];
+    expect(grokMonitorNudge(stop({ backgroundTasks: tasks }), AGENT, true)).toBeUndefined();
+    expect(grokMonitorNudge(stop({ backgroundTasks: tasks }), AGENT, false)).toBeDefined();
+  });
+
   it('ignores unrelated monitors', () => {
     const tasks = [{ id: 't1', type: 'monitor', status: 'running', description: 'tail -f log' }];
     expect(grokMonitorNudge(stop({ backgroundTasks: tasks }), AGENT)).toBeDefined();

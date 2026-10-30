@@ -11,6 +11,7 @@ import {
   effectiveEndpointCapabilities,
   encodeCapabilities,
   monitorCapabilityFor,
+  receiverActive,
   type EndpointCapability,
 } from '../../domain/delivery.js';
 import { grokMonitorNudge } from '../../domain/grok-monitor.js';
@@ -480,8 +481,10 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         kind: options.provider,
         ...(options.fromHook === true ? { hookPayload } : {}),
       });
-      const nudge =
-        grokStop && hookPayload !== undefined ? grokMonitorNudge(hookPayload, agentId) : undefined;
+      const monitorNudge = (active: boolean): string | undefined =>
+        grokStop && hookPayload !== undefined
+          ? grokMonitorNudge(hookPayload, agentId, active)
+          : undefined;
       if (access.kind === 'cloud') {
         let messages: DeliverableMessage[];
         try {
@@ -490,8 +493,12 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
           reportCloudFailure(error instanceof Error ? error.message : String(error));
           return;
         }
-        if (messages.length > 0) writeMessages(options.format, messages);
-        else if (nudge !== undefined) writeMonitorNudge(nudge);
+        if (messages.length > 0) {
+          writeMessages(options.format, messages);
+        } else {
+          const nudge = monitorNudge(watching(access.runtime, agentId));
+          if (nudge !== undefined) writeMonitorNudge(nudge);
+        }
         return;
       }
       // A subagent shares its parent's session id, so its hooks resolve the
@@ -518,6 +525,9 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       // Silence matters: a hook that prints on an empty inbox would inject
       // noise into the session on every single tool call.
       if (messages.length === 0) {
+        const nudge = monitorNudge(
+          receiverActive(context.repos.agentEndpoints.getByAgent(agentId)),
+        );
         if (nudge !== undefined) writeMonitorNudge(nudge);
         return;
       }

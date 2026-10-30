@@ -33,7 +33,13 @@ export function grokMonitorCommand(agentId: string): string {
  * The stop feedback asking the agent to start its monitor, or undefined when
  * one is already running or this stop is not the main session ending a turn.
  */
-export function grokMonitorNudge(rawPayload: string, agentId: string): string | undefined {
+export function grokMonitorNudge(
+  rawPayload: string,
+  agentId: string,
+  receiverIsActive = false,
+): string | undefined {
+  // Grok's monitor description is free text; the live receiver lease is authoritative.
+  if (receiverIsActive) return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawPayload);
