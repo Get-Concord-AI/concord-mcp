@@ -1,5 +1,5 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { delimiter, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import {
   HARNESS_CONFIGS,
@@ -8,7 +8,8 @@ import {
   type MonitorKind,
 } from '../../domain/harness-config.js';
 import { userHome } from '../../config/paths.js';
-import { spawnCommandSync } from '../spawn-command.js';
+import { installOpencode, statusOpencode } from './opencode.js';
+import { atLeast, executablePath, run, versionTuple } from './probe.js';
 import {
   devinMcpInstalled,
   installDevinMcpConfig,
@@ -61,6 +62,7 @@ import {
   type LinkedHarness,
 } from './links.js';
 
+export { atLeast, executablePath, run, versionTuple } from './probe.js';
 export type { HarnessName, MonitorKind } from '../../domain/harness-config.js';
 export type AdapterStatus =
   'installed' | 'not_detected' | 'action_required' | 'unsupported_version' | 'error';
@@ -75,49 +77,6 @@ export interface AdapterReport {
   installedPath?: string | undefined;
   /** Present when the adapter link points somewhere other than this package. */
   link?: LinkCheck | undefined;
-}
-
-export function executablePath(name: string, env: NodeJS.ProcessEnv): string | undefined {
-  const path = env['PATH'];
-  if (path === undefined) return undefined;
-  const extensions = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
-  for (const directory of path.split(delimiter)) {
-    for (const extension of extensions) {
-      const candidate = join(directory, `${name}${extension}`);
-      if (existsSync(candidate)) return candidate;
-    }
-  }
-  return undefined;
-}
-
-export function run(
-  command: string,
-  args: readonly string[],
-  env: NodeJS.ProcessEnv,
-): {
-  ok: boolean;
-  output: string;
-} {
-  const result = spawnCommandSync(command, args, { env, timeout: 15_000 });
-  return {
-    ok: result.status === 0,
-    output: result.error?.message ?? `${result.stdout}${result.stderr}`.trim(),
-  };
-}
-
-export function versionTuple(output: string): number[] | undefined {
-  const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
-  if (match === null) return undefined;
-  return match.slice(1).map((part) => Number.parseInt(part, 10));
-}
-
-export function atLeast(actual: readonly number[], required: readonly number[]): boolean {
-  for (let index = 0; index < required.length; index += 1) {
-    const left = actual[index] ?? 0;
-    const right = required[index] ?? 0;
-    if (left !== right) return left > right;
-  }
-  return true;
 }
 
 /** Devin introduced dedicated MCP config files in v3000.3; its CLI omits the patch sometimes. */
@@ -742,6 +701,8 @@ export function statusAdapter(
       return statusCopilot(env);
     case 'devin':
       return statusDevin(env, repoRoot);
+    case 'opencode':
+      return statusOpencode(env);
   }
 }
 
@@ -792,6 +753,11 @@ export function installAdapter(
       );
     }
     installGlobalAntigravityHooks(env);
+    return;
+  }
+
+  if (harness === 'opencode') {
+    installOpencode(env);
     return;
   }
 
