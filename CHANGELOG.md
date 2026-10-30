@@ -8,6 +8,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `update_work` with `kind: decision` can supersede an earlier decision on the same task
+  (`supersedes`, with an optional `supersede_reason`). Superseded decisions are hidden from
+  `inspect_work` task context unless `include_superseded` is set.
 - `concord adapters gemini`: starts Gemini CLI with a first turn that runs its
   Concord inbox monitor, so a fresh session can be reached while idle before
   the user types anything. A session started with plain `gemini` has no monitor

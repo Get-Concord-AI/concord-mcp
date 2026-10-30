@@ -23,6 +23,14 @@ export interface TaskContextResult {
   messages: AgentMessageRecord[];
 }
 
+/** Superseded decisions stay in the log but are hidden unless the caller asks for them. */
+function visibleUpdates(
+  updates: TaskUpdateRecord[],
+  includeSuperseded: boolean,
+): TaskUpdateRecord[] {
+  return includeSuperseded ? updates : updates.filter((update) => update.supersededBy === null);
+}
+
 export function handleGetTaskContext(
   repos: Repositories,
   input: GetTaskContextInput,
@@ -62,7 +70,10 @@ export function handleGetTaskContext(
               ? 'unregistered'
               : deriveLiveness(owner.lastSeen, Date.now());
           })(),
-    updates: repos.taskUpdates.listByTask(task.taskId),
+    updates: visibleUpdates(
+      repos.taskUpdates.listByTask(task.taskId),
+      input.include_superseded === true,
+    ),
     latestHandoff: repos.handoffs.latestForTask(task.taskId),
     latestReview: repos.reviews.latestForTask(task.taskId),
     overlaps,

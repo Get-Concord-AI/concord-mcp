@@ -41,7 +41,10 @@ export function handleInspectWork(
         ? undefined
         : { agentId: input.agent_id, verified: false };
   if (input.task_id !== undefined) {
-    const context = handleGetTaskContext(repos, { task_id: input.task_id });
+    const context = handleGetTaskContext(repos, {
+      task_id: input.task_id,
+      include_superseded: input.include_superseded,
+    });
     return {
       scope: 'task',
       context: { ...context, messages: visibleTaskMessages(repos, context.messages, viewer) },

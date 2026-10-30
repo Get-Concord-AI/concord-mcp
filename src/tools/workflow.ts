@@ -228,6 +228,8 @@ export function handleUpdateWork(
     content: input.content,
     agent_id: input.agent_id,
     agent: input.agent_id,
+    supersedes: input.supersedes,
+    supersede_reason: input.supersede_reason,
   });
 }
 
