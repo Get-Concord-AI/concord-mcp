@@ -22,6 +22,11 @@ import {
 import { devinHooksInstalled } from '../devin-hooks.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import {
+  hermesConfigInstalled,
+  installHermesMcpConfig,
+  uninstallHermesMcpConfig,
+} from '../hermes-config.js';
+import {
   copilotConfigInstalled,
   copilotHooksInstalled,
   installCopilotHooks,
@@ -105,20 +110,8 @@ export function run(
   };
 }
 
-export function versionTuple(output: string): number[] | undefined {
-  const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
-  if (match === null) return undefined;
-  return match.slice(1).map((part) => Number.parseInt(part, 10));
-}
-
-export function atLeast(actual: readonly number[], required: readonly number[]): boolean {
-  for (let index = 0; index < required.length; index += 1) {
-    const left = actual[index] ?? 0;
-    const right = required[index] ?? 0;
-    if (left !== right) return left > right;
-  }
-  return true;
-}
+import { atLeast, versionTuple } from './version.js';
+export { atLeast, versionTuple };
 
 /** Devin introduced dedicated MCP config files in v3000.3; its CLI omits the patch sometimes. */
 export function devinSupportsDedicatedMcpConfig(versionOutput: string): boolean {
@@ -555,6 +548,37 @@ function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
   };
 }
 
+function statusHermes(env: NodeJS.ProcessEnv): AdapterReport {
+  const config = HARNESS_CONFIGS.hermes;
+  const executable = executablePath(config.executable, env);
+  const detected = executable !== undefined;
+  const version = detected ? versionTuple(run(executable, ['--version'], env).output) : undefined;
+  const supported = version !== undefined && atLeast(version, config.minimumVersion);
+  const installed = hermesConfigInstalled(env);
+  const status: AdapterStatus = !detected
+    ? 'not_detected'
+    : !supported
+      ? 'unsupported_version'
+      : installed
+        ? 'installed'
+        : 'action_required';
+  const detail = !detected
+    ? 'Hermes CLI was not found on PATH.'
+    : !supported
+      ? config.unsupportedDetail
+      : installed
+        ? config.installedDetail
+        : 'Concord MCP is not registered with Hermes, or its session/workspace configuration is incomplete.';
+  return {
+    harness: config.name,
+    detected,
+    status,
+    monitor: config.monitor.kind,
+    capabilities: detected && supported && installed ? [...config.installedCapabilities] : [],
+    detail,
+  };
+}
+
 function statusAntigravity(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterReport {
   const config = HARNESS_CONFIGS.antigravity;
   const executable = executablePath(config.executable, env);
@@ -736,6 +760,8 @@ export function statusAdapter(
       return statusGrok(env);
     case 'goose':
       return statusGoose(env);
+    case 'hermes':
+      return statusHermes(env);
     case 'antigravity':
       return statusAntigravity(env, repoRoot);
     case 'copilot-cli':
@@ -827,6 +853,12 @@ export function installAdapter(
       }
       return;
     }
+    case 'hermes': {
+      const version = versionTuple(run(executable, ['--version'], env).output);
+      if (version === undefined || !atLeast(version, HARNESS_CONFIGS.hermes.minimumVersion)) return;
+      installHermesMcpConfig(env);
+      return;
+    }
     case 'goose': {
       const version = versionTuple(run(executable, ['--version'], env).output);
       if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
@@ -909,6 +941,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
+  try {
+    uninstallHermesMcpConfig(env);
+  } catch {
+    // Preserve malformed Hermes settings and continue independent adapter cleanup.
+  }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
   if (existsSync(antigravityMcp)) {

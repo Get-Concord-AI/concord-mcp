@@ -26,6 +26,15 @@ export function resolve(intent: Intent, tools: readonly string[]): Step {
         (tool) => tool.includes('concord') && tool.endsWith(intent.operation),
       );
       if (direct !== undefined) return { kind: 'tool', name: direct, input: intent.input };
+      if (tools.includes('tool_call')) {
+        return {
+          kind: 'tool',
+          name: 'tool_call',
+          input: {
+            calls: [{ name: `mcp__concord__${intent.operation}`, arguments: intent.input }],
+          },
+        };
+      }
       return {
         kind: 'tool',
         name: 'use_tool',
