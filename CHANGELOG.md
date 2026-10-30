@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-30
+
 ### Added
 
 - `concord adapters gemini`: starts Gemini CLI with a first turn that runs its
@@ -13,6 +15,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the user types anything. A session started with plain `gemini` has no monitor
   until its first turn. Gemini's own flags are forwarded, and a prompt passed
   with `-i` or `-p` is left as given.
+
+### Fixed
+
+- `finish_work`'s field descriptions now say that a `reported_outcome` needs a
+  `provenance` entry with field `"reported_outcome"`, and the rejection names
+  that entry, so agents stop dropping the outcome.
 
 ## [0.18.0] - 2026-10-28
 
