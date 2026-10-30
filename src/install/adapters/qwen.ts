@@ -16,23 +16,49 @@ export function statusQwen(
   repoRoot: string | undefined,
 ): AdapterReport {
   const config = HARNESS_CONFIGS.qwen;
-  const settingsPath = repoRoot === undefined ? undefined : join(repoRoot, QWEN_SETTINGS);
-  const mcpInstalled =
-    settingsPath !== undefined &&
-    existsSync(settingsPath) &&
-    hasMcpServer(readFileSync(settingsPath, 'utf8'));
-  const installed = executable !== undefined && mcpInstalled;
+  if (executable === undefined) {
+    return report('not_detected', 'Qwen Code was not found on PATH.');
+  }
+  const registered = qwenRegistered(repoRoot);
+  if (registered === 'unreadable') {
+    return report(
+      'action_required',
+      'Qwen Code settings in .qwen/settings.json could not be read. Check the file and its permissions.',
+    );
+  }
+  if (!registered) {
+    return report(
+      'action_required',
+      'Qwen Code needs the Concord MCP server in .qwen/settings.json.',
+    );
+  }
+  return report('installed', config.installedDetail, config.installedCapabilities);
+}
+
+/** Whether the project's Qwen settings register Concord, or 'unreadable' if the file exists but cannot be read. */
+function qwenRegistered(repoRoot: string | undefined): boolean | 'unreadable' {
+  if (repoRoot === undefined) return false;
+  const settingsPath = join(repoRoot, QWEN_SETTINGS);
+  if (!existsSync(settingsPath)) return false;
+  try {
+    return hasMcpServer(readFileSync(settingsPath, 'utf8'));
+  } catch {
+    return 'unreadable';
+  }
+}
+
+function report(
+  status: AdapterReport['status'],
+  detail: string,
+  capabilities: readonly string[] = [],
+): AdapterReport {
+  const config = HARNESS_CONFIGS.qwen;
   return {
     harness: config.name,
-    detected: executable !== undefined,
-    status: executable === undefined ? 'not_detected' : installed ? 'installed' : 'action_required',
+    detected: status !== 'not_detected',
+    status,
     monitor: config.monitor.kind,
-    capabilities: installed ? [...config.installedCapabilities] : [],
-    detail:
-      executable === undefined
-        ? 'Qwen Code was not found on PATH.'
-        : installed
-          ? config.installedDetail
-          : 'Qwen Code needs the Concord MCP server in .qwen/settings.json.',
+    capabilities: [...capabilities],
+    detail,
   };
 }
