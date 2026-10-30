@@ -192,7 +192,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'managed-controller',
       'harness-monitor',
-      'harness-monitor',
+      'managed-controller',
     ]);
   });
 
@@ -230,7 +230,7 @@ describe('global harness adapters', () => {
       });
     });
 
-    it('needs setup until Concord is registered, and reports only pull and busy after', () => {
+    it('needs setup until Concord is registered, and reports launcher capabilities after', () => {
       const { home, env } = opencodeEnv();
       expect(opencodeReport(env)).toMatchObject({ status: 'action_required', capabilities: [] });
 
@@ -241,7 +241,7 @@ describe('global harness adapters', () => {
       );
       expect(opencodeReport({ ...env, FAKE_OC_MCP: mcp })).toMatchObject({
         status: 'installed',
-        capabilities: ['pull', 'busy'],
+        capabilities: ['pull', 'inject', 'steer', 'idle', 'busy'],
       });
     });
 

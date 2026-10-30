@@ -5,7 +5,7 @@ import type { AdapterReport } from './index.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
 
 /** The desktop app bundles its own CLI off PATH, so look there before PATH. */
-function opencodeExecutable(env: NodeJS.ProcessEnv): string | undefined {
+export function opencodeExecutable(env: NodeJS.ProcessEnv): string | undefined {
   const found = findOpenCodeExecutable(env);
   return found === 'opencode' ? executablePath('opencode', env) : found;
 }
