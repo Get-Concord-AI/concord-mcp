@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, and GitHub Copilot CLI talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, GitHub Copilot CLI, and OpenCode talk to each other.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -141,6 +141,7 @@ aside once no session started before the link is running (nothing is deleted).
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
+| OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
 | Any other MCP-capable coding agent | [Manual setup](./docs/other-mcp-clients.md)        |
 
