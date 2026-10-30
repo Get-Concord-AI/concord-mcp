@@ -399,3 +399,33 @@ describe('hasGrokMcpServer', () => {
     }
   });
 });
+
+describe('Qwen Code registration', () => {
+  it('keeps existing settings, pins the qwen agent kind, and reruns unchanged', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-qwen-'));
+    const settingsPath = join(root, '.qwen', 'settings.json');
+    mkdirSync(join(root, '.qwen'), { recursive: true });
+    writeFileSync(
+      settingsPath,
+      '{"theme":"dark","mcpServers":{"other":{"command":"other-server"}}}\n',
+    );
+
+    installMcpConfigs(root);
+    const first = readFileSync(settingsPath, 'utf8');
+    installMcpConfigs(root);
+    expect(readFileSync(settingsPath, 'utf8')).toBe(first);
+
+    const settings = z
+      .object({
+        theme: z.string(),
+        mcpServers: z.object({
+          other: z.object({ command: z.string() }),
+          concord: z.object({ env: z.object({ CONCORD_AGENT_KIND: z.string() }) }),
+        }),
+      })
+      .parse(JSON.parse(first));
+    expect(settings.theme).toBe('dark');
+    expect(settings.mcpServers.other.command).toBe('other-server');
+    expect(settings.mcpServers.concord.env.CONCORD_AGENT_KIND).toBe('qwen');
+  });
+});
