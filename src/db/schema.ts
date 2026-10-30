@@ -269,4 +269,11 @@ export const migrations: readonly string[] = [
   // 015 — messaging v2: sent/delivered/read/replied receipts, per-session
   // delivery attribution, and expiry for messages nobody ever took.
   MESSAGING_V2_MIGRATION,
+  // 016 — decision supersession: a decision update can name an earlier decision
+  // on the same task that it replaces. The replaced row records what replaced it.
+  `
+  ALTER TABLE task_updates ADD COLUMN superseded_by INTEGER REFERENCES task_updates(id);
+  ALTER TABLE task_updates ADD COLUMN supersede_reason TEXT;
+  ALTER TABLE task_updates ADD COLUMN superseded_at TEXT;
+  `,
 ];

@@ -132,6 +132,10 @@ export const inspectWorkInputShape = {
         'your session.',
     ),
   message_id: z.string().min(1).optional().describe('Prompt/reply thread to inspect'),
+  include_superseded: z
+    .boolean()
+    .optional()
+    .describe('Include superseded decisions in task context (hidden by default)'),
   workspace_id: workspaceIdField,
 } as const;
 export type InspectWorkInput = z.infer<z.ZodObject<typeof inspectWorkInputShape>>;
@@ -156,6 +160,18 @@ export const updateWorkInputShape = {
     .optional()
     .describe('Kind of task-scoped update'),
   content: z.string().min(1).max(16_384).describe('Concise context another agent needs'),
+  supersedes: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('For kind decision: id of an earlier decision on this task that this one replaces'),
+  supersede_reason: z
+    .string()
+    .min(1)
+    .max(1024)
+    .optional()
+    .describe('Why the replaced decision no longer holds'),
   agent_id: agentIdField,
   to_agent_id: z.string().min(1).optional().describe('Recipient required for prompt'),
   reply_to_message_id: z.string().min(1).optional().describe('Message being answered for reply'),

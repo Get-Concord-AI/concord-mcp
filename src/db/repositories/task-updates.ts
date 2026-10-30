@@ -13,7 +13,9 @@ export interface NewTaskUpdate {
 
 export interface TaskUpdateRepository {
   create(update: NewTaskUpdate): TaskUpdateRecord;
+  get(id: number): TaskUpdateRecord | undefined;
   listByTask(taskId: string): TaskUpdateRecord[];
+  markSuperseded(id: number, supersededBy: number, reason: string | null): void;
 }
 
 const rawListSchema = z.array(z.unknown());
@@ -27,9 +29,15 @@ export function createTaskUpdateRepository(
     VALUES (@project, @task_id, @kind, @content, @agent, @created_at)
   `);
   const getByIdStmt = db.prepare('SELECT * FROM task_updates WHERE id = ?');
+  const getForProjectStmt = db.prepare('SELECT * FROM task_updates WHERE project = ? AND id = ?');
   const listByTaskStmt = db.prepare(
     'SELECT * FROM task_updates WHERE project = ? AND task_id = ? ORDER BY created_at ASC, id ASC',
   );
+  const markSupersededStmt = db.prepare(`
+    UPDATE task_updates
+    SET superseded_by = @superseded_by, supersede_reason = @reason, superseded_at = @at
+    WHERE project = @project AND id = @id
+  `);
 
   return {
     create(update) {
@@ -47,9 +55,22 @@ export function createTaskUpdateRepository(
       }
       return parseTaskUpdateRow(raw);
     },
+    get(id) {
+      const raw: unknown = getForProjectStmt.get(project, id);
+      return raw === undefined ? undefined : parseTaskUpdateRow(raw);
+    },
     listByTask(taskId) {
       const raw: unknown = listByTaskStmt.all(project, taskId);
       return rawListSchema.parse(raw).map(parseTaskUpdateRow);
+    },
+    markSuperseded(id, supersededBy, reason) {
+      markSupersededStmt.run({
+        project,
+        id,
+        superseded_by: supersededBy,
+        reason,
+        at: new Date().toISOString(),
+      });
     },
   };
 }
