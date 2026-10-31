@@ -67,9 +67,21 @@ const hookSessionSchema = z
   })
   .loose();
 
-const openCodeRequestMetaSchema = z.object({
-  'ai.opencode/sessionID': z.string().trim().min(1),
-});
+const openCodeRequestMetaSchema = z
+  .object({
+    'ai.opencode/sessionID': z.string().trim().min(1),
+  })
+  .transform(({ 'ai.opencode/sessionID': sessionId }) => ({ sessionId }));
+
+export type OpenCodeRequestIdentityMetadata = z.infer<typeof openCodeRequestMetaSchema>;
+
+/** Parse the OpenCode V2 session metadata at the MCP request boundary. */
+export function parseOpenCodeRequestIdentityMetadata(
+  input: unknown,
+): OpenCodeRequestIdentityMetadata | undefined {
+  const parsed = openCodeRequestMetaSchema.safeParse(input);
+  return parsed.success ? parsed.data : undefined;
+}
 
 /**
  * A stable agent id for one session of one client, e.g. `claude-code:4f2a91c7`.
@@ -88,13 +100,11 @@ export function agentIdForSession(kind: string, sessionId: string): string {
  * the server process environment or the model-visible tool arguments.
  */
 export function resolveOpenCodeRequestIdentity(
-  meta: Record<string, unknown> | undefined,
+  meta: OpenCodeRequestIdentityMetadata | undefined,
 ): AgentIdentity | undefined {
   if (meta === undefined) return undefined;
-  const parsed = openCodeRequestMetaSchema.safeParse(meta);
-  if (!parsed.success) return undefined;
   return {
-    agentId: agentIdForSession('opencode', parsed.data['ai.opencode/sessionID']),
+    agentId: agentIdForSession('opencode', meta.sessionId),
     kind: 'opencode',
     origin: 'session',
   };

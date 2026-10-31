@@ -8,7 +8,13 @@ import type { AdapterNotice } from '../adapter-check.js';
 import type { AvailableUpdate } from '../update-notifier.js';
 import { receiverActive } from '../domain/delivery.js';
 import { harnessConfigFor } from '../domain/harness-config.js';
-import { identityForRequest, resolveActorId, type AgentIdentity } from '../domain/identity.js';
+import {
+  identityForRequest,
+  parseOpenCodeRequestIdentityMetadata,
+  resolveActorId,
+  type AgentIdentity,
+  type OpenCodeRequestIdentityMetadata,
+} from '../domain/identity.js';
 import type { SemanticTelemetryEvent, TelemetryRecorder } from '../telemetry/events.js';
 import type { WorkspaceContext } from '../workspaces/manager.js';
 import { SocketAgentMessageDispatcher } from '../relay/socket-dispatcher.js';
@@ -412,7 +418,9 @@ export function registerWorkflowTools(
   dispatcher: AgentMessageDispatcher = new SocketAgentMessageDispatcher(),
   telemetry?: TelemetryRecorder,
   getAdapterNotice?: () => AdapterNotice | undefined,
-  requestIdentity?: (meta: Record<string, unknown> | undefined) => AgentIdentity | undefined,
+  requestIdentity?: (
+    meta: OpenCodeRequestIdentityMetadata | undefined,
+  ) => AgentIdentity | undefined,
 ): void {
   interface WorkflowToolResponse {
     content: { type: 'text'; text: string }[];
@@ -535,11 +543,11 @@ export function registerWorkflowTools(
   /** Stamp the resolved actor onto a write tool's arguments. Throws with the
    *  fix-it message when neither the session nor the caller identifies anyone. */
   const sessionForRequest = (
-    meta: Record<string, unknown> | undefined,
+    meta: OpenCodeRequestIdentityMetadata | undefined,
   ): AgentIdentity | undefined => identityForRequest(session, requestIdentity?.(meta));
   const withActor = <T extends { agent_id?: string | undefined }>(
     args: T,
-    meta: Record<string, unknown> | undefined,
+    meta: OpenCodeRequestIdentityMetadata | undefined,
   ): WithActor<T> => ({
     ...args,
     agent_id: resolveActorId(sessionForRequest(meta), args.agent_id),
@@ -556,12 +564,13 @@ export function registerWorkflowTools(
     },
     (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const requestSession = sessionForRequest(extra._meta);
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
+      const requestSession = sessionForRequest(requestMeta);
       // The session's kind wins alongside its id: the id embeds the kind, so
       // registering under a different one would describe an agent that is not
       // the one being addressed.
       const result = handleStartWork(repos, {
-        ...withActor(args, extra._meta),
+        ...withActor(args, requestMeta),
         kind: requestSession?.kind ?? args.kind,
       });
       const startedTaskFlowId = taskFlowId(result.claim.task.taskId);
@@ -623,7 +632,8 @@ export function registerWorkflowTools(
     },
     (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleInspectWork(repos, args, sessionForRequest(extra._meta)?.agentId);
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
+      const result = handleInspectWork(repos, args, sessionForRequest(requestMeta)?.agentId);
       if (result.scope === 'workspace') {
         return withSessionAdvisories({
           content: [
@@ -734,6 +744,7 @@ export function registerWorkflowTools(
     },
     async (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
       // Delivery awaits, and the client's folder may become the active workspace meanwhile:
       // the whole call stays with the workspace it started in.
       const callRepos = workspace?.repos ?? repos;
@@ -750,7 +761,7 @@ export function registerWorkflowTools(
           ? null
           : (taskFlowId(messageTaskId) ?? null);
       try {
-        const result = await handleUpdateWork(callRepos, withActor(args, extra._meta), dispatcher);
+        const result = await handleUpdateWork(callRepos, withActor(args, requestMeta), dispatcher);
         onWrite?.(workspace);
         if ('update' in result) {
           return withCallAdvisories({
@@ -878,7 +889,8 @@ export function registerWorkflowTools(
     },
     (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleTransferWork(repos, withActor(args, extra._meta));
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
+      const result = handleTransferWork(repos, withActor(args, requestMeta));
       recordTaskTransition(result.task.taskId, args.action, result.task.status);
       onWrite?.();
       return withSessionAdvisories({
@@ -912,7 +924,8 @@ export function registerWorkflowTools(
     },
     (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleFinishWork(repos, withActor(args, extra._meta));
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
+      const result = handleFinishWork(repos, withActor(args, requestMeta));
       const finishedTaskFlowId = taskFlowId(result.task.taskId);
       if (finishedTaskFlowId !== undefined) {
         telemetry?.recordEvent({

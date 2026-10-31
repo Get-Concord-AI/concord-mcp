@@ -19,7 +19,11 @@ import {
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { machineProjectKey } from '../../src/cloud/target.js';
 import { writeUserConfig } from '../../src/config/user-config.js';
-import { agentIdForSession, resolveOpenCodeRequestIdentity } from '../../src/domain/identity.js';
+import {
+  agentIdForSession,
+  parseOpenCodeRequestIdentityMetadata,
+  resolveOpenCodeRequestIdentity,
+} from '../../src/domain/identity.js';
 
 const SESSION_AGENT = { agentId: 'claude-code:aaaa1111', kind: 'claude-code', origin: 'session' };
 
@@ -48,9 +52,14 @@ describe('forwardedArguments', () => {
     };
 
     expect(
-      forwardedArguments('update_work', { agent_id: 'opencode:request-session' }, operatorSession, {
-        'ai.opencode/sessionID': 'ses_private_opencode_session_3',
-      }),
+      forwardedArguments(
+        'update_work',
+        { agent_id: 'opencode:request-session' },
+        operatorSession,
+        parseOpenCodeRequestIdentityMetadata({
+          'ai.opencode/sessionID': 'ses_private_opencode_session_3',
+        }),
+      ),
     ).toEqual({ agent_id: 'alpha' });
   });
 

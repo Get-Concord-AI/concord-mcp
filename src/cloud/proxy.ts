@@ -11,7 +11,12 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import { identityForRequest, type AgentIdentity } from '../domain/identity.js';
+import {
+  identityForRequest,
+  parseOpenCodeRequestIdentityMetadata,
+  type AgentIdentity,
+  type OpenCodeRequestIdentityMetadata,
+} from '../domain/identity.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../install/instructions.js';
 import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
@@ -46,7 +51,7 @@ export interface CloudSession {
   readonly identity: AgentIdentity | undefined;
   /** Resolves harness session identity supplied only on MCP requests. */
   readonly requestIdentity?: (
-    meta: Record<string, unknown> | undefined,
+    meta: OpenCodeRequestIdentityMetadata | undefined,
   ) => AgentIdentity | undefined;
 }
 
@@ -59,7 +64,9 @@ export function cloudSessionFor(
   env: NodeJS.ProcessEnv,
   identity: AgentIdentity | undefined,
   checkoutRoot: string = repoRoot,
-  requestIdentity?: (meta: Record<string, unknown> | undefined) => AgentIdentity | undefined,
+  requestIdentity?: (
+    meta: OpenCodeRequestIdentityMetadata | undefined,
+  ) => AgentIdentity | undefined,
 ): CloudSession | undefined {
   const machine = linkedMachine(env);
   const target = cloudTargetFor(repoRoot, env);
@@ -118,7 +125,7 @@ export function forwardedArguments(
   tool: string,
   args: ToolArguments,
   session: Pick<CloudSession, 'identity' | 'repoRoot' | 'checkoutRoot' | 'requestIdentity'>,
-  requestMeta?: Record<string, unknown>,
+  requestMeta?: OpenCodeRequestIdentityMetadata,
 ): ToolArguments {
   const forwarded: ToolArguments = {};
   for (const [name, value] of Object.entries(args)) {
@@ -212,11 +219,12 @@ export function createCloudProxyServer(
     try {
       const { name } = request.params;
       const args = toolArguments.parse(request.params.arguments ?? {});
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(request.params._meta);
       return await (
         await attempt
       ).callTool({
         name,
-        arguments: forwardedArguments(name, args, session, request.params._meta),
+        arguments: forwardedArguments(name, args, session, requestMeta),
       });
     } catch (error) {
       forget(attempt);

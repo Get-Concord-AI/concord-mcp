@@ -70,4 +70,33 @@ describe('OpenCode request identity', () => {
       repos.db.close();
     }
   });
+
+  it('ignores malformed OpenCode metadata at the request boundary', async () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    const server = createServer(repos, { requestIdentity: resolveOpenCodeRequestIdentity });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'opencode-invalid-metadata-test', version: '2.2.3' });
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+
+    try {
+      const result = await client.callTool({
+        name: 'start_work',
+        arguments: {
+          task_id: 'OPENCODE-INVALID-META',
+          title: 'Ignore malformed request metadata',
+          kind: 'codex',
+          agent_id: 'fallback-agent',
+        },
+        _meta: { 'ai.opencode/sessionID': 23 },
+      });
+
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      expect(result.structuredContent).toMatchObject({ agent_id: 'fallback-agent' });
+      expect(repos.agents.get('fallback-agent')?.kind).toBe('codex');
+    } finally {
+      await client.close();
+      await server.close();
+      repos.db.close();
+    }
+  });
 });

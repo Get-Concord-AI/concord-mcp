@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { Repositories } from './db/index.js';
-import type { AgentIdentity } from './domain/identity.js';
+import type { AgentIdentity, OpenCodeRequestIdentityMetadata } from './domain/identity.js';
 import type { TelemetryRecorder } from './telemetry/events.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from './install/instructions.js';
 import type { AdapterNotice } from './adapter-check.js';
@@ -36,7 +36,9 @@ export interface ServerOptions {
   /** Reads the background check of this session's harness adapter. */
   getAdapterNotice?: () => AdapterNotice | undefined;
   /** Resolves a harness session from request metadata when it is not in env. */
-  requestIdentity?: (meta: Record<string, unknown> | undefined) => AgentIdentity | undefined;
+  requestIdentity?: (
+    meta: OpenCodeRequestIdentityMetadata | undefined,
+  ) => AgentIdentity | undefined;
 }
 
 /**
