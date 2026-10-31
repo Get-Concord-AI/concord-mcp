@@ -219,7 +219,9 @@ export function registerAdaptersCommand(program: Command): void {
     .command('uninstall')
     .description('Remove only globally installed Concord adapter artifacts')
     .action(() => {
-      process.stdout.write(`${renderAdapterReport(uninstallGlobalAdapters(process.env))}\n`);
+      process.stdout.write(
+        `${renderAdapterReport(uninstallGlobalAdapters(process.env, repoRoot()))}\n`,
+      );
     });
   adapters
     .command('ensure', { hidden: true })

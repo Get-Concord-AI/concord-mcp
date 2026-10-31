@@ -15,9 +15,11 @@ import { standaloneInstall, standaloneUpgrade } from '../../config/install-mode.
 import { installConcord } from '../../install/index.js';
 import {
   installGlobalAdapters,
+  openCodeSupportsV2,
   renderAdapterReport,
   type AdapterReport,
 } from '../../install/adapters/index.js';
+import { installOpenCodeMcpConfig } from '../../install/opencode-config.js';
 import {
   McpConfigParseError,
   installMcpConfigs,
@@ -260,6 +262,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
     if (migratedCursorConfig !== undefined) written.push(migratedCursorConfig);
     written.push(installCodexMcpConfig(env));
     written.push(installDevinMcpConfig(env, repoRoot));
+    if (openCodeSupportsV2(env)) written.push(installOpenCodeMcpConfig(repoRoot));
   }
   // `env` is also the unit-test/config-path seam. Avoid touching unrelated
   // real harness homes unless adapter installation was explicitly requested.

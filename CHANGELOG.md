@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- OpenCode V2 integration. `concord setup` merges a repository-scoped MCP entry
+  into `opencode.json` or `opencode.jsonc`, uses OpenCode request metadata for
+  session identity, and reports durable inbox delivery without claiming idle
+  reachability.
+
 ## [0.19.0] - 2026-10-30
 
 ### Added

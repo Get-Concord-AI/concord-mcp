@@ -44,6 +44,10 @@ export interface CloudSession {
   /** The checkout this session works in: a linked worktree's own root. */
   readonly checkoutRoot: string;
   readonly identity: AgentIdentity | undefined;
+  /** Resolves harness session identity supplied only on MCP requests. */
+  readonly requestIdentity?: (
+    meta: Record<string, unknown> | undefined,
+  ) => AgentIdentity | undefined;
 }
 
 /**
@@ -55,6 +59,7 @@ export function cloudSessionFor(
   env: NodeJS.ProcessEnv,
   identity: AgentIdentity | undefined,
   checkoutRoot: string = repoRoot,
+  requestIdentity?: (meta: Record<string, unknown> | undefined) => AgentIdentity | undefined,
 ): CloudSession | undefined {
   const machine = linkedMachine(env);
   const target = cloudTargetFor(repoRoot, env);
@@ -69,6 +74,7 @@ export function cloudSessionFor(
     repoRoot,
     checkoutRoot,
     identity,
+    ...(requestIdentity === undefined ? {} : { requestIdentity }),
   };
 }
 
@@ -111,7 +117,8 @@ export function repoRelative(
 export function forwardedArguments(
   tool: string,
   args: ToolArguments,
-  session: Pick<CloudSession, 'identity' | 'repoRoot' | 'checkoutRoot'>,
+  session: Pick<CloudSession, 'identity' | 'repoRoot' | 'checkoutRoot' | 'requestIdentity'>,
+  requestMeta?: Record<string, unknown>,
 ): ToolArguments {
   const forwarded: ToolArguments = {};
   for (const [name, value] of Object.entries(args)) {
@@ -122,7 +129,7 @@ export function forwardedArguments(
   }
 
   // The session is the authority, as `resolveActorId` makes it locally.
-  const identity = session.identity;
+  const identity = session.requestIdentity?.(requestMeta) ?? session.identity;
   if (identity !== undefined && WRITE_TOOLS.has(tool)) {
     forwarded['agent_id'] = identity.agentId;
     if (tool === 'start_work') forwarded['kind'] = identity.kind;
@@ -207,7 +214,10 @@ export function createCloudProxyServer(
       const args = toolArguments.parse(request.params.arguments ?? {});
       return await (
         await attempt
-      ).callTool({ name, arguments: forwardedArguments(name, args, session) });
+      ).callTool({
+        name,
+        arguments: forwardedArguments(name, args, session, request.params._meta),
+      });
     } catch (error) {
       forget(attempt);
       return failure(error instanceof Error ? error.message : String(error));
