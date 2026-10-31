@@ -19,6 +19,7 @@ import {
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { machineProjectKey } from '../../src/cloud/target.js';
 import { writeUserConfig } from '../../src/config/user-config.js';
+import { agentIdForSession, resolveOpenCodeRequestIdentity } from '../../src/domain/identity.js';
 
 const SESSION_AGENT = { agentId: 'claude-code:aaaa1111', kind: 'claude-code', origin: 'session' };
 
@@ -178,6 +179,38 @@ describe('the cloud proxy', () => {
       'x-concord-project': 'github.com/acme/app',
       'x-concord-machine': 'machine-1',
     });
+  });
+
+  it('forwards request-scoped OpenCode identity without persisting its raw session ID', async () => {
+    const sessionId = 'ses_private_cloud_opencode';
+    const openCodeSession: CloudSession = {
+      ...session,
+      identity: undefined,
+      requestIdentity: resolveOpenCodeRequestIdentity,
+    };
+    const proxy = createCloudProxyServer(openCodeSession, () => connectCloud(openCodeSession));
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await proxy.connect(serverSide);
+    const harness = new Client({ name: 'opencode-harness', version: '2.2.3' });
+    await harness.connect(clientSide);
+
+    try {
+      const result = await harness.callTool({
+        name: 'start_work',
+        arguments: { agent_id: 'model-selected-peer', kind: 'wrong-kind' },
+        _meta: { 'ai.opencode/sessionID': sessionId },
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(cloud.calls.at(-1)).toEqual({
+        agent_id: agentIdForSession('opencode', sessionId),
+        kind: 'opencode',
+      });
+      expect(JSON.stringify(cloud.calls.at(-1))).not.toContain(sessionId);
+    } finally {
+      await harness.close();
+      await proxy.close();
+    }
   });
 
   it('connects afresh after a call through the client fails', async () => {

@@ -33,6 +33,7 @@ import { workspaceIdForRoot } from '../../src/config/paths.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 import { handleReviewReady } from '../../src/tools/review-ready.js';
+import { writeFakeVersion } from '../helpers/fake-command.js';
 
 function repoDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'concord-cli-'));
@@ -81,6 +82,24 @@ describe('runSetup', () => {
     expect(readFileSync(join(dir, '.cursor', 'mcp.json'), 'utf8')).toContain(
       `"CONCORD_REPO_ROOT": ${JSON.stringify(dir)}`,
     );
+  });
+
+  it('registers OpenCode V2 in the project even when global adapters are skipped', () => {
+    const dir = repoDir();
+    const home = mkdtempSync(join(tmpdir(), 'concord-opencode-home-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'opencode', 'opencode 2.2.3');
+
+    const result = runSetup(dir, {
+      env: { ...process.env, HOME: home, PATH: bin, CONCORD_REPO_ROOT: dir },
+      adapters: false,
+    });
+
+    expect(result.written).toContain('opencode.json');
+    expect(readFileSync(join(dir, 'opencode.json'), 'utf8')).toContain('"CONCORD_AGENT_KIND"');
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('start_work');
+    expect(result.adapters).toEqual([]);
   });
 
   it('leaves the repository gitignore and a customized Concord gitignore untouched', () => {

@@ -412,6 +412,7 @@ export function registerWorkflowTools(
   dispatcher: AgentMessageDispatcher = new SocketAgentMessageDispatcher(),
   telemetry?: TelemetryRecorder,
   getAdapterNotice?: () => AdapterNotice | undefined,
+  requestIdentity?: (meta: Record<string, unknown> | undefined) => AgentIdentity | undefined,
 ): void {
   interface WorkflowToolResponse {
     content: { type: 'text'; text: string }[];
@@ -533,9 +534,15 @@ export function registerWorkflowTools(
 
   /** Stamp the resolved actor onto a write tool's arguments. Throws with the
    *  fix-it message when neither the session nor the caller identifies anyone. */
-  const withActor = <T extends { agent_id?: string | undefined }>(args: T): WithActor<T> => ({
+  const sessionForRequest = (
+    meta: Record<string, unknown> | undefined,
+  ): AgentIdentity | undefined => requestIdentity?.(meta) ?? session;
+  const withActor = <T extends { agent_id?: string | undefined }>(
+    args: T,
+    meta: Record<string, unknown> | undefined,
+  ): WithActor<T> => ({
     ...args,
-    agent_id: resolveActorId(session, args.agent_id),
+    agent_id: resolveActorId(sessionForRequest(meta), args.agent_id),
   });
 
   server.registerTool(
@@ -547,14 +554,15 @@ export function registerWorkflowTools(
         'when needed, claim the declared scope, and return actionable overlap warnings.',
       inputSchema: startWorkInputShape,
     },
-    (args) => {
+    (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
+      const requestSession = sessionForRequest(extra._meta);
       // The session's kind wins alongside its id: the id embeds the kind, so
       // registering under a different one would describe an agent that is not
       // the one being addressed.
       const result = handleStartWork(repos, {
-        ...withActor(args),
-        kind: session?.kind ?? args.kind,
+        ...withActor(args, extra._meta),
+        kind: requestSession?.kind ?? args.kind,
       });
       const startedTaskFlowId = taskFlowId(result.claim.task.taskId);
       if (startedTaskFlowId !== undefined) {
@@ -613,9 +621,9 @@ export function registerWorkflowTools(
         openWorldHint: false,
       },
     },
-    (args) => {
+    (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleInspectWork(repos, args, session?.agentId);
+      const result = handleInspectWork(repos, args, sessionForRequest(extra._meta)?.agentId);
       if (result.scope === 'workspace') {
         return withSessionAdvisories({
           content: [
@@ -724,7 +732,7 @@ export function registerWorkflowTools(
         'Record task context or deliver a live prompt/reply to another promptable workspace agent.',
       inputSchema: updateWorkInputShape,
     },
-    async (args) => {
+    async (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       // Delivery awaits, and the client's folder may become the active workspace meanwhile:
       // the whole call stays with the workspace it started in.
@@ -742,7 +750,7 @@ export function registerWorkflowTools(
           ? null
           : (taskFlowId(messageTaskId) ?? null);
       try {
-        const result = await handleUpdateWork(callRepos, withActor(args), dispatcher);
+        const result = await handleUpdateWork(callRepos, withActor(args, extra._meta), dispatcher);
         onWrite?.(workspace);
         if ('update' in result) {
           return withCallAdvisories({
@@ -868,9 +876,9 @@ export function registerWorkflowTools(
         'offer an evidence-bearing handoff, or reopen terminal work.',
       inputSchema: transferWorkInputShape,
     },
-    (args) => {
+    (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleTransferWork(repos, withActor(args));
+      const result = handleTransferWork(repos, withActor(args, extra._meta));
       recordTaskTransition(result.task.taskId, args.action, result.task.status);
       onWrite?.();
       return withSessionAdvisories({
@@ -902,9 +910,9 @@ export function registerWorkflowTools(
         'review-ready, or close it with a complete/closed outcome.',
       inputSchema: finishWorkInputShape,
     },
-    (args) => {
+    (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleFinishWork(repos, withActor(args));
+      const result = handleFinishWork(repos, withActor(args, extra._meta));
       const finishedTaskFlowId = taskFlowId(result.task.taskId);
       if (finishedTaskFlowId !== undefined) {
         telemetry?.recordEvent({

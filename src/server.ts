@@ -35,6 +35,8 @@ export interface ServerOptions {
   telemetry?: TelemetryRecorder;
   /** Reads the background check of this session's harness adapter. */
   getAdapterNotice?: () => AdapterNotice | undefined;
+  /** Resolves a harness session from request metadata when it is not in env. */
+  requestIdentity?: (meta: Record<string, unknown> | undefined) => AgentIdentity | undefined;
 }
 
 /**
@@ -67,6 +69,7 @@ export function createServer(repos: Repositories, options: ServerOptions = {}): 
     undefined,
     options.telemetry,
     options.getAdapterNotice,
+    options.requestIdentity,
   );
   return server;
 }

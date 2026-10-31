@@ -8,6 +8,7 @@
     "model-context-protocol",
     "claude-code",
     "codex",
+    "opencode",
     "cursor",
     "ai-agents",
     "coding-agents",
@@ -62,6 +63,7 @@
     "commander": "^15.0.0",
     "ink": "8.0.0",
     "js-yaml": "^5.4.3",
+    "jsonc-parser": "3.3.1",
     "react": "19.3.1",
     "react-devtools-core": "8.0.0",
     "zod": "^4.4.3"

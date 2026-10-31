@@ -4,6 +4,7 @@ import {
   agentIdForSession,
   resolveActorId,
   resolveIdentity,
+  resolveOpenCodeRequestIdentity,
   UNRESOLVED_IDENTITY_MESSAGE,
 } from '../../src/domain/identity.js';
 
@@ -112,6 +113,26 @@ describe('resolveIdentity', () => {
     });
 
     expect(first?.agentId).not.toBe(second?.agentId);
+  });
+});
+
+describe('resolveOpenCodeRequestIdentity', () => {
+  it('hashes OpenCode V2 request metadata without returning the opaque session ID', () => {
+    const rawSessionId = 'ses_private-open-code-session';
+    const identity = resolveOpenCodeRequestIdentity({ 'ai.opencode/sessionID': rawSessionId });
+
+    expect(identity).toEqual({
+      agentId: agentIdForSession('opencode', rawSessionId),
+      kind: 'opencode',
+      origin: 'session',
+    });
+    expect(JSON.stringify(identity)).not.toContain(rawSessionId);
+  });
+
+  it('ignores absent or malformed request metadata', () => {
+    expect(resolveOpenCodeRequestIdentity(undefined)).toBeUndefined();
+    expect(resolveOpenCodeRequestIdentity({ 'ai.opencode/sessionID': '  ' })).toBeUndefined();
+    expect(resolveOpenCodeRequestIdentity({ 'ai.opencode/sessionID': 1 })).toBeUndefined();
   });
 });
 

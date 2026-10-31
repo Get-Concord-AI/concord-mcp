@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, and GitHub Copilot CLI talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, GitHub Copilot CLI, and OpenCode V2 coordinate.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -73,7 +73,8 @@ direct prompts and replies.
 <summary>What <code>concord setup</code> changes</summary>
 
 `concord setup` creates the local `.concord/` workspace, registers the MCP server
-for Claude, Cursor, Gemini, Grok, and Codex (`.mcp.json`, `.cursor/mcp.json`,
+for Claude, Cursor, Gemini, Grok, Codex, and OpenCode V2 (`opencode.json` or
+`opencode.jsonc`, when OpenCode V2 is detected; `.mcp.json`, `.cursor/mcp.json`,
 `.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`).
 For [Goose](./docs/goose.md), it registers the `concord-relay` extension in
 Goose's `config.yaml` when detected. For
@@ -141,6 +142,7 @@ aside once no session started before the link is running (nothing is deleted).
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
+| OpenCode V2                        | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
 | Any other MCP-capable coding agent | [Manual setup](./docs/other-mcp-clients.md)        |
 

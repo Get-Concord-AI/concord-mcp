@@ -15,6 +15,7 @@ export const harnessNames = [
   'goose',
   'antigravity',
   'copilot-cli',
+  'opencode',
   'devin',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
@@ -34,10 +35,10 @@ export interface EndpointCapability {
   operations: readonly DeliveryCapability[];
 }
 
-export type MonitorKind = 'native-monitor' | 'managed-controller' | 'harness-monitor';
+export type MonitorKind = 'none' | 'native-monitor' | 'managed-controller' | 'harness-monitor';
 
-export type MonitorLifecycle = 'native' | 'managed' | 'persistent' | 'one-shot';
-export type MonitorCompletion = 'native' | 'controller' | 'shell-inject';
+export type MonitorLifecycle = 'none' | 'native' | 'managed' | 'persistent' | 'one-shot';
+export type MonitorCompletion = 'none' | 'native' | 'controller' | 'shell-inject';
 
 export interface HarnessMonitorConfig {
   kind: MonitorKind;
@@ -83,6 +84,12 @@ const idleInject: EndpointCapability = {
   transport: 'pull',
   reach: ['busy', 'idle'],
   operations: ['pull', 'inject', 'steer'],
+};
+
+const durableInbox: EndpointCapability = {
+  transport: 'pull',
+  reach: [],
+  operations: ['pull'],
 };
 
 export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
@@ -237,6 +244,25 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Sessions started with `concord adapters copilot` are steered and woken through the embedded server; plain `copilot` sessions get hook delivery after tool calls and at turn end.',
     unsupportedDetail: 'Copilot CLI does not meet the verified hooks baseline (1.0.0).',
+  },
+  opencode: {
+    name: 'opencode',
+    executable: 'opencode',
+    minimumVersion: [2, 0, 0],
+    defaultCapability: durableInbox,
+    monitorCapability: durableInbox,
+    monitor: {
+      kind: 'none',
+      lifecycle: 'none',
+      completion: 'none',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull'],
+    installedDetail:
+      'OpenCode V2 session metadata identifies the agent; messages stay in its durable inbox, with no idle wake or resume receiver.',
+    unsupportedDetail:
+      'OpenCode V2.0 or newer is required for the verified config and request session metadata.',
   },
   devin: {
     name: 'devin',
