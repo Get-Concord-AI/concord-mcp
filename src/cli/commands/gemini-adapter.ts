@@ -1,5 +1,6 @@
 import { executablePath } from '../../install/adapters/index.js';
 import { runInteractive } from '../../install/spawn-command.js';
+import { reportMissingHarnessCli } from './missing-harness-cli.js';
 
 /**
  * Gemini CLI reachable from its first moment.
@@ -40,7 +41,10 @@ export function geminiLaunchPlan(args: readonly string[]): {
 /** Run Gemini CLI with the monitor started on its first turn. */
 export async function launchGemini(args: readonly string[]): Promise<void> {
   const executable = executablePath('gemini', process.env);
-  if (executable === undefined) throw new Error('Gemini CLI was not found on PATH.');
+  if (executable === undefined) {
+    reportMissingHarnessCli('Gemini CLI', 'npm i -g @google/gemini-cli');
+    return;
+  }
   const plan = geminiLaunchPlan(args);
   if (!plan.startsMonitor) {
     process.stderr.write(
