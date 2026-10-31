@@ -1,7 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { parse, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -23,7 +22,9 @@ import {
 import { writeFakeCommand } from '../helpers/fake-command.js';
 
 function dir(label: string): string {
-  return realpathSync(mkdtempSync(join(tmpdir(), `concord-${label}-`)));
+  return realpathSync(
+    mkdtempSync(join(parse(process.cwd()).root, `concord-${label}-`)),
+  );
 }
 
 function repoDir(label: string): string {
@@ -51,6 +52,7 @@ async function deliveryServer(
   // A fresh home keeps the store in the repository, whatever this machine's global mode.
   const manager = WorkspaceManager.fromEnvironment(launched, { HOME: dir('home') });
   const repos = manager.current().repos;
+
   for (const agentId of ['codex:sender', 'codex:target']) {
     repos.agents.upsert({
       agentId,
@@ -65,6 +67,7 @@ async function deliveryServer(
       status: 'active',
     });
   }
+
   repos.agentEndpoints.upsert({
     endpointId: 'e1',
     agentId: 'codex:target',
@@ -76,11 +79,14 @@ async function deliveryServer(
     status: 'connected',
     expiresAt: null,
   });
+
   const server = new McpServer({ name: 'test', version: '0' });
+
   const deliver = () => {
     duringDelivery(manager);
     return Promise.resolve({ provider: 'codex', delivery: 'steer' as const });
   };
+
   registerWorkflowTools(
     server,
     routedRepositories(manager),
@@ -90,9 +96,12 @@ async function deliveryServer(
     undefined,
     { deliver },
   );
+
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const mcp = new Client({ name: 'test', version: '0' });
+
   await Promise.all([mcp.connect(clientSide), server.connect(serverSide)]);
+
   const prompt = async () => {
     try {
       return await mcp.callTool({
@@ -109,6 +118,7 @@ async function deliveryServer(
       await mcp.close();
     }
   };
+
   return { launched, manager, repos, prompt };
 }
 
@@ -130,6 +140,7 @@ describe('joinClientRoot', () => {
   it('keeps the working directory for a client without roots', async () => {
     const launched = dir('launched');
     const manager = new WorkspaceManager(launched);
+
     expect(await joinClientRoot(client(undefined), manager)).toBeUndefined();
     expect(manager.current().repoRoot).toBe(launched);
   });
@@ -139,7 +150,9 @@ describe('joinClientRoot', () => {
     const open = repoDir('open');
     const named = repoDir('named');
     const manager = new WorkspaceManager(launched);
+
     let answer: (roots: { roots: { uri: string }[] }) => void = () => undefined;
+
     const slow = {
       getClientCapabilities: () => ({ roots: {} }),
       listRoots: () => new Promise<{ roots: { uri: string }[] }>((resolve) => (answer = resolve)),
@@ -147,19 +160,24 @@ describe('joinClientRoot', () => {
 
     const joining = joinClientRoot(slow, manager);
     manager.select();
+
     expect(manager.current().repoRoot).toBe(launched);
+
     answer({ roots: [{ uri: pathToFileURL(open).href }] });
     expect((await joining)?.repoRoot).toBe(open);
 
     const rejoining = joinClientRoot(slow, manager);
     manager.select(workspaceIdForRoot(named));
+
     answer({ roots: [{ uri: pathToFileURL(open).href }] });
+
     expect(await rejoining).toBeUndefined();
     expect(manager.current().repoRoot).toBe(named);
   });
 
   it('keeps a live delivery in the workspace it started in when the folder joins meanwhile', async () => {
     const open = repoDir('open');
+
     const { manager, repos, prompt } = await deliveryServer((manager) => {
       manager.join(open);
     });
@@ -183,9 +201,11 @@ describe('Cursor session context', () => {
   it('gives the workspace id, and instructions for a repository in the global store', () => {
     const home = dir('home');
     writeUserConfig({ HOME: home }, { globalMode: true });
+
     const root = repoDir('cursor-global');
     const env = { HOME: home, CONCORD_REPO_ROOT: root };
     const status = workspaceStatus(root, env);
+
     expect(status).toMatchObject({ workspace_id: workspaceIdForRoot(root), store: 'global' });
     expect(status['instructions']).toContain('start_work');
 
@@ -194,7 +214,9 @@ describe('Cursor session context', () => {
       'fake-concord',
       `if (process.argv[3] === 'status') process.stdout.write(${JSON.stringify(JSON.stringify(status))});\n`,
     );
+
     const hook = join(process.cwd(), 'plugin', 'cursor', 'concord-relay', 'cursor-hook.mjs');
+
     const result = spawnSync(process.execPath, [hook, 'session-start'], {
       env: { ...process.env, CONCORD_EXECUTABLE: fakeConcord },
       input: JSON.stringify({ conversation_id: 'cursor-global', workspace_roots: [root] }),
@@ -202,17 +224,25 @@ describe('Cursor session context', () => {
     });
 
     expect(result.status).toBe(0);
+
     const raw: unknown = JSON.parse(result.stdout);
     const context = z.object({ additional_context: z.string() }).parse(raw).additional_context;
+
     expect(context).toContain(`workspace_id "${workspaceIdForRoot(root)}"`);
     expect(context).toContain('start_work');
   });
 
   it('adds no instructions for a set-up repository, which has its own rule file', () => {
     const root = repoDir('cursor-local');
+
     mkdirSync(join(root, '.concord'));
     writeFileSync(join(root, '.concord', 'concord.db'), '');
-    const status = workspaceStatus(root, { HOME: dir('home'), CONCORD_REPO_ROOT: root });
+
+    const status = workspaceStatus(root, {
+      HOME: dir('home'),
+      CONCORD_REPO_ROOT: root,
+    });
+
     expect(status).toEqual({ workspace_id: workspaceIdForRoot(root), store: 'local' });
   });
 });
