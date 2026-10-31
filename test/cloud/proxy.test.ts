@@ -40,6 +40,20 @@ describe('forwardedArguments', () => {
     });
   });
 
+  it('keeps an operator-chosen identity when request metadata identifies OpenCode', () => {
+    const operatorSession = {
+      ...session,
+      identity: { agentId: 'alpha', kind: 'codex', origin: 'operator' as const },
+      requestIdentity: resolveOpenCodeRequestIdentity,
+    };
+
+    expect(
+      forwardedArguments('update_work', { agent_id: 'opencode:request-session' }, operatorSession, {
+        'ai.opencode/sessionID': 'ses_private_opencode_session_3',
+      }),
+    ).toEqual({ agent_id: 'alpha' });
+  });
+
   it('leaves the agent a read names alone, and every call without a session', () => {
     expect(forwardedArguments('inspect_work', { agent_id: 'claude-code:peer' }, session)).toEqual({
       agent_id: 'claude-code:peer',

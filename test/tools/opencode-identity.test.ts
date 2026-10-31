@@ -38,4 +38,36 @@ describe('OpenCode request identity', () => {
       repos.db.close();
     }
   });
+
+  it('keeps an operator-chosen identity when OpenCode request metadata is present', async () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    const operator = { agentId: 'alpha', kind: 'codex', origin: 'operator' as const };
+    const server = createServer(repos, {
+      identity: operator,
+      requestIdentity: resolveOpenCodeRequestIdentity,
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'opencode-operator-identity-test', version: '2.2.3' });
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+
+    try {
+      const result = await client.callTool({
+        name: 'start_work',
+        arguments: {
+          task_id: 'OPENCODE-OPERATOR-1',
+          title: 'Keep the chosen identity',
+          kind: 'codex',
+        },
+        _meta: { 'ai.opencode/sessionID': 'ses_private_opencode_session_2' },
+      });
+
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      expect(result.structuredContent).toMatchObject({ agent_id: operator.agentId });
+      expect(repos.agents.get(operator.agentId)?.kind).toBe(operator.kind);
+    } finally {
+      await client.close();
+      await server.close();
+      repos.db.close();
+    }
+  });
 });

@@ -266,7 +266,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   }
   // `env` is also the unit-test/config-path seam. Avoid touching unrelated
   // real harness homes unless adapter installation was explicitly requested.
-  const installAdapters = options.adapters ?? (options.mcp !== false && options.env === undefined);
+  const installAdapters = options.mcp !== false && (options.adapters ?? options.env === undefined);
   if (installAdapters) {
     adapters = installGlobalAdapters(import.meta.url, env, repoRoot);
     for (const adapter of adapters) {

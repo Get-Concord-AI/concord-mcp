@@ -9,17 +9,18 @@ import { CONCORD_SERVER_COMMAND, McpConfigParseError } from './mcp-config.js';
 const SERVER_KEY = 'concord';
 const PACKAGE_NAME = '@concord-ai/concord-mcp';
 const CONFIG_FILES = ['opencode.json', 'opencode.jsonc'] as const;
+const jsonValueSchema = z.json();
 
 const configSchema = z
   .object({
     mcp: z
       .object({
-        servers: z.record(z.string(), z.unknown()).optional(),
+        servers: z.record(z.string(), jsonValueSchema).optional(),
       })
-      .loose()
+      .catchall(jsonValueSchema)
       .optional(),
   })
-  .loose();
+  .catchall(jsonValueSchema);
 
 const entrySchema = z
   .object({
@@ -28,7 +29,7 @@ const entrySchema = z
     environment: z.record(z.string(), z.string()).optional(),
     disabled: z.boolean().optional(),
   })
-  .loose();
+  .catchall(jsonValueSchema);
 
 const ownedEntrySchema = z
   .object({
@@ -60,8 +61,8 @@ function parseConfig(text: string, relPath: string): z.infer<typeof configSchema
     allowTrailingComma: true,
     disallowComments: false,
   });
-  if (errors.length > 0) throw new McpConfigParseError(relPath, 'is not valid JSONC');
   const config = configSchema.safeParse(parsed);
+  if (errors.length > 0) throw new McpConfigParseError(relPath, 'is not valid JSONC');
   if (!config.success) throw new McpConfigParseError(relPath, 'has an invalid MCP configuration');
   return config.data;
 }
@@ -102,22 +103,30 @@ function formatOptions(text: string) {
   };
 }
 
-function edit(text: string, path: (string | number)[], value: unknown, relPath: string): string {
+function edit(
+  text: string,
+  path: (string | number)[],
+  value: z.infer<typeof jsonValueSchema> | undefined,
+  relPath: string,
+): string {
   const errors: ParseError[] = [];
   parse(text, errors, { allowTrailingComma: true, disallowComments: false });
   if (errors.length > 0) throw new McpConfigParseError(relPath, 'is not valid JSONC');
   return applyEdits(text, modify(text, path, value, formatOptions(text)));
 }
 
-function concordEntry(text: string, relPath: string): unknown {
+function concordEntry(text: string, relPath: string): z.infer<typeof jsonValueSchema> | undefined {
   return parseConfig(text, relPath).mcp?.servers?.[SERVER_KEY];
 }
 
-function isOwnedEntry(entry: unknown): entry is z.infer<typeof ownedEntrySchema> {
-  return ownedEntrySchema.safeParse(entry).success;
+function parseOwnedEntry(
+  entry: z.infer<typeof jsonValueSchema>,
+): z.infer<typeof ownedEntrySchema> | undefined {
+  const parsed = ownedEntrySchema.safeParse(entry);
+  return parsed.success ? parsed.data : undefined;
 }
 
-function isConcordCommand(entry: unknown): boolean {
+function isConcordCommand(entry: z.infer<typeof jsonValueSchema>): boolean {
   const parsed = entrySchema.safeParse(entry);
   return (
     parsed.success &&
@@ -129,7 +138,8 @@ function isConcordCommand(entry: unknown): boolean {
 function updatedText(existing: string | undefined, relPath: string): string {
   const original = existing === undefined || existing.trim() === '' ? '{}\n' : existing;
   const current = concordEntry(original, relPath);
-  if (current !== undefined && !isOwnedEntry(current)) return original;
+  const currentOwned = current === undefined ? undefined : parseOwnedEntry(current);
+  if (current !== undefined && currentOwned === undefined) return original;
 
   const root = ['mcp', 'servers', SERVER_KEY];
   const entry = {
@@ -147,7 +157,7 @@ function updatedText(existing: string | undefined, relPath: string): string {
     updated = edit(updated, [...root, 'type'], entry.type, relPath);
     updated = edit(updated, [...root, 'command'], entry.command, relPath);
     updated = edit(updated, [...root, 'environment', 'CONCORD_AGENT_KIND'], 'opencode', relPath);
-    if (isOwnedEntry(current) && current.disabled === true) {
+    if (currentOwned?.disabled === true) {
       updated = edit(updated, [...root, 'disabled'], false, relPath);
     }
   }
@@ -172,9 +182,11 @@ export function inspectOpenCodeMcpConfig(repoRoot: string): OpenCodeConfigState 
   if (!isConcordCommand(entry)) return { kind: 'custom', relPath: target.relPath };
 
   const parsed = entrySchema.parse(entry);
-  return parsed.disabled === true
-    ? { kind: 'disabled', relPath: target.relPath }
-    : { kind: 'configured', relPath: target.relPath };
+  if (parsed.disabled === true) return { kind: 'disabled', relPath: target.relPath };
+  if (parsed.environment?.['CONCORD_AGENT_KIND'] !== 'opencode') {
+    return { kind: 'custom', relPath: target.relPath };
+  }
+  return { kind: 'configured', relPath: target.relPath };
 }
 
 /** Write only the repository-scoped config file; OpenCode loads AGENTS.md instructions itself. */
@@ -202,7 +214,7 @@ export function removeOpenCodeMcpConfig(repoRoot: string): string | undefined {
   if (!stat.isFile()) throw new McpConfigParseError(target.relPath, 'must be a regular file');
   const existing = readFileSync(target.fullPath, 'utf8');
   const entry = concordEntry(existing, target.relPath);
-  if (entry === undefined || !isOwnedEntry(entry)) return undefined;
+  if (entry === undefined || parseOwnedEntry(entry) === undefined) return undefined;
 
   const updated = edit(existing, ['mcp', 'servers', SERVER_KEY], undefined, target.relPath);
   writeFileSync(target.fullPath, updated.endsWith('\n') ? updated : `${updated}\n`);

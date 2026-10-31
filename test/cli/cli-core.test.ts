@@ -102,6 +102,25 @@ describe('runSetup', () => {
     expect(result.adapters).toEqual([]);
   });
 
+  it('does not install client adapters when setup opts out of MCP', () => {
+    const dir = repoDir();
+    const home = mkdtempSync(join(tmpdir(), 'concord-no-mcp-home-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'opencode', 'opencode 2.2.3');
+
+    const result = runSetup(dir, {
+      env: { HOME: home, PATH: bin, CONCORD_REPO_ROOT: dir },
+      mcp: false,
+      adapters: true,
+    });
+
+    expect(result.adapters).toEqual([]);
+    expect(result.written).not.toContain('opencode.json');
+    expect(existsSync(join(dir, 'opencode.json'))).toBe(false);
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('start_work');
+  });
+
   it('leaves the repository gitignore and a customized Concord gitignore untouched', () => {
     const dir = repoDir();
     const gitignorePath = join(dir, '.gitignore');

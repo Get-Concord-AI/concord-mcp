@@ -49,7 +49,7 @@ export function ensureHarnessAdapter(
   if (!adapterNeedsAttention(before)) return check(harness, 'healthy', before);
   if (!options.autoAdapters) return check(harness, 'needs_install', before);
   try {
-    installAdapter(harness, options.moduleUrl, options.env, isEphemeral);
+    installAdapter(harness, options.moduleUrl, options.env, isEphemeral, options.repoRoot);
   } catch (error) {
     return {
       harness,

@@ -250,6 +250,23 @@ describe('global harness adapters', () => {
     expect(existsSync(join(project, 'opencode.json'))).toBe(false);
   });
 
+  it('requires attention when a Concord OpenCode entry lacks request identity', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-opencode-identity-home-'));
+    const project = mkdtempSync(join(tmpdir(), 'concord-opencode-identity-project-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'opencode', 'opencode v2.2.3');
+    writeFileSync(
+      join(project, 'opencode.json'),
+      '{"mcp":{"servers":{"concord":{"type":"local","command":["concord-mcp"]}}}}\n',
+    );
+
+    expect(statusAdapter('opencode', { HOME: home, PATH: bin }, project)).toMatchObject({
+      status: 'action_required',
+      detail: 'A custom Concord MCP entry exists; review it before replacing it.',
+    });
+  });
+
   it('requires Gemini completion injection in the current project', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-gemini-home-'));
     const project = mkdtempSync(join(tmpdir(), 'concord-gemini-project-'));

@@ -93,6 +93,16 @@ describe('OpenCode repository MCP config', () => {
     expect(readFileSync(configPath, 'utf8')).toBe(existing);
   });
 
+  it('reports a Concord command without OpenCode identity as custom', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-opencode-missing-identity-'));
+    writeFileSync(
+      join(root, 'opencode.json'),
+      '{"mcp":{"servers":{"concord":{"type":"local","command":["concord-mcp"]}}}}\n',
+    );
+
+    expect(inspectOpenCodeMcpConfig(root)).toEqual({ kind: 'custom', relPath: 'opencode.json' });
+  });
+
   it('reports and re-enables a disabled owned entry, then removes only that entry', () => {
     const root = mkdtempSync(join(tmpdir(), 'concord-opencode-disabled-'));
     const configPath = join(root, 'opencode.json');

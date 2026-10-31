@@ -11,7 +11,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import type { AgentIdentity } from '../domain/identity.js';
+import { identityForRequest, type AgentIdentity } from '../domain/identity.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../install/instructions.js';
 import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
@@ -129,7 +129,7 @@ export function forwardedArguments(
   }
 
   // The session is the authority, as `resolveActorId` makes it locally.
-  const identity = session.requestIdentity?.(requestMeta) ?? session.identity;
+  const identity = identityForRequest(session.identity, session.requestIdentity?.(requestMeta));
   if (identity !== undefined && WRITE_TOOLS.has(tool)) {
     forwarded['agent_id'] = identity.agentId;
     if (tool === 'start_work') forwarded['kind'] = identity.kind;

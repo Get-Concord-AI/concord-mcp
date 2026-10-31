@@ -100,6 +100,14 @@ export function resolveOpenCodeRequestIdentity(
   };
 }
 
+/** An operator-chosen identity remains authoritative for every request. */
+export function identityForRequest(
+  session: AgentIdentity | undefined,
+  request: AgentIdentity | undefined,
+): AgentIdentity | undefined {
+  return session?.origin === 'operator' ? session : (request ?? session);
+}
+
 /** The session sources for a client, when that client exposes any. */
 function sourcesFor(kind: string | undefined): readonly SessionSource[] {
   if (kind === undefined) return SESSION_SOURCES;
