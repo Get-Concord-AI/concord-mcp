@@ -15,7 +15,10 @@ import {
 } from '../../src/relay/server.js';
 import { SocketAgentMessageDispatcher } from '../../src/relay/socket-dispatcher.js';
 import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
-import { handleSendAgentMessageWithDelivery } from '../../src/tools/agent-messages.js';
+import {
+  handleSendAgentMessage,
+  handleSendAgentMessageWithDelivery,
+} from '../../src/tools/agent-messages.js';
 
 function register(repos: Repositories, agentId: string): void {
   repos.agents.upsert({
@@ -71,6 +74,7 @@ describe('local IPC relay', () => {
         },
       },
     });
+
     try {
       const result = await handleSendAgentMessageWithDelivery(
         repos,
@@ -87,10 +91,121 @@ describe('local IPC relay', () => {
       expect(result.delivery).toBe('delivered');
       expect(result.immediateMode).toBe('inject');
       expect(result.message.providerReceipt).toBe('turn-new');
+
       // Framed like every other channel, so the woken session can reply.
       expect(deliveries[0]?.content).toBe(
         `[concord from codex:sender id=${result.message.messageId}]\nStart reviewing now.`,
       );
+    } finally {
+      await relay.close();
+    }
+  });
+
+  it('does not inject the same message twice when a delivery is retried', async () => {
+    const deliveries: AgentSessionDelivery[] = [];
+
+    const relay = await startAgentRelay({
+      repos,
+      agentId: 'codex:target',
+      address: relayAddress(mkdtempSync(join(tmpdir(), 'concord-relay-')), 'codex:target'),
+      adapter: {
+        provider: 'codex',
+        isBusy: () => false,
+        steer: () => Promise.resolve('steered'),
+        inject: (delivery) => {
+          deliveries.push(delivery);
+          return Promise.resolve(`turn-${String(deliveries.length)}`);
+        },
+      },
+    });
+
+    try {
+      const result = handleSendAgentMessage(repos, {
+        operation: 'prompt',
+        agentId: 'codex:sender',
+        toAgentId: 'codex:target',
+        content: 'Test duplicate delivery.',
+        idempotencyKey: 'relay-dedup-1',
+      });
+
+      const endpoint = repos.agentEndpoints.getByAgent('codex:target');
+
+      if (endpoint === undefined) {
+        throw new Error('Relay endpoint was not registered.');
+      }
+
+      const dispatcher = new SocketAgentMessageDispatcher();
+      const request = {
+        endpoint,
+        message: result.message,
+      };
+
+      // Simulate the sender retrying the exact same delivery.
+      const firstReceipt = await dispatcher.deliver(request);
+      const secondReceipt = await dispatcher.deliver(request);
+
+      expect(firstReceipt).toEqual(secondReceipt);
+      expect(firstReceipt.receipt).toBe('turn-1');
+      expect(deliveries).toHaveLength(1);
+    } finally {
+      await relay.close();
+    }
+  });
+
+  it('does not inject the same message twice when deliveries arrive concurrently', async () => {
+    const deliveries: AgentSessionDelivery[] = [];
+
+    const relay = await startAgentRelay({
+      repos,
+      agentId: 'codex:target',
+      address: relayAddress(mkdtempSync(join(tmpdir(), 'concord-relay-')), 'codex:target'),
+      adapter: {
+        provider: 'codex',
+        isBusy: () => false,
+        steer: () => Promise.resolve('steered'),
+        inject: async (delivery) => {
+          deliveries.push(delivery);
+
+          // Keep the first delivery in flight while the concurrent retry arrives.
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 50);
+          });
+
+          return `turn-${String(deliveries.length)}`;
+        },
+      },
+    });
+
+    try {
+      const result = handleSendAgentMessage(repos, {
+        operation: 'prompt',
+        agentId: 'codex:sender',
+        toAgentId: 'codex:target',
+        content: 'Test concurrent duplicate delivery.',
+        idempotencyKey: 'relay-concurrent-dedup-1',
+      });
+
+      const endpoint = repos.agentEndpoints.getByAgent('codex:target');
+
+      if (endpoint === undefined) {
+        throw new Error('Relay endpoint was not registered.');
+      }
+
+      const dispatcher = new SocketAgentMessageDispatcher();
+      const request = {
+        endpoint,
+        message: result.message,
+      };
+
+      // Both requests arrive while the first adapter invocation is in flight.
+      const [firstReceipt, secondReceipt] = await Promise.all([
+        dispatcher.deliver(request),
+        dispatcher.deliver(request),
+      ]);
+
+      expect(firstReceipt).toEqual(secondReceipt);
+      expect(firstReceipt.receipt).toBe('turn-1');
+      expect(deliveries).toHaveLength(1);
     } finally {
       await relay.close();
     }
@@ -144,6 +259,7 @@ describe('local IPC relay', () => {
       },
       pullFallback: true,
     });
+
     try {
       registerPullEndpoint(repos, 'codex:target', 'codex');
       expect(repos.agentEndpoints.getByAgent('codex:target')).toMatchObject({
@@ -168,6 +284,7 @@ describe('local IPC relay', () => {
       },
     };
     const relay = await startAgentRelay({ repos, agentId: 'codex:target', address, adapter });
+
     try {
       await expect(
         startAgentRelay({ repos, agentId: 'codex:target', address, adapter }),
@@ -207,6 +324,7 @@ describe('local IPC relay', () => {
       },
       pullFallback: true,
     });
+
     try {
       const result = await handleSendAgentMessageWithDelivery(
         repos,
@@ -219,6 +337,7 @@ describe('local IPC relay', () => {
         },
         new SocketAgentMessageDispatcher(),
       );
+
       expect(result.delivery).toBe('queued_pull');
       expect(result.message.status).toBe('sent');
       expect(result.outlook).toMatch(/remains queued/i);
