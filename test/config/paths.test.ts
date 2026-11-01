@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, parse } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -14,7 +15,7 @@ import {
 } from '../../src/config/paths.js';
 
 function tempDir(prefix: string): string {
-  return mkdtempSync(join(parse(process.cwd()).root, prefix));
+  return mkdtempSync(join(tmpdir(), prefix));
 }
 
 describe('paths', () => {
@@ -33,9 +34,11 @@ describe('paths', () => {
   });
 
   it('falls back to the start dir when no .git is found', () => {
-    const dir = tempDir('concord-nogit-');
+    // Start at the filesystem root: there is no parent directory in which
+    // an unrelated .git entry could be discovered.
+    const root = parse(process.cwd()).root;
 
-    expect(findRepoRoot(dir)).toBe(realpathSync(dir));
+    expect(findRepoRoot(root)).toBe(realpathSync(root));
   });
 
   it('maps a linked worktree to the primary checkout root', () => {

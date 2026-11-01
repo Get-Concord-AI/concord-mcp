@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
-import { parse, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -13,18 +14,16 @@ import { workspaceStatus } from '../../src/cli/commands/inbox.js';
 import { workspaceIdForRoot } from '../../src/config/paths.js';
 import { writeUserConfig } from '../../src/config/user-config.js';
 import { hasExplicitRepoRoot, joinClientRoot } from '../../src/workspaces/client-roots.js';
+import { writeFakeCommand } from '../helpers/fake-command.js';
 import { registerWorkflowTools } from '../../src/tools/workflow.js';
 import {
   type WorkspaceContext,
   WorkspaceManager,
   routedRepositories,
 } from '../../src/workspaces/manager.js';
-import { writeFakeCommand } from '../helpers/fake-command.js';
 
 function dir(label: string): string {
-  return realpathSync(
-    mkdtempSync(join(parse(process.cwd()).root, `concord-${label}-`)),
-  );
+  return realpathSync(mkdtempSync(join(tmpdir(), `concord-${label}-`)));
 }
 
 function repoDir(label: string): string {
@@ -40,16 +39,11 @@ function client(roots: readonly string[] | undefined) {
   };
 }
 
-/**
- * A workflow server whose one live delivery runs `duringDelivery` before it
- * resolves, and a call that sends `codex:sender`'s prompt to `codex:target`.
- */
 async function deliveryServer(
   duringDelivery: (manager: WorkspaceManager) => void,
   onWrite?: (workspace?: WorkspaceContext) => void,
 ) {
   const launched = repoDir('launched');
-  // A fresh home keeps the store in the repository, whatever this machine's global mode.
   const manager = WorkspaceManager.fromEnvironment(launched, { HOME: dir('home') });
   const repos = manager.current().repos;
 
@@ -138,7 +132,7 @@ describe('joinClientRoot', () => {
   });
 
   it('keeps the working directory for a client without roots', async () => {
-    const launched = dir('launched');
+    const launched = repoDir('launched');
     const manager = new WorkspaceManager(launched);
 
     expect(await joinClientRoot(client(undefined), manager)).toBeUndefined();
@@ -146,7 +140,7 @@ describe('joinClientRoot', () => {
   });
 
   it('keeps a workspace a tool named while the roots answer was on its way', async () => {
-    const launched = dir('launched');
+    const launched = repoDir('launched');
     const open = repoDir('open');
     const named = repoDir('named');
     const manager = new WorkspaceManager(launched);

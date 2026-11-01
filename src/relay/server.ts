@@ -30,6 +30,8 @@ export interface AgentRelayServerOptions {
   pullFallback?: boolean;
   /** The opaque key of the session this relay delivers into. */
   session?: string;
+  /** Maximum number of cached deliveries. Defaults to 1,000. */
+  maxCachedDeliveries?: number;
 }
 
 export interface RunningAgentRelay {
@@ -148,6 +150,15 @@ export async function startAgentRelay(
   await prepareRelayAddress(options.address);
 
   const ttlMs = options.ttlMs ?? 15_000;
+  const maxCachedDeliveries = options.maxCachedDeliveries ?? MAX_CACHED_DELIVERIES;
+
+  if (
+    !Number.isSafeInteger(maxCachedDeliveries) ||
+    maxCachedDeliveries < 1
+  ) {
+    throw new Error('maxCachedDeliveries must be a positive safe integer.');
+  }
+
   const endpointId = randomUUID();
   const credential = randomBytes(32).toString('base64url');
   const credentialProof = createHash('sha256').update(credential).digest('hex');
@@ -169,7 +180,7 @@ export async function startAgentRelay(
       }
     }
 
-    if (deliveryCache.size <= MAX_CACHED_DELIVERIES) return;
+    if (deliveryCache.size <= maxCachedDeliveries) return;
 
     const completedEntries = [...deliveryCache.entries()]
       .filter(([, entry]) => entry.completedAt !== undefined)
@@ -181,12 +192,38 @@ export async function startAgentRelay(
       });
 
     while (
-      deliveryCache.size > MAX_CACHED_DELIVERIES &&
+      deliveryCache.size > maxCachedDeliveries &&
       completedEntries.length > 0
     ) {
       const oldest = completedEntries.shift();
       if (oldest !== undefined) deliveryCache.delete(oldest[0]);
     }
+  };
+
+  // Make room for a new delivery without evicting active work. Existing
+  // message IDs are checked before this function is called, so retries can
+  // still reuse their original in-flight promise when the cache is full.
+  const makeRoomForDelivery = (): boolean => {
+    if (deliveryCache.size < maxCachedDeliveries) return true;
+
+    const completedEntries = [...deliveryCache.entries()]
+      .filter(([, entry]) => entry.completedAt !== undefined)
+      .sort((left, right) => {
+        const leftCompletedAt = left[1].completedAt ?? 0;
+        const rightCompletedAt = right[1].completedAt ?? 0;
+
+        return leftCompletedAt - rightCompletedAt;
+      });
+
+    while (
+      deliveryCache.size >= maxCachedDeliveries &&
+      completedEntries.length > 0
+    ) {
+      const oldest = completedEntries.shift();
+      if (oldest !== undefined) deliveryCache.delete(oldest[0]);
+    }
+
+    return deliveryCache.size < maxCachedDeliveries;
   };
 
   const deliverOnce = (
@@ -206,6 +243,14 @@ export async function startAgentRelay(
       }
 
       return existing.promise;
+    }
+
+    if (!makeRoomForDelivery()) {
+      return Promise.reject(
+        new Error(
+          'Relay delivery cache is full because all cached deliveries are still pending. Retry later.',
+        ),
+      );
     }
 
     const promise = (async (): Promise<SuccessfulRelayResponse> => {

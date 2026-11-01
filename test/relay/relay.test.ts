@@ -1,3 +1,4 @@
+
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -207,6 +208,151 @@ describe('local IPC relay', () => {
       expect(firstReceipt.receipt).toBe('turn-1');
       expect(deliveries).toHaveLength(1);
     } finally {
+      await relay.close();
+    }
+  });
+
+  it('enforces the delivery cache limit without evicting pending deliveries', async () => {
+    const pendingResolvers: ((receipt: string) => void)[] = [];
+    let deliveryCount = 0;
+
+    let resolveTwoDeliveries: (() => void) | undefined;
+    let resolveThirdDelivery: (() => void) | undefined;
+
+    const twoDeliveriesStarted = new Promise<void>((resolve) => {
+      resolveTwoDeliveries = resolve;
+    });
+
+    const thirdDeliveryStarted = new Promise<void>((resolve) => {
+      resolveThirdDelivery = resolve;
+    });
+
+    const relay = await startAgentRelay({
+      repos,
+      agentId: 'codex:target',
+      address: relayAddress(mkdtempSync(join(tmpdir(), 'concord-relay-')), 'codex:target'),
+      maxCachedDeliveries: 2,
+      adapter: {
+        provider: 'codex',
+        isBusy: () => false,
+        steer: () => Promise.reject(new Error('not busy')),
+        inject: () => {
+          deliveryCount += 1;
+
+          if (deliveryCount === 2) {
+            resolveTwoDeliveries?.();
+          }
+
+          if (deliveryCount === 3) {
+            resolveThirdDelivery?.();
+          }
+
+          return new Promise<string>((resolve) => {
+            pendingResolvers.push(resolve);
+          });
+        },
+      },
+    });
+
+    try {
+      const endpoint = repos.agentEndpoints.getByAgent('codex:target');
+
+      if (endpoint === undefined) {
+        throw new Error('Relay endpoint was not registered.');
+      }
+
+      const dispatcher = new SocketAgentMessageDispatcher(10_000);
+
+      const createMessage = (idempotencyKey: string) =>
+        handleSendAgentMessage(repos, {
+          operation: 'prompt',
+          agentId: 'codex:sender',
+          toAgentId: 'codex:target',
+          content: `Message ${idempotencyKey}`,
+          idempotencyKey,
+        }).message;
+
+      const firstMessage = createMessage('cache-pending-1');
+      const secondMessage = createMessage('cache-pending-2');
+
+      const firstRequest = { endpoint, message: firstMessage };
+      const secondRequest = { endpoint, message: secondMessage };
+
+      const firstDelivery = dispatcher.deliver(firstRequest);
+      const secondDelivery = dispatcher.deliver(secondRequest);
+
+      // Wait until both cache entries are pending.
+      await twoDeliveriesStarted;
+
+      // A retry of an existing message must reuse its pending promise.
+      const duplicateDelivery = dispatcher.deliver(firstRequest);
+
+      // A distinct third message must be rejected while both entries are pending.
+      const thirdMessage = createMessage('cache-pending-3');
+
+      await expect(
+        dispatcher.deliver({ endpoint, message: thirdMessage }),
+      ).rejects.toThrow(/cache is full/i);
+
+      expect(deliveryCount).toBe(2);
+
+      // Completing one delivery frees capacity.
+      const resolveFirst = pendingResolvers[0];
+
+      if (resolveFirst === undefined) {
+        throw new Error('First delivery resolver was not registered.');
+      }
+
+      resolveFirst('turn-1');
+
+      const [firstReceipt, duplicateReceipt] = await Promise.all([
+        firstDelivery,
+        duplicateDelivery,
+      ]);
+
+      expect(firstReceipt).toEqual(duplicateReceipt);
+      expect(firstReceipt.receipt).toBe('turn-1');
+
+      // A new distinct delivery can now enter the cache.
+      const fourthMessage = createMessage('cache-pending-4');
+      const fourthDelivery = dispatcher.deliver({ endpoint, message: fourthMessage });
+
+      await thirdDeliveryStarted;
+
+      const resolveThird = pendingResolvers[2];
+
+      if (resolveThird === undefined) {
+        throw new Error('Third delivery resolver was not registered.');
+      }
+
+      resolveThird('turn-3');
+
+      await expect(fourthDelivery).resolves.toMatchObject({
+        provider: 'codex',
+        delivery: 'inject',
+        receipt: 'turn-3',
+      });
+
+      expect(deliveryCount).toBe(3);
+
+      // Finish the remaining pending delivery.
+      const resolveSecond = pendingResolvers[1];
+
+      if (resolveSecond === undefined) {
+        throw new Error('Second delivery resolver was not registered.');
+      }
+
+      resolveSecond('turn-2');
+
+      await expect(secondDelivery).resolves.toMatchObject({
+        receipt: 'turn-2',
+      });
+    } finally {
+      // Ensure no adapter promises are left pending if an assertion fails.
+      for (const resolve of pendingResolvers) {
+        resolve('cleanup');
+      }
+
       await relay.close();
     }
   });
