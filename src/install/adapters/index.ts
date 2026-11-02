@@ -1,5 +1,5 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { delimiter, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import {
   HARNESS_CONFIGS,
@@ -8,7 +8,8 @@ import {
   type MonitorKind,
 } from '../../domain/harness-config.js';
 import { userHome } from '../../config/paths.js';
-import { spawnCommandSync } from '../spawn-command.js';
+import { atLeast, executablePath, run, versionTuple } from './runtime.js';
+import { installOpenCode, statusOpenCode } from './opencode.js';
 import {
   devinMcpInstalled,
   installDevinMcpConfig,
@@ -33,6 +34,7 @@ import {
   installGooseMcpConfig,
   uninstallGooseConfig,
 } from '../goose-config.js';
+import { removeOpenCodeMcpConfig } from '../opencode-config.js';
 import {
   globalAntigravityHooksPath,
   hasAntigravityHooks,
@@ -77,48 +79,8 @@ export interface AdapterReport {
   link?: LinkCheck | undefined;
 }
 
-export function executablePath(name: string, env: NodeJS.ProcessEnv): string | undefined {
-  const path = env['PATH'];
-  if (path === undefined) return undefined;
-  const extensions = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
-  for (const directory of path.split(delimiter)) {
-    for (const extension of extensions) {
-      const candidate = join(directory, `${name}${extension}`);
-      if (existsSync(candidate)) return candidate;
-    }
-  }
-  return undefined;
-}
-
-export function run(
-  command: string,
-  args: readonly string[],
-  env: NodeJS.ProcessEnv,
-): {
-  ok: boolean;
-  output: string;
-} {
-  const result = spawnCommandSync(command, args, { env, timeout: 15_000 });
-  return {
-    ok: result.status === 0,
-    output: result.error?.message ?? `${result.stdout}${result.stderr}`.trim(),
-  };
-}
-
-export function versionTuple(output: string): number[] | undefined {
-  const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
-  if (match === null) return undefined;
-  return match.slice(1).map((part) => Number.parseInt(part, 10));
-}
-
-export function atLeast(actual: readonly number[], required: readonly number[]): boolean {
-  for (let index = 0; index < required.length; index += 1) {
-    const left = actual[index] ?? 0;
-    const right = required[index] ?? 0;
-    if (left !== right) return left > right;
-  }
-  return true;
-}
+export { atLeast, executablePath, run, versionTuple } from './runtime.js';
+export { openCodeSupportsV2 } from './opencode.js';
 
 /** Devin introduced dedicated MCP config files in v3000.3; its CLI omits the patch sometimes. */
 export function devinSupportsDedicatedMcpConfig(versionOutput: string): boolean {
@@ -740,6 +702,8 @@ export function statusAdapter(
       return statusAntigravity(env, repoRoot);
     case 'copilot-cli':
       return statusCopilot(env);
+    case 'opencode':
+      return statusOpenCode(env, repoRoot);
     case 'devin':
       return statusDevin(env, repoRoot);
   }
@@ -765,6 +729,7 @@ export function installAdapter(
   moduleUrl: string,
   env: NodeJS.ProcessEnv = process.env,
   isEphemeral: EphemeralTest = isEphemeralPath,
+  repoRoot?: string,
 ): void {
   if (harness === 'antigravity') {
     const config = HARNESS_CONFIGS.antigravity;
@@ -847,6 +812,10 @@ export function installAdapter(
       installCopilotHooks(env);
       return;
     }
+    case 'opencode': {
+      installOpenCode(env, repoRoot ?? process.cwd());
+      return;
+    }
     case 'devin': {
       if (devinCliSupportsDedicatedMcpConfig(env)) {
         installDevinMcpConfig(env);
@@ -866,7 +835,7 @@ export function installGlobalAdapters(
   const failures = new Map<HarnessName, string>();
   for (const harness of harnessNames) {
     try {
-      installAdapter(harness, moduleUrl, env, isEphemeral);
+      installAdapter(harness, moduleUrl, env, isEphemeral, repoRoot);
     } catch (error) {
       failures.set(harness, error instanceof Error ? error.message : String(error));
     }
@@ -900,7 +869,10 @@ function removeOwnedLink(path: string): boolean {
   return true;
 }
 
-export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): AdapterReport[] {
+export function uninstallGlobalAdapters(
+  env: NodeJS.ProcessEnv = process.env,
+  repoRoot?: string,
+): AdapterReport[] {
   removeOwnedLink(linkTarget('claude-code', env));
   removeOwnedLink(linkTarget('gemini', env));
   removeOwnedLink(linkTarget('cursor', env));
@@ -928,9 +900,10 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   }
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
+  if (repoRoot !== undefined) removeOpenCodeMcpConfig(repoRoot);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
-  return statusGlobalAdapters(env);
+  return statusGlobalAdapters(env, repoRoot);
 }
 
 /** A harness that is set up but not working, or whose adapter link is broken. */

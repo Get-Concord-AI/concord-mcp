@@ -7,7 +7,7 @@ import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/p
 import { LINKED_MACHINE_MESSAGE, linkedMachine } from './cloud/target.js';
 import { startBackgroundUpdateCheck } from './update-notifier.js';
 import { resolveCheckoutRoot, resolveRepoRoot } from './config/paths.js';
-import { resolveIdentity } from './domain/identity.js';
+import { resolveIdentity, resolveOpenCodeRequestIdentity } from './domain/identity.js';
 import { createServer } from './server.js';
 import { ensureAgentRegistered } from './tools/register-agent.js';
 import { createTelemetryClient } from './telemetry/client.js';
@@ -23,6 +23,7 @@ async function main(): Promise<void> {
   // same id the relay CLI derives for the same session.
   const kind = process.env['CONCORD_AGENT_KIND']?.trim();
   const identity = resolveIdentity(process.env, kind !== undefined && kind !== '' ? { kind } : {});
+  const requestIdentity = kind === 'opencode' ? resolveOpenCodeRequestIdentity : undefined;
 
   // A machine linked to Concord Cloud works through it everywhere: no local
   // database, and no telemetry from this package for operations that are not local.
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
     process.env,
     identity,
     resolveCheckoutRoot(process.cwd(), process.env),
+    requestIdentity,
   );
   // Before the cloud branch: adapters are installed on this machine either way.
   const adapterCheck = startBackgroundAdapterCheck(identity, process.env);
@@ -58,6 +60,7 @@ async function main(): Promise<void> {
   const server = createServer(workspaceManager.current().repos, {
     workspaceManager,
     ...(identity === undefined ? {} : { identity }),
+    ...(requestIdentity === undefined ? {} : { requestIdentity }),
     getAvailableUpdate: updateCheck.getAvailableUpdate,
     getAdapterNotice: adapterCheck.getNotice,
     ...(telemetry === undefined ? {} : { telemetry }),
