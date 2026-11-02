@@ -7,7 +7,7 @@
  * the user can fix.
  */
 export interface ErrorStream {
-  write(chunk: string): void;
+  write(chunk: string): unknown;
 }
 
 export function reportMissingHarnessCli(

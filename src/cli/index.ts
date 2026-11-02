@@ -8,7 +8,6 @@ import { createTelemetryClient } from '../telemetry/client.js';
 import { VERSION } from '../version.js';
 import { registerCheckCommand } from './commands/check.js';
 import { registerCloudCommand } from './commands/cloud.js';
-import { operationOutcome } from './operation-outcome.js';
 import { registerAdaptersCommand } from './commands/adapters.js';
 import { registerDashboardCommand } from './commands/dashboard.js';
 import { registerDoctorCommand } from './commands/doctor.js';
@@ -69,7 +68,7 @@ program.hook('postAction', (_command, actionCommand) => {
     if (!backgroundCommands.has(activeCommand.name)) {
       telemetry?.recordOperation(
         activeCommand.name,
-        operationOutcome(process.exitCode),
+        'success',
         performance.now() - activeCommand.startedAt,
       );
     }
