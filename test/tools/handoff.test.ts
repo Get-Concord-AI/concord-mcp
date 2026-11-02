@@ -116,7 +116,22 @@ describe('handleHandoff', () => {
         },
         provenance: [{ field: 'tests_run', source: 'pnpm test' }],
       }),
-    ).toThrow(/reported_outcome provenance is required/u);
+    ).toThrow(/got fields \[tests_run\]/u);
+  });
+
+  it('accepts per-value provenance for a reported outcome', () => {
+    handleClaimWork(repos, { task_id: 'TASK-SUBFIELD', title: 'Per-value source' });
+    const result = handleHandoff(repos, {
+      task_id: 'TASK-SUBFIELD',
+      status: 'done',
+      what_changed: 'x',
+      reported_outcome: { source: 'review', acceptance: 'accepted', integration: 'passed' },
+      provenance: [
+        { field: 'reported_outcome.acceptance', source: 'PR approved' },
+        { field: 'reported_outcome.integration', source: 'CI green' },
+      ],
+    });
+    expect(result.handoff.reportedOutcome?.integration).toBe('passed');
   });
 
   it('produces a review packet when ready_for_review is set (folded review_ready)', () => {

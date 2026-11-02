@@ -9,6 +9,22 @@ export interface HandoffResult {
   task: TaskRecord;
 }
 
+const REPORTED_OUTCOME_FIELD = 'reported_outcome';
+const REPORTED_OUTCOME_KEYS = [
+  'source',
+  'acceptance',
+  'integration',
+  'human_intervention_ms',
+  'rework_ms',
+];
+
+function citesReportedOutcome(field: string): boolean {
+  return (
+    field === REPORTED_OUTCOME_FIELD ||
+    REPORTED_OUTCOME_KEYS.some((key) => field === `${REPORTED_OUTCOME_FIELD}.${key}`)
+  );
+}
+
 /**
  * Record completion/review evidence for an existing task. Ownership transfer
  * is handled separately by transfer_work.
@@ -40,14 +56,16 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
       `Task ${input.task_id} version conflict: expected ${String(input.expected_version)}, current ${String(existing.version)}.`,
     );
   }
-  if (
-    input.reported_outcome !== undefined &&
-    !input.provenance?.some((entry) => entry.field === 'reported_outcome')
-  ) {
-    throw new Error(
-      'reported_outcome provenance is required when reported_outcome is supplied: add ' +
-        '{ "field": "reported_outcome", "source": "<CI run, PR, or reviewer>" } to provenance.',
-    );
+  if (input.reported_outcome !== undefined) {
+    const fields = input.provenance?.map((entry) => entry.field) ?? [];
+    if (!fields.some(citesReportedOutcome)) {
+      throw new Error(
+        'reported_outcome provenance is required when reported_outcome is supplied: add ' +
+          '{ "field": "reported_outcome", "source": "<CI run, PR, or reviewer>" } to provenance ' +
+          '(or a "reported_outcome.<key>" entry per measured value); ' +
+          `got fields [${fields.join(', ')}].`,
+      );
+    }
   }
 
   const reviewReady = input.ready_for_review === true;
