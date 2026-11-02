@@ -1,4 +1,3 @@
-
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -290,9 +289,9 @@ describe('local IPC relay', () => {
       // A distinct third message must be rejected while both entries are pending.
       const thirdMessage = createMessage('cache-pending-3');
 
-      await expect(
-        dispatcher.deliver({ endpoint, message: thirdMessage }),
-      ).rejects.toThrow(/cache is full/i);
+      await expect(dispatcher.deliver({ endpoint, message: thirdMessage })).rejects.toThrow(
+        /cache is full/i,
+      );
 
       expect(deliveryCount).toBe(2);
 

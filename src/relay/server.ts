@@ -152,10 +152,7 @@ export async function startAgentRelay(
   const ttlMs = options.ttlMs ?? 15_000;
   const maxCachedDeliveries = options.maxCachedDeliveries ?? MAX_CACHED_DELIVERIES;
 
-  if (
-    !Number.isSafeInteger(maxCachedDeliveries) ||
-    maxCachedDeliveries < 1
-  ) {
+  if (!Number.isSafeInteger(maxCachedDeliveries) || maxCachedDeliveries < 1) {
     throw new Error('maxCachedDeliveries must be a positive safe integer.');
   }
 
@@ -172,10 +169,7 @@ export async function startAgentRelay(
     const now = Date.now();
 
     for (const [messageId, entry] of deliveryCache) {
-      if (
-        entry.completedAt !== undefined &&
-        now - entry.completedAt >= DELIVERY_CACHE_TTL_MS
-      ) {
+      if (entry.completedAt !== undefined && now - entry.completedAt >= DELIVERY_CACHE_TTL_MS) {
         deliveryCache.delete(messageId);
       }
     }
@@ -191,10 +185,7 @@ export async function startAgentRelay(
         return leftCompletedAt - rightCompletedAt;
       });
 
-    while (
-      deliveryCache.size > maxCachedDeliveries &&
-      completedEntries.length > 0
-    ) {
+    while (deliveryCache.size > maxCachedDeliveries && completedEntries.length > 0) {
       const oldest = completedEntries.shift();
       if (oldest !== undefined) deliveryCache.delete(oldest[0]);
     }
@@ -215,10 +206,7 @@ export async function startAgentRelay(
         return leftCompletedAt - rightCompletedAt;
       });
 
-    while (
-      deliveryCache.size >= maxCachedDeliveries &&
-      completedEntries.length > 0
-    ) {
+    while (deliveryCache.size >= maxCachedDeliveries && completedEntries.length > 0) {
       const oldest = completedEntries.shift();
       if (oldest !== undefined) deliveryCache.delete(oldest[0]);
     }
@@ -237,9 +225,7 @@ export async function startAgentRelay(
 
     if (existing !== undefined) {
       if (existing.fingerprint !== fingerprint) {
-        return Promise.reject(
-          new Error('Message ID was reused with different delivery content.'),
-        );
+        return Promise.reject(new Error('Message ID was reused with different delivery content.'));
       }
 
       return existing.promise;
