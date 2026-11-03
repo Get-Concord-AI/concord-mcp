@@ -4,21 +4,20 @@ import { spawn } from 'node:child_process';
 import type { CloudRuntime } from '../../cloud/runtime.js';
 import { atLeast, executablePath, run, versionTuple } from '../../install/adapters/index.js';
 import { relayAddress } from '../../relay/address.js';
-import type { Repositories } from '../../db/index.js';
-import { renderPeerMessage } from '../../domain/pull-inbox.js';
 import { PushPromptSessionAdapter, type PushPromptSession } from '../../relay/adapters.js';
 import { CopilotUiServerClient } from '../../relay/copilot-client.js';
-import { RELAY_PROTOCOL_VERSION } from '../../relay/protocol.js';
-import {
-  startAgentRelay,
-  type AgentSessionAdapter,
-  type AgentSessionDelivery,
-} from '../../relay/server.js';
+import { startAgentRelay } from '../../relay/server.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { openContext } from '../context.js';
 import { availablePort } from '../local-port.js';
 import { deliverToSession } from './cloud-codex.js';
 import { watchCloud } from './cloud-inbox.js';
+import {
+  SWEEP_AFTER_MS,
+  sweepStragglers,
+  startSweeper,
+  TrackedSessionAdapter,
+} from './session-sweep.js';
 
 /**
  * Copilot CLI with idle wake-up (issue #261), shaped like the Codex adapter.
@@ -88,85 +87,14 @@ export async function launchCopilot(args: readonly string[]): Promise<void> {
   if (code !== null && code !== 0) process.exitCode = code;
 }
 
-/**
- * Hands relay deliveries to the Copilot session. A sender's dispatcher has
- * already framed each one with its sender and id, as hooks and the cloud host
- * do, so Copilot can tell a peer message from the user and knows which id to
- * answer; framing it again here would show the header twice.
- */
-export class CopilotSessionAdapter implements AgentSessionAdapter {
-  readonly provider = KIND;
-  /** Every message handed to Copilot, so a sweep never hands one over twice. */
-  readonly handled = new Set<string>();
-
-  constructor(private readonly session: PushPromptSession) {}
-
-  isBusy(): boolean {
-    return this.session.isBusy();
-  }
-
-  steer(delivery: AgentSessionDelivery): Promise<string | undefined> {
-    this.handled.add(delivery.messageId);
-    return this.session.pushPrompt(delivery.content, 'steer');
-  }
-
-  inject(delivery: AgentSessionDelivery): Promise<string | undefined> {
-    this.handled.add(delivery.messageId);
-    return this.session.pushPrompt(delivery.content, 'inject');
+/** Hands relay deliveries to the Copilot session; see {@link TrackedSessionAdapter}. */
+export class CopilotSessionAdapter extends TrackedSessionAdapter {
+  constructor(session: PushPromptSession) {
+    super(KIND, session);
   }
 }
 
-/** How old a pending message must be before the sweep takes it: past any push. */
-export const SWEEP_AFTER_MS = 10_000;
-const SWEEP_EVERY_MS = 5_000;
-
-/**
- * The live host is its session's single consumer (#261): hooks of a hosted
- * session do not drain. A sender keeps a message pending while it pushes it
- * here, and leaves it pending when the push fails or times out — even if the
- * push reached Copilot late. The sweep takes messages pending past that window:
- * one this host already handed to Copilot is only marked delivered; any other
- * is handed over and marked delivered once Copilot accepts it. A failed handoff
- * stays pending for the next sweep, or for the hooks once this host is gone —
- * nothing is claimed that has not reached the session.
- */
-export async function sweepStragglers(
-  repos: Repositories,
-  agentId: string,
-  adapter: CopilotSessionAdapter,
-  now = Date.now(),
-): Promise<void> {
-  const cutoff = new Date(now - SWEEP_AFTER_MS).toISOString();
-  const stragglers = repos.agentMessages
-    .listPendingForRecipient(agentId)
-    .filter((message) => message.createdAt < cutoff);
-  for (const message of stragglers) {
-    if (adapter.handled.has(message.messageId)) {
-      repos.agentMessages.markDelivered(message.messageId, KIND, null);
-      continue;
-    }
-    const delivery: AgentSessionDelivery = {
-      version: RELAY_PROTOCOL_VERSION,
-      type: 'deliver',
-      messageId: message.messageId,
-      senderAgentId: message.senderAgentId,
-      recipientAgentId: agentId,
-      // Read straight from the store, so framed here as a dispatcher would.
-      content: renderPeerMessage(message),
-    };
-    let receipt: string | undefined;
-    try {
-      receipt = await (adapter.isBusy() ? adapter.steer(delivery) : adapter.inject(delivery));
-    } catch {
-      // Not handed over: still pending, so the next sweep tries again.
-      adapter.handled.delete(message.messageId);
-      continue;
-    }
-    // Handed over: it stays in `handled`, so if recording this fails the next
-    // sweep only retries the record, never the handoff.
-    repos.agentMessages.markDelivered(message.messageId, KIND, receipt ?? null);
-  }
-}
+export { SWEEP_AFTER_MS, sweepStragglers };
 
 async function connectSession(address: string, sessionId: string): Promise<CopilotUiServerClient> {
   const client = new CopilotUiServerClient(address, sessionId);
@@ -192,19 +120,10 @@ export async function hostCopilot(
     pullFallback: true,
     session: sessionKey(sessionId),
   });
-  let sweeping = false;
-  const sweeper = setInterval(() => {
-    if (sweeping) return;
-    sweeping = true;
-    void sweepStragglers(context.repos, agentId, adapter)
-      .catch(() => undefined)
-      .finally(() => {
-        sweeping = false;
-      });
-  }, SWEEP_EVERY_MS);
+  const stopSweeper = startSweeper(context.repos, agentId, adapter);
   await new Promise<void>((resolve) => {
     const stop = (): void => {
-      clearInterval(sweeper);
+      stopSweeper();
       void relay.close().finally(() => {
         client.close();
         resolve();
