@@ -15,6 +15,7 @@ import { CodexReadTracker } from '../../relay/codex-read-tracker.js';
 import { sessionKey } from '../../domain/receipts.js';
 import { startAgentRelay } from '../../relay/server.js';
 import {
+  executablePath,
   installGlobalAdapters,
   renderAdapterReport,
   statusGlobalAdapters,
@@ -31,6 +32,7 @@ import {
 } from './copilot-adapter.js';
 import { launchGemini } from './gemini-adapter.js';
 import { cloudAccess } from './cloud-inbox.js';
+import { reportMissingHarnessCli } from './missing-harness-cli.js';
 
 async function hostCodex(agentId: string, threadId: string): Promise<void> {
   const context = openContext(process.cwd());
@@ -152,7 +154,12 @@ export function codexLaunchArgv(
   };
 }
 
-async function launchCodex(args: readonly string[], repoRoot: string): Promise<void> {
+export async function launchCodex(args: readonly string[], repoRoot: string): Promise<void> {
+  const executable = executablePath('codex', process.env);
+  if (executable === undefined) {
+    reportMissingHarnessCli('Codex CLI', 'npm i -g @openai/codex');
+    return;
+  }
   const port = await availablePort();
   const url = `ws://127.0.0.1:${String(port)}`;
   // The app-server, not the remote TUI, owns MCP child processes. Give both
