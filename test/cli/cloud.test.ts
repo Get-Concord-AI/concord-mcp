@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -229,7 +230,7 @@ describe('concord cloud', () => {
       );
     // One line, and short: the page is flattened and cut, not printed whole.
     await expect(runCloudLogin({ url: API }, { ...deps, fetch: failing })).rejects.toThrow(
-      /^[^\n]{1,400}$/,
+      /^[^\n]{1,400}$/u,
     );
   });
 
@@ -269,16 +270,39 @@ describe('concord cloud', () => {
 
   it('says where each folder works on a linked machine', async () => {
     await runCloudLogin({ url: API }, deps);
-    expect(await runCloudStatus(deps)).toContain('is github.com/acme/app on Concord Cloud');
+
+    const originalStatus = await runCloudStatus(deps);
+
+    expect(originalStatus).toContain(
+      "Machine: linked; every folder's agents work through Concord Cloud",
+    );
+    expect(originalStatus).toContain('is github.com/acme/app on Concord Cloud');
 
     const noOrigin = { ...deps, originRemote: () => undefined };
-    expect(await runCloudStatus(noOrigin)).toContain('is local.concord/');
+    const noOriginStatus = await runCloudStatus(noOrigin);
+
+    expect(noOriginStatus).toContain('is local.concord/');
 
     const folder = mkdtempSync(join(tmpdir(), 'concord-folder-'));
-    const inFolder = { ...deps, cwd: folder, env: { ...deps.env, CONCORD_REPO_ROOT: folder } };
-    expect(await runCloudStatus(inFolder)).toContain('is general on Concord Cloud');
+    mkdirSync(join(folder, '.git'));
+
+    const inFolder = {
+      ...deps,
+      cwd: folder,
+      env: { ...deps.env, CONCORD_REPO_ROOT: folder },
+    };
+
+    const folderStatus = await runCloudStatus(inFolder);
+
+    expect(folderStatus).toContain(
+      "Machine: linked; every folder's agents work through Concord Cloud",
+    );
+    expect(folderStatus).toContain(
+      `Here: ${realpathSync(folder)} is github.com/acme/app on Concord Cloud`,
+    );
 
     runCloudUnlink(deps);
+
     expect(await runCloudStatus(deps)).toContain('uses local Concord');
   });
 
