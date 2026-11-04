@@ -24,6 +24,7 @@ import {
 import { openContext } from '../context.js';
 import { availablePort } from '../local-port.js';
 import { hostCodexInCloud } from './cloud-codex.js';
+import { codexThreadHostable } from '../embedding-host.js';
 import {
   copilotServerAddress,
   hostCopilot,
@@ -287,6 +288,12 @@ export function registerAdaptersCommand(program: Command): void {
     .requiredOption('--agent <id>')
     .requiredOption('--thread <id>')
     .action(async (options) => {
+      if (!codexThreadHostable(process.env)) {
+        throw new Error(
+          'This Codex thread runs in another app (Conductor), whose own app-server owns it. ' +
+            'Concord delivers to it through its hooks instead; no host is needed.',
+        );
+      }
       const access = cloudAccess(process.cwd());
       if (access.kind === 'unusable') throw new Error(`Concord Cloud: ${access.reason}`);
       if (access.kind === 'cloud') {

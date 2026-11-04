@@ -27,7 +27,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "AskUserQuestion",
+        "matcher": "AskUserQuestion|mcp__conductor__AskUserQuestion",
         "hooks": [
           {
             "type": "command",
@@ -62,6 +62,12 @@
           {
             "type": "command",
             "command": "concord inbox drain --from-hook --format stop"
+          },
+          {
+            "type": "command",
+            "command": "concord inbox rewake",
+            "asyncRewake": true,
+            "timeout": 86400
           }
         ]
       }

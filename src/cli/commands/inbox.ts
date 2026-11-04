@@ -31,7 +31,15 @@ import { resolveAgentId, resolveInboxOwner } from '../agent-identity.js';
 import { resolveStore } from '../../workspaces/store.js';
 import { openContext } from '../context.js';
 import { launchDetachedConcord } from '../detached-host.js';
+import { codexThreadHostable } from '../embedding-host.js';
 import { isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
+import {
+  claimWaiter,
+  hostsRewake,
+  renderRewake,
+  REWAKE_EXIT_CODE,
+  standDownWhenSuperseded,
+} from './inbox-rewake.js';
 import { CONCORD_SERVER_ONLY } from './session-start-message.js';
 import {
   cloudAccess,
@@ -140,9 +148,10 @@ export async function watchInbox(
   interval: number,
   once: boolean,
   emit: (messages: readonly DeliverableMessage[]) => void,
+  hookPayload?: string,
 ): Promise<void> {
   const monitorCapability = monitorCapabilityFor(provider);
-  const session = currentSession(provider, undefined);
+  const session = currentSession(provider, hookPayload);
   await new Promise<void>((resolve, reject) => {
     let timer: NodeJS.Timeout | undefined;
     let finished = false;
@@ -210,7 +219,7 @@ export async function watchInbox(
  * a plugin monitor's stdin may stay open for the life of the session, and
  * blocking on it there would silently wedge message delivery.
  */
-function readHookPayload(): string | undefined {
+export function readHookPayload(): string | undefined {
   if (process.stdin.isTTY) return undefined;
   try {
     return readFileSync(0, 'utf8');
@@ -412,6 +421,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         if (
           options.provider === 'codex' &&
           threadId !== undefined &&
+          codexThreadHostable(process.env) &&
           !watching(access.runtime, agentId)
         ) {
           launchCodexAdapterHost(access.runtime.repoRoot, agentId, threadId);
@@ -431,7 +441,12 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         existing.status === 'connected' &&
         (existing.expiresAt === null || Date.parse(existing.expiresAt) > Date.now());
       const threadId = hookPayload === undefined ? undefined : hookSessionId(hookPayload);
-      if (options.provider === 'codex' && threadId !== undefined && !alreadyHosted) {
+      if (
+        options.provider === 'codex' &&
+        threadId !== undefined &&
+        codexThreadHostable(process.env) &&
+        !alreadyHosted
+      ) {
         launchCodexAdapterHost(context.repoRoot, agentId, threadId);
       }
       // Name the id. Clients whose session Concord can read resolve it on every
@@ -547,6 +562,58 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         process.stderr.write(
           `Concord: could not record hook event: ${error instanceof Error ? error.message : String(error)}\n`,
         );
+      }
+    });
+
+  inbox
+    .command('rewake')
+    .description(
+      'Wait in an asyncRewake hook for the next message, then wake an SDK-hosted Claude session',
+    )
+    .action(async () => {
+      // Interactive sessions have the plugin monitor; only SDK hosts need this.
+      if (!hostsRewake(process.env)) return;
+      const access = cloudAccess(process.cwd());
+      if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
+      if (access.kind === 'unusable') return;
+      const hookPayload = readHookPayload() ?? '';
+      const parsedHook = parseObservedHook(hookPayload);
+      if (parsedHook !== undefined && isSubagentHook(parsedHook)) return;
+      const agentId = resolveInboxOwner(undefined, process.env, {
+        kind: 'claude-code',
+        hookPayload,
+      });
+      const claim = claimWaiter(agentId, randomUUID());
+      const cancel = standDownWhenSuperseded(claim, () => {
+        process.emit('SIGTERM', 'SIGTERM');
+      });
+      const wake = (messages: readonly DeliverableMessage[]): void => {
+        if (messages.length === 0) return;
+        // asyncRewake shows the model stderr, falling back to stdout.
+        process.stderr.write(renderRewake(messages));
+        process.exitCode = REWAKE_EXIT_CODE;
+      };
+      try {
+        if (access.kind === 'cloud') {
+          await watchCloud(access.runtime, agentId, 'claude-code', true, wake);
+          return;
+        }
+        const context = openContext(process.cwd());
+        await watchInbox(
+          context.repos,
+          agentId,
+          'claude-code',
+          1000,
+          true,
+          (messages) => {
+            recordDeliveredMessages(telemetry, messages);
+            wake(messages);
+          },
+          hookPayload,
+        );
+      } finally {
+        cancel();
+        claim.release();
       }
     });
 
