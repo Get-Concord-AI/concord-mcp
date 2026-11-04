@@ -271,11 +271,28 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
     written.push(installCodexMcpConfig(env));
     if (writeRepoFiles) written.push(installDevinMcpConfig(env, repoRoot));
   }
+  // Global mode runs inside the adapter step, before readiness is judged, so the
+  // user-level settings it writes count when the repository holds no copies.
+  const globalRun: { report?: GlobalModeReport } = {};
+  const applyGlobal = (): void => {
+    if (options.global === undefined || globalRun.report !== undefined) return;
+    globalRun.report = applyGlobalMode(env, options.global, {
+      mcp: options.mcp !== false,
+      registrations: readUserConfig(env).globalRegistrations ?? [],
+    });
+    written.push(
+      writeUserConfig(env, {
+        globalMode: options.global,
+        globalRegistrations: globalRun.report.registrations,
+      }),
+      ...globalRun.report.written,
+    );
+  };
   // `env` is also the unit-test/config-path seam. Avoid touching unrelated
   // real harness homes unless adapter installation was explicitly requested.
   const installAdapters = options.adapters ?? (options.mcp !== false && options.env === undefined);
   if (installAdapters) {
-    adapters = installGlobalAdapters(import.meta.url, env, repoRoot);
+    adapters = installGlobalAdapters(import.meta.url, env, repoRoot, undefined, applyGlobal);
     for (const adapter of adapters) {
       if (adapter.installedPath !== undefined) written.push(adapter.installedPath);
     }
@@ -293,20 +310,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   if (options.autoAdapters !== undefined) {
     written.push(writeUserConfig(env, { autoAdapters: options.autoAdapters }));
   }
-  let globalMode: GlobalModeReport | undefined;
-  if (options.global !== undefined) {
-    globalMode = applyGlobalMode(env, options.global, {
-      mcp: options.mcp !== false,
-      registrations: readUserConfig(env).globalRegistrations ?? [],
-    });
-    written.push(
-      writeUserConfig(env, {
-        globalMode: options.global,
-        globalRegistrations: globalMode.registrations,
-      }),
-    );
-    written.push(...globalMode.written);
-  }
+  applyGlobal();
   return {
     repoRoot,
     workspaceId: workspaceIdForRoot(repoRoot),
@@ -315,7 +319,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
     written: [...new Set(written)],
     adapters,
     repoFilesSkipped: !writeRepoFiles,
-    ...(globalMode === undefined ? {} : { globalMode }),
+    ...(globalRun.report === undefined ? {} : { globalMode: globalRun.report }),
   };
 }
 

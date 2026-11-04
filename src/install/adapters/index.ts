@@ -870,6 +870,7 @@ export function installGlobalAdapters(
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
   isEphemeral: EphemeralTest = isEphemeralPath,
+  afterInstall?: () => void,
 ): AdapterReport[] {
   const failures = new Map<HarnessName, string>();
   for (const harness of harnessNames) {
@@ -879,6 +880,9 @@ export function installGlobalAdapters(
       failures.set(harness, error instanceof Error ? error.message : String(error));
     }
   }
+  // Runs before readiness is judged: user-level settings it writes (global
+  // mode's Gemini settings) count towards a harness being ready.
+  afterInstall?.();
 
   const report = statusGlobalAdapters(env, repoRoot, moduleUrl, isEphemeral).map((entry) => {
     const failure = failures.get(entry.harness);

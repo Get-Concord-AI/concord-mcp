@@ -381,6 +381,27 @@ describe('runSetup with global mode', () => {
     expect(present(neverChosen)).toEqual(REPO_FILES);
   });
 
+  it('judges Gemini by the settings global mode writes, so a first --require-adapters run passes', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-global-home-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'gemini', '0.55.1');
+    const env = { HOME: home, PATH: bin, CODEX_HOME: join(home, '.codex') };
+    const repo = repository();
+
+    const result = runSetup(repo, {
+      env: { ...env, CONCORD_REPO_ROOT: repo },
+      global: true,
+      adapters: true,
+      requireAdapters: true,
+    });
+
+    expect(read(join(home, '.gemini', 'settings.json'))).toContain('modelSteering');
+    expect(result.adapters.find((entry) => entry.harness === 'gemini')?.status).toBe('installed');
+    expect(result.globalMode?.registrations).toContain('gemini');
+    expect(present(repo)).toEqual([]);
+  });
+
   it('writes the repository files when saved global mode is turned off in the same run', () => {
     const env = machine([]);
     writeUserConfig(env, { globalMode: true });
