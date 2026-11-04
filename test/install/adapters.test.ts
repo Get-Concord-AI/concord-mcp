@@ -194,6 +194,33 @@ describe('global harness adapters', () => {
     ]);
   });
 
+  it('accepts Gemini completion injection set in the user settings', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-gemini-home-'));
+    const project = mkdtempSync(join(tmpdir(), 'concord-gemini-project-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'gemini', '0.55.1');
+    const env = { HOME: home, PATH: bin };
+    installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+    const geminiStatus = (): string | undefined =>
+      statusGlobalAdapters(env, project, undefined, LASTING).find(
+        (entry) => entry.harness === 'gemini',
+      )?.status;
+
+    expect(geminiStatus()).toBe('action_required');
+
+    mkdirSync(join(home, '.gemini'), { recursive: true });
+    writeFileSync(
+      join(home, '.gemini', 'settings.json'),
+      `${JSON.stringify({
+        tools: { shell: { backgroundCompletionBehavior: 'inject' } },
+        experimental: { modelSteering: true },
+      })}\n`,
+    );
+
+    expect(geminiStatus()).toBe('installed');
+  });
+
   it('requires Gemini completion injection in the current project', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-gemini-home-'));
     const project = mkdtempSync(join(tmpdir(), 'concord-gemini-project-'));

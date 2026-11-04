@@ -285,20 +285,130 @@ describe('resolveGlobalChoice', () => {
 });
 
 describe('runSetup with global mode', () => {
-  it('saves the choice and still sets the repository up locally', () => {
-    const env = machine([]);
+  const REPO_FILES = [
+    'CLAUDE.md',
+    'AGENTS.md',
+    join('.codex', 'concord.md'),
+    join('.cursor', 'rules', 'concord.mdc'),
+    join('.github', 'copilot-instructions.md'),
+    join('.agents', 'rules', 'concord.md'),
+    '.mcp.json',
+    join('.cursor', 'mcp.json'),
+    join('.agents', 'mcp_config.json'),
+    join('.agents', 'hooks.json'),
+    join('.github', 'mcp.json'),
+    join('.gemini', 'settings.json'),
+    join('.grok', 'config.toml'),
+    join('.devin', 'hooks.v1.json'),
+    join('.devin', 'mcp_config.json'),
+  ];
+
+  function repository(): string {
     const repo = mkdtempSync(join(tmpdir(), 'concord-global-repo-'));
     mkdirSync(join(repo, '.git'));
+    return repo;
+  }
+
+  const present = (repo: string): string[] =>
+    REPO_FILES.filter((relPath) => existsSync(join(repo, relPath)));
+
+  it('saves the choice and sets the repository up locally without writing repository files', () => {
+    const env = machine([]);
+    const repo = repository();
 
     const result = runSetup(repo, {
       env: { ...env, CONCORD_REPO_ROOT: repo },
-      mcp: false,
       global: true,
     });
 
     expect(readUserConfig(env)).toEqual({ globalMode: true, globalRegistrations: [] });
     expect(result.globalMode).toEqual({ written: [], warnings: [], registrations: [] });
+    expect(result.repoFilesSkipped).toBe(true);
     expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(true);
+    expect(present(repo)).toEqual([]);
+    expect(result.written.filter((path) => !path.startsWith(env.HOME))).toEqual([]);
+  });
+
+  it('skips the repository files when global mode was saved earlier', () => {
+    const env = machine([]);
+    writeUserConfig(env, { globalMode: true });
+    const repo = repository();
+
+    const result = runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo } });
+
+    expect(result.repoFilesSkipped).toBe(true);
+    expect(present(repo)).toEqual([]);
+  });
+
+  it('skips the repository files with --no-mcp too, and leaves existing ones alone', () => {
+    const env = machine([]);
+    const repo = repository();
+    const existing = upsertBlock('# Mine\n', 'old instructions');
+    writeFileSync(join(repo, 'CLAUDE.md'), existing);
+
+    runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, mcp: false, global: true });
+
+    expect(read(join(repo, 'CLAUDE.md'))).toBe(existing);
+    expect(present(repo)).toEqual(['CLAUDE.md']);
+  });
+
+  it('writes the repository files when asked with repoFiles', () => {
+    const env = machine([]);
+    const repo = repository();
+
+    const result = runSetup(repo, {
+      env: { ...env, CONCORD_REPO_ROOT: repo },
+      global: true,
+      repoFiles: true,
+    });
+
+    expect(result.repoFilesSkipped).toBe(false);
+    expect(present(repo)).toEqual(REPO_FILES);
     expect(read(join(repo, 'CLAUDE.md'))).toContain(BLOCK_START);
+  });
+
+  it('writes the repository files when global mode is off or was never chosen', () => {
+    const env = machine([]);
+    const turnedOff = repository();
+    runSetup(turnedOff, { env: { ...env, CONCORD_REPO_ROOT: turnedOff }, global: false });
+    expect(present(turnedOff)).toEqual(REPO_FILES);
+
+    const neverChosen = repository();
+    const result = runSetup(neverChosen, {
+      env: { ...machine([]), CONCORD_REPO_ROOT: neverChosen },
+    });
+    expect(result.repoFilesSkipped).toBe(false);
+    expect(present(neverChosen)).toEqual(REPO_FILES);
+  });
+
+  it('judges Gemini by the settings global mode writes, so a first --require-adapters run passes', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-global-home-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'gemini', '0.55.1');
+    const env = { HOME: home, PATH: bin, CODEX_HOME: join(home, '.codex') };
+    const repo = repository();
+
+    const result = runSetup(repo, {
+      env: { ...env, CONCORD_REPO_ROOT: repo },
+      global: true,
+      adapters: true,
+      requireAdapters: true,
+    });
+
+    expect(read(join(home, '.gemini', 'settings.json'))).toContain('modelSteering');
+    expect(result.adapters.find((entry) => entry.harness === 'gemini')?.status).toBe('installed');
+    expect(result.globalMode?.registrations).toContain('gemini');
+    expect(present(repo)).toEqual([]);
+  });
+
+  it('writes the repository files when saved global mode is turned off in the same run', () => {
+    const env = machine([]);
+    writeUserConfig(env, { globalMode: true });
+    const repo = repository();
+
+    runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, global: false });
+
+    expect(present(repo)).toEqual(REPO_FILES);
   });
 });
