@@ -41,6 +41,8 @@ export interface SetupOptions {
   requireAdapters?: boolean;
   /** Turn global mode on or off, as `resolveGlobalChoice` decided; undefined leaves it. */
   global?: boolean;
+  /** Write the repository's instruction and MCP files even though global mode is on. */
+  repoFiles?: boolean;
   /** Save whether sessions repair their own harness adapter; undefined leaves it. */
   autoAdapters?: boolean;
   env?: NodeJS.ProcessEnv;
@@ -60,6 +62,8 @@ export interface SetupResult {
   state: SetupState;
   written: string[];
   adapters: AdapterReport[];
+  /** True when global mode was on and no instruction or MCP file was written into the repository. */
+  repoFilesSkipped: boolean;
   globalMode?: GlobalModeReport;
 }
 
@@ -244,22 +248,28 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
     state = { kind: 'cloud', ...cloud };
   }
 
-  const written = installConcord(repoRoot);
+  // With global mode on, the user-level registrations and instructions already
+  // cover each harness, so the repository's copies are redundant and only
+  // dirty its working tree. `--repo-files` writes them anyway.
+  const globalOn = options.global ?? readUserConfig(env).globalMode === true;
+  const writeRepoFiles = options.repoFiles === true || !globalOn;
+  const written = writeRepoFiles ? installConcord(repoRoot) : [];
   let adapters: AdapterReport[] = [];
   if (options.claudeHooks === true) {
     written.push(installClaudeHook(repoRoot));
   }
   if (options.mcp !== false) {
-    written.push(installDevinHooks(repoRoot));
-    written.push(...installMcpConfigs(repoRoot));
-    written.push(installAntigravityHooks(repoRoot));
+    if (writeRepoFiles) {
+      written.push(installDevinHooks(repoRoot));
+      written.push(...installMcpConfigs(repoRoot));
+      written.push(installAntigravityHooks(repoRoot));
+    }
     // Global mode owns a user-level Cursor entry; without it, one is a stale
     // registration that would shadow this repository's pinned one.
-    const migratedCursorConfig =
-      options.global === true ? undefined : removeGlobalCursorConcord(env);
+    const migratedCursorConfig = globalOn ? undefined : removeGlobalCursorConcord(env);
     if (migratedCursorConfig !== undefined) written.push(migratedCursorConfig);
     written.push(installCodexMcpConfig(env));
-    written.push(installDevinMcpConfig(env, repoRoot));
+    if (writeRepoFiles) written.push(installDevinMcpConfig(env, repoRoot));
   }
   // `env` is also the unit-test/config-path seam. Avoid touching unrelated
   // real harness homes unless adapter installation was explicitly requested.
@@ -304,8 +314,21 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
     // A file touched by two installers is still one file to the reader.
     written: [...new Set(written)],
     adapters,
+    repoFilesSkipped: !writeRepoFiles,
     ...(globalMode === undefined ? {} : { globalMode }),
   };
+}
+
+/** Say why the repository was left alone and which harnesses already work without its files. */
+function renderRepoFilesSkipped(adapters: readonly AdapterReport[]): string {
+  const covered = adapters
+    .filter((adapter) => adapter.status === 'installed')
+    .map((adapter) => adapter.harness);
+  return (
+    '    (none in the repository: global mode is on, so the machine-wide setup covers it)\n' +
+    (covered.length > 0 ? `  covered by machine-wide adapters: ${covered.join(', ')}\n` : '') +
+    '  Run concord setup --repo-files to write the repository files anyway.\n'
+  );
 }
 
 export function registerSetupCommand(program: Command): void {
@@ -321,6 +344,10 @@ export function registerSetupCommand(program: Command): void {
     .option('--require-adapters', 'fail unless every detected harness adapter is ready')
     .option('--global', 'let agents use Concord in repositories that were not set up')
     .option('--no-global', 'turn that off and remove its user-level instructions')
+    .option(
+      '--repo-files',
+      'write the repository instruction and MCP files even when global mode is on',
+    )
     .option('--auto-adapters', 'install a harness adapter when a session finds it missing')
     .option('--no-auto-adapters', 'only report a missing harness adapter')
     .action(async (options) => {
@@ -345,6 +372,7 @@ export function registerSetupCommand(program: Command): void {
           adapters: options.adapters,
           ...(options.requireAdapters === true ? { requireAdapters: true } : {}),
           ...(global === undefined ? {} : { global }),
+          ...(options.repoFiles === true ? { repoFiles: true } : {}),
           ...(autoAdapters === undefined ? {} : { autoAdapters }),
         };
         if (options.claudeHooks === true) {
@@ -364,6 +392,9 @@ export function registerSetupCommand(program: Command): void {
         );
         for (const path of result.written) {
           process.stdout.write(`    ${path}\n`);
+        }
+        if (result.repoFilesSkipped) {
+          process.stdout.write(renderRepoFilesSkipped(result.adapters));
         }
         if (result.adapters.length > 0) {
           process.stdout.write(`\n${renderAdapterReport(result.adapters)}\n`);

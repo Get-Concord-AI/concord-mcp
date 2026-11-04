@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `concord setup` no longer writes instruction and MCP files into the repository
+  (`CLAUDE.md`, `AGENTS.md`, `.mcp.json`, `.cursor/`, `.gemini/`, `.grok/`,
+  `.agents/`, `.devin/`, ...) while global mode is on, since the user-level
+  registrations already cover them. It says so and lists the harnesses the
+  machine-wide adapters cover. Pass `--repo-files` to write them anyway; with
+  global mode off the files are written as before. The Gemini adapter now also
+  accepts completion injection set in `~/.gemini/settings.json`.
+
 ## [0.19.0] - 2026-10-30
 
 ### Added

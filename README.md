@@ -89,6 +89,10 @@ adapters independently. Use `--no-adapters` to skip that step or
 Pass `--no-mcp` to write only the workspace and instructions while managing MCP
 registration yourself.
 
+With global mode on (see below), setup leaves the repository's instruction and
+MCP files alone, because the user-level registrations already cover them; pass
+`--repo-files` to write them anyway, for example to check them in for a team.
+
 </details>
 
 <details>
@@ -106,8 +110,9 @@ agent and adds a short Concord section to their user instruction files
 written into those repositories: their work is kept in `~/.concord/global.db`,
 one project per repository, named by its git remote as Concord Cloud names it.
 Sessions outside any repository share the `general` project. A repository you
-did set up keeps everything in its own `.concord/`. Turning global mode off
-removes exactly what it added.
+did set up keeps everything in its own `.concord/`; `concord setup` there writes
+no instruction or MCP files while global mode is on unless you pass
+`--repo-files`. Turning global mode off removes exactly what it added.
 
 </details>
 
