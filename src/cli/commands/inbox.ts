@@ -135,6 +135,13 @@ function isSqliteBusy(error: unknown): boolean {
   return typeof code === 'string' && code.startsWith('SQLITE_BUSY');
 }
 
+export interface WatchOptions {
+  /** Hook payload naming the session, when the watcher runs as a hook. */
+  hookPayload?: string;
+  /** Whether a newer watcher for this agent has replaced this one. */
+  replaced?: () => boolean;
+}
+
 /**
  * Poll until a monitor receives a message or the owning harness stops it.
  * Signal listeners are removed on every completion path: leaving them attached
@@ -148,10 +155,11 @@ export async function watchInbox(
   interval: number,
   once: boolean,
   emit: (messages: readonly DeliverableMessage[]) => void,
-  hookPayload?: string,
+  options: WatchOptions = {},
 ): Promise<void> {
   const monitorCapability = monitorCapabilityFor(provider);
-  const session = currentSession(provider, hookPayload);
+  const session = currentSession(provider, options.hookPayload);
+  const replaced = options.replaced ?? (() => false);
   await new Promise<void>((resolve, reject) => {
     let timer: NodeJS.Timeout | undefined;
     let finished = false;
@@ -164,7 +172,10 @@ export async function watchInbox(
       try {
         registerPullEndpoint(repos, agentId, provider);
         const endpoint = repos.agentEndpoints.getByAgent(agentId);
-        if (endpoint !== undefined) repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+        // A replaced watcher leaves the receiver to the one that replaced it.
+        if (endpoint !== undefined && !replaced()) {
+          repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+        }
       } catch (registrationError) {
         if (error === undefined) error = registrationError;
       }
@@ -595,7 +606,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       };
       try {
         if (access.kind === 'cloud') {
-          await watchCloud(access.runtime, agentId, 'claude-code', true, wake);
+          await watchCloud(access.runtime, agentId, 'claude-code', true, wake, claim.superseded);
           return;
         }
         const context = openContext(process.cwd());
@@ -609,7 +620,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
             recordDeliveredMessages(telemetry, messages);
             wake(messages);
           },
-          hookPayload,
+          { hookPayload, replaced: claim.superseded },
         );
       } finally {
         cancel();

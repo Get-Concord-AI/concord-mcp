@@ -67,9 +67,9 @@ function readClaim(path: string): string | undefined {
 
 export interface WaiterClaim {
   /** Whether a newer waiter has taken this agent's place since this one began. */
-  superseded(): boolean;
+  readonly superseded: () => boolean;
   /** Gives up the claim, if it is still this waiter's. */
-  release(): void;
+  readonly release: () => void;
 }
 
 /**
