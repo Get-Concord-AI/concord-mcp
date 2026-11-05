@@ -15,7 +15,7 @@ import {
   handleCloudSessionStart,
 } from '../../src/cli/commands/cloud-hooks.js';
 import { cloudAccess } from '../../src/cli/commands/cloud-inbox.js';
-import { ensureMachineKey, writeCredentials, writeLink } from '../../src/cloud/settings.js';
+import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { fakeCloud, ok, type Route } from '../cloud/fake-cloud.js';
 
 const SELF = 'claude-code:aaaa1111';
@@ -189,7 +189,6 @@ describe('cloud hooks', () => {
       'init',
     );
     git(primary, 'worktree', 'add', '-q', worktree);
-    writeLink(primary, { apiUrl: 'https://api.example.test', projectKey: 'github.com/acme/app' });
     const home = mkdtempSync(join(tmpdir(), 'concord-home-'));
     const env = { HOME: home };
     writeCredentials(env, { apiUrl: 'https://api.example.test', apiKey: 'cc_test' });

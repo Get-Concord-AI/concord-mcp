@@ -16,7 +16,9 @@ import {
   forwardedArguments,
   type CloudSession,
 } from '../../src/cloud/proxy.js';
-import { ensureMachineKey, writeCredentials, writeLink } from '../../src/cloud/settings.js';
+import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
+import { machineProjectKey } from '../../src/cloud/target.js';
+import { writeUserConfig } from '../../src/config/user-config.js';
 
 const SESSION_AGENT = { agentId: 'claude-code:aaaa1111', kind: 'claude-code', origin: 'session' };
 
@@ -241,32 +243,17 @@ describe('cloudSessionFor', () => {
   });
   const credentials = { apiUrl: 'https://api.test', apiKey: 'k' };
 
-  it('is undefined for a repository that is not linked', () => {
+  it('is undefined on a machine that is not linked', () => {
     writeCredentials({ HOME: home }, credentials);
+    expect(cloudSessionFor(repo, { HOME: home }, undefined)).toBeUndefined();
+    ensureMachineKey({ HOME: home }, () => 'm');
+    writeUserConfig({ HOME: home }, { cloudLink: false });
     expect(cloudSessionFor(repo, { HOME: home }, undefined)).toBeUndefined();
   });
 
-  it('refuses a linked repository on a machine that cannot reach that cloud', () => {
-    writeLink(repo, { apiUrl: 'https://api.test', projectKey: 'github.com/acme/app' });
-    expect(() => cloudSessionFor(repo, { HOME: home }, undefined)).toThrow(/not logged in/);
-    ensureMachineKey({ HOME: home }, () => 'm');
-    writeCredentials({ HOME: home }, { ...credentials, apiUrl: 'https://other.test' });
-    expect(() => cloudSessionFor(repo, { HOME: home }, undefined)).toThrow(/logged in to/);
-  });
-
-  it('treats API URLs that differ only in spelling as the same API', () => {
-    ensureMachineKey({ HOME: home }, () => 'm');
-    writeLink(repo, { apiUrl: 'https://api.test', projectKey: 'github.com/acme/app' });
-    writeCredentials({ HOME: home }, { ...credentials, apiUrl: 'https://API.test/' });
-    expect(cloudSessionFor(repo, { HOME: home }, undefined)?.projectKey).toBe(
-      'github.com/acme/app',
-    );
-  });
-
-  it('combines the login, the machine and the link', async () => {
+  it('combines the login, the machine and the folder’s project', async () => {
     writeCredentials({ HOME: home }, credentials);
     ensureMachineKey({ HOME: home }, () => 'm');
-    writeLink(repo, { apiUrl: 'https://api.test', projectKey: 'github.com/acme/app' });
     const session = cloudSessionFor(repo, { HOME: home }, undefined);
     if (session === undefined) throw new Error('expected a cloud session');
     const { bearer, ...rest } = session;
@@ -274,7 +261,8 @@ describe('cloudSessionFor', () => {
     expect(rest).toEqual({
       apiUrl: 'https://api.test',
       machineKey: 'm',
-      projectKey: 'github.com/acme/app',
+      // The fixture has no remote, so it is a project of its own on this machine.
+      projectKey: machineProjectKey('m', repo),
       repoRoot: repo,
       checkoutRoot: repo,
       identity: undefined,

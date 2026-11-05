@@ -15,6 +15,7 @@ import { CodexReadTracker } from '../../relay/codex-read-tracker.js';
 import { sessionKey } from '../../domain/receipts.js';
 import { startAgentRelay } from '../../relay/server.js';
 import {
+  executablePath,
   installGlobalAdapters,
   renderAdapterReport,
   statusGlobalAdapters,
@@ -29,7 +30,9 @@ import {
   hostCopilotInCloud,
   launchCopilot,
 } from './copilot-adapter.js';
+import { launchGemini } from './gemini-adapter.js';
 import { cloudAccess } from './cloud-inbox.js';
+import { reportMissingHarnessCli } from './missing-harness-cli.js';
 
 async function hostCodex(agentId: string, threadId: string): Promise<void> {
   const context = openContext(process.cwd());
@@ -112,7 +115,51 @@ export function codexManagedLaunchContext(
   return { cwd: repoRoot, env: codexManagedEnvironment(url, env) };
 }
 
-async function launchCodex(args: readonly string[], repoRoot: string): Promise<void> {
+/**
+ * `-c` / `--config` overrides that must reach `codex app-server`.
+ * The remote TUI still gets the full argv (including `--profile` and
+ * TUI-only flags). Codex rejects `--profile` on app-server itself.
+ */
+export function codexAppServerConfigArgs(args: readonly string[]): string[] {
+  const forwarded: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === undefined) continue;
+
+    if (arg === '-c' || arg === '--config') {
+      forwarded.push(arg);
+      const value = args[index + 1];
+      if (value !== undefined && !value.startsWith('-')) {
+        forwarded.push(value);
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg.startsWith('-c=') || arg.startsWith('--config=')) {
+      forwarded.push(arg);
+    }
+  }
+  return forwarded;
+}
+
+/** Argv for the managed Codex app-server and remote TUI processes. */
+export function codexLaunchArgv(
+  url: string,
+  args: readonly string[],
+): { appServer: string[]; tui: string[] } {
+  return {
+    appServer: ['app-server', '--listen', url, ...codexAppServerConfigArgs(args)],
+    tui: ['--remote', url, ...args],
+  };
+}
+
+export async function launchCodex(args: readonly string[], repoRoot: string): Promise<void> {
+  const executable = executablePath('codex', process.env);
+  if (executable === undefined) {
+    reportMissingHarnessCli('Codex CLI', 'npm i -g @openai/codex');
+    return;
+  }
   const port = await availablePort();
   const url = `ws://127.0.0.1:${String(port)}`;
   // The app-server, not the remote TUI, owns MCP child processes. Give both
@@ -121,13 +168,14 @@ async function launchCodex(args: readonly string[], repoRoot: string): Promise<v
   // Codex intentionally filters the environment of MCP children, so also run
   // the complete managed tree from the resolved repository root.
   const context = codexManagedLaunchContext(repoRoot, url, process.env);
-  const server = spawn('codex', ['app-server', '--listen', url], {
+  const argv = codexLaunchArgv(url, args);
+  const server = spawn('codex', argv.appServer, {
     ...context,
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   try {
     await waitForCodexServer(url, server);
-    const tui = spawn('codex', ['--remote', url, ...args], {
+    const tui = spawn('codex', argv.tui, {
       ...context,
       stdio: 'inherit',
     });
@@ -199,6 +247,10 @@ export function registerAdaptersCommand(program: Command): void {
     .command('codex')
     .description('Launch Codex through a Concord-reachable local app-server')
     .argument('[args...]', 'Arguments forwarded to the Codex TUI')
+    // Codex's own flags (-c, --profile, --dangerously-bypass-..., ...) are
+    // forwarded, not parsed here. Only -c/--config also go to app-server
+    // (see codexAppServerConfigArgs); --profile stays on the remote TUI.
+    .allowUnknownOption()
     .action(async (args) => launchCodex(args, repoRoot()));
   adapters
     .command('copilot')
@@ -207,6 +259,13 @@ export function registerAdaptersCommand(program: Command): void {
     // Copilot's own flags (-i, --allow-tool, ...) are forwarded, not parsed here.
     .allowUnknownOption()
     .action(async (args) => launchCopilot(args));
+  adapters
+    .command('gemini')
+    .description('Launch Gemini CLI with its Concord inbox monitor started on the first turn')
+    .argument('[args...]', 'Arguments forwarded to Gemini CLI')
+    // Gemini's own flags (-m, --approval-mode, -i, ...) are forwarded, not parsed here.
+    .allowUnknownOption()
+    .action(async (args) => launchGemini(args));
   adapters
     .command('host-copilot', { hidden: true })
     .requiredOption('--agent <id>')

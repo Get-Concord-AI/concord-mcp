@@ -1,3 +1,4 @@
+import { deriveLiveness, type Liveness } from '../domain/presence.js';
 import type {
   HandoffRecord,
   OwnershipEventRecord,
@@ -12,6 +13,7 @@ import { detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
 
 export interface TaskContextResult {
   task: TaskRecord;
+  ownerLiveness: Liveness | 'unregistered' | null;
   updates: TaskUpdateRecord[];
   latestHandoff: HandoffRecord | undefined;
   latestReview: ReviewRecord | undefined;
@@ -51,6 +53,15 @@ export function handleGetTaskContext(
 
   return {
     task,
+    ownerLiveness:
+      task.agentId === null
+        ? null
+        : (() => {
+            const owner = repos.agents.get(task.agentId);
+            return owner === undefined
+              ? 'unregistered'
+              : deriveLiveness(owner.lastSeen, Date.now());
+          })(),
     updates: repos.taskUpdates.listByTask(task.taskId),
     latestHandoff: repos.handoffs.latestForTask(task.taskId),
     latestReview: repos.reviews.latestForTask(task.taskId),

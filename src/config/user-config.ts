@@ -18,6 +18,7 @@ const userConfigSchema = z
     globalMode: z.boolean().optional(),
     globalRegistrations: z.array(z.string()).optional(),
     autoAdapters: z.boolean().optional(),
+    cloudLink: z.boolean().optional(),
   })
   .loose();
 /** The whole file as JSON, so settings this version does not know survive a write. */
@@ -31,6 +32,11 @@ export interface UserConfig {
   readonly globalRegistrations?: readonly string[];
   /** Install or repair a harness's adapter when a session finds it missing; undefined until asked. */
   readonly autoAdapters?: boolean;
+  /**
+   * False after `concord cloud unlink`: signed in, but working locally. Absent
+   * or true, a signed-in machine works through Concord Cloud.
+   */
+  readonly cloudLink?: boolean;
 }
 
 /** `~/.concord/`, home to the machine-wide store and the user's settings. */
@@ -60,6 +66,7 @@ export function readUserConfig(env: NodeJS.ProcessEnv): UserConfig {
         ? {}
         : { globalRegistrations: parsed.globalRegistrations }),
       ...(parsed.autoAdapters === undefined ? {} : { autoAdapters: parsed.autoAdapters }),
+      ...(parsed.cloudLink === undefined ? {} : { cloudLink: parsed.cloudLink }),
     };
   } catch {
     return {};

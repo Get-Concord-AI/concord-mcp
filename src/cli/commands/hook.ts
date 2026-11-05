@@ -33,6 +33,7 @@ import {
 import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
 import { copilotServerAddress } from './copilot-adapter.js';
 import { fileSpool } from './copilot-spool.js';
+import { isDevinHookEvent, runDevinHook } from './devin-hooks.js';
 import {
   cloudCopilotBackend,
   copilotWorkspace,
@@ -312,6 +313,10 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     )
     .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {
+      if (isDevinHookEvent(event)) {
+        process.stdout.write(`${await runDevinHook(event, readStdin())}\n`);
+        return;
+      }
       if (options.client === 'copilot-cli') {
         await runCopilotClientHook(event);
         return;

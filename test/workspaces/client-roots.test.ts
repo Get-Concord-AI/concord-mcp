@@ -173,39 +173,6 @@ describe('joinClientRoot', () => {
     ]);
   });
 
-  it('reports a delivered message as sent when a cloud refusal lands meanwhile', async () => {
-    const written: string[] = [];
-    const { launched, manager, repos, prompt } = await deliveryServer(
-      (manager) => {
-        manager.refuse('works through Concord Cloud');
-      },
-      (workspace) => written.push((workspace ?? manager.current()).repoRoot),
-    );
-
-    const sent = await prompt();
-
-    expect(sent.isError).not.toBe(true);
-    expect(written).toEqual([launched]);
-    expect(repos.agentMessages.listByAgent('codex:target').map((m) => m.status)).toEqual([
-      'delivered',
-    ]);
-  });
-
-  it('refuses a folder linked to Concord Cloud instead of serving it locally', async () => {
-    const launched = dir('launched');
-    const linked = repoDir('linked');
-    const manager = new WorkspaceManager(launched);
-
-    const joined = await joinClientRoot(client([pathToFileURL(linked).href]), manager, {
-      isCloudLinked: (root) => root === linked,
-    });
-
-    expect(joined).toBeUndefined();
-    expect(() => manager.select()).toThrow(/works through Concord Cloud/u);
-    // Telemetry still reads a root without throwing, so the refusal reaches the client.
-    expect(manager.activeRoot).toBeUndefined();
-  });
-
   it('does not second-guess a repository the environment names', () => {
     expect(hasExplicitRepoRoot({ CLAUDE_PROJECT_DIR: '/repo' })).toBe(true);
     expect(hasExplicitRepoRoot({ CONCORD_REPO_ROOT: ' ' })).toBe(false);

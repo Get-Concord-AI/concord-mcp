@@ -9,6 +9,17 @@ import {
 } from '../../domain/harness-config.js';
 import { userHome } from '../../config/paths.js';
 import { spawnCommandSync } from '../spawn-command.js';
+import {
+  devinMcpInstalled,
+  installDevinMcpConfig,
+  uninstallDevinMcpConfig,
+} from '../devin-config.js';
+import {
+  devinUserHooksInstalled,
+  installDevinUserHooks,
+  removeDevinUserHooks,
+} from '../devin-user-hooks.js';
+import { devinHooksInstalled } from '../devin-hooks.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import {
   copilotConfigInstalled,
@@ -90,7 +101,7 @@ export function run(
   const result = spawnCommandSync(command, args, { env, timeout: 15_000 });
   return {
     ok: result.status === 0,
-    output: `${result.stdout}${result.stderr}`.trim(),
+    output: result.error?.message ?? `${result.stdout}${result.stderr}`.trim(),
   };
 }
 
@@ -107,6 +118,24 @@ export function atLeast(actual: readonly number[], required: readonly number[]):
     if (left !== right) return left > right;
   }
   return true;
+}
+
+/** Devin introduced dedicated MCP config files in v3000.3; its CLI omits the patch sometimes. */
+export function devinSupportsDedicatedMcpConfig(versionOutput: string): boolean {
+  const match = /v?(\d+)\.(\d+)(?:\.(\d+))?/iu.exec(versionOutput);
+  if (match === null) return false;
+  return atLeast(
+    [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)],
+    HARNESS_CONFIGS.devin.minimumVersion,
+  );
+}
+
+export function devinCliSupportsDedicatedMcpConfig(env: NodeJS.ProcessEnv): boolean {
+  const executable = executablePath(HARNESS_CONFIGS.devin.executable, env);
+  return (
+    executable !== undefined &&
+    devinSupportsDedicatedMcpConfig(run(executable, ['--version'], env).output)
+  );
 }
 
 /** The running package, and which paths count as throwaway checkouts. */
@@ -340,9 +369,9 @@ function uninstallCursorHooks(env: NodeJS.ProcessEnv): void {
   });
 }
 
-function geminiCompletionInjectionReady(repoRoot: string): boolean {
+function geminiSettingsInjectReady(settingsPath: string): boolean {
   try {
-    const settings = readJsonObject(join(repoRoot, '.gemini', 'settings.json'));
+    const settings = readJsonObject(settingsPath);
     const tools = settings['tools'];
     if (!isRecord(tools)) return false;
     const shell = tools['shell'];
@@ -356,6 +385,14 @@ function geminiCompletionInjectionReady(repoRoot: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Gemini merges user and project settings, so either file can turn completion injection on. */
+function geminiCompletionInjectionReady(repoRoot: string, env: NodeJS.ProcessEnv): boolean {
+  return (
+    geminiSettingsInjectReady(join(repoRoot, '.gemini', 'settings.json')) ||
+    geminiSettingsInjectReady(join(userHome(env), '.gemini', 'settings.json'))
+  );
 }
 
 function statusGemini(
@@ -393,7 +430,7 @@ function statusGemini(
   if (
     installed.status !== 'installed' ||
     repoRoot === undefined ||
-    geminiCompletionInjectionReady(repoRoot)
+    geminiCompletionInjectionReady(repoRoot, env)
   ) {
     return installed;
   }
@@ -402,9 +439,9 @@ function statusGemini(
     status: 'action_required',
     capabilities: ['pull', 'steer', 'busy'],
     detail:
-      'The Gemini extension is installed, but this project is missing ' +
-      'tools.shell.backgroundCompletionBehavior = "inject" or ' +
-      'experimental.modelSteering = true. Run `concord setup` in the project.',
+      'The Gemini extension is installed, but neither this project nor ~/.gemini/settings.json sets ' +
+      'tools.shell.backgroundCompletionBehavior = "inject" and ' +
+      'experimental.modelSteering = true. Run `concord setup --repo-files` in the project.',
   };
 }
 
@@ -640,6 +677,40 @@ function statusCopilot(env: NodeJS.ProcessEnv): AdapterReport {
   };
 }
 
+function statusDevin(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterReport {
+  const config = HARNESS_CONFIGS.devin;
+  const executable = executablePath(config.executable, env);
+  const supported = executable !== undefined && devinCliSupportsDedicatedMcpConfig(env);
+  const mcpInstalled =
+    devinMcpInstalled(env) || (repoRoot !== undefined && devinMcpInstalled(env, repoRoot));
+  const hooksInstalled =
+    devinUserHooksInstalled(env) || (repoRoot !== undefined && devinHooksInstalled(repoRoot));
+  const installed = supported && mcpInstalled && hooksInstalled;
+  if (executable !== undefined && !supported) {
+    return {
+      harness: config.name,
+      detected: true,
+      status: 'unsupported_version',
+      monitor: config.monitor.kind,
+      capabilities: [],
+      detail: config.unsupportedDetail,
+    };
+  }
+  return {
+    harness: config.name,
+    detected: executable !== undefined,
+    status: executable === undefined ? 'not_detected' : installed ? 'installed' : 'action_required',
+    monitor: config.monitor.kind,
+    capabilities: installed ? [...config.installedCapabilities] : [],
+    detail:
+      executable === undefined
+        ? 'Devin CLI was not found on PATH.'
+        : installed
+          ? config.installedDetail
+          : 'Devin CLI needs the Concord MCP server and lifecycle hooks installed.',
+  };
+}
+
 export function statusGlobalAdapters(
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
@@ -677,6 +748,8 @@ export function statusAdapter(
       return statusAntigravity(env, repoRoot);
     case 'copilot-cli':
       return statusCopilot(env);
+    case 'devin':
+      return statusDevin(env, repoRoot);
   }
 }
 
@@ -782,6 +855,13 @@ export function installAdapter(
       installCopilotHooks(env);
       return;
     }
+    case 'devin': {
+      if (devinCliSupportsDedicatedMcpConfig(env)) {
+        installDevinMcpConfig(env);
+        installDevinUserHooks(env);
+      }
+      return;
+    }
   }
 }
 
@@ -790,6 +870,7 @@ export function installGlobalAdapters(
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
   isEphemeral: EphemeralTest = isEphemeralPath,
+  afterInstall?: () => void,
 ): AdapterReport[] {
   const failures = new Map<HarnessName, string>();
   for (const harness of harnessNames) {
@@ -799,6 +880,9 @@ export function installGlobalAdapters(
       failures.set(harness, error instanceof Error ? error.message : String(error));
     }
   }
+  // Runs before readiness is judged: user-level settings it writes (global
+  // mode's Gemini settings) count towards a harness being ready.
+  afterInstall?.();
 
   const report = statusGlobalAdapters(env, repoRoot, moduleUrl, isEphemeral).map((entry) => {
     const failure = failures.get(entry.harness);
@@ -854,6 +938,8 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   } catch {
     // Malformed or unreadable hooks config is left untouched.
   }
+  uninstallDevinMcpConfig(env);
+  removeDevinUserHooks(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

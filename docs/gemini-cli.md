@@ -27,6 +27,21 @@ native background completion into the agent, which answers the message and
 immediately starts a fresh one-shot monitor. Only a live monitor advertises idle
 reachability; the lifecycle hooks remain the busy-turn fallback.
 
+The monitor only exists once the agent has run that command, and the agent
+only acts on its first turn. A session started with plain `gemini` therefore
+cannot be reached while idle until the user types something; until then,
+messages wait as sent (✓). Start Gemini through Concord to give it that first
+turn straight away:
+
+```bash
+concord adapters gemini        # any Gemini flags can follow, e.g. -m <model>
+```
+
+It runs `gemini -i "Start the Concord inbox monitor…"`, so the monitor is
+running before you type. If you pass your own prompt (`-i` or `-p`), it is used
+as given and the monitor starts only when the agent is asked to start it. In
+the default approval mode, Gemini asks once before running the monitor command.
+
 Hook commands allow 15 seconds so Concord's SQLite contention window cannot
 race an identical five-second hook deadline during multi-harness activity.
 

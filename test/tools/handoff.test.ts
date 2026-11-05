@@ -116,8 +116,41 @@ describe('handleHandoff', () => {
         },
         provenance: [{ field: 'tests_run', source: 'pnpm test' }],
       }),
-    ).toThrow(/reported_outcome provenance is required/u);
+    ).toThrow(/got fields \[tests_run\]/u);
   });
+
+  it.each(['source', 'acceptance', 'integration', 'human_intervention_ms', 'rework_ms'])(
+    'accepts reported_outcome.%s provenance on its own',
+    (key) => {
+      const taskId = `TASK-SUB-${key}`;
+      handleClaimWork(repos, { task_id: taskId, title: 'Per-value source' });
+      const result = handleHandoff(repos, {
+        task_id: taskId,
+        status: 'done',
+        what_changed: 'x',
+        reported_outcome: { source: 'review', acceptance: 'accepted', integration: 'passed' },
+        provenance: [{ field: `reported_outcome.${key}`, source: 'PR approved' }],
+      });
+      expect(result.handoff.reportedOutcome?.acceptance).toBe('accepted');
+    },
+  );
+
+  it.each(['acceptance', 'reported_outcome.typo', 'reported_outcome.'])(
+    'rejects %s as reported_outcome provenance',
+    (field) => {
+      const taskId = `TASK-BAD-${field}`;
+      handleClaimWork(repos, { task_id: taskId, title: 'Bad source' });
+      expect(() =>
+        handleHandoff(repos, {
+          task_id: taskId,
+          status: 'done',
+          what_changed: 'x',
+          reported_outcome: { source: 'review', acceptance: 'accepted', integration: 'passed' },
+          provenance: [{ field, source: 'PR approved' }],
+        }),
+      ).toThrow(new RegExp(`got fields \\[${field.replace('.', '\\.')}\\]`, 'u'));
+    },
+  );
 
   it('produces a review packet when ready_for_review is set (folded review_ready)', () => {
     handleClaimWork(repos, { task_id: 'TASK-12', title: 'Retry', modules: ['billing'] });
