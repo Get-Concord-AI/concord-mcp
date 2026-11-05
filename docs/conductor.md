@@ -62,15 +62,17 @@ Interactive terminal sessions keep the native monitor.
 Conductor replaces `AskUserQuestion` with its own `mcp__conductor__AskUserQuestion`.
 Concord treats either one as the agent waiting on its user.
 
-**Codex.** Conductor runs `codex app-server` itself, over stdio. Concord's Codex
-host steers turns through its own managed app-server, which cannot reach a
-thread that Conductor's process owns: a turn started there would run outside
-Conductor and never show in its UI. So in a Conductor session
-(`CONDUCTOR_SESSION_ID` is set), Concord does not start the host, and
+**Codex.** Conductor runs `codex app-server` itself, over stdio, and that
+process is the thread's only writer. Concord's Codex host starts idle turns
+through a separate app-server, and Codex refuses to resume a thread there while
+Conductor holds it ("thread … already has an active writer"). So in a Conductor
+session (`CONDUCTOR_SESSION_ID` is set), Concord does not start the host, and
 `concord adapters host-codex` refuses to run. Messages reach the agent through
 its PostToolUse and Stop hooks during a turn. A message sent while the chat is
-idle waits for its next turn. Codex hooks cannot wake an idle session, and
-Conductor documents no local API for sending a prompt to a local session.
+idle waits for its next turn: Codex hooks cannot wake an idle session, a
+finished background command does not wake one either, and the
+[Conductor API](https://www.conductor.build/docs/api), which can send a prompt
+to a session, covers cloud workspaces only.
 
 ## Not covered
 
