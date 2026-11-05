@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-05
+
 ### Added
 
 - Conductor support for local Claude Code and Codex chats
