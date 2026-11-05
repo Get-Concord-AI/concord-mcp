@@ -191,6 +191,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'managed-controller',
       'harness-monitor',
+      'harness-monitor',
     ]);
   });
 
@@ -549,5 +550,51 @@ describe('global harness adapters', () => {
     const agEntry = report.find((entry) => entry.harness === 'antigravity');
     expect(agEntry?.status).toBe('action_required');
     expect(agEntry?.detail).toContain('Concord lifecycle hooks remain installed');
+  });
+
+  it('installs Muse Code config and reports adapter status', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-muse-home-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'muse', '0.1.0');
+
+    const env = { HOME: home, PATH: bin };
+    const reportBefore = statusGlobalAdapters(env);
+    expect(reportBefore.find((entry) => entry.harness === 'muse-code')).toMatchObject({
+      detected: true,
+      status: 'action_required',
+    });
+
+    const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+    expect(report.find((entry) => entry.harness === 'muse-code')).toMatchObject({
+      status: 'installed',
+      capabilities: ['pull', 'busy'],
+    });
+
+    const settingsPath = join(home, '.config', 'muse', 'settings.json');
+    expect(existsSync(settingsPath)).toBe(true);
+    expect(readFileSync(settingsPath, 'utf8')).toContain('concord-mcp');
+
+    const uninstallReport = uninstallGlobalAdapters(env);
+    expect(uninstallReport.find((entry) => entry.harness === 'muse-code')).toMatchObject({
+      status: 'action_required',
+    });
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+
+  it('does not install Muse Code config below the supported version', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-muse-old-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'muse', '0.0.9');
+
+    const env = { HOME: home, PATH: bin };
+    const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+    expect(report.find((entry) => entry.harness === 'muse-code')).toMatchObject({
+      status: 'unsupported_version',
+      capabilities: [],
+    });
+
+    expect(existsSync(join(home, '.config', 'muse', 'settings.json'))).toBe(false);
   });
 });
