@@ -7,7 +7,7 @@ import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/p
 import { LINKED_MACHINE_MESSAGE, linkedMachine } from './cloud/target.js';
 import { startBackgroundUpdateCheck } from './update-notifier.js';
 import { resolveCheckoutRoot, resolveRepoRoot } from './config/paths.js';
-import { resolveIdentity } from './domain/identity.js';
+import { resolveServerIdentity } from './domain/identity.js';
 import { createServer } from './server.js';
 import { ensureAgentRegistered } from './tools/register-agent.js';
 import { createTelemetryClient } from './telemetry/client.js';
@@ -21,8 +21,7 @@ async function main(): Promise<void> {
   // One server process per session, with the session id in its environment, so
   // this agent's identity is known before the transport connects — and it is the
   // same id the relay CLI derives for the same session.
-  const kind = process.env['CONCORD_AGENT_KIND']?.trim();
-  const identity = resolveIdentity(process.env, kind !== undefined && kind !== '' ? { kind } : {});
+  const identity = resolveServerIdentity(process.env);
 
   // A machine linked to Concord Cloud works through it everywhere: no local
   // database, and no telemetry from this package for operations that are not local.
