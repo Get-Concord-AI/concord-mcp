@@ -48,6 +48,14 @@ describe('resolveIdentity', () => {
     expect(identity?.origin).toBe('hook');
   });
 
+  it('derives a Hermes identity from the session id passed to its MCP child', () => {
+    const identity = resolveIdentity({ HERMES_SESSION_ID: SESSION }, { kind: 'hermes' });
+
+    expect(identity?.agentId).toBe(agentIdForSession('hermes', SESSION));
+    expect(identity?.kind).toBe('hermes');
+    expect(identity?.origin).toBe('session');
+  });
+
   it('derives a Goose identity from the session id Goose exports to extensions', () => {
     const identity = resolveIdentity({ AGENT_SESSION_ID: '20261009_4' });
 
