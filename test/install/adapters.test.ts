@@ -597,4 +597,17 @@ describe('global harness adapters', () => {
 
     expect(existsSync(join(home, '.config', 'muse', 'settings.json'))).toBe(false);
   });
+
+  it('finishes global uninstall even when Muse Code settings.json is malformed', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-muse-malformed-'));
+    const env = { HOME: home };
+    const settingsPath = join(home, '.config', 'muse', 'settings.json');
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    const broken = '{ malformed json';
+    writeFileSync(settingsPath, broken);
+
+    const report = uninstallGlobalAdapters(env);
+    expect(report).toBeDefined();
+    expect(readFileSync(settingsPath, 'utf8')).toBe(broken);
+  });
 });

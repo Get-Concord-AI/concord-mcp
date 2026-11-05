@@ -6,13 +6,10 @@ Meta's Muse Code is a terminal coding agent built on the Muse Spark model (macOS
 
 ### Automatic setup (Global mode / Adapters)
 
-When `muse` is installed on your `PATH`, running:
+When `muse` is installed on your `PATH`:
 
-```bash
-concord adapters
-```
-
-or enabling global mode (`concord global enable` or `concord setup --global`) registers Concord in Muse Code's user settings file and installs instructions into `~/.config/muse/AGENTS.md`.
+- **Machine-wide setup (server + instructions)**: Run `concord setup --global` to register the MCP server in `~/.config/muse/settings.json` and install instructions into `~/.config/muse/AGENTS.md`.
+- **MCP server registration only**: Run `concord adapters install` to register Concord in `~/.config/muse/settings.json` without writing global instructions.
 
 ### Repository instructions
 

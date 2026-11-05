@@ -34,17 +34,10 @@ function writeJson(path: string, json: string): void {
   writeFileSync(path, json);
 }
 
-const museSettingsSchema = z.object({
+const settingsSchema = z.object({
   schema_version: z.number(),
-  mcp_servers: z
-    .record(
-      z.string(),
-      z.object({
-        command: z.string(),
-      }),
-    )
-    .optional(),
-  tui: z.record(z.string(), z.unknown()).optional(),
+  tui: z.object({ theme: z.string() }).optional(),
+  mcp_servers: z.record(z.string(), z.object({ command: z.string() })).optional(),
 });
 
 describe('Muse Code configuration', () => {
@@ -86,7 +79,7 @@ describe('Muse Code configuration', () => {
 
   it('upserts concord entry into a missing or empty config with schema_version 1', () => {
     const initial = upsertMuseCodeMcpServer(undefined);
-    const parsed = museSettingsSchema.parse(JSON.parse(initial));
+    const parsed = settingsSchema.parse(JSON.parse(initial));
     expect(parsed.schema_version).toBe(1);
     expect(parsed.mcp_servers?.['concord']?.command).toBe('concord-mcp');
 
@@ -105,18 +98,12 @@ describe('Muse Code configuration', () => {
 
     const updated = upsertMuseCodeMcpServer(existing);
     const raw: unknown = JSON.parse(updated);
-    const verified = z
-      .object({
-        schema_version: z.number(),
-        tui: z.object({ theme: z.string() }),
-        mcp_servers: z.record(z.string(), z.object({ command: z.string() })),
-      })
-      .parse(raw);
+    const verified = settingsSchema.parse(raw);
 
     expect(verified.schema_version).toBe(2);
-    expect(verified.tui.theme).toBe('dark');
-    expect(verified.mcp_servers['existing_tool']?.command).toBe('custom-tool');
-    expect(verified.mcp_servers['concord']?.command).toBe('concord-mcp');
+    expect(verified.tui?.theme).toBe('dark');
+    expect(verified.mcp_servers?.['existing_tool']?.command).toBe('custom-tool');
+    expect(verified.mcp_servers?.['concord']?.command).toBe('concord-mcp');
   });
 
   it('throws an error with path context on malformed JSON or non-object config', () => {
@@ -171,22 +158,50 @@ describe('Muse Code configuration', () => {
     expect(existsSync(path)).toBe(true);
     const content = readFileSync(path, 'utf8');
     const raw: unknown = JSON.parse(content);
-    const verified = z
-      .object({
-        schema_version: z.number(),
-        tui: z.object({ theme: z.string() }),
-        mcp_servers: z.record(z.string(), z.object({ command: z.string() })),
-      })
-      .parse(raw);
+    const verified = settingsSchema.parse(raw);
 
-    expect(verified.tui.theme).toBe('light');
-    expect(verified.mcp_servers['other']?.command).toBe('other-cli');
-    expect(verified.mcp_servers['concord']).toBeUndefined();
+    expect(verified.tui?.theme).toBe('light');
+    expect(verified.mcp_servers?.['other']?.command).toBe('other-cli');
+    expect(verified.mcp_servers?.['concord']).toBeUndefined();
   });
 
   it('does not create a file when uninstalling an absent config', () => {
     const { env, path } = fixture();
     expect(uninstallMuseCodeConfig(env)).toBeUndefined();
     expect(existsSync(path)).toBe(false);
+  });
+
+  it('preserves custom user-owned concord entry during install and removal', () => {
+    const { env, path } = fixture();
+    const customConfig = JSON.stringify(
+      {
+        schema_version: 1,
+        mcp_servers: {
+          concord: {
+            command: 'my-custom-wrapper',
+            args: ['--debug'],
+            env: { CUSTOM_VAR: '1' },
+          },
+        },
+      },
+      null,
+      2,
+    );
+    writeJson(path, customConfig);
+
+    installMuseCodeMcpConfig(env);
+    expect(readFileSync(path, 'utf8')).toBe(customConfig);
+
+    uninstallMuseCodeConfig(env);
+    expect(readFileSync(path, 'utf8')).toBe(customConfig);
+  });
+
+  it('safely ignores unreadable or malformed config during uninstall', () => {
+    const { env, path } = fixture();
+    const broken = '{ malformed json';
+    writeJson(path, broken);
+
+    expect(uninstallMuseCodeConfig(env)).toBeUndefined();
+    expect(readFileSync(path, 'utf8')).toBe(broken);
   });
 });
