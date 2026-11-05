@@ -18,6 +18,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   summary timestamps independently (#68). Migration 017 appends to the existing
   migration history.
 
+- A harness started from another harness's shell no longer acts as its parent.
+  Goose, Grok Build, Gemini CLI and Cursor inherited the parent's session
+  variable (for example `CLAUDE_CODE_SESSION_ID`), so their Concord server
+  claimed work, sent messages and read the inbox as the parent agent. `concord
+setup` and global mode now pin `CONCORD_AGENT_KIND` in each of their MCP
+  entries, which restricts the server to that harness's own session variable
+  (as Antigravity, Copilot CLI and Devin already did). `.mcp.json` stays
+  unpinned because more than one client reads it. Existing installs pick the
+  pin up the next time `concord setup` runs.
+
 ## [0.21.0] - 2026-11-09
 
 ### Added
