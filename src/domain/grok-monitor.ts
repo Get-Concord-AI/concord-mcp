@@ -36,7 +36,7 @@ export function grokMonitorCommand(agentId: string): string {
 export function grokMonitorNudge(
   rawPayload: string,
   agentId: string,
-  receiverIsActive = false,
+  receiverIsActive: boolean,
 ): string | undefined {
   // Grok's monitor description is free text; the live receiver lease is authoritative.
   if (receiverIsActive) return undefined;
