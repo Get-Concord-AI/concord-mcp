@@ -4,6 +4,7 @@ import { delimiter, dirname, join } from 'node:path';
 import {
   HARNESS_CONFIGS,
   harnessNames,
+  type HarnessConfig,
   type HarnessName,
   type MonitorKind,
 } from '../../domain/harness-config.js';
@@ -33,6 +34,11 @@ import {
   installGooseMcpConfig,
   uninstallGooseConfig,
 } from '../goose-config.js';
+import {
+  installMuseCodeMcpConfig,
+  museCodeConfigInstalled,
+  uninstallMuseCodeConfig,
+} from '../muse-code-config.js';
 import {
   globalAntigravityHooksPath,
   hasAntigravityHooks,
@@ -526,8 +532,12 @@ function statusGrok(env: NodeJS.ProcessEnv): AdapterReport {
   };
 }
 
-function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
-  const config = HARNESS_CONFIGS.goose;
+function statusSimpleCli(
+  config: HarnessConfig,
+  isInstalled: (env: NodeJS.ProcessEnv) => boolean,
+  label: string,
+  env: NodeJS.ProcessEnv,
+): AdapterReport {
   const executable = executablePath(config.executable, env);
   if (executable === undefined) {
     return {
@@ -536,7 +546,7 @@ function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
       status: 'not_detected',
       monitor: config.monitor.kind,
       capabilities: [],
-      detail: 'Goose CLI was not found on PATH.',
+      detail: `${label} CLI was not found on PATH.`,
     };
   }
   const version = versionTuple(run(executable, ['--version'], env).output);
@@ -550,7 +560,7 @@ function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
       detail: config.unsupportedDetail,
     };
   }
-  const installed = gooseConfigInstalled(env);
+  const installed = isInstalled(env);
   return {
     harness: config.name,
     detected: true,
@@ -559,9 +569,15 @@ function statusGoose(env: NodeJS.ProcessEnv): AdapterReport {
     capabilities: installed ? [...config.installedCapabilities] : ['pull', 'busy'],
     detail: installed
       ? config.installedDetail
-      : 'Concord MCP server is not yet registered with Goose.',
+      : `Concord MCP server is not yet registered with ${label}.`,
   };
 }
+
+const statusGoose = (env: NodeJS.ProcessEnv): AdapterReport =>
+  statusSimpleCli(HARNESS_CONFIGS.goose, gooseConfigInstalled, 'Goose', env);
+
+const statusMuseCode = (env: NodeJS.ProcessEnv): AdapterReport =>
+  statusSimpleCli(HARNESS_CONFIGS['muse-code'], museCodeConfigInstalled, 'Muse Code', env);
 
 function statusAntigravity(env: NodeJS.ProcessEnv, repoRoot?: string): AdapterReport {
   const config = HARNESS_CONFIGS.antigravity;
@@ -750,6 +766,8 @@ export function statusAdapter(
       return statusCopilot(env);
     case 'devin':
       return statusDevin(env, repoRoot);
+    case 'muse-code':
+      return statusMuseCode(env);
   }
 }
 
@@ -783,20 +801,12 @@ export function installAdapter(
       existsSync(join(userHome(env), '.gemini', 'config'));
     if (!detected) return;
     const path = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
-    if (existsSync(path)) {
-      const existing = readFileSync(path, 'utf8');
-      if (!hasMcpServer(existing)) {
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(
-          path,
-          upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
-        );
-      }
-    } else {
+    const existing = existsSync(path) ? readFileSync(path, 'utf8') : undefined;
+    if (existing === undefined || !hasMcpServer(existing)) {
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(
         path,
-        upsertMcpServer(undefined, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
+        upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
       );
     }
     installGlobalAntigravityHooks(env);
@@ -837,28 +847,33 @@ export function installAdapter(
     }
     case 'goose': {
       const version = versionTuple(run(executable, ['--version'], env).output);
-      if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
-        return;
+      if (version !== undefined && atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
+        installGooseMcpConfig(env);
       }
-      installGooseMcpConfig(env);
       return;
     }
     case 'copilot-cli': {
       const version = versionTuple(run(executable, ['--version'], env).output);
       if (
-        version === undefined ||
-        !atLeast(version, HARNESS_CONFIGS['copilot-cli'].minimumVersion)
+        version !== undefined &&
+        atLeast(version, HARNESS_CONFIGS['copilot-cli'].minimumVersion)
       ) {
-        return;
+        installCopilotMcpConfig(env);
+        installCopilotHooks(env);
       }
-      installCopilotMcpConfig(env);
-      installCopilotHooks(env);
       return;
     }
     case 'devin': {
       if (devinCliSupportsDedicatedMcpConfig(env)) {
         installDevinMcpConfig(env);
         installDevinUserHooks(env);
+      }
+      return;
+    }
+    case 'muse-code': {
+      const version = versionTuple(run(executable, ['--version'], env).output);
+      if (version !== undefined && atLeast(version, HARNESS_CONFIGS['muse-code'].minimumVersion)) {
+        installMuseCodeMcpConfig(env);
       }
       return;
     }
@@ -921,6 +936,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
+  try {
+    uninstallMuseCodeConfig(env);
+  } catch {
+    // Unreadable or malformed config is left untouched.
+  }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
   if (existsSync(antigravityMcp)) {

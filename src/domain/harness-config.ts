@@ -16,6 +16,7 @@ export const harnessNames = [
   'antigravity',
   'copilot-cli',
   'devin',
+  'muse-code',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -254,6 +255,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedCapabilities: ['pull', 'steer', 'busy'],
     installedDetail: 'Devin CLI hooks register sessions and inject inbox messages on user prompts.',
     unsupportedDetail: 'Devin CLI must be v3000.3 or newer for dedicated MCP config files.',
+  },
+  'muse-code': {
+    name: 'muse-code',
+    executable: 'muse',
+    minimumVersion: [0, 1, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Concord MCP server is registered with Muse Code; session-level presence and work-state are active.',
+    unsupportedDetail: 'Muse Code does not meet the verified MCP baseline (0.1.0).',
   },
 };
 
