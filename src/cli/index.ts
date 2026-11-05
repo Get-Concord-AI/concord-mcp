@@ -22,6 +22,7 @@ import { registerStatus } from './commands/status.js';
 import { registerTasks } from './commands/tasks.js';
 import { registerWatchCommand } from './commands/watch.js';
 import { registerWhoCommand } from './commands/who.js';
+import { registerWorkCommand } from './commands/work.js';
 import { notifyIfUpdateAvailable } from '../update-notifier.js';
 import { configureCliWorkspace, parseCliWorkspaceOptions } from './workspace-options.js';
 
@@ -88,6 +89,7 @@ registerWatchCommand(program);
 registerHookCommand(program, telemetry);
 registerInboxCommand(program, telemetry);
 registerHandoffCommand(program);
+registerWorkCommand(program, telemetry);
 registerReviewPacketCommand(program);
 registerExportCommand(program);
 registerDoctorCommand(program);
