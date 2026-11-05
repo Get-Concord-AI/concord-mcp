@@ -16,6 +16,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { runCli } from '../../src/cli/index.js';
 import { CONCORD_SERVER_ONLY } from '../../src/cli/commands/session-start-message.js';
 import {
   NO_STDIN_MESSAGE,
@@ -296,6 +297,36 @@ describe('concord work', () => {
       z.object({ presence: z.array(z.object({ agentId: z.string() })) }),
     );
     expect(workspace.presence.map((entry) => entry.agentId)).toEqual(['alpha:1']);
+  });
+
+  it('uses one kind for the start arguments and the registered agent', async () => {
+    const flagged = writeInput(
+      'kind-flag.json',
+      JSON.stringify({ task_id: 'kind-flag', title: 'Flag', kind: 'cursor', agent_id: 'json:9' }),
+    );
+    parsed(await run('start', { jsonPath: flagged, flags: { kind: 'ci' } }), taskSchema);
+
+    const kept = writeInput(
+      'kind-agent.json',
+      JSON.stringify({
+        task_id: 'kind-agent',
+        title: 'Agent',
+        kind: 'cursor',
+        agent_id: 'json:9',
+      }),
+    );
+    parsed(await run('start', { jsonPath: kept, flags: { agent: 'codex:7' } }), taskSchema);
+
+    const roster = parsed(
+      await run('inspect', {}),
+      z.object({ presence: z.array(z.object({ agentId: z.string(), kind: z.string() })) }),
+    );
+    expect(roster.presence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ agentId: 'json:9', kind: 'ci' }),
+        expect.objectContaining({ agentId: 'codex:7', kind: 'cursor' }),
+      ]),
+    );
   });
 
   it('takes the agent from CONCORD_AGENT_ID and start kind from CONCORD_AGENT_KIND', async () => {
@@ -677,6 +708,26 @@ describe('concord work', () => {
       restore('CLAUDE_PROJECT_DIR', savedClaude);
       restore('DEVIN_PROJECT_DIR', savedDevin);
       restore('CONCORD_AGENT_ID', savedAgent);
+    }
+  });
+
+  it('prints a JSON error when a global workspace option fails before work runs', async () => {
+    const output = captureOutput();
+    const previous = process.exitCode;
+    const savedUpdateCheck = process.env['CONCORD_NO_UPDATE_CHECK'];
+    process.env['CONCORD_NO_UPDATE_CHECK'] = '1';
+    try {
+      process.exitCode = 0;
+      await runCli(['--workspace', 'ws_bad', 'work', 'inspect']);
+      expect(process.exitCode).toBe(1);
+      expect(errorSchema.parse(JSON.parse(output.stdout()))).toEqual({
+        error: 'Invalid workspace id: ws_bad',
+      });
+      expect(output.stderr()).toContain('Invalid workspace id: ws_bad');
+    } finally {
+      process.exitCode = previous;
+      if (savedUpdateCheck === undefined) delete process.env['CONCORD_NO_UPDATE_CHECK'];
+      else process.env['CONCORD_NO_UPDATE_CHECK'] = savedUpdateCheck;
     }
   });
 

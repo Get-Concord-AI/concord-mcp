@@ -190,9 +190,32 @@ function readArguments(jsonPath: string, options: RunWorkOptions): JsonObject {
   return parsed.data;
 }
 
-function agentKind(flags: WorkFlags, env: NodeJS.ProcessEnv): string | undefined {
-  const kind = (flags.kind ?? env['CONCORD_AGENT_KIND'])?.trim();
-  return kind === '' ? undefined : kind;
+function trimmed(value: string | undefined): string | undefined {
+  const kind = value?.trim();
+  return kind === undefined || kind === '' ? undefined : kind;
+}
+
+/**
+ * One kind for the tool arguments and the registered agent. `--kind` wins, then
+ * the start JSON `kind`, then `CONCORD_AGENT_KIND`. The agent id's prefix is
+ * not a separate source: it would disagree with the kind the tool records.
+ */
+function resolvedKind(
+  action: WorkAction,
+  json: JsonObject,
+  flags: WorkFlags,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  const flagged = trimmed(flags.kind);
+  if (flagged !== undefined) return flagged;
+  if (action === 'start') {
+    const supplied = json['kind'];
+    if (typeof supplied === 'string') {
+      const fromJson = trimmed(supplied);
+      if (fromJson !== undefined) return fromJson;
+    }
+  }
+  return trimmed(env['CONCORD_AGENT_KIND']);
 }
 
 /** `--agent` names this caller the way CONCORD_AGENT_ID does for the MCP server. */
@@ -216,7 +239,7 @@ function toolArguments(
     const value = flags[name];
     if (value !== undefined) args[FLAGS[name].field] = value;
   }
-  if (action === 'start' && args['kind'] === undefined && kind !== undefined) args['kind'] = kind;
+  if (action === 'start' && kind !== undefined) args['kind'] = kind;
   return args;
 }
 
@@ -250,7 +273,7 @@ export async function runWork(
     const json = input.jsonPath === undefined ? {} : readArguments(input.jsonPath, options);
     const repoRoot = resolveRepoRoot(options.cwd, options.env);
     const flags = input.flags ?? {};
-    const kind = agentKind(flags, options.env);
+    const kind = resolvedKind(action, json, flags, options.env);
     const identity = workIdentity(flags, kind, options.env);
     const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, options.env, {
       open: (databasePath, project) => {
@@ -309,6 +332,13 @@ function addFlag(command: Command, flag: FlagSpec): void {
 }
 
 const STDIN = { isTTY: () => isatty(0), read: () => readFileSync(0) };
+
+/** Failure shape for `concord work`: JSON on stdout, the same text on stderr, exit 1. */
+export function reportWorkFailure(message: string): void {
+  process.stdout.write(`${JSON.stringify({ error: message })}\n`);
+  process.stderr.write(`${message}\n`);
+  process.exitCode = 1;
+}
 
 /** One usage event. A throw here must not change what the command prints or its exit code. */
 function recordWorkCall(
