@@ -135,6 +135,24 @@ function symlinksBlocked(): boolean {
 
 const skipBuiltCliSymlink = symlinksBlocked();
 
+const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+
+/** `dist/cli/index.js`, compiled with the package build when CI tests before building. */
+function builtCliEntry(): string {
+  const entry = join(REPO_ROOT, 'dist', 'cli', 'index.js');
+  if (existsSync(entry)) return entry;
+  const tsc = join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
+  const build = spawnSync(process.execPath, [tsc, '-p', 'tsconfig.build.json'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+  });
+  if (build.status !== 0) {
+    throw new Error(`tsc -p tsconfig.build.json failed:\n${build.stdout}\n${build.stderr}`);
+  }
+  if (!existsSync(entry)) throw new Error(`The build did not produce ${entry}.`);
+  return entry;
+}
+
 describe('concord work', () => {
   let temporary: string[] = [];
   let repo: string;
@@ -738,19 +756,22 @@ describe('concord work', () => {
     }
   });
 
-  it.skipIf(skipBuiltCliSymlink)('runs the built CLI through a symlink', () => {
-    const entry = fileURLToPath(new URL('../../dist/cli/index.js', import.meta.url));
-    expect(existsSync(entry), 'build dist/cli/index.js before this test').toBe(true);
-    const dir = tempDir('cli-link');
-    const link = join(dir, 'concord');
-    symlinkSync(entry, link, 'file');
-    const result = spawnSync(process.execPath, [link, '--version'], {
-      encoding: 'utf8',
-      env: { ...process.env, CONCORD_NO_UPDATE_CHECK: '1' },
-    });
-    expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe(VERSION);
-  });
+  it.skipIf(skipBuiltCliSymlink)(
+    'runs the built CLI through a symlink',
+    { timeout: 120_000 },
+    () => {
+      const entry = builtCliEntry();
+      const dir = tempDir('cli-link');
+      const link = join(dir, 'concord');
+      symlinkSync(entry, link, 'file');
+      const result = spawnSync(process.execPath, [link, '--version'], {
+        encoding: 'utf8',
+        env: { ...process.env, CONCORD_NO_UPDATE_CHECK: '1' },
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe(VERSION);
+    },
+  );
 
   it('prints a JSON error when a global workspace option fails before work runs', async () => {
     const output = captureOutput();
