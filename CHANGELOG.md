@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Conductor support for local Claude Code and Codex chats
+  ([docs/conductor.md](./docs/conductor.md)). Claude Code sessions hosted by the
+  Claude Agent SDK, which never starts plugin monitors, now wake when a message
+  arrives while they are idle: the relay plugin's Stop hook arms
+  `concord inbox rewake`, an `asyncRewake` hook that waits for the next message
+  and wakes the session with it. Interactive sessions keep the native monitor.
+
 ### Changed
 
 - `concord setup` no longer writes instruction and MCP files into the repository
@@ -15,6 +24,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   machine-wide adapters cover. Pass `--repo-files` to write them anyway; with
   global mode off the files are written as before. The Gemini adapter now also
   accepts completion injection set in `~/.gemini/settings.json`.
+
+### Fixed
+
+- Codex chats in Conductor no longer start Concord's Codex host. Conductor's
+  own app-server is the thread's writer, so Codex refuses to resume the thread
+  anywhere else ("already has an active writer") and the host could never
+  deliver. `concord adapters host-codex` now refuses to run there. These chats
+  receive messages through their hooks during a turn.
+- Conductor's `mcp__conductor__AskUserQuestion` now counts as the agent waiting
+  on its user, as `AskUserQuestion` does.
 
 ## [0.19.0] - 2026-10-30
 

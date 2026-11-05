@@ -191,6 +191,11 @@ export async function watchCloud(
   once: boolean,
   /** Awaited before the next round, so a slow handoff never overlaps the next batch. */
   emit: (messages: readonly DeliverableMessage[], stop: AbortSignal) => Promise<void> | void,
+  /**
+   * Whether a newer receiver for this agent has replaced this one. A replaced
+   * receiver leaves the lease alone on the way out: it is the newer one's now.
+   */
+  replaced: () => boolean = () => false,
 ): Promise<void> {
   const stop = new AbortController();
   const stopped = (): boolean => stop.signal.aborted;
@@ -219,7 +224,9 @@ export async function watchCloud(
     }
   } finally {
     for (const name of signals) process.off(name, stopWatching);
-    updateAgentState(runtime, agentKey, { watchingUntil: undefined });
-    if (agent !== undefined) await releaseReceiver(runtime, agent).catch(() => undefined);
+    if (!replaced()) {
+      updateAgentState(runtime, agentKey, { watchingUntil: undefined });
+      if (agent !== undefined) await releaseReceiver(runtime, agent).catch(() => undefined);
+    }
   }
 }
