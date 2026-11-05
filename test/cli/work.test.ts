@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -5,10 +6,12 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { Command, type CommandUnknownOpts } from '@commander-js/extra-typings';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -16,7 +19,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { runCli } from '../../src/cli/index.js';
+import { runCli } from '../../src/cli/run.js';
 import { CONCORD_SERVER_ONLY } from '../../src/cli/commands/session-start-message.js';
 import {
   NO_STDIN_MESSAGE,
@@ -107,6 +110,30 @@ function captureOutput(): { stdout: () => string; stderr: () => string } {
     stderr: () => stderr.mock.calls.map((call) => String(call[0])).join(''),
   };
 }
+
+function symlinkErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  return typeof error.code === 'string' ? error.code : undefined;
+}
+
+/** Windows without Developer Mode rejects file symlinks; skip that case only. */
+function symlinksBlocked(): boolean {
+  const dir = mkdtempSync(join(tmpdir(), 'concord-symlink-probe-'));
+  try {
+    const target = join(dir, 'target.txt');
+    writeFileSync(target, 'x');
+    symlinkSync(target, join(dir, 'link'), 'file');
+    return false;
+  } catch (error) {
+    const code = symlinkErrorCode(error);
+    if (code === 'EPERM' || code === 'EACCES' || code === 'ENOTSUP') return true;
+    throw error;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const skipBuiltCliSymlink = symlinksBlocked();
 
 describe('concord work', () => {
   let temporary: string[] = [];
@@ -709,6 +736,20 @@ describe('concord work', () => {
       restore('DEVIN_PROJECT_DIR', savedDevin);
       restore('CONCORD_AGENT_ID', savedAgent);
     }
+  });
+
+  it.skipIf(skipBuiltCliSymlink)('runs the built CLI through a symlink', () => {
+    const entry = fileURLToPath(new URL('../../dist/cli/index.js', import.meta.url));
+    expect(existsSync(entry), 'build dist/cli/index.js before this test').toBe(true);
+    const dir = tempDir('cli-link');
+    const link = join(dir, 'concord');
+    symlinkSync(entry, link, 'file');
+    const result = spawnSync(process.execPath, [link, '--version'], {
+      encoding: 'utf8',
+      env: { ...process.env, CONCORD_NO_UPDATE_CHECK: '1' },
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(VERSION);
   });
 
   it('prints a JSON error when a global workspace option fails before work runs', async () => {
