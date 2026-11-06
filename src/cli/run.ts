@@ -59,9 +59,10 @@ program.hook('preAction', (command, actionCommand) => {
     parent === 'cloud' ||
     ((parent === 'inbox' || CLOUD_SERVED.has(actionCommand.name())) &&
       linkedMachine(process.env) !== undefined);
-  activeCommand = nonLocal || parent === 'work'
-    ? undefined
-    : { name: actionCommand.name(), startedAt: performance.now() };
+  activeCommand =
+    nonLocal || parent === 'work'
+      ? undefined
+      : { name: actionCommand.name(), startedAt: performance.now() };
 });
 
 program.hook('postAction', (_command, actionCommand) => {
