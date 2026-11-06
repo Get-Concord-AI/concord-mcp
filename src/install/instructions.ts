@@ -2,7 +2,7 @@ import { RELAYED_MESSAGE_GUIDANCE } from '../domain/pull-inbox.js';
 import { HARNESS_CONFIGS, renderHarnessMonitorInstructions } from '../domain/harness-config.js';
 
 /** Version of the generated agent workflow contract. */
-export const CONCORD_INSTRUCTION_VERSION = '7';
+export const CONCORD_INSTRUCTION_VERSION = '8';
 
 /** Concise MCP-native guidance, versioned with the running server. */
 export const CONCORD_SERVER_INSTRUCTIONS = `Concord coordinates coding agents through five workflow tools.
@@ -11,6 +11,7 @@ export const CONCORD_SERVER_INSTRUCTIONS = `Concord coordinates coding agents th
 - Use transfer_work for assignment, acceptance, decline, release, reassignment, evidence-bearing handoff offers, and reopening.
 - Call finish_work before finishing, review, or closure with changed files, tests, assumptions, decisions, risks, and provenance.
 Keep claims small and resolve reported overlaps before editing.
+Without an MCP client, run the same tools from a shell: concord work <start|inspect|update|transfer|finish> --agent <id> --json <file|->.
 ${RELAYED_MESSAGE_GUIDANCE}`;
 
 /** Canonical fallback block written into supported client instruction files. */
@@ -34,6 +35,11 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
   records evidence and can mark work review-ready or terminal.
 - Before handing work to cloud Devin, use \`transfer_work\` to hand off or
   release your local claim; cloud Devin cannot access this local Concord state.
+- **No MCP client?** Each tool has a shell form that takes the same arguments
+  and shares the same state: \`concord work start|inspect|update|transfer|finish
+  --agent <id> --json <file|->\` prints the tool's result as JSON and exits 1
+  on an error. Pick one stable \`--agent\` id (such as \`kind:name\`) and reuse
+  it on every call, or set \`CONCORD_AGENT_ID\` once.
 
 Keep each claim small and resolve reported overlaps before editing. Concord
 regenerates human-readable review artifacts in \`.concord/\`.
@@ -86,7 +92,7 @@ Keep each claim small and resolve reported overlaps before editing. Concord
 regenerates human-readable review artifacts in \`.concord/\`.`;
 
 /** Version of the user-level block written by global mode. */
-export const CONCORD_GLOBAL_INSTRUCTION_VERSION = '1';
+export const CONCORD_GLOBAL_INSTRUCTION_VERSION = '2';
 
 /** The user-level block for every session on the machine: short, and deferring to a repo's own section. */
 export const CONCORD_GLOBAL_INSTRUCTIONS = `## Concord — shared work-state for coding agents
@@ -104,6 +110,8 @@ Concord section, follow that instead of this one.
   messages to other agents, and \`transfer_work\` for handoffs.
 - **Before finishing**, call \`finish_work\` with the outcome, changed files,
   and tests.
+- Without an MCP client, run the same tools as \`concord work <action> --agent
+  <id> --json <file|->\`, reusing one stable agent id.
 - Before handing work to cloud Devin, use \`transfer_work\` to hand off or
   release your local claim; cloud Devin cannot access this local Concord state.
 
