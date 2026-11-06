@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex proxy now speaks WebSocket over stdio (`ws@8`) and `initialize` times out
+  after 10s instead of hanging (#320).
+
 ## [0.20.0] - 2026-11-05
 
 ### Added
