@@ -111,9 +111,11 @@ function captureOutput(): { stdout: () => string; stderr: () => string } {
   };
 }
 
+const symlinkErrorSchema = z.object({ code: z.string() });
+
 function symlinkErrorCode(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
-  return typeof error.code === 'string' ? error.code : undefined;
+  const parsed = symlinkErrorSchema.safeParse(error);
+  return parsed.success ? parsed.data.code : undefined;
 }
 
 /** Windows without Developer Mode rejects file symlinks; skip that case only. */
