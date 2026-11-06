@@ -15,6 +15,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
 } from 'node:fs';
@@ -260,7 +261,9 @@ function smokeEnvironment(layout: Layout): NodeJS.ProcessEnv {
 }
 
 function createLayout(): Layout {
-  const root = mkdtempSync(join(tmpdir(), 'concord-windows-smoke-'));
+  // Resolve 8.3 short names (e.g. RUNNER~1 on GitHub runners) so the prefix
+  // matches the long-form paths that `where` prints.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'concord-windows-smoke-')));
   const home = join(root, 'home');
   const directories = [
     home,
