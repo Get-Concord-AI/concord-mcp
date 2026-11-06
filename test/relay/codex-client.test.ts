@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { CodexDaemonClient } from '../../src/relay/codex-client.js';
 
 /** RFC 6455 magic. The proxy client and a standards-compliant daemon both use it. */
-const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC5B85B';
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 const rpcSchema = z.object({ id: z.number().optional(), method: z.string().optional() }).loose();
 
