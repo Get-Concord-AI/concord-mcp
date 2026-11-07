@@ -29,11 +29,11 @@ interface RpcSocket {
   close(): void;
 }
 
-function bufferFromChunk(chunk: unknown): Buffer | undefined {
+function bufferFromChunk(chunk: string | Buffer | ArrayBuffer | Buffer[]): Buffer {
   if (typeof chunk === 'string') return Buffer.from(chunk);
   if (Buffer.isBuffer(chunk)) return chunk;
-  if (chunk instanceof Uint8Array) return Buffer.from(chunk);
-  return undefined;
+  if (chunk instanceof ArrayBuffer) return Buffer.from(chunk);
+  return Buffer.concat(chunk);
 }
 
 function rawText(data: RawData): string | undefined {
@@ -55,17 +55,28 @@ function proxyStdio(child: ChildProcessWithoutNullStreams): Duplex {
         child.stdin.write(chunk, encoding, callback);
         return;
       }
-      const buffer = bufferFromChunk(chunk);
-      if (buffer === undefined) {
-        callback(new Error('Unexpected Codex proxy write.'));
+      if (Buffer.isBuffer(chunk) || chunk instanceof ArrayBuffer) {
+        child.stdin.write(bufferFromChunk(chunk), callback);
         return;
       }
-      child.stdin.write(buffer, callback);
+      if (Array.isArray(chunk)) {
+        const parts: Buffer[] = [];
+        for (const part of chunk) {
+          if (!Buffer.isBuffer(part)) {
+            callback(new Error('Unexpected Codex proxy write.'));
+            return;
+          }
+          parts.push(part);
+        }
+        child.stdin.write(bufferFromChunk(parts), callback);
+        return;
+      }
+      callback(new Error('Unexpected Codex proxy write.'));
     },
   });
-  child.stdout.on('data', (chunk: unknown) => {
+  child.stdout.on('data', (chunk) => {
+    if (typeof chunk !== 'string' && !Buffer.isBuffer(chunk)) return;
     const buffer = bufferFromChunk(chunk);
-    if (buffer === undefined) return;
     if (!stream.push(buffer)) child.stdout.pause();
   });
   child.stdout.on('end', () => {
