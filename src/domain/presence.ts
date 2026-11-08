@@ -1,4 +1,4 @@
-import type { AgentRecord, AgentStatus, TaskRecord } from '../db/index.js';
+import type { AgentExecutionStatus, AgentRecord, AgentStatus, TaskRecord } from '../db/index.js';
 
 /**
  * Liveness is *derived* from how long ago an agent was last seen — never stored.
@@ -32,10 +32,18 @@ export interface PresenceEntry {
   owner: string | null;
   summary: string | null;
   status: AgentStatus;
+  executionStatus: AgentExecutionStatus;
   liveness: Liveness;
   lastSeen: string;
   /** Whole seconds since `last_seen`, floored at 0. */
   ageSeconds: number;
+  heartbeatAt: string;
+  heartbeatLiveness: Liveness;
+  heartbeatAgeSeconds: number;
+  activityAt: string | null;
+  activityAgeSeconds: number | null;
+  summaryUpdatedAt: string | null;
+  summaryAgeSeconds: number | null;
 }
 
 /** Derive liveness from a `last_seen` ISO timestamp relative to `now` (ms since
@@ -73,13 +81,35 @@ function ageSecondsOf(lastSeen: string, now: number): number {
   return Math.max(0, Math.floor((now - seen) / 1000));
 }
 
-/**
- * Build the presence roster from registered agents: live agents first, then by
- * most-recently-seen. This is the "who is here and what are they doing" view
- * that other agents read before or while working. Archived agents are omitted
- * — they stay registered forever, they just no longer appear here.
- */
-/** An active claim whose owning agent is no longer reliably present. */
+function optionalAgeSecondsOf(timestamp: string | null, now: number): number | null {
+  return timestamp === null ? null : ageSecondsOf(timestamp, now);
+}
+
+export function presenceEntryOf(
+  agent: AgentRecord,
+  now: number,
+  thresholds: PresenceThresholds = DEFAULT_PRESENCE_THRESHOLDS,
+): PresenceEntry {
+  return {
+    agentId: agent.agentId,
+    kind: agent.kind,
+    owner: agent.owner,
+    summary: agent.summary,
+    status: agent.status,
+    executionStatus: agent.executionStatus,
+    liveness: deriveLiveness(agent.lastSeen, now, thresholds),
+    lastSeen: agent.lastSeen,
+    ageSeconds: ageSecondsOf(agent.lastSeen, now),
+    heartbeatAt: agent.heartbeatAt,
+    heartbeatLiveness: deriveLiveness(agent.heartbeatAt, now, thresholds),
+    heartbeatAgeSeconds: ageSecondsOf(agent.heartbeatAt, now),
+    activityAt: agent.activityAt,
+    activityAgeSeconds: optionalAgeSecondsOf(agent.activityAt, now),
+    summaryUpdatedAt: agent.summaryUpdatedAt,
+    summaryAgeSeconds: optionalAgeSecondsOf(agent.summaryUpdatedAt, now),
+  };
+}
+
 export interface StaleClaim {
   taskId: string;
   title: string;
@@ -133,22 +163,19 @@ export function detectStaleClaims(
   return stale;
 }
 
+/**
+ * Build the presence roster from registered agents: live agents first, then by
+ * most-recently-seen. This is the "who is here and what are they doing" view
+ * that other agents read before or while working. Archived agents are omitted
+ * — they stay registered forever, they just no longer appear here.
+ */
 export function buildRoster(
   agents: readonly AgentRecord[],
   now: number,
   thresholds: PresenceThresholds = DEFAULT_PRESENCE_THRESHOLDS,
 ): PresenceEntry[] {
   return agents
-    .map((agent) => ({
-      agentId: agent.agentId,
-      kind: agent.kind,
-      owner: agent.owner,
-      summary: agent.summary,
-      status: agent.status,
-      liveness: deriveLiveness(agent.lastSeen, now, thresholds),
-      lastSeen: agent.lastSeen,
-      ageSeconds: ageSecondsOf(agent.lastSeen, now),
-    }))
+    .map((agent) => presenceEntryOf(agent, now, thresholds))
     .filter((entry) => entry.liveness !== 'archived')
     .sort((a, b) => {
       const byLiveness = LIVENESS_ORDER[a.liveness] - LIVENESS_ORDER[b.liveness];

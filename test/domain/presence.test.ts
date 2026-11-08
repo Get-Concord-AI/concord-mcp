@@ -22,12 +22,14 @@ function agent(partial: Partial<AgentRecord> & { agentId: string }): AgentRecord
     branch: partial.branch ?? null,
     summary: partial.summary ?? null,
     status: partial.status ?? 'active',
-    executionStatus: partial.executionStatus ?? 'executing',
+    executionStatus:
+      partial.executionStatus ??
+      ((partial.status ?? 'active') === 'active' ? 'executing' : 'not_executing'),
+    firstSeen: partial.firstSeen ?? ago(60 * 60 * 1000),
+    lastSeen: partial.lastSeen ?? ago(0),
     heartbeatAt: partial.heartbeatAt ?? partial.lastSeen ?? ago(0),
     activityAt: partial.activityAt ?? null,
     summaryUpdatedAt: partial.summaryUpdatedAt ?? null,
-    firstSeen: partial.firstSeen ?? ago(60 * 60 * 1000),
-    lastSeen: partial.lastSeen ?? ago(0),
   };
 }
 
@@ -79,6 +81,37 @@ describe('buildRoster', () => {
     expect(entry?.summary).toBe('building frontend');
     expect(entry?.liveness).toBe('live');
     expect(entry?.ageSeconds).toBe(90);
+  });
+
+  it('keeps heartbeat, activity, summary age and reported status separate', () => {
+    const [entry] = buildRoster(
+      [
+        agent({
+          agentId: 'claude-code:7p8v',
+          summary: 'finished earlier task',
+          status: 'done',
+          heartbeatAt: ago(40 * 60 * 1000),
+          activityAt: ago(10_000),
+          lastSeen: ago(10_000),
+          summaryUpdatedAt: ago(3 * 60 * 60 * 1000),
+        }),
+      ],
+      NOW,
+    );
+    expect(entry?.status).toBe('done');
+    expect(entry?.executionStatus).toBe('not_executing');
+    expect(entry?.liveness).toBe('live');
+    expect(entry?.heartbeatLiveness).toBe('away');
+    expect(entry?.heartbeatAgeSeconds).toBe(2400);
+    expect(entry?.activityAgeSeconds).toBe(10);
+    expect(entry?.summaryAgeSeconds).toBe(10_800);
+  });
+
+  it('reports no activity or summary age when none was recorded', () => {
+    const [entry] = buildRoster([agent({ agentId: 'claude-code:7p8v' })], NOW);
+    expect(entry?.activityAt).toBeNull();
+    expect(entry?.activityAgeSeconds).toBeNull();
+    expect(entry?.summaryAgeSeconds).toBeNull();
   });
 
   it('orders live agents first, then most-recently-seen', () => {

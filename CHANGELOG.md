@@ -8,6 +8,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Show heartbeat, activity, and summary ages separately in the roster, dashboard,
+  and exported work state (#68). Reported agent status stays independent of work.
+
 - Preserve omitted agent registration fields and store heartbeat, activity, and
   summary timestamps independently (#68). Migration 016 appends to the existing
   migration history.
