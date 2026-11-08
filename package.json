@@ -51,6 +51,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "vitest run --config vitest.e2e.config.ts",
+    "smoke:windows": "node --experimental-strip-types scripts/windows-install-smoke.ts",
     "demo": "pnpm build && bash examples/whack-a-mole/run.sh",
     "demo:stop": "bash examples/whack-a-mole/stop.sh",
     "prepublishOnly": "npm run build"
