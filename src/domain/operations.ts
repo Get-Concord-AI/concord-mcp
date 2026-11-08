@@ -36,10 +36,14 @@ export type ClaimWorkInput = Pick<
 
 export interface GetTaskContextInput {
   task_id: NonNullable<InspectWorkInput['task_id']>;
+  include_superseded?: boolean | undefined;
 }
 
 export type UpdateTaskInput = Require<
-  Pick<UpdateWorkInput, 'task_id' | 'kind' | 'content' | 'agent_id'>,
+  Pick<
+    UpdateWorkInput,
+    'task_id' | 'kind' | 'content' | 'agent_id' | 'supersedes' | 'supersede_reason'
+  >,
   'task_id' | 'kind'
 > & { agent?: string | undefined };
 

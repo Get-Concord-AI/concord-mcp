@@ -44,7 +44,9 @@ export function buildDashboardSnapshot(
     .map((task) => ({
       task,
       touches: touchesOf(task),
-      updates: repos.taskUpdates.listByTask(task.taskId),
+      updates: repos.taskUpdates
+        .listByTask(task.taskId)
+        .filter((update) => update.supersededBy === null),
       latestHandoff: repos.handoffs.latestForTask(task.taskId),
       latestReview: repos.reviews.latestForTask(task.taskId),
     }))
