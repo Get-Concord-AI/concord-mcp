@@ -22,6 +22,10 @@ function agent(partial: Partial<AgentRecord> & { agentId: string }): AgentRecord
     branch: partial.branch ?? null,
     summary: partial.summary ?? null,
     status: partial.status ?? 'active',
+    executionStatus: partial.executionStatus ?? 'executing',
+    heartbeatAt: partial.heartbeatAt ?? partial.lastSeen ?? ago(0),
+    activityAt: partial.activityAt ?? null,
+    summaryUpdatedAt: partial.summaryUpdatedAt ?? null,
     firstSeen: partial.firstSeen ?? ago(60 * 60 * 1000),
     lastSeen: partial.lastSeen ?? ago(0),
   };

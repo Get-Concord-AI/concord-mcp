@@ -269,4 +269,18 @@ export const migrations: readonly string[] = [
   // 015 — messaging v2: sent/delivered/read/replied receipts, per-session
   // delivery attribution, and expiry for messages nobody ever took.
   MESSAGING_V2_MIGRATION,
+  // 016 — split presence out of last_seen into heartbeat, activity, summary
+  // change time, and execution status. last_seen stays as the freshest signal.
+  `
+  ALTER TABLE agents ADD COLUMN heartbeat_at TEXT;
+  ALTER TABLE agents ADD COLUMN activity_at TEXT;
+  ALTER TABLE agents ADD COLUMN summary_updated_at TEXT;
+  ALTER TABLE agents ADD COLUMN execution_status TEXT NOT NULL DEFAULT 'not_executing';
+
+  UPDATE agents SET
+    heartbeat_at = last_seen,
+    activity_at = last_seen,
+    summary_updated_at = CASE WHEN summary IS NULL THEN NULL ELSE last_seen END,
+    execution_status = CASE WHEN status = 'active' THEN 'executing' ELSE 'not_executing' END;
+  `,
 ];

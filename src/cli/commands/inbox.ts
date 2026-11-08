@@ -116,7 +116,7 @@ export function drainInbox(
 ): DeliverableMessage[] {
   registerPullEndpoint(repos, agentId, provider, Date.now(), capability);
   const claimed = repos.agentMessages.claimPendingForRecipient(agentId, provider, options);
-  repos.agents.touch(agentId);
+  repos.agents.heartbeat(agentId);
   return claimed.map(toDeliverable);
 }
 

@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve omitted agent registration fields and store heartbeat, activity, and
+  summary timestamps independently (#68). Migration 016 appends to the existing
+  migration history.
+
 ## [0.20.0] - 2026-11-05
 
 ### Added
