@@ -14,11 +14,13 @@ export const CONCORD_SERVER_COMMAND = 'concord-mcp';
 const JSON_TARGETS: readonly string[] = [
   '.mcp.json',
   join('.cursor', 'mcp.json'),
+  join('.roo', 'mcp.json'),
   join('.agents', 'mcp_config.json'),
   join('.github', 'mcp.json'),
 ];
 /** Harness kind each project file pins, for files only one harness reads. */
 const PINNED_KINDS: ReadonlyMap<string, string> = new Map([
+  [join('.roo', 'mcp.json'), 'roo'],
   [join('.agents', 'mcp_config.json'), 'antigravity'],
   [join('.github', 'mcp.json'), 'copilot-cli'],
 ]);
@@ -276,9 +278,9 @@ function writeGeminiConfig(repoRoot: string): string {
 
 /**
  * Register Concord in every project-scoped client config under `repoRoot`:
- * Claude Code, Cursor, Antigravity, Copilot CLI, Gemini CLI, and Grok Build.
- * Codex uses its user-scoped TOML installer because that harness does not
- * expose a project MCP file.
+ * Claude Code, Cursor, Roo Code, Antigravity, Copilot CLI, Gemini CLI, and
+ * Grok Build. Codex uses its user-scoped TOML installer because that harness
+ * does not expose a project MCP file.
  */
 export function installMcpConfigs(repoRoot: string): string[] {
   return [
