@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, fix/presence-storage, feat/presence-signal-display]
 
 concurrency:
   group: ci-${{ github.ref }}
