@@ -7,6 +7,7 @@ import {
   ANTIGRAVITY_RULE_HEADER,
   CONCORD_INSTRUCTIONS,
   CURSOR_MDC_HEADER,
+  ROO_INSTRUCTIONS,
 } from './instructions.js';
 
 interface InstallTarget {
@@ -23,7 +24,7 @@ const TARGETS: readonly InstallTarget[] = [
   { relPath: 'AGENTS.md' },
   { relPath: join('.codex', 'concord.md') },
   { relPath: join('.cursor', 'rules', 'concord.mdc'), header: CURSOR_MDC_HEADER },
-  { relPath: join('.roo', 'rules', 'concord.md') },
+  { relPath: join('.roo', 'rules', 'concord.md'), instructions: ROO_INSTRUCTIONS },
   { relPath: join('.github', 'copilot-instructions.md') },
   {
     relPath: join('.agents', 'rules', 'concord.md'),

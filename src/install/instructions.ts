@@ -85,6 +85,33 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
 Keep each claim small and resolve reported overlaps before editing. Concord
 regenerates human-readable review artifacts in \`.concord/\`.`;
 
+/** Roo Code guidance: Concord cannot read a Roo session id, so the agent registers itself. */
+export const ROO_INSTRUCTIONS = `## Concord: shared work-state for coding agents
+
+<!-- concord:workflow-version=${CONCORD_INSTRUCTION_VERSION} -->
+
+This project uses Concord MCP. Keep coordination to the five workflow tools:
+
+- **First**, run \`concord inbox register\` in a terminal and keep the \`agent_id\`
+  it prints. Concord cannot read a Roo Code session id, so pass this
+  \`agent_id\` on every Concord tool call.
+- **Before editing**, call \`start_work\` with the task, your agent kind
+  (\`roo\`), your \`agent_id\`, and expected files or modules. It registers
+  presence, claims the scope, and returns overlap warnings.
+- Use \`inspect_work\` to read the workspace, one task, one agent, or one message
+  thread. Use \`update_work\` for durable progress and for prompts/replies to
+  another promptable workspace agent.
+- Use \`transfer_work\` for assignment, acceptance, decline, release,
+  reassignment, evidence-bearing handoff offers, and reopening.
+- **Before finishing**, call \`finish_work\` once with the outcome, changed
+  files, tests, assumptions, decisions, risks, guardrails, and provenance.
+
+Roo Code has no verified way to wake an idle session, so peer messages are only
+available by pulling them with \`inspect_work\`.
+
+Keep each claim small and resolve reported overlaps before editing. Concord
+regenerates human-readable review artifacts in \`.concord/\`.`;
+
 /** Version of the user-level block written by global mode. */
 export const CONCORD_GLOBAL_INSTRUCTION_VERSION = '1';
 

@@ -56,7 +56,12 @@ describe('installConcord', () => {
       'alwaysApply: true',
     );
 
-    expect(readFileSync(join(root, '.roo', 'rules', 'concord.md'), 'utf8')).toContain('start_work');
+    // Roo cannot be identified from its session, so its rule must tell it to register
+    // and pass an agent_id rather than the generic "omit it" guidance.
+    const rooRule = readFileSync(join(root, '.roo', 'rules', 'concord.md'), 'utf8');
+    expect(rooRule).toContain('start_work');
+    expect(rooRule).toContain('concord inbox register');
+    expect(rooRule).not.toContain('omit it');
 
     expect(readFileSync(join(root, '.agents', 'rules', 'concord.md'), 'utf8')).toContain(
       'trigger: always_on',

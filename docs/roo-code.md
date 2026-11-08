@@ -1,9 +1,11 @@
 # Using Concord with Roo Code
 
-Run `concord setup` in the repository. Setup registers Concord's MCP server in
-the project's `.roo/mcp.json` and writes the Concord workflow instructions to
-`.roo/rules/concord.md`. Existing MCP servers, settings, and rule content are
-preserved, and re-running setup leaves the files unchanged.
+Run `concord setup --repo-files` in the repository. Roo Code needs project files
+even when global mode is on, because Concord has no user-level Roo setup. Setup
+registers Concord's MCP server in the project's `.roo/mcp.json` and writes the
+Concord workflow instructions to `.roo/rules/concord.md`. Existing MCP servers,
+settings, and rule content are preserved, and re-running setup leaves the files
+unchanged.
 
 Roo Code is a VS Code extension rather than a command-line tool, so Concord does
 not look for an executable. Like the other project-scoped configs, the files are
@@ -14,9 +16,9 @@ its MCP server with Roo Code, but live inbox messaging is not currently
 supported. Do not expect live inbox messages to reach Roo Code sessions yet.
 
 Concord has no verified way to read a Roo Code session id, so it cannot derive
-the agent's identity on its own. A Roo Code agent has to identify itself with an
-`agent_id` from `concord inbox register`, or you can set `CONCORD_AGENT_ID`
-before starting the session.
+the agent's identity on its own. The installed rule tells the agent to run
+`concord inbox register` and pass the `agent_id` it prints. You can also set
+`CONCORD_AGENT_ID` before starting the session.
 
 ## Configuration
 
