@@ -6,9 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-09
+
+### Added
+
+- Qwen Code project setup registers Concord in `.qwen/settings.json`, preserving
+  existing settings. Adapter checks report unreadable settings without stopping
+  doctor. Qwen supports delivery during a turn; idle wake-up is not verified.
+- Decisions can replace earlier decisions on the same task with `supersedes` and
+  `supersede_reason` on `update_work`. Task context hides replaced decisions by
+  default; pass `include_superseded: true` to `inspect_work` to include them.
+
 ### Fixed
 
 - Local relay preserves multibyte UTF-8 content when frames arrive across socket chunks.
+- Local relay reuses results for duplicate deliveries and rejects the same message
+  ID with different content. Failed deliveries can be retried; duplicate protection
+  lasts for the relay process and does not persist across restarts.
+- Grok's Stop hook no longer asks for another inbox monitor when a live local or
+  cloud receiver already holds the session's receiver lease.
+
+### Changed
+
+- CI now smoke-tests the installed npm command shim on Windows.
 
 ## [0.20.0] - 2026-11-05
 
