@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Local relay preserves multibyte UTF-8 content when frames arrive across socket chunks.
+
 ## [0.20.0] - 2026-11-05
 
 ### Added

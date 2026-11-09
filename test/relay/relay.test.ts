@@ -1,4 +1,5 @@
 import { mkdtempSync } from 'node:fs';
+import { createConnection, createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +9,7 @@ import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { relayAddress } from '../../src/relay/address.js';
 import { CodexAppServerAdapter } from '../../src/relay/adapters.js';
+import { encodeRelayFrame, type RelayDelivery } from '../../src/relay/protocol.js';
 import {
   relayHeartbeatPhaseDelay,
   startAgentRelay,
@@ -32,6 +34,27 @@ function register(repos: Repositories, agentId: string): void {
     branch: null,
     summary: null,
     status: 'active',
+  });
+}
+
+async function listen(server: Server, address: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(address, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+}
+
+async function closeServer(server: Server): Promise<void> {
+  if (!server.listening) return;
+
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error === undefined) resolve();
+      else reject(error);
+    });
   });
 }
 
@@ -98,6 +121,124 @@ describe('local IPC relay', () => {
       );
     } finally {
       await relay.close();
+    }
+  });
+
+  it('preserves multibyte request content when a frame spans socket writes', async () => {
+    const deliveries: AgentSessionDelivery[] = [];
+    const address = relayAddress(mkdtempSync(join(tmpdir(), 'concord-relay-')), 'codex:target');
+    const content = 'namaste  café 東京';
+    const relay = await startAgentRelay({
+      repos,
+      agentId: 'codex:target',
+      address,
+      adapter: {
+        provider: 'codex',
+        isBusy: () => false,
+        steer: () => Promise.reject(new Error('not busy')),
+        inject: (delivery) => {
+          deliveries.push(delivery);
+          return Promise.resolve('turn-utf8');
+        },
+      },
+    });
+
+    try {
+      const endpoint = repos.agentEndpoints.getByAgent('codex:target');
+      if (endpoint === undefined) throw new Error('Relay endpoint was not registered.');
+
+      const request: RelayDelivery = {
+        version: 1,
+        type: 'deliver',
+        messageId: 'utf8-request-1',
+        senderAgentId: 'codex:sender',
+        recipientAgentId: 'codex:target',
+        credentialProof: endpoint.credentialHash,
+        content,
+      };
+      const frame = Buffer.from(encodeRelayFrame(request), 'utf8');
+      const splitAt = frame.indexOf(Buffer.from('東', 'utf8')) + 1;
+      const response = await new Promise<Buffer>((resolve, reject) => {
+        const socket = createConnection(address);
+        const responseChunks: Buffer[] = [];
+        socket.on('data', (chunk) => {
+          if (Buffer.isBuffer(chunk)) {
+            responseChunks.push(chunk);
+          }
+        });
+        socket.once('error', reject);
+        socket.once('end', () => {
+          resolve(Buffer.concat(responseChunks));
+        });
+        socket.once('connect', () => {
+          socket.write(frame.subarray(0, splitAt));
+          setTimeout(() => {
+            socket.write(frame.subarray(splitAt));
+          }, 10);
+        });
+      });
+
+      expect(response.toString('utf8')).toContain('"ok":true');
+      expect(deliveries[0]?.content).toBe(content);
+      expect(deliveries[0]?.content).not.toContain('\uFFFD');
+    } finally {
+      await relay.close();
+    }
+  });
+
+  it('preserves multibyte relay responses split across socket chunks', async () => {
+    const address = relayAddress(
+      mkdtempSync(join(tmpdir(), 'concord-relay-response-')),
+      'codex:target',
+    );
+    const response = Buffer.from(
+      encodeRelayFrame({
+        version: 1,
+        ok: true,
+        provider: '東京',
+        delivery: 'inject',
+        receipt: 'turn-café',
+      }),
+      'utf8',
+    );
+    const splitAt = response.indexOf(Buffer.from('東', 'utf8')) + 1;
+    const server = createServer((socket) => {
+      socket.once('data', () => {
+        socket.write(response.subarray(0, splitAt));
+        setTimeout(() => {
+          socket.end(response.subarray(splitAt));
+        }, 10);
+      });
+    });
+    await listen(server, address);
+
+    try {
+      const endpoint = repos.agentEndpoints.upsert({
+        endpointId: 'utf8-response-endpoint',
+        agentId: 'codex:target',
+        provider: 'codex',
+        transport: 'local-ipc',
+        capabilities: ['local-ipc'],
+        address,
+        credentialHash: 'unused-by-response-server',
+      });
+      const message = handleSendAgentMessage(repos, {
+        operation: 'prompt',
+        agentId: 'codex:sender',
+        toAgentId: 'codex:target',
+        content: 'Read this response.',
+        idempotencyKey: 'utf8-response-1',
+      }).message;
+
+      await expect(
+        new SocketAgentMessageDispatcher().deliver({ endpoint, message }),
+      ).resolves.toEqual({
+        provider: '東京',
+        delivery: 'inject',
+        receipt: 'turn-café',
+      });
+    } finally {
+      await closeServer(server);
     }
   });
 
