@@ -3,7 +3,13 @@
  * without this build. npm installs harness CLIs on Windows as `.cmd` shims,
  * and Node refuses to spawn those without a shell.
  */
-import { spawn, spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import {
+  spawn,
+  spawnSync,
+  type ChildProcess,
+  type StdioOptions,
+  type SpawnSyncReturns,
+} from 'node:child_process';
 import { join } from 'node:path';
 
 const BATCH_EXTENSION = /\.(?:cmd|bat)$/iu;
@@ -69,6 +75,20 @@ export function spawnCommandSync(
     encoding: 'utf8',
     shell: false,
     windowsHide: true,
+    windowsVerbatimArguments: target.windowsVerbatimArguments,
+  });
+}
+
+/** Start a resolved executable, routing Windows batch shims through cmd.exe. */
+export function spawnCommand(
+  file: string,
+  args: readonly string[],
+  options: { env: NodeJS.ProcessEnv; cwd?: string; stdio?: StdioOptions },
+): ChildProcess {
+  const target = invocation(file, args, options.env);
+  return spawn(target.command, target.args, {
+    ...options,
+    shell: false,
     windowsVerbatimArguments: target.windowsVerbatimArguments,
   });
 }

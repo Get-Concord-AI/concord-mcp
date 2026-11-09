@@ -1,5 +1,5 @@
 import type { Command } from '@commander-js/extra-typings';
-import { spawn } from 'node:child_process';
+import { spawnCommand } from '../../install/spawn-command.js';
 
 import { z } from 'zod';
 
@@ -85,7 +85,10 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
   });
 }
 
-async function waitForCodexServer(url: string, server: ReturnType<typeof spawn>): Promise<void> {
+async function waitForCodexServer(
+  url: string,
+  server: ReturnType<typeof spawnCommand>,
+): Promise<void> {
   const healthUrl = url.replace(/^ws:/u, 'http:') + '/readyz';
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (server.exitCode !== null) {
@@ -170,13 +173,13 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
   // the complete managed tree from the resolved repository root.
   const context = codexManagedLaunchContext(repoRoot, url, process.env);
   const argv = codexLaunchArgv(url, args);
-  const server = spawn('codex', argv.appServer, {
+  const server = spawnCommand(executable, argv.appServer, {
     ...context,
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   try {
     await waitForCodexServer(url, server);
-    const tui = spawn('codex', argv.tui, {
+    const tui = spawnCommand(executable, argv.tui, {
       ...context,
       stdio: 'inherit',
     });
