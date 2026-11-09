@@ -9,7 +9,9 @@ import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { relayAddress } from '../../src/relay/address.js';
 import { CodexAppServerAdapter } from '../../src/relay/adapters.js';
+import { RelayFrameReader } from '../../src/relay/frame-reader.js';
 import {
+  decodeRelayDelivery,
   decodeRelayResponse,
   encodeRelayFrame,
   type RelayDelivery,
@@ -188,6 +190,14 @@ describe('local IPC relay', () => {
       };
       const frame = Buffer.from(encodeRelayFrame(request), 'utf8');
       const splitAt = frame.indexOf(Buffer.from('東', 'utf8')) + 1;
+      const reader = new RelayFrameReader();
+      reader.append(frame.subarray(0, splitAt));
+      expect(reader.readFrames()).toEqual([]);
+      reader.append(frame.subarray(splitAt));
+      const decodedFrame = reader.readFrames()[0];
+      if (decodedFrame === undefined) throw new Error('expected one relay frame');
+      expect(decodeRelayDelivery(decodedFrame).content).toBe(content);
+      expect(decodedFrame).not.toContain('\uFFFD');
       const response = await new Promise<Buffer>((resolve, reject) => {
         const socket = createConnection(address);
         const responseChunks: Buffer[] = [];
@@ -210,7 +220,6 @@ describe('local IPC relay', () => {
 
       expect(response.toString('utf8')).toContain('"ok":true');
       expect(deliveries[0]?.content).toBe(renderPeerMessage(pending.message));
-      expect(deliveries[0]?.content).not.toContain('\uFFFD');
     } finally {
       await relay.close();
     }
