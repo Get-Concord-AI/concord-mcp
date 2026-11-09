@@ -3,6 +3,7 @@ import { chmodSync, existsSync, lstatSync, unlinkSync } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 
 import type { Repositories } from '../db/index.js';
+import { RelayFrameReader } from './frame-reader.js';
 import {
   decodeRelayDelivery,
   encodeRelayFrame,
@@ -282,16 +283,21 @@ export async function startAgentRelay(
   };
 
   const server = createServer((socket) => {
-    let buffer = '';
+    const frameReader = new RelayFrameReader();
 
     socket.setTimeout(2_000, () => {
       socket.destroy();
     });
 
     socket.on('data', (chunk) => {
-      buffer += chunk.toString('utf8');
+      if (!Buffer.isBuffer(chunk)) {
+        socket.destroy();
+        return;
+      }
 
-      if (Buffer.byteLength(buffer, 'utf8') > MAX_RELAY_FRAME_BYTES) {
+      frameReader.append(chunk);
+
+      if (frameReader.bufferedByteLength > MAX_RELAY_FRAME_BYTES) {
         socket.removeAllListeners('data');
         respond(socket, {
           version: RELAY_PROTOCOL_VERSION,
@@ -301,14 +307,14 @@ export async function startAgentRelay(
         return;
       }
 
-      const newline = buffer.indexOf('\n');
-      if (newline < 0) return;
+      const frame = frameReader.readFrames()[0];
+      if (frame === undefined) return;
 
       socket.removeAllListeners('data');
 
       void (async () => {
         try {
-          const delivery = decodeRelayDelivery(buffer.slice(0, newline));
+          const delivery = decodeRelayDelivery(frame);
 
           if (!authenticated(delivery.credentialProof, credentialProof)) {
             throw new Error('Relay credential was rejected.');
