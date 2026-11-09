@@ -283,7 +283,6 @@ export async function startAgentRelay(
     return promise;
   };
 
-  // The presented digest is the database column, so the pending row is the prompt.
   const deliveryFromStore = (frame: RelayDelivery): AgentSessionDelivery => {
     if (frame.recipientAgentId !== options.agentId) {
       throw new Error(`Relay endpoint belongs to ${options.agentId}.`);
