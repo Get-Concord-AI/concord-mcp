@@ -931,7 +931,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
-  uninstallDeepseekConfig(env);
+  try {
+    uninstallDeepseekConfig(env);
+  } catch {
+    // Leave malformed or unreadable DeepSeek config untouched and continue cleanup.
+  }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
   if (existsSync(antigravityMcp)) {
