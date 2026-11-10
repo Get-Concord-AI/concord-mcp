@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -84,6 +84,40 @@ describe('applyGlobalMode', () => {
 
     expect(report.registrations).toEqual([]);
     expect(existsSync(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).toBe(false);
+  });
+
+  it('writes one instruction block per OpenClaw agent workspace and removes them cleanly', () => {
+    const env = machine(['openclaw']);
+    mkdirSync(join(env.HOME, '.openclaw'));
+    writeFileSync(
+      join(env.HOME, '.openclaw', 'openclaw.json'),
+      '{ agents: { entries: { main: { default: true }, research: {} } } }\n',
+    );
+    const mainFile = join(env.HOME, '.openclaw', 'workspace', 'AGENTS.md');
+    const researchFile = join(env.HOME, '.openclaw', 'workspace-research', 'AGENTS.md');
+    mkdirSync(dirname(mainFile), { recursive: true });
+    writeFileSync(mainFile, '# Main agent\n');
+
+    const on = applyGlobalMode(env, true);
+
+    expect(on.warnings).toEqual([]);
+    expect(read(mainFile)).toMatch(/^# Main agent\n\n<!-- concord/u);
+    expect(read(mainFile)).toContain('agent_id: "openclaw:main"');
+    expect(read(mainFile)).not.toContain('openclaw:research');
+    expect(read(researchFile)).toContain('agent_id: "openclaw:research"');
+    expect(read(researchFile)).toContain('do not run `concord setup` yourself');
+
+    const off = applyGlobalMode(env, false, { registrations: on.registrations });
+
+    expect(off.warnings).toEqual([]);
+    expect(read(mainFile)).toBe('# Main agent\n');
+    expect(existsSync(researchFile)).toBe(false);
+  });
+
+  it('skips OpenClaw instruction files when OpenClaw is not installed', () => {
+    const env = machine([]);
+    applyGlobalMode(env, true);
+    expect(existsSync(join(env.HOME, '.openclaw', 'workspace', 'AGENTS.md'))).toBe(false);
   });
 
   it('registers and instructs each installed harness, then removes only its own additions', () => {

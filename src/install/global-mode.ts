@@ -3,11 +3,14 @@ import { dirname, join } from 'node:path';
 
 import { userHome } from '../config/paths.js';
 import { devinCliSupportsDedicatedMcpConfig, executablePath, run } from './adapters/index.js';
+import { isOpenclawDetected } from './adapters/openclaw.js';
+import { HARNESS_CONFIGS } from '../domain/harness-config.js';
 import { removeBlock, upsertBlock } from './block.js';
 import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
 import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
+import { openclawAgentWorkspaces } from './openclaw-config.js';
 import {
   devinMcpConfigPath,
   hasDevinMcpServer,
@@ -15,7 +18,11 @@ import {
   upsertDevinMcpConfig,
 } from './devin-config.js';
 import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-user-hooks.js';
-import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
+import {
+  ANTIGRAVITY_RULE_HEADER,
+  CONCORD_GLOBAL_INSTRUCTIONS,
+  openclawGlobalInstructions,
+} from './instructions.js';
 import {
   CONCORD_SERVER_COMMAND,
   CONCORD_SERVER_KEY,
@@ -164,6 +171,21 @@ const USER_FILES: readonly UserFile[] = [
   },
 ];
 
+/**
+ * One instruction file per OpenClaw agent: each agent reads the `AGENTS.md` of its
+ * own workspace, and gets a block naming its own Concord id. The MCP registration
+ * is the adapter's, as for Goose.
+ */
+function openclawInstructionFiles(env: NodeJS.ProcessEnv): UserFile[] {
+  return openclawAgentWorkspaces(env).map(({ agentId, workspace }) => ({
+    isDetected: (env) =>
+      isOpenclawDetected(executablePath(HARNESS_CONFIGS.openclaw.executable, env), env),
+    path: () => join(workspace, 'AGENTS.md'),
+    install: (existing) => upsertBlock(existing ?? '', openclawGlobalInstructions(agentId)),
+    uninstall: removeBlock,
+  }));
+}
+
 /** A registration global mode added, or a missing one, may change; the user's own never does. */
 function mayChange(
   registration: Registration,
@@ -257,7 +279,7 @@ export function applyGlobalMode(
   const owned = new Set(options.registrations);
   const report: GlobalModeReport = { written: [], warnings: [], registrations: [] };
   const mcp = options.mcp !== false;
-  for (const file of USER_FILES) {
+  for (const file of [...USER_FILES, ...openclawInstructionFiles(env)]) {
     if (mcp || file.registration === undefined) applyFile(env, file, enable, owned, report);
   }
   if (mcp) applyClaude(env, enable, owned, report);

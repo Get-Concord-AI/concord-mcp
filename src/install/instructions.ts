@@ -109,3 +109,16 @@ Concord section, follow that instead of this one.
 
 Outside any repository, work is recorded in the shared \`general\` workspace.
 Concord needs no files in the repository: do not run \`concord setup\` yourself.`;
+
+/**
+ * The user-level block for one OpenClaw agent. OpenClaw spawns Concord without
+ * a session id, so each agent's workspace instructions fix the id it passes;
+ * that keeps the presence and claims of several agents on one machine apart.
+ */
+export function openclawGlobalInstructions(agentId: string): string {
+  return `${CONCORD_GLOBAL_INSTRUCTIONS}
+
+You are the OpenClaw agent \`${agentId}\`. OpenClaw does not tell Concord which
+session is calling, so pass \`agent_id: "openclaw:${agentId}"\` on every Concord
+tool call, and \`kind: "openclaw"\` to \`start_work\`. Never use another agent's id.`;
+}

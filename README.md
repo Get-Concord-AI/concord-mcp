@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, and GitHub Copilot CLI talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, OpenClaw, and GitHub Copilot CLI talk to each other.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -89,7 +89,9 @@ direct prompts and replies.
 for Claude, Cursor, Gemini, Grok, and Codex (`.mcp.json`, `.cursor/mcp.json`,
 `.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`).
 For [Goose](./docs/goose.md), it registers the `concord-relay` extension in
-Goose's `config.yaml` when detected. For
+Goose's `config.yaml` when detected. For [OpenClaw](./docs/openclaw.md), it
+registers Concord under `mcp.servers` in `~/.openclaw/openclaw.json` when
+detected. For
 [Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
 `.agents/hooks.json`, and `.agents/rules/concord.md`. It also writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
@@ -119,7 +121,8 @@ answer is saved in `~/.concord/config.json`; `concord setup --global` or
 With global mode on, Concord registers itself at user level for each installed
 agent and adds a short Concord section to their user instruction files
 (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, Goose's
-`.goosehints`, `~/.copilot/copilot-instructions.md`; Cursor receives it from its global session hook). Nothing is
+`.goosehints`, each OpenClaw agent's workspace `AGENTS.md`,
+`~/.copilot/copilot-instructions.md`; Cursor receives it from its global session hook). Nothing is
 written into those repositories: their work is kept in `~/.concord/global.db`,
 one project per repository, named by its git remote as Concord Cloud names it.
 Sessions outside any repository share the `general` project. A repository you
@@ -157,6 +160,7 @@ aside once no session started before the link is running (nothing is deleted).
 | Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)         |
 | Grok Build                         | [Setup and delivery](./docs/grok-build.md)         |
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
+| OpenClaw                           | [Setup and delivery](./docs/openclaw.md)           |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
 | Devin CLI                          | Project-level setup via `concord setup`            |
