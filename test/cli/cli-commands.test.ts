@@ -155,7 +155,11 @@ describe('CLI read/export commands', () => {
     // Independent of where this checkout lives, including under /tmp.
     const lasting = (): boolean => false;
     mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
-    symlinkSync(join(home, 'deleted-scratchpad'), link);
+    symlinkSync(
+      join(home, 'deleted-scratchpad'),
+      link,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
 
     const before = await runDoctorCommand(dir, env, {
       moduleUrl: import.meta.url,
