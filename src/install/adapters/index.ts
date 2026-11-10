@@ -910,7 +910,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   } catch {
     // Preserve malformed Hermes settings and continue independent adapter cleanup.
   }
-  uninstallDeepseekConfig(env);
+  try {
+    uninstallDeepseekConfig(env);
+  } catch {
+    // Leave malformed or unreadable DeepSeek config untouched and continue cleanup.
+  }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
   if (existsSync(antigravityMcp)) {
