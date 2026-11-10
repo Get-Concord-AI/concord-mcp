@@ -8,6 +8,11 @@ import {
 } from '../../src/domain/harness-config.js';
 
 describe('harness configuration', () => {
+  it('keeps DeepSeek inbox delivery busy-only even when a monitor is requested', () => {
+    expect(HARNESS_CONFIGS.deepseek.defaultCapability.reach).toEqual(['busy']);
+    expect(configuredMonitorCapabilityFor('deepseek').reach).toEqual(['busy']);
+    expect(HARNESS_CONFIGS.deepseek.monitor).toMatchObject({ background: false, verified: false });
+  });
   it('defines every supported harness in one catalog', () => {
     expect(Object.keys(HARNESS_CONFIGS)).toEqual(harnessNames);
   });
