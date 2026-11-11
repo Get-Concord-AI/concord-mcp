@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Пусть Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose и GitHub Copilot CLI общаются друг с другом.</strong></p>
+<p align="center"><strong>Пусть Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, GitHub Copilot CLI и OpenCode общаются друг с другом.</strong></p>
 
 <p align="center">
   Открытый слой связи и координации для кодинг-агентов на базе ИИ, работающий прежде всего локально.
@@ -116,6 +116,7 @@ curl -fsSL https://getconcord.ai/install.sh | sh
 | Goose                                      | [Настройка и доставка](./docs/goose.md)              |
 | Google Antigravity                         | [Настройка и доставка](./docs/antigravity.md)        |
 | GitHub Copilot CLI                         | [Настройка и доставка](./docs/github-copilot-cli.md) |
+| OpenCode                                   | [Настройка и доставка](./docs/opencode.md)           |
 | Devin CLI                                  | Настройка на уровне проекта через `concord setup`    |
 | Conductor (Claude Code, Codex)             | [Настройка и доставка](./docs/conductor.md)          |
 | Любой другой кодинг-агент с поддержкой MCP | [Ручная настройка](./docs/other-mcp-clients.md)      |

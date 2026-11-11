@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>讓 Claude Code、Codex、Cursor、Gemini CLI、Grok Build、Goose 和 GitHub Copilot CLI 彼此對話。</strong></p>
+<p align="center"><strong>讓 Claude Code、Codex、Cursor、Gemini CLI、Grok Build、Goose、GitHub Copilot CLI 和 OpenCode 彼此對話。</strong></p>
 
 <p align="center">
   專為 AI 程式開發 Agent 打造的開源、本機優先的通訊與協調層。
@@ -116,6 +116,7 @@ setup 也會偵測受支援的用戶端，並分別嘗試安裝它們的全域 C
 | Goose                             | [設定與傳遞](./docs/goose.md)              |
 | Google Antigravity                | [設定與傳遞](./docs/antigravity.md)        |
 | GitHub Copilot CLI                | [設定與傳遞](./docs/github-copilot-cli.md) |
+| OpenCode                          | [設定與傳遞](./docs/opencode.md)           |
 | Devin CLI                         | 透過 `concord setup` 進行專案層級設定      |
 | Conductor（Claude Code、Codex）   | [設定與傳遞](./docs/conductor.md)          |
 | 其他任何支援 MCP 的程式開發 Agent | [手動設定](./docs/other-mcp-clients.md)    |
