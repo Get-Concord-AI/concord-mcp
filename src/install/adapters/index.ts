@@ -41,6 +41,7 @@ import {
   uninstallGlobalAntigravityHooks,
 } from '../antigravity-hooks.js';
 import {
+  agentKindEnv,
   hasMcpServer,
   isConcordServerOwned,
   removeMcpServer,
@@ -790,17 +791,11 @@ export function installAdapter(
       const existing = readFileSync(path, 'utf8');
       if (!hasMcpServer(existing)) {
         mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(
-          path,
-          upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
-        );
+        writeFileSync(path, upsertMcpServer(existing, undefined, agentKindEnv('antigravity')));
       }
     } else {
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(
-        path,
-        upsertMcpServer(undefined, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
-      );
+      writeFileSync(path, upsertMcpServer(undefined, undefined, agentKindEnv('antigravity')));
     }
     installGlobalAntigravityHooks(env);
     return;
