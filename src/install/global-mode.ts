@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 
 import { userHome } from '../config/paths.js';
-import { devinCliSupportsDedicatedMcpConfig, executablePath, run } from './adapters/index.js';
+import {
+  devinCliSupportsDedicatedMcpConfig,
+  executablePath,
+  kiroExecutablePath,
+  run,
+} from './adapters/index.js';
 import { removeBlock, upsertBlock } from './block.js';
 import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
@@ -15,13 +20,25 @@ import {
   upsertDevinMcpConfig,
 } from './devin-config.js';
 import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-user-hooks.js';
-import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
+import {
+  ANTIGRAVITY_RULE_HEADER,
+  CONCORD_GLOBAL_INSTRUCTIONS,
+  KIRO_STEERING_HEADER,
+} from './instructions.js';
+import {
+  kiroHome,
+  kiroUserHooksPath,
+  kiroUserMcpPath,
+  upsertKiroHooks,
+  withoutKiroHooks,
+} from './kiro-config.js';
 import {
   agentKindEnv,
   CONCORD_SERVER_COMMAND,
   CONCORD_SERVER_KEY,
   hasGrokMcpServer,
   hasMcpServer,
+  isConcordServerOwned,
   McpConfigParseError,
   removeGrokMcpServer,
   removeMcpServer,
@@ -41,6 +58,8 @@ export interface GlobalModeReport {
 interface Registration {
   readonly id: string;
   readonly present: (existing: string) => boolean;
+  /** True when an entry Concord wrote before global mode can be adopted. */
+  readonly adopt?: ((existing: string) => boolean) | undefined;
 }
 
 /** A user-level file global mode owns part of, for one harness. */
@@ -74,6 +93,11 @@ function isAntigravityDetected(env: NodeJS.ProcessEnv): boolean {
     env['ANTIGRAVITY_AGENT'] === '1' ||
     existsSync(antigravityConfigDir(env))
   );
+}
+
+/** Kiro's CLI, its IDE launcher, or an existing `~/.kiro` directory. */
+function isKiroDetected(env: NodeJS.ProcessEnv): boolean {
+  return kiroExecutablePath(env) !== undefined || existsSync(kiroHome(env));
 }
 
 function instructionFile(
@@ -162,6 +186,25 @@ const USER_FILES: readonly UserFile[] = [
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('antigravity')),
     uninstall: removeMcpServer,
   },
+  instructionFile(
+    'kiro',
+    (env) => join(kiroHome(env), 'steering', 'concord.md'),
+    KIRO_STEERING_HEADER,
+    isKiroDetected,
+  ),
+  {
+    isDetected: isKiroDetected,
+    path: kiroUserHooksPath,
+    install: (existing, path) => upsertKiroHooks(existing, path),
+    uninstall: withoutKiroHooks,
+  },
+  {
+    isDetected: isKiroDetected,
+    registration: { id: 'kiro', present: hasMcpServer, adopt: isConcordServerOwned },
+    path: kiroUserMcpPath,
+    install: (existing) => upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'kiro' }),
+    uninstall: removeMcpServer,
+  },
 ];
 
 /** A registration global mode added, or a missing one, may change; the user's own never does. */
@@ -172,7 +215,9 @@ function mayChange(
   owned: ReadonlySet<string>,
 ): boolean {
   if (owned.has(registration.id)) return true;
-  return enable && (existing === undefined || !registration.present(existing));
+  if (!enable) return false;
+  if (existing !== undefined && registration.adopt?.(existing) === true) return true;
+  return existing === undefined || !registration.present(existing);
 }
 
 function isFileDetected(file: UserFile, env: NodeJS.ProcessEnv): boolean {

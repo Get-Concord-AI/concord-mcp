@@ -42,6 +42,7 @@ describe('installConcord', () => {
       join('.cursor', 'rules', 'concord.mdc'),
       join('.github', 'copilot-instructions.md'),
       join('.agents', 'rules', 'concord.md'),
+      join('.kiro', 'steering', 'concord.md'),
     ]);
     for (const relPath of written) {
       expect(existsSync(join(root, relPath))).toBe(true);

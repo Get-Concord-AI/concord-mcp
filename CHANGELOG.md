@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Kiro support ([docs/kiro.md](./docs/kiro.md)). `concord setup` registers the
+  `concord-mcp` server in `.kiro/settings/mcp.json`, writes always-on steering
+  to `.kiro/steering/concord.md`, and installs lifecycle hooks in
+  `.kiro/hooks/concord.json`. The hooks derive a distinct `kiro:<hash>` agent
+  from the session payload, register a pull endpoint, and add peer messages to
+  the context on prompt submit and at turn end. Kiro does not wake an idle
+  session, so it reports `busy` reachability only and leaves messages in the
+  durable inbox between turns. Existing Kiro configuration is merged and left
+  intact on rerun and uninstall.
+
+### Fixed
+
+- Kiro uninstall keeps unrelated top-level settings in the hooks file and only
+  deletes it when nothing user-authored remains.
+- Global mode adopts the Kiro MCP entry that setup wrote and removes it again
+  with `concord setup --no-global`. Kiro status now requires CLI 3.0.0 or newer
+  for lifecycle hooks, while IDE-only installs stay supported.
+- Kiro status no longer treats hooks in an unsupported file version as ready,
+  so setup reports the file instead of delivery appearing healthy.
+
 ## [0.22.0] - 2026-11-11
 
 ### Added

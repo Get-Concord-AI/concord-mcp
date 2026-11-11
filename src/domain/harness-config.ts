@@ -19,6 +19,7 @@ export const harnessNames = [
   'devin',
   'opencode',
   'qwen',
+  'kiro',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -311,6 +312,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
     unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
+  },
+  kiro: {
+    name: 'kiro',
+    executable: 'kiro-cli',
+    minimumVersion: [3, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'steer', 'busy'],
+    installedDetail:
+      'Kiro is registered with Concord; lifecycle hooks add messages on prompt submit and at turn end, and anything sent while idle waits in the durable inbox.',
+    unsupportedDetail: 'Kiro lifecycle hooks need Kiro CLI V3 or Kiro IDE 1.0 or newer.',
   },
 };
 

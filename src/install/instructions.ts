@@ -59,6 +59,37 @@ export const ANTIGRAVITY_RULE_HEADER = [
   '',
 ].join('\n');
 
+/** YAML frontmatter Kiro reads to include a steering file in every session. */
+export const KIRO_STEERING_HEADER = ['---', 'inclusion: always', '---', ''].join('\n');
+
+/** Kiro-specific guidance: hook identity, and delivery that cannot wake an idle session. */
+export const KIRO_INSTRUCTIONS = `## Concord — shared work-state for coding agents
+
+<!-- concord:workflow-version=${CONCORD_INSTRUCTION_VERSION} -->
+
+This project uses Concord MCP. Keep coordination to the five workflow tools:
+
+- **Before editing**, call \`start_work\` with the task and the files or modules
+  you expect to touch. Kiro's lifecycle hooks (\`.kiro/hooks/concord.json\`)
+  register this session and print your \`agent_id\`; because Kiro's MCP server
+  cannot see the hook session, pass \`agent_id: "<id>"\` on \`start_work\`,
+  \`update_work\`, \`transfer_work\`, and \`finish_work\` calls. On
+  \`inspect_work\`, leave \`agent_id\` off unless you are reading your own inbox.
+- Use \`inspect_work\` to read the workspace, one task, one agent, or one
+  message thread. Use \`update_work\` for durable progress and for live
+  prompts/replies to another promptable workspace agent.
+- Messages from other agents reach a running turn on prompt submit and at turn
+  end. Kiro does not wake an idle session, so messages sent while you are idle
+  wait in your durable inbox; drain them with
+  \`concord inbox drain --agent <agent_id> --provider kiro\`.
+- Use \`transfer_work\` for assignment, acceptance, decline, release,
+  reassignment, evidence-bearing handoff offers, and reopening.
+- **Before finishing**, call \`finish_work\` once with the outcome, changed
+  files, tests, assumptions, decisions, risks, guardrails, and provenance.
+
+Keep each claim small and resolve reported overlaps before editing. Concord
+regenerates human-readable review artifacts in \`.concord/\`.`;
+
 /** Antigravity-specific guidance tailored for hook-based identity and message injection. */
 export const ANTIGRAVITY_INSTRUCTIONS = `## Concord — shared work-state for coding agents
 
