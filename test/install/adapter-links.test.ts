@@ -45,6 +45,10 @@ function packagedTree(): { root: string; moduleUrl: string; source: string } {
 
 const LASTING = (): boolean => false;
 
+function linkDir(source: string, destination: string): void {
+  symlinkSync(source, destination, process.platform === 'win32' ? 'junction' : 'dir');
+}
+
 describe('adapter links', () => {
   let home: string;
   let env: NodeJS.ProcessEnv;
@@ -60,7 +64,7 @@ describe('adapter links', () => {
   it('links a source, is a no-op when repeated, and re-points a dangling link', () => {
     const { source } = packagedTree();
     mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
-    symlinkSync(join(home, 'gone'), target);
+    linkDir(join(home, 'gone'), target);
 
     expect(installLink(source, target, LASTING)).toBe('installed');
     expect(installLink(source, target, LASTING)).toBe('installed');
@@ -122,7 +126,7 @@ describe('adapter links', () => {
     const { moduleUrl, source } = packagedTree();
     const gone = join(home, 'scratchpad', 'plugin', 'concord-relay');
     mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
-    symlinkSync(gone, target);
+    linkDir(gone, target);
 
     expect(inspectLink(target, source)).toMatchObject({ health: 'dangling', pointsTo: gone });
     const claude = statusGlobalAdapters(env, undefined, moduleUrl)[0];
@@ -165,7 +169,7 @@ describe('adapter links', () => {
     mkdirSync(join(home, 'bin'));
     writeFakeVersion(join(home, 'bin'), 'claude', '1.0.0');
     mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
-    symlinkSync(join(home, 'gone'), target);
+    linkDir(join(home, 'gone'), target);
 
     const claude = statusGlobalAdapters(env, undefined, moduleUrl, LASTING)[0];
     expect(claude?.status).toBe('action_required');
@@ -175,7 +179,7 @@ describe('adapter links', () => {
   it('repairs broken links and leaves healthy ones alone', () => {
     const { moduleUrl, source } = packagedTree();
     mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
-    symlinkSync(join(home, 'gone'), target);
+    linkDir(join(home, 'gone'), target);
     const gemini = join(home, '.gemini', 'extensions', 'concord-relay');
 
     const repairs = repairAdapterLinks(moduleUrl, env, LASTING);

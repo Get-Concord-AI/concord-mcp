@@ -580,7 +580,7 @@ export function registerWorkflowTools(
           breadth_warning_count: result.claim.breadthReasons.length,
         });
       }
-      onWrite?.();
+      onWrite?.(workspace);
       const task = result.claim.task;
       return withSessionAdvisories({
         content: [
@@ -885,7 +885,7 @@ export function registerWorkflowTools(
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const result = handleTransferWork(repos, withActor(args));
       recordTaskTransition(result.task.taskId, args.action, result.task.status);
-      onWrite?.();
+      onWrite?.(workspace);
       return withSessionAdvisories({
         content: [
           {
@@ -939,7 +939,7 @@ export function registerWorkflowTools(
           });
         }
       }
-      onWrite?.();
+      onWrite?.(workspace);
       return withSessionAdvisories({
         content: [
           {
