@@ -24,15 +24,16 @@ import { startSweeper, TrackedSessionAdapter } from './session-sweep.js';
  * OpenCode with idle wake-up and mid-turn steering, shaped like the Copilot
  * adapter.
  *
- * OpenCode exposes no session id to the MCP servers it spawns, and the shared
- * background service (not the terminal) spawns them, so the launcher cannot
- * pass an identity through the environment. Instead `concord adapters opencode`
- * chooses the session id itself (OpenCode accepts any `ses…` id), creates the
- * session in the current directory, and admits the agent's identity as a silent
- * synthetic message (`resume: false`, so it does not start a turn). The model
- * then passes that `agent_id` on its Concord tool calls. The host relays
- * Concord messages into the session while OpenCode runs. Sessions opened any
- * other way keep the MCP tools but have no identity and no push delivery.
+ * The shared background service (not the terminal) spawns OpenCode's MCP
+ * servers, so the launcher cannot pass an identity through the environment.
+ * The MCP server derives it from the session id OpenCode sends on each request
+ * instead, so `concord adapters opencode` chooses the session id itself
+ * (OpenCode accepts any `ses…` id), and `agentIdForSession` gives the host the
+ * same agent id the server will resolve. It creates the session in the current
+ * directory and admits that identity as a silent synthetic message
+ * (`resume: false`, so it does not start a turn). The host relays Concord
+ * messages into the session while OpenCode runs. Sessions opened any other way
+ * are identified but get no push delivery.
  */
 
 const KIND = 'opencode';
@@ -198,7 +199,7 @@ function warn(message: string): void {
 /**
  * Run OpenCode with a hosted, identified session. Anything that stops the
  * session being hosted — an old OpenCode, a session the user chose, or a setup
- * failure — starts OpenCode plain, with the MCP tools only, rather than not at all.
+ * failure — starts OpenCode plain, without push delivery, rather than not at all.
  */
 export async function launchOpencode(args: readonly string[]): Promise<void> {
   const env = process.env;

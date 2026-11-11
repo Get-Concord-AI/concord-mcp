@@ -20,18 +20,19 @@ found.
 
 ## Identity
 
-OpenCode does not tell the MCP servers it starts which session they belong to,
-and its shared background service (not your terminal) starts them, so Concord
-cannot hand an identity through the environment. The server entry pins only
-`CONCORD_AGENT_KIND=opencode`, never a repository: the server resolves its
-workspace from the session's directory.
+OpenCode's shared background service (not your terminal) starts the MCP
+servers, so Concord cannot read a session id from the environment. Instead,
+OpenCode 2 sends the session id with every MCP request
+(`_meta["ai.opencode/sessionID"]`), and Concord derives the agent id from it:
+`opencode:<hash>`, the same shape as other harnesses. The raw session id is
+never stored or shown. The server entry pins only `CONCORD_AGENT_KIND=opencode`,
+never a repository: the server resolves its workspace from the session's
+directory.
 
-A session therefore learns its Concord agent id from a message instead, and
-passes it as `agent_id` on its Concord tool calls. `concord adapters opencode`
-(below) supplies that message. In a session started any other way the agent has
-to be given an id of your choosing: run
-`concord inbox register --agent <id> --provider opencode` and tell the agent to
-pass that `agent_id` on its Concord tool calls.
+Every OpenCode session is therefore identified, however it was started. An id
+set with `CONCORD_AGENT_ID` still wins over the request metadata.
+`concord adapters opencode` (below) also tells the agent its id in a silent
+first message, which resolves to the same `opencode:<hash>`.
 
 ## Messages
 
@@ -57,9 +58,9 @@ The launcher starts OpenCode without a host, and says why, when:
   session it did not create;
 - creating the session or starting the host fails.
 
-Sessions started with plain `opencode` (or from the desktop app) have the MCP
-tools only. A message sent to one waits in its inbox until the agent reads it
-with `inspect_work`. Concord installs no hooks into OpenCode, so there is no
+Sessions started with plain `opencode` (or from the desktop app) are identified
+but not hosted. A message sent to one waits in its inbox until the agent reads
+it with `inspect_work`. Concord installs no hooks into OpenCode, so there is no
 delivery between tool calls.
 
 Concord reaches OpenCode through `opencode api`, which authenticates against

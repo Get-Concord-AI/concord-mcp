@@ -272,7 +272,7 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     },
     installedCapabilities: ['pull', 'inject', 'steer', 'idle', 'busy'],
     installedDetail:
-      'Sessions started with `concord adapters opencode` are steered and woken through the OpenCode server API; sessions opened any other way get the MCP tools only, and pass their agent_id on each call.',
+      'Sessions started with `concord adapters opencode` are steered and woken through the OpenCode server API; sessions opened any other way are identified from OpenCode request metadata and pull messages from the inbox.',
     unsupportedDetail: 'OpenCode must be v2.0.0 or newer for the mcp.servers config shape.',
   },
   qwen: {

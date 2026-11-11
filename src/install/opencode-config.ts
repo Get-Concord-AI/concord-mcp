@@ -13,8 +13,9 @@ import { spawnCommandSync } from './spawn-command.js';
  * else in the file untouched. Registration is read back from the server's
  * `GET /api/mcp`.
  *
- * The entry pins only the harness kind. OpenCode exposes no session id to MCP
- * servers, so identity flows through the per-call `agent_id`.
+ * The entry pins only the harness kind. OpenCode sends its session id in each
+ * MCP request's metadata rather than the server's environment, and the server
+ * derives the agent from it per request.
  */
 
 const OPENCODE_KIND = 'opencode';
