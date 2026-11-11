@@ -1,5 +1,6 @@
 import type { Command } from '@commander-js/extra-typings';
-import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
+import { spawnCommand, stopCommand } from '../../install/spawn-command.js';
 
 import { z } from 'zod';
 
@@ -15,6 +16,7 @@ import { CodexReadTracker } from '../../relay/codex-read-tracker.js';
 import { sessionKey } from '../../domain/receipts.js';
 import { startAgentRelay } from '../../relay/server.js';
 import {
+  executablePath,
   installGlobalAdapters,
   renderAdapterReport,
   statusGlobalAdapters,
@@ -23,6 +25,7 @@ import {
 import { openContext } from '../context.js';
 import { availablePort } from '../local-port.js';
 import { hostCodexInCloud } from './cloud-codex.js';
+import { codexThreadHostable } from '../embedding-host.js';
 import {
   copilotServerAddress,
   hostCopilot,
@@ -32,6 +35,7 @@ import {
 import { launchGemini } from './gemini-adapter.js';
 import { launchOpencode } from './opencode-adapter.js';
 import { cloudAccess } from './cloud-inbox.js';
+import { reportMissingHarnessCli } from './missing-harness-cli.js';
 
 async function hostCodex(agentId: string, threadId: string): Promise<void> {
   const context = openContext(process.cwd());
@@ -83,7 +87,10 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
   });
 }
 
-async function waitForCodexServer(url: string, server: ReturnType<typeof spawn>): Promise<void> {
+async function waitForCodexServer(
+  url: string,
+  server: ReturnType<typeof spawnCommand>,
+): Promise<void> {
   const healthUrl = url.replace(/^ws:/u, 'http:') + '/readyz';
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (server.exitCode !== null) {
@@ -153,7 +160,13 @@ export function codexLaunchArgv(
   };
 }
 
-async function launchCodex(args: readonly string[], repoRoot: string): Promise<void> {
+export async function launchCodex(args: readonly string[], repoRoot: string): Promise<void> {
+  const executable = executablePath('codex', process.env);
+  if (executable === undefined) {
+    reportMissingHarnessCli('Codex CLI', 'npm i -g @openai/codex');
+    return;
+  }
+  const selectedPath = resolve(executable);
   const port = await availablePort();
   const url = `ws://127.0.0.1:${String(port)}`;
   // The app-server, not the remote TUI, owns MCP child processes. Give both
@@ -163,13 +176,13 @@ async function launchCodex(args: readonly string[], repoRoot: string): Promise<v
   // the complete managed tree from the resolved repository root.
   const context = codexManagedLaunchContext(repoRoot, url, process.env);
   const argv = codexLaunchArgv(url, args);
-  const server = spawn('codex', argv.appServer, {
+  const server = spawnCommand(selectedPath, argv.appServer, {
     ...context,
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   try {
     await waitForCodexServer(url, server);
-    const tui = spawn('codex', argv.tui, {
+    const tui = spawnCommand(selectedPath, argv.tui, {
       ...context,
       stdio: 'inherit',
     });
@@ -179,7 +192,7 @@ async function launchCodex(args: readonly string[], repoRoot: string): Promise<v
     });
     if (code !== null && code !== 0) process.exitCode = code;
   } finally {
-    server.kill();
+    stopCommand(server, context.env);
   }
 }
 
@@ -288,6 +301,12 @@ export function registerAdaptersCommand(program: Command): void {
     .requiredOption('--agent <id>')
     .requiredOption('--thread <id>')
     .action(async (options) => {
+      if (!codexThreadHostable(process.env)) {
+        throw new Error(
+          'This Codex thread runs in another app (Conductor), whose own app-server owns it. ' +
+            'Concord delivers to it through its hooks instead; no host is needed.',
+        );
+      }
       const access = cloudAccess(process.cwd());
       if (access.kind === 'unusable') throw new Error(`Concord Cloud: ${access.reason}`);
       if (access.kind === 'cloud') {

@@ -30,6 +30,19 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
+<p align="center">
+  <a href="./README.md">English</a> |
+  <a href="./README.zh-CN.md">简体中文</a> |
+  <a href="./README.zh-TW.md">繁體中文</a> |
+  <a href="./README.ja.md">日本語</a> |
+  <a href="./README.ko.md">한국어</a> |
+  <a href="./README.es.md">Español</a> |
+  <a href="./README.pt-BR.md">Português</a> |
+  <a href="./README.fr.md">Français</a> |
+  <a href="./README.de.md">Deutsch</a> |
+  <a href="./README.ru.md">Русский</a>
+</p>
+
 ## See it work
 
 Two agents in different harnesses can discover each other, exchange messages,
@@ -89,6 +102,10 @@ adapters independently. Use `--no-adapters` to skip that step or
 Pass `--no-mcp` to write only the workspace and instructions while managing MCP
 registration yourself.
 
+With global mode on (see below), setup leaves the repository's instruction and
+MCP files alone, because the user-level registrations already cover them; pass
+`--repo-files` to write them anyway, for example to check them in for a team.
+
 </details>
 
 <details>
@@ -106,8 +123,9 @@ agent and adds a short Concord section to their user instruction files
 written into those repositories: their work is kept in `~/.concord/global.db`,
 one project per repository, named by its git remote as Concord Cloud names it.
 Sessions outside any repository share the `general` project. A repository you
-did set up keeps everything in its own `.concord/`. Turning global mode off
-removes exactly what it added.
+did set up keeps everything in its own `.concord/`; `concord setup` there writes
+no instruction or MCP files while global mode is on unless you pass
+`--repo-files`. Turning global mode off removes exactly what it added.
 
 </details>
 
@@ -143,6 +161,7 @@ aside once no session started before the link is running (nothing is deleted).
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
+| Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
 | Any other MCP-capable coding agent | [Manual setup](./docs/other-mcp-clients.md)        |
 
 > There is no universal `/concord` slash command — commands are client-specific.
@@ -181,8 +200,11 @@ review state through one small MCP server.
 | `finish_work`   | records evidence and optionally marks a task review-ready, complete, or closed              |
 
 Writes accept an `agent_id`, which keeps presence live just by working.
-`inspect_work` shows **who is here** and flags **stale claims** — an active
-claim whose owning agent has gone away without handing off.
+`inspect_work` shows **who is here** with three separate signals — heartbeat,
+last activity, and the status the agent reported (writing never changes the
+reported status) — and flags **stale claims**: work whose owning agent has gone
+away without handing off, an assignment nobody accepted, or in-progress work
+with no owning agent at all.
 
 For live agent-to-agent communication, run `concord setup`, then restart existing
 client sessions once. A prompt uses `update_work` with `operation: "prompt"`, the

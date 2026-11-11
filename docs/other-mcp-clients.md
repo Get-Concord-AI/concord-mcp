@@ -11,7 +11,7 @@ Install Node.js >= 22.12, with `npx` available to the client. Open the repositor
 you want the agents to coordinate in, then initialize its state and instructions:
 
 ```sh
-npx -y --package @concord-ai/concord-mcp@0.14.2 concord setup --no-mcp --no-adapters
+npx -y --package @concord-ai/concord-mcp concord setup --no-mcp --no-adapters
 ```
 
 `--no-mcp` skips MCP client registration. `--no-adapters` also skips installing
@@ -36,7 +36,7 @@ is not a complete configuration file for every client.
 ```json
 {
   "command": "npx",
-  "args": ["-y", "@concord-ai/concord-mcp@0.14.2"],
+  "args": ["-y", "@concord-ai/concord-mcp"],
   "env": {
     "CONCORD_REPO_ROOT": "/absolute/path/to/your/repository",
     "CONCORD_AGENT_KIND": "your-client-name",
@@ -80,7 +80,7 @@ Create `.vscode/mcp.json` in the opened repository:
     "concord": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@concord-ai/concord-mcp@0.14.2"],
+      "args": ["-y", "@concord-ai/concord-mcp"],
       "env": {
         "CONCORD_REPO_ROOT": "${workspaceFolder}",
         "CONCORD_AGENT_KIND": "vscode",
@@ -108,10 +108,11 @@ This uses VS Code's `servers` format, not a generic `mcpServers` wrapper.
    by itself prove that a particular chat session is using its tools.
 
 **Verified:** VS Code 1.137.0 on macOS arm64, Node.js 24.19.0, and the published
-Concord 0.14.2 package. In an isolated workspace, the server started through `npx`,
+Concord 0.14.2 package (the commands above were pinned to that version when
+tested and now use the unpinned package). In an isolated workspace, the server started through `npx`,
 discovered all five tools, and returned the correct repository through
 `concord://work-state`. The setup command above was also run with a temporary
-HOME. Executable paths were made absolute for the test machine. A separate SDK stdio check against the same published package verified
+HOME. Executable paths were made absolute for the test machine. A separate SDK stdio check against the same 0.14.2 package verified
 that `start_work` without an identity fails, while setting `CONCORD_AGENT_ID`
 allows `start_work`, `inspect_work`, and `finish_work` with no `agent_id` argument.
 Model-driven tool calls and live push delivery were not tested. Windows, Linux, Windsurf, and
@@ -133,12 +134,12 @@ same repository, register a pull inbox using exactly the `CONCORD_AGENT_ID` set
 in the MCP entry (replace the example id in both places):
 
 ```sh
-npx -y --package @concord-ai/concord-mcp@0.14.2 concord inbox register --provider vscode --agent vscode:replace-with-unique-session-id
-npx -y --package @concord-ai/concord-mcp@0.14.2 concord inbox drain --provider vscode --agent vscode:replace-with-unique-session-id
+npx -y --package @concord-ai/concord-mcp concord inbox register --provider vscode --agent vscode:replace-with-unique-session-id
+npx -y --package @concord-ai/concord-mcp concord inbox drain --provider vscode --agent vscode:replace-with-unique-session-id
 ```
 
 Use the actual client kind instead of `vscode` for another client. With a global
-installation, replace the `npx -y --package @concord-ai/concord-mcp@0.14.2 concord`
+installation, replace the `npx -y --package @concord-ai/concord-mcp concord`
 prefix with `concord`. If the shell is outside the repository, set
 `CONCORD_REPO_ROOT` there as well; variables in the MCP entry do not configure the
 terminal environment.
@@ -155,7 +156,7 @@ cannot run these CLI steps can inspect shared state, but this setup does not
 provide a complete peer prompt/reply workflow for it.
 
 **Additional verification:** with two isolated SDK stdio clients using the
-published 0.14.2 package, a prompt remained pending after `inspect_work`, became
+published 0.14.2 package (not re-run on later versions), a prompt remained pending after `inspect_work`, became
 delivered after the recipient's CLI drain, and a subsequent reply was received
 by the sender's drain. This was a protocol/CLI test, not a model-driven chat test.
 

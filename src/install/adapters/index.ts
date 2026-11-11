@@ -1,5 +1,6 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { statusQwen } from './qwen.js';
 
 import {
   HARNESS_CONFIGS,
@@ -41,6 +42,7 @@ import {
   uninstallGlobalAntigravityHooks,
 } from '../antigravity-hooks.js';
 import {
+  agentKindEnv,
   hasMcpServer,
   isConcordServerOwned,
   removeMcpServer,
@@ -328,9 +330,9 @@ function uninstallCursorHooks(env: NodeJS.ProcessEnv): void {
   });
 }
 
-function geminiCompletionInjectionReady(repoRoot: string): boolean {
+function geminiSettingsInjectReady(settingsPath: string): boolean {
   try {
-    const settings = readJsonObject(join(repoRoot, '.gemini', 'settings.json'));
+    const settings = readJsonObject(settingsPath);
     const tools = settings['tools'];
     if (!isRecord(tools)) return false;
     const shell = tools['shell'];
@@ -344,6 +346,14 @@ function geminiCompletionInjectionReady(repoRoot: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Gemini merges user and project settings, so either file can turn completion injection on. */
+function geminiCompletionInjectionReady(repoRoot: string, env: NodeJS.ProcessEnv): boolean {
+  return (
+    geminiSettingsInjectReady(join(repoRoot, '.gemini', 'settings.json')) ||
+    geminiSettingsInjectReady(join(userHome(env), '.gemini', 'settings.json'))
+  );
 }
 
 function statusGemini(
@@ -381,7 +391,7 @@ function statusGemini(
   if (
     installed.status !== 'installed' ||
     repoRoot === undefined ||
-    geminiCompletionInjectionReady(repoRoot)
+    geminiCompletionInjectionReady(repoRoot, env)
   ) {
     return installed;
   }
@@ -390,9 +400,9 @@ function statusGemini(
     status: 'action_required',
     capabilities: ['pull', 'steer', 'busy'],
     detail:
-      'The Gemini extension is installed, but this project is missing ' +
-      'tools.shell.backgroundCompletionBehavior = "inject" or ' +
-      'experimental.modelSteering = true. Run `concord setup` in the project.',
+      'The Gemini extension is installed, but neither this project nor ~/.gemini/settings.json sets ' +
+      'tools.shell.backgroundCompletionBehavior = "inject" and ' +
+      'experimental.modelSteering = true. Run `concord setup --repo-files` in the project.',
   };
 }
 
@@ -703,6 +713,8 @@ export function statusAdapter(
       return statusDevin(env, repoRoot);
     case 'opencode':
       return statusOpencode(env);
+    case 'qwen':
+      return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
   }
 }
 
@@ -740,17 +752,11 @@ export function installAdapter(
       const existing = readFileSync(path, 'utf8');
       if (!hasMcpServer(existing)) {
         mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(
-          path,
-          upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
-        );
+        writeFileSync(path, upsertMcpServer(existing, undefined, agentKindEnv('antigravity')));
       }
     } else {
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(
-        path,
-        upsertMcpServer(undefined, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
-      );
+      writeFileSync(path, upsertMcpServer(undefined, undefined, agentKindEnv('antigravity')));
     }
     installGlobalAntigravityHooks(env);
     return;
@@ -828,6 +834,7 @@ export function installGlobalAdapters(
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
   isEphemeral: EphemeralTest = isEphemeralPath,
+  afterInstall?: () => void,
 ): AdapterReport[] {
   const failures = new Map<HarnessName, string>();
   for (const harness of harnessNames) {
@@ -837,6 +844,9 @@ export function installGlobalAdapters(
       failures.set(harness, error instanceof Error ? error.message : String(error));
     }
   }
+  // Runs before readiness is judged: user-level settings it writes (global
+  // mode's Gemini settings) count towards a harness being ready.
+  afterInstall?.();
 
   const report = statusGlobalAdapters(env, repoRoot, moduleUrl, isEphemeral).map((entry) => {
     const failure = failures.get(entry.harness);

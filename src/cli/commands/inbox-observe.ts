@@ -79,8 +79,12 @@ function conversationFile(hook: ObservedHook): string | undefined {
   return path;
 }
 
-/** Claude Code's tool that blocks the turn on a question for the user. */
-const ASK_USER_TOOL = 'AskUserQuestion';
+/**
+ * Tools that block the turn on a question for the user: Claude Code's own, and
+ * the replacement Conductor routes it to (it disables the built-in and aliases
+ * it to its own MCP tool, so the session never calls `AskUserQuestion`).
+ */
+const ASK_USER_TOOLS: readonly string[] = ['AskUserQuestion', 'mcp__conductor__AskUserQuestion'];
 /** The most of a transcript read per hook: unread messages are recent. */
 const TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
 /**
@@ -196,7 +200,7 @@ function observeRead(
  * - Any hook from the session itself can carry read evidence (its prompt or
  *   transcript). Hooks fired inside a subagent are ignored: a subagent's
  *   activity is not proof the session's own model saw anything.
- * - `PreToolUse` for `AskUserQuestion`, and a `permission_prompt`
+ * - `PreToolUse` for `AskUserQuestion` (or Conductor's alias), and a `permission_prompt`
  *   notification, mean the session is about to block on its user. Recorded so
  *   a sender can be told; delivery is never held on it, because dismissing a
  *   prompt with Esc or Deny fires no hook to clear it.
@@ -220,7 +224,9 @@ export function observeHookEvent(
 
   switch (eventName(hook)) {
     case 'PreToolUse':
-      if (hook.tool_name === ASK_USER_TOOL) awaitUser(repos, agentId);
+      if (hook.tool_name !== undefined && ASK_USER_TOOLS.includes(hook.tool_name)) {
+        awaitUser(repos, agentId);
+      }
       break;
     case 'Notification':
       if (hook.notification_type === 'permission_prompt') awaitUser(repos, agentId);

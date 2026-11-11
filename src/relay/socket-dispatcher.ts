@@ -2,6 +2,7 @@ import { createConnection } from 'node:net';
 
 import { renderPeerMessage } from '../domain/pull-inbox.js';
 import type { AgentMessageDispatcher, DeliveryReceipt } from '../tools/agent-messages.js';
+import { RelayFrameReader } from './frame-reader.js';
 import {
   decodeRelayResponse,
   encodeRelayFrame,
@@ -22,7 +23,7 @@ export class SocketAgentMessageDispatcher implements AgentMessageDispatcher {
     return new Promise((resolve, reject) => {
       const socket = createConnection(request.endpoint.address);
       let settled = false;
-      let buffer = '';
+      const frameReader = new RelayFrameReader();
       const timer = setTimeout(() => {
         finish(new Error('relay connection timed out'));
         socket.destroy();
@@ -56,15 +57,20 @@ export class SocketAgentMessageDispatcher implements AgentMessageDispatcher {
         );
       });
       socket.on('data', (chunk) => {
-        buffer += chunk.toString('utf8');
-        if (Buffer.byteLength(buffer, 'utf8') > MAX_RELAY_FRAME_BYTES) {
+        if (!Buffer.isBuffer(chunk)) {
+          finish(new Error('relay response was not received as bytes'));
+          return;
+        }
+
+        frameReader.append(chunk);
+        if (frameReader.bufferedByteLength > MAX_RELAY_FRAME_BYTES) {
           finish(new Error('relay response exceeded maximum frame size'));
           return;
         }
-        const newline = buffer.indexOf('\n');
-        if (newline < 0) return;
+        const frame = frameReader.readFrames()[0];
+        if (frame === undefined) return;
         try {
-          const response = decodeRelayResponse(buffer.slice(0, newline));
+          const response = decodeRelayResponse(frame);
           if (!response.ok) {
             finish(new Error(response.error));
             return;

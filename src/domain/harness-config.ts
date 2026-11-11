@@ -17,6 +17,7 @@ export const harnessNames = [
   'copilot-cli',
   'devin',
   'opencode',
+  'qwen',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -273,6 +274,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Sessions started with `concord adapters opencode` are steered and woken through the OpenCode server API; sessions opened any other way get the MCP tools only, and pass their agent_id on each call.',
     unsupportedDetail: 'OpenCode must be v2.0.0 or newer for the mcp.servers config shape.',
+  },
+  qwen: {
+    name: 'qwen',
+    executable: 'qwen',
+    minimumVersion: [0, 26, 4],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
+    unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
   },
 };
 
