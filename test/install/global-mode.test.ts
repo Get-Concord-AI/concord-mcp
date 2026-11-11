@@ -114,6 +114,28 @@ describe('applyGlobalMode', () => {
     expect(existsSync(researchFile)).toBe(false);
   });
 
+  it('writes no agent id into a workspace that several OpenClaw agents share', () => {
+    const env = machine(['openclaw']);
+    const shared = join(env.HOME, 'shared');
+    const configPath = join(env.HOME, '.openclaw', 'openclaw.json');
+    mkdirSync(join(env.HOME, '.openclaw'));
+    const sharedFile = join(shared, 'AGENTS.md');
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(configPath, `{ agents: { list: [{ id: "a", workspace: "${shared}" }] } }\n`);
+    applyGlobalMode(env, true);
+    expect(read(sharedFile)).toContain('agent_id: "openclaw:a"');
+
+    writeFileSync(
+      configPath,
+      `{ agents: { list: [{ id: "a", workspace: "${shared}" }, { id: "b", workspace: "${shared}/" }] } }\n`,
+    );
+    const on = applyGlobalMode(env, true);
+
+    expect(on.warnings).toHaveLength(1);
+    expect(on.warnings[0]).toContain('agents a, b share this workspace');
+    expect(existsSync(sharedFile)).toBe(false);
+  });
+
   it('skips OpenClaw instruction files when OpenClaw is not installed', () => {
     const env = machine([]);
     applyGlobalMode(env, true);

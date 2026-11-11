@@ -70,11 +70,28 @@ function mcpServers(config: UnknownRecord): { mcp: UnknownRecord; servers: Unkno
   return { mcp, servers: mappingOrThrow(mcp[SERVERS_KEY], `${MCP_KEY}.${SERVERS_KEY}`) };
 }
 
-/** An entry Concord wrote: npx running the package, or the standalone launcher. */
+/** Environment keys Concord itself writes; any other key is the user's setting. */
+const CONCORD_ENV_KEYS: ReadonlySet<string> = new Set(['CONCORD_REPO_ROOT', 'CONCORD_AGENT_KIND']);
+
+/**
+ * An entry Concord wrote: npx running the package, or the standalone launcher
+ * with no arguments. A launcher entry with arguments or extra environment (such
+ * as `CONCORD_AGENT_ID`) is the user's own, so setup never replaces it and
+ * uninstall never removes it.
+ */
 function isConcordOpenclawEntry(entry: unknown): boolean {
   if (isConcordWrittenEntry(entry)) return true;
-  const parsed = z.object({ command: z.string() }).loose().safeParse(entry);
-  return parsed.success && basename(parsed.data.command) === CONCORD_SERVER_COMMAND;
+  const parsed = z
+    .object({
+      command: z.string(),
+      args: z.array(z.unknown()).optional(),
+      env: z.record(z.string(), z.unknown()).optional(),
+    })
+    .loose()
+    .safeParse(entry);
+  if (!parsed.success || basename(parsed.data.command) !== CONCORD_SERVER_COMMAND) return false;
+  if ((parsed.data.args ?? []).length > 0) return false;
+  return Object.keys(parsed.data.env ?? {}).every((key) => CONCORD_ENV_KEYS.has(key));
 }
 
 export function openclawConfigInstalled(env: NodeJS.ProcessEnv = process.env): boolean {

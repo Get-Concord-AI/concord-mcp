@@ -120,6 +120,27 @@ describe('OpenClaw configuration', () => {
     expect(read(path)).toBe(own);
   });
 
+  it("treats a standalone launcher entry with custom arguments or environment as the user's", () => {
+    const { env, path } = fixture();
+    const launcher = '/home/u/.concord/bin/concord-mcp';
+    for (const own of [
+      `{ mcp: { servers: { concord: { command: "${launcher}", env: { CONCORD_AGENT_KIND: "openclaw", CONCORD_AGENT_ID: "openclaw:main" } } } } }\n`,
+      `{ mcp: { servers: { concord: { command: "${launcher}", args: ["--verbose"] } } } }\n`,
+    ]) {
+      writeConfig(path, own);
+      installOpenclawMcpConfig(env);
+      expect(read(path)).toBe(own);
+      uninstallOpenclawConfig(env);
+      expect(read(path)).toBe(own);
+    }
+    writeConfig(
+      path,
+      `{ mcp: { servers: { concord: { command: "${launcher}", args: [], env: { CONCORD_AGENT_KIND: "openclaw" } } } } }`,
+    );
+    uninstallOpenclawConfig(env);
+    expect(JSON.parse(read(path))).toEqual({ mcp: { servers: {} } });
+  });
+
   it('refuses to overwrite a config whose mcp or servers is not a mapping', () => {
     const { env, path } = fixture();
     writeConfig(path, '{ mcp: [] }');
