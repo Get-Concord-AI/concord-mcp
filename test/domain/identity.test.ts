@@ -10,6 +10,22 @@ import {
 const SESSION = 'a1b2c3d4-e5f6-7890';
 
 describe('resolveIdentity', () => {
+  it('uses an explicit DeepSeek identity without borrowing inherited harness sessions', () => {
+    const inherited = { CLAUDE_CODE_SESSION_ID: SESSION, AGENT_SESSION_ID: 'goose-parent' };
+    expect(resolveIdentity(inherited, { kind: 'deepseek' })).toBeUndefined();
+    expect(
+      resolveIdentity(
+        { ...inherited, CONCORD_AGENT_ID: 'deepseek:session-a' },
+        {
+          kind: 'deepseek',
+        },
+      ),
+    ).toEqual({ agentId: 'deepseek:session-a', kind: 'deepseek', origin: 'operator' });
+    expect(resolveActorId(undefined, 'deepseek:registered-session')).toBe(
+      'deepseek:registered-session',
+    );
+    expect(() => resolveActorId(undefined, undefined)).toThrow(UNRESOLVED_IDENTITY_MESSAGE);
+  });
   it('derives identity from the session alone, so a plain session needs no setup', () => {
     const identity = resolveIdentity({ CLAUDE_CODE_SESSION_ID: SESSION });
 

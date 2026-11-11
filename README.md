@@ -89,7 +89,9 @@ direct prompts and replies.
 for Claude, Cursor, Gemini, Grok, and Codex (`.mcp.json`, `.cursor/mcp.json`,
 `.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`).
 For [Goose](./docs/goose.md), it registers the `concord-relay` extension in
-Goose's `config.yaml` when detected. For
+Goose's `config.yaml` when detected. For [DeepSeek Harness](./docs/deepseek.md),
+it adds a native MCP plugin to `$DSH_HOME/cordis.patch.yml` when `dsh` is detected.
+For
 [Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
 `.agents/hooks.json`, and `.agents/rules/concord.md`. It also writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
@@ -157,6 +159,7 @@ aside once no session started before the link is running (nothing is deleted).
 | Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)         |
 | Grok Build                         | [Setup and delivery](./docs/grok-build.md)         |
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
+| DeepSeek Harness                   | [Setup and delivery](./docs/deepseek.md)           |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
 | Devin CLI                          | Project-level setup via `concord setup`            |

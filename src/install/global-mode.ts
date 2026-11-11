@@ -8,6 +8,7 @@ import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
 import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
+import { deepseekHome } from './deepseek-config.js';
 import {
   devinMcpConfigPath,
   hasDevinMcpServer,
@@ -106,6 +107,7 @@ const USER_FILES: readonly UserFile[] = [
   instructionFile('codex', (env) => join(codexHome(env), 'AGENTS.md')),
   instructionFile('gemini', (env) => join(userHome(env), '.gemini', 'GEMINI.md')),
   instructionFile('goose', (env) => join(dirname(gooseConfigPath(env)), '.goosehints')),
+  instructionFile('dsh', (env) => join(deepseekHome(env), 'AGENTS.md')),
   instructionFile('copilot', (env) => join(copilotHome(env), 'copilot-instructions.md')),
   instructionFile(
     'agy',

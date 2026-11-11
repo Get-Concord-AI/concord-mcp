@@ -1,6 +1,14 @@
 import { installGooseMcpConfig } from '../../src/install/goose-config.js';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -190,6 +198,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'managed-controller',
+      'harness-monitor',
       'harness-monitor',
       'harness-monitor',
     ]);
@@ -530,6 +539,63 @@ describe('global harness adapters', () => {
     expect(existsSync(statePath)).toBe(false);
     expect(readFileSync(hooksPath, 'utf8')).toBe(broken);
   });
+
+  it.each([
+    { problem: 'malformed', detected: false },
+    { problem: 'malformed', detected: true },
+    { problem: 'unreadable', detected: false },
+    { problem: 'unreadable', detected: true },
+  ])(
+    'uninstalls later adapters when DeepSeek config is $problem (detected: $detected)',
+    ({ problem, detected }) => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-deepseek-uninstall-'));
+      try {
+        const bin = join(home, 'bin');
+        mkdirSync(bin);
+        writeFakeVersion(bin, 'copilot', 'GitHub Copilot CLI 1.0.100.');
+        writeFakeVersion(bin, 'devin', 'Devin CLI v3000.3');
+        if (detected) writeFakeVersion(bin, 'dsh', '0.2.2');
+        const env = { HOME: home, USERPROFILE: home, PATH: bin, ANTIGRAVITY_AGENT: '1' };
+        const installed = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+        for (const harness of ['copilot-cli', 'antigravity', 'devin']) {
+          expect(installed.find((entry) => entry.harness === harness)?.status).toBe('installed');
+        }
+
+        const configPath = join(home, '.dsh', 'cordis.patch.yml');
+        mkdirSync(dirname(configPath), { recursive: true });
+        rmSync(configPath, { force: true });
+        const broken = '- insert: [invalid\n';
+        if (problem === 'malformed') writeFileSync(configPath, broken);
+        // A directory makes readFileSync fail regardless of the user's permissions.
+        else mkdirSync(configPath);
+        const statePath = join(home, '.concord', 'adapters.json');
+        expect(existsSync(statePath)).toBe(true);
+
+        const report = uninstallGlobalAdapters(env);
+
+        expect(report.find((entry) => entry.harness === 'deepseek')?.status).toBe(
+          detected ? 'action_required' : 'not_detected',
+        );
+        for (const config of [
+          join(home, '.copilot', 'mcp-config.json'),
+          join(home, '.gemini', 'config', 'mcp_config.json'),
+          join(home, '.config', 'devin', 'mcp_config.json'),
+        ]) {
+          expect(readFileSync(config, 'utf8')).not.toContain('"concord"');
+        }
+        expect(existsSync(join(home, '.copilot', 'hooks', 'concord.json'))).toBe(false);
+        expect(existsSync(join(home, '.gemini', 'config', 'hooks.json'))).toBe(false);
+        expect(readFileSync(join(home, '.config', 'devin', 'config.json'), 'utf8')).not.toContain(
+          'concord hook',
+        );
+        expect(existsSync(statePath)).toBe(false);
+        if (problem === 'malformed') expect(readFileSync(configPath, 'utf8')).toBe(broken);
+        else expect(statSync(configPath).isDirectory()).toBe(true);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('reports action_required with remaining hooks detail when hooks remain but MCP is not registered', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-ag-hooks-remaining-'));
