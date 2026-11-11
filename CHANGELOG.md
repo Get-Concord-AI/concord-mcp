@@ -6,27 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-11-11
+
+### Security
+
+- The local relay no longer trusts the sender, recipient or text in a delivery
+  frame. It delivers only a message stored in Concord as pending for that agent,
+  and renders the sender and content from the database. Before, any process able
+  to read `concord.db` could reuse the stored credential hash to inject text into
+  another agent's live session with no record in Concord (#333).
+
 ### Fixed
-
-- Surface unowned work and overdue assignments. Acceptance age comes from the
-  latest ownership transition, so reminders cannot hide an overdue assignment.
-
-- Show heartbeat, activity, and summary ages separately in the roster, dashboard,
-  and exported work state (#68). Reported agent status stays independent of work.
-
-- Preserve omitted agent registration fields and store heartbeat, activity, and
-  summary timestamps independently (#68). Migration 017 appends to the existing
-  migration history.
 
 - A harness started from another harness's shell no longer acts as its parent.
   Goose, Grok Build, Gemini CLI and Cursor inherited the parent's session
   variable (for example `CLAUDE_CODE_SESSION_ID`), so their Concord server
-  claimed work, sent messages and read the inbox as the parent agent. `concord
-setup` and global mode now pin `CONCORD_AGENT_KIND` in each of their MCP
-  entries, which restricts the server to that harness's own session variable
+  claimed work, sent messages and read the inbox as the parent agent.
+  `concord setup` and global mode now pin `CONCORD_AGENT_KIND` in each of their
+  MCP entries, which restricts the server to that harness's own session variable
   (as Antigravity, Copilot CLI and Devin already did). `.mcp.json` stays
   unpinned because more than one client reads it. Existing installs pick the
-  pin up the next time `concord setup` runs.
+  pin up the next time `concord setup` runs (#317).
+- Overlap detection and `concord check` treat Windows backslash paths and POSIX
+  paths as the same file, so `src\app\page.tsx` and `src/app/page.tsx` collide,
+  and directory overlaps work for backslash paths (#336).
+- Surface unowned work and overdue assignments. Acceptance age comes from the
+  latest ownership transition, so reminders cannot hide an overdue assignment.
+- Show heartbeat, activity, and summary ages separately in the roster, dashboard,
+  and exported work state (#68). Reported agent status stays independent of work.
+  A short dashboard pane shows one line per agent instead of clipping them.
+- Preserve omitted agent registration fields and store heartbeat, activity, and
+  summary timestamps independently (#68). Migration 017 appends to the existing
+  migration history.
+- `concord adapters codex` launches Codex through its resolved path on Windows,
+  where npm installs a `.cmd` shim that Node cannot start by name (#330).
+
+### Changed
+
+- The README is available in Simplified and Traditional Chinese, Japanese,
+  Korean, Spanish, Brazilian Portuguese, French, German and Russian (#337).
 
 ## [0.21.0] - 2026-11-09
 
@@ -818,7 +836,14 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.0...v0.21.1
+[0.21.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.20.0...v0.21.0
+[0.20.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.19.0...v0.20.0
+[0.19.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.18.0...v0.19.0
+[0.18.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.17.1...v0.18.0
+[0.17.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.17.0...v0.17.1
+[0.17.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.2...v0.15.0
 [0.14.2]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.1...v0.14.2
