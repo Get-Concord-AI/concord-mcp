@@ -65,7 +65,7 @@ describe('Hermes MCP config', () => {
     installGlobalAdapters(import.meta.url, runtimeEnv);
     expect(statusAdapter('hermes', runtimeEnv)).toMatchObject({
       status: 'installed',
-      capabilities: ['pull', 'steer', 'busy'],
+      capabilities: ['pull', 'busy'],
     });
     expect(statusAdapter('hermes', runtimeEnv).detail).toContain('workspace');
     expect(capabilityFor('hermes')).toEqual({
@@ -79,23 +79,17 @@ describe('Hermes MCP config', () => {
       operations: ['pull', 'steer'],
     });
     const parsed = load(readFileSync(path, 'utf8'));
+    // The server pins no session or workspace: Hermes would resolve both to `$HOME`.
     expect(parsed).toMatchObject({
-      mcp_servers: {
-        concord: {
-          env: {
-            HERMES_SESSION_ID: '${HERMES_SESSION_ID}',
-            CONCORD_AGENT_KIND: 'hermes',
-            CONCORD_REPO_ROOT: '${workspaceFolder}',
-          },
-        },
-      },
+      mcp_servers: { concord: { env: { CONCORD_AGENT_KIND: 'hermes' } } },
+      hooks: { pre_llm_call: [{ command: 'concord hook hermes-pre-llm-call', timeout: 30 }] },
     });
     expect(existsSync(path)).toBe(true);
     uninstallGlobalAdapters(runtimeEnv);
     expect(statusAdapter('hermes', runtimeEnv).status).toBe('action_required');
   });
 
-  it('requires Hermes 0.22.5 for session/workspace interpolation', () => {
+  it('requires Hermes 0.22.5', () => {
     const { env, path } = fixture();
     const bin = join(env.HOME, 'bin');
     mkdirSync(bin);
@@ -168,6 +162,75 @@ describe('Hermes MCP config', () => {
     uninstallHermesMcpConfig(env);
     expect(readdirSync(dirname(path))).toEqual(['config.yaml']);
     expect(readFileSync(path, 'utf8')).toContain('model: original');
+  });
+
+  it('replaces the home-pinning server env an earlier release wrote', () => {
+    const { env, path } = fixture();
+    seed(
+      path,
+      [
+        'mcp_servers:',
+        '  concord:',
+        '    command: npx',
+        "    args: ['-y', '@concord-ai/concord-mcp']",
+        '    env:',
+        "      HERMES_SESSION_ID: '${HERMES_SESSION_ID}'",
+        '      CONCORD_AGENT_KIND: hermes',
+        "      CONCORD_REPO_ROOT: '${workspaceFolder}'",
+        '      OTHER: kept',
+        '    enabled: true',
+        '',
+      ].join('\n'),
+    );
+    expect(hermesConfigInstalled(env)).toBe(false);
+    installHermesMcpConfig(env);
+    expect(hermesConfigInstalled(env)).toBe(true);
+    expect(load(readFileSync(path, 'utf8'))).toMatchObject({
+      mcp_servers: { concord: { env: { CONCORD_AGENT_KIND: 'hermes', OTHER: 'kept' } } },
+    });
+    expect(readFileSync(path, 'utf8')).not.toContain('workspaceFolder');
+  });
+
+  it('keeps other hooks, and adds its own once however often it installs', () => {
+    const { env, path } = fixture();
+    seed(
+      path,
+      [
+        'hooks:',
+        '  pre_llm_call:',
+        '    - command: ~/bin/mine.sh',
+        '  post_tool_call:',
+        '    - command: ~/bin/audit.sh',
+        '',
+      ].join('\n'),
+    );
+    installHermesMcpConfig(env);
+    installHermesMcpConfig(env);
+    expect(load(readFileSync(path, 'utf8'))).toMatchObject({
+      hooks: {
+        pre_llm_call: [
+          { command: '~/bin/mine.sh' },
+          { command: 'concord hook hermes-pre-llm-call', timeout: 30 },
+        ],
+        post_tool_call: [{ command: '~/bin/audit.sh' }],
+      },
+    });
+    uninstallHermesMcpConfig(env);
+    expect(load(readFileSync(path, 'utf8'))).toEqual({
+      mcp_servers: {},
+      hooks: {
+        pre_llm_call: [{ command: '~/bin/mine.sh' }],
+        post_tool_call: [{ command: '~/bin/audit.sh' }],
+      },
+    });
+  });
+
+  it('is not installed without its hook', () => {
+    const { env, path } = fixture();
+    installHermesMcpConfig(env);
+    const config = readFileSync(path, 'utf8');
+    writeFileSync(path, config.slice(0, config.indexOf('hooks:')));
+    expect(hermesConfigInstalled(env)).toBe(false);
   });
 
   it('rejects a different npx package as installed', () => {
