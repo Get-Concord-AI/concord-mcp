@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 
 import { userHome } from '../config/paths.js';
-import { devinCliSupportsDedicatedMcpConfig, executablePath, run } from './adapters/index.js';
+import {
+  devinCliSupportsDedicatedMcpConfig,
+  executablePath,
+  kiroExecutablePath,
+  run,
+} from './adapters/index.js';
 import { removeBlock, upsertBlock } from './block.js';
 import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
@@ -15,7 +20,18 @@ import {
   upsertDevinMcpConfig,
 } from './devin-config.js';
 import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-user-hooks.js';
-import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
+import {
+  ANTIGRAVITY_RULE_HEADER,
+  CONCORD_GLOBAL_INSTRUCTIONS,
+  KIRO_STEERING_HEADER,
+} from './instructions.js';
+import {
+  kiroHome,
+  kiroUserHooksPath,
+  kiroUserMcpPath,
+  upsertKiroHooks,
+  withoutKiroHooks,
+} from './kiro-config.js';
 import {
   CONCORD_SERVER_COMMAND,
   CONCORD_SERVER_KEY,
@@ -73,6 +89,11 @@ function isAntigravityDetected(env: NodeJS.ProcessEnv): boolean {
     env['ANTIGRAVITY_AGENT'] === '1' ||
     existsSync(antigravityConfigDir(env))
   );
+}
+
+/** Kiro's CLI, its IDE launcher, or an existing `~/.kiro` directory. */
+function isKiroDetected(env: NodeJS.ProcessEnv): boolean {
+  return kiroExecutablePath(env) !== undefined || existsSync(kiroHome(env));
 }
 
 function instructionFile(
@@ -160,6 +181,25 @@ const USER_FILES: readonly UserFile[] = [
     path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
     install: (existing) =>
       upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
+    uninstall: removeMcpServer,
+  },
+  instructionFile(
+    'kiro',
+    (env) => join(kiroHome(env), 'steering', 'concord.md'),
+    KIRO_STEERING_HEADER,
+    isKiroDetected,
+  ),
+  {
+    isDetected: isKiroDetected,
+    path: kiroUserHooksPath,
+    install: (existing, path) => upsertKiroHooks(existing, path),
+    uninstall: withoutKiroHooks,
+  },
+  {
+    isDetected: isKiroDetected,
+    registration: { id: 'kiro', present: hasMcpServer },
+    path: kiroUserMcpPath,
+    install: (existing) => upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'kiro' }),
     uninstall: removeMcpServer,
   },
 ];

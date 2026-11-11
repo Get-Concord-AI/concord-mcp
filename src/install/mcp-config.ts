@@ -16,12 +16,14 @@ const JSON_TARGETS: readonly string[] = [
   join('.cursor', 'mcp.json'),
   join('.agents', 'mcp_config.json'),
   join('.github', 'mcp.json'),
+  join('.kiro', 'settings', 'mcp.json'),
 ];
 /** Harness kind each project file pins, for files only one harness reads. */
 const PINNED_KINDS: ReadonlyMap<string, string> = new Map([
   [join('.agents', 'mcp_config.json'), 'antigravity'],
   [join('.github', 'mcp.json'), 'copilot-cli'],
   [join('.qwen', 'settings.json'), 'qwen'],
+  [join('.kiro', 'settings', 'mcp.json'), 'kiro'],
 ]);
 const GEMINI_CONFIG_PATH = join('.gemini', 'settings.json');
 const GROK_CONFIG_PATH = join('.grok', 'config.toml');
@@ -277,7 +279,8 @@ function writeGeminiConfig(repoRoot: string): string {
 
 /**
  * Register Concord in every project-scoped client config under `repoRoot`:
- * Claude Code, Cursor, Antigravity, Copilot CLI, Gemini CLI, and Grok Build.
+ * Claude Code, Cursor, Antigravity, Copilot CLI, Kiro, Gemini CLI, and Grok
+ * Build.
  * Codex uses its user-scoped TOML installer because that harness does not
  * expose a project MCP file.
  */

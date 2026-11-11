@@ -1,5 +1,6 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
+import { statusKiro } from './kiro.js';
 import { statusQwen } from './qwen.js';
 
 import {
@@ -46,6 +47,7 @@ import {
   removeMcpServer,
   upsertMcpServer,
 } from '../mcp-config.js';
+import { installKiroUserConfigs, kiroDetected, uninstallKiroUserConfigs } from '../kiro-config.js';
 import {
   cursorTarget,
   hasConcordManifest,
@@ -89,6 +91,11 @@ export function executablePath(name: string, env: NodeJS.ProcessEnv): string | u
     }
   }
   return undefined;
+}
+
+/** Kiro's CLI (`kiro-cli`), or the `kiro` launcher an IDE-only install may have. */
+export function kiroExecutablePath(env: NodeJS.ProcessEnv): string | undefined {
+  return executablePath(HARNESS_CONFIGS.kiro.executable, env) ?? executablePath('kiro', env);
 }
 
 export function run(
@@ -753,6 +760,8 @@ export function statusAdapter(
       return statusDevin(env, repoRoot);
     case 'qwen':
       return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
+    case 'kiro':
+      return statusKiro(kiroExecutablePath(env), repoRoot, env);
   }
 }
 
@@ -803,6 +812,12 @@ export function installAdapter(
       );
     }
     installGlobalAntigravityHooks(env);
+    return;
+  }
+
+  if (harness === 'kiro') {
+    if (!kiroDetected(kiroExecutablePath(env), undefined, env)) return;
+    installKiroUserConfigs(env);
     return;
   }
 
@@ -943,6 +958,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   }
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
+  uninstallKiroUserConfigs(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);
