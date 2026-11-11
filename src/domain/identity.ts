@@ -49,6 +49,7 @@ export const SESSION_SOURCES: readonly SessionSource[] = [
   // there resolve through hookPayload (SessionStart / PreInvocation hooks).
   { kind: 'antigravity', envVar: 'ANTIGRAVITY_CONVERSATION_ID' },
   { kind: 'antigravity', envVar: 'ANTIGRAVITY_SESSION_ID' },
+  { kind: 'muse-code', envVar: 'MUSE_SESSION_ID' },
 ];
 
 /** How an identity was established, for diagnostics and error messages. */

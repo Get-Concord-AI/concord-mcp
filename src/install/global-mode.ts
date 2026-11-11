@@ -15,6 +15,13 @@ import {
   upsertDevinMcpConfig,
 } from './devin-config.js';
 import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-user-hooks.js';
+import {
+  hasMuseCodeMcpServer,
+  museConfigPath,
+  museHome,
+  removeMuseCodeMcpServer,
+  upsertMuseCodeMcpServer,
+} from './muse-code-config.js';
 import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
 import {
   agentKindEnv,
@@ -114,6 +121,7 @@ const USER_FILES: readonly UserFile[] = [
     ANTIGRAVITY_RULE_HEADER,
     isAntigravityDetected,
   ),
+  instructionFile('muse', (env) => join(museHome(env), 'AGENTS.md')),
   instructionFile('devin', (env) => join(dirname(devinMcpConfigPath(env)), 'AGENTS.md')),
   {
     executable: 'devin',
@@ -161,6 +169,13 @@ const USER_FILES: readonly UserFile[] = [
     path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('antigravity')),
     uninstall: removeMcpServer,
+  },
+  {
+    executable: 'muse',
+    registration: { id: 'muse-code', present: hasMuseCodeMcpServer },
+    path: (env) => museConfigPath(env),
+    install: (existing, path) => upsertMuseCodeMcpServer(existing, path),
+    uninstall: (existing) => removeMuseCodeMcpServer(existing),
   },
 ];
 

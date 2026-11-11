@@ -65,6 +65,14 @@ describe('resolveIdentity', () => {
     expect(identity?.kind).toBe('goose');
   });
 
+  it('derives a Muse Code identity from MUSE_SESSION_ID', () => {
+    const identity = resolveIdentity({ MUSE_SESSION_ID: 'muse-sess-123' });
+
+    expect(identity?.agentId).toBe(agentIdForSession('muse-code', 'muse-sess-123'));
+    expect(identity?.kind).toBe('muse-code');
+    expect(identity?.origin).toBe('session');
+  });
+
   it('derives an Antigravity identity from ANTIGRAVITY_CONVERSATION_ID and ANTIGRAVITY_SESSION_ID', () => {
     const fromConv = resolveIdentity({ ANTIGRAVITY_CONVERSATION_ID: 'conv-123' });
     expect(fromConv?.agentId).toBe(agentIdForSession('antigravity', 'conv-123'));

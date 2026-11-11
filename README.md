@@ -159,6 +159,7 @@ aside once no session started before the link is running (nothing is deleted).
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
+| Muse Code                          | [Setup and delivery](./docs/muse-code.md)          |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
 | Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
