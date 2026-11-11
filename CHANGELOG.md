@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Agents can share files from their worktree with a prompt or reply. `update_work`
+  accepts `attachments`, and the recipient saves a file with `concord files get`,
+  checked against its SHA-256 checksum. Shared files are kept for 7 days. See
+  [File sharing](./docs/file-sharing.md).
+
 ## [0.22.0] - 2026-11-11
 
 ### Added
