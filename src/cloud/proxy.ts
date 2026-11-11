@@ -11,7 +11,12 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import type { AgentIdentity } from '../domain/identity.js';
+import {
+  identityForRequest,
+  parseOpenCodeRequestIdentityMetadata,
+  type AgentIdentity,
+  type OpenCodeRequestIdentityMetadata,
+} from '../domain/identity.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../install/instructions.js';
 import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
@@ -44,6 +49,10 @@ export interface CloudSession {
   /** The checkout this session works in: a linked worktree's own root. */
   readonly checkoutRoot: string;
   readonly identity: AgentIdentity | undefined;
+  /** Resolves harness session identity supplied only on MCP requests. */
+  readonly requestIdentity?: (
+    meta: OpenCodeRequestIdentityMetadata | undefined,
+  ) => AgentIdentity | undefined;
 }
 
 /**
@@ -55,6 +64,9 @@ export function cloudSessionFor(
   env: NodeJS.ProcessEnv,
   identity: AgentIdentity | undefined,
   checkoutRoot: string = repoRoot,
+  requestIdentity?: (
+    meta: OpenCodeRequestIdentityMetadata | undefined,
+  ) => AgentIdentity | undefined,
 ): CloudSession | undefined {
   const machine = linkedMachine(env);
   const target = cloudTargetFor(repoRoot, env);
@@ -69,6 +81,7 @@ export function cloudSessionFor(
     repoRoot,
     checkoutRoot,
     identity,
+    ...(requestIdentity === undefined ? {} : { requestIdentity }),
   };
 }
 
@@ -111,7 +124,8 @@ export function repoRelative(
 export function forwardedArguments(
   tool: string,
   args: ToolArguments,
-  session: Pick<CloudSession, 'identity' | 'repoRoot' | 'checkoutRoot'>,
+  session: Pick<CloudSession, 'identity' | 'repoRoot' | 'checkoutRoot' | 'requestIdentity'>,
+  requestMeta?: OpenCodeRequestIdentityMetadata,
 ): ToolArguments {
   const forwarded: ToolArguments = {};
   for (const [name, value] of Object.entries(args)) {
@@ -122,7 +136,7 @@ export function forwardedArguments(
   }
 
   // The session is the authority, as `resolveActorId` makes it locally.
-  const identity = session.identity;
+  const identity = identityForRequest(session.identity, session.requestIdentity?.(requestMeta));
   if (identity !== undefined && WRITE_TOOLS.has(tool)) {
     forwarded['agent_id'] = identity.agentId;
     if (tool === 'start_work') forwarded['kind'] = identity.kind;
@@ -205,9 +219,13 @@ export function createCloudProxyServer(
     try {
       const { name } = request.params;
       const args = toolArguments.parse(request.params.arguments ?? {});
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(request.params._meta);
       return await (
         await attempt
-      ).callTool({ name, arguments: forwardedArguments(name, args, session) });
+      ).callTool({
+        name,
+        arguments: forwardedArguments(name, args, session, requestMeta),
+      });
     } catch (error) {
       forget(attempt);
       return failure(error instanceof Error ? error.message : String(error));

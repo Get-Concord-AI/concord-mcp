@@ -67,6 +67,22 @@ const hookSessionSchema = z
   })
   .loose();
 
+const openCodeRequestMetaSchema = z
+  .object({
+    'ai.opencode/sessionID': z.string().trim().min(1),
+  })
+  .transform(({ 'ai.opencode/sessionID': sessionId }) => ({ sessionId }));
+
+export type OpenCodeRequestIdentityMetadata = z.infer<typeof openCodeRequestMetaSchema>;
+
+/** Parse the OpenCode V2 session metadata at the MCP request boundary. */
+export function parseOpenCodeRequestIdentityMetadata(
+  input: unknown,
+): OpenCodeRequestIdentityMetadata | undefined {
+  const parsed = openCodeRequestMetaSchema.safeParse(input);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /**
  * A stable agent id for one session of one client, e.g. `claude-code:4f2a91c7`.
  *
@@ -77,6 +93,29 @@ const hookSessionSchema = z
  */
 export function agentIdForSession(kind: string, sessionId: string): string {
   return `${kind}:${createHash('sha256').update(sessionId).digest('hex').slice(0, 8)}`;
+}
+
+/**
+ * OpenCode V2 supplies its opaque session id in MCP request metadata, not in
+ * the server process environment or the model-visible tool arguments.
+ */
+export function resolveOpenCodeRequestIdentity(
+  meta: OpenCodeRequestIdentityMetadata | undefined,
+): AgentIdentity | undefined {
+  if (meta === undefined) return undefined;
+  return {
+    agentId: agentIdForSession('opencode', meta.sessionId),
+    kind: 'opencode',
+    origin: 'session',
+  };
+}
+
+/** An operator-chosen identity remains authoritative for every request. */
+export function identityForRequest(
+  session: AgentIdentity | undefined,
+  request: AgentIdentity | undefined,
+): AgentIdentity | undefined {
+  return session?.origin === 'operator' ? session : (request ?? session);
 }
 
 /** The session sources for a client, when that client exposes any. */
