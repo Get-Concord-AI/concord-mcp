@@ -23,23 +23,41 @@ interface PanelProps {
   focused: boolean;
   children: ReactNode;
   height?: number | string;
+  /** Share of the leftover height, for panes laid out beside a fixed-height pane. */
+  grow?: number;
 }
 
-function Panel({ title, focused, children, height }: PanelProps): ReactNode {
+/** Rows a panel spends on its border (2) and title (1). */
+const PANEL_CHROME_ROWS = 3;
+
+function Panel({ title, focused, children, height, grow }: PanelProps): ReactNode {
   return (
     <Box
       borderStyle="round"
       borderColor={focused ? 'cyan' : 'gray'}
       flexDirection="column"
       height={height}
+      flexGrow={grow ?? 0}
+      flexBasis={grow === undefined ? undefined : 0}
       overflow="hidden"
       paddingX={1}
     >
-      <Text bold color={focused ? 'cyan' : 'gray'}>
-        {title}
-      </Text>
+      <Box flexShrink={0}>
+        <Text bold color={focused ? 'cyan' : 'gray'} wrap="truncate-end">
+          {title}
+        </Text>
+      </Box>
       {children}
     </Box>
+  );
+}
+
+/** 18% of the body, but never under 5 rows (two agent lines), and never more than half. */
+function stackedAgentsHeight(bodyHeight: number): number {
+  const minimum = PANEL_CHROME_ROWS + 2;
+  return Math.max(
+    1,
+    Math.min(Math.max(minimum, Math.round(bodyHeight * 0.18)), Math.floor(bodyHeight / 2)),
   );
 }
 
@@ -76,21 +94,60 @@ function livenessMarker(entry: PresenceEntry): ReactNode {
   return <Text color="red">○</Text>;
 }
 
-function Agents({ snapshot }: { snapshot: DashboardSnapshot }): ReactNode {
-  if (snapshot.status.presence.length === 0) {
+function signalAges(agent: PresenceEntry, compact: boolean): string {
+  const parts = [`${compact ? 'hb' : 'heartbeat'} ${ageLabel(agent.heartbeatAgeSeconds)}`];
+  if (agent.activityAgeSeconds !== null) {
+    parts.push(`${compact ? 'act' : 'activity'} ${ageLabel(agent.activityAgeSeconds)}`);
+  }
+  return parts.join(' · ');
+}
+
+function detailedRows(agent: PresenceEntry): number {
+  return agent.summary === null ? 2 : 3;
+}
+
+/** One line per agent, for panes too short for the detailed layout. */
+function CompactAgent({ agent }: { agent: PresenceEntry }): ReactNode {
+  const summaryAge =
+    agent.summaryAgeSeconds === null ? '' : ` · summary ${ageLabel(agent.summaryAgeSeconds)} old`;
+  return (
+    <Text wrap="truncate-end">
+      {livenessMarker(agent)} {agent.agentId} · {agent.status} · {signalAges(agent, true)}
+      {agent.summary === null ? '' : `${summaryAge} · ${agent.summary}`}
+    </Text>
+  );
+}
+
+/** Each agent takes three rows when `rows` allows it, otherwise one; agents that still do not
+ * fit are counted on a final "+N more" line so the pane never silently drops them. */
+function Agents({ snapshot, rows }: { snapshot: DashboardSnapshot; rows: number }): ReactNode {
+  const presence = snapshot.status.presence;
+  if (presence.length === 0) {
     return <Text dimColor>No registered agents</Text>;
   }
-  return snapshot.status.presence.map((agent) => (
-    <Box key={agent.agentId} flexDirection="column">
+  const detailed = presence.reduce((total, agent) => total + detailedRows(agent), 0) <= rows;
+  if (!detailed) {
+    const shown = presence.length <= rows ? presence : presence.slice(0, Math.max(0, rows - 1));
+    const hidden = presence.length - shown.length;
+    return (
+      <>
+        {shown.map((agent) => (
+          <Box key={agent.agentId} flexShrink={0}>
+            <CompactAgent agent={agent} />
+          </Box>
+        ))}
+        {hidden === 0 ? null : (
+          <Text dimColor>+{hidden} more · widen or heighten the terminal</Text>
+        )}
+      </>
+    );
+  }
+  return presence.map((agent) => (
+    <Box key={agent.agentId} flexDirection="column" flexShrink={0}>
       <Text wrap="truncate-end">
         {livenessMarker(agent)} {agent.agentId} · {agent.status}
       </Text>
-      <Text wrap="truncate-end">
-        heartbeat {ageLabel(agent.heartbeatAgeSeconds)}
-        {agent.activityAgeSeconds === null
-          ? ''
-          : ` · activity ${ageLabel(agent.activityAgeSeconds)}`}
-      </Text>
+      <Text wrap="truncate-end">{signalAges(agent, false)}</Text>
       {agent.summary === null ? null : (
         <Text wrap="truncate-end">
           {agent.summaryAgeSeconds === null
@@ -299,7 +356,10 @@ function DashboardBody({
   const overview = (
     <Box flexDirection="column" height="100%" overflow="hidden">
       <Panel title="Agents" focused={pane === 'agents'} height="65%">
-        <Agents snapshot={snapshot} />
+        <Agents
+          snapshot={snapshot}
+          rows={Math.round(Math.round(height * 0.68) * 0.65) - PANEL_CHROME_ROWS}
+        />
       </Panel>
       <Panel title="Alerts" focused={pane === 'alerts'} height="35%">
         <Alerts snapshot={snapshot} />
@@ -318,21 +378,22 @@ function DashboardBody({
   );
 
   if (layout === 'stacked') {
+    const agentsHeight = stackedAgentsHeight(height);
     return (
       <Box flexDirection="column" height={height} overflow="hidden">
-        <Panel title="Agents" focused={pane === 'agents'} height="18%">
-          <Agents snapshot={snapshot} />
+        <Panel title="Agents" focused={pane === 'agents'} height={agentsHeight}>
+          <Agents snapshot={snapshot} rows={agentsHeight - PANEL_CHROME_ROWS} />
         </Panel>
-        <Panel title="Tasks" focused={pane === 'tasks'} height="20%">
+        <Panel title="Tasks" focused={pane === 'tasks'} grow={20}>
           <Tasks tasks={tasks} selectedIndex={selectedIndex} />
         </Panel>
-        <Panel title="Alerts" focused={pane === 'alerts'} height="18%">
+        <Panel title="Alerts" focused={pane === 'alerts'} grow={18}>
           <Alerts snapshot={snapshot} />
         </Panel>
-        <Panel title="Task context" focused={pane === 'context'} height="24%">
+        <Panel title="Task context" focused={pane === 'context'} grow={24}>
           <Context item={selected} />
         </Panel>
-        <Panel title="Timeline" focused={pane === 'timeline'} height="20%">
+        <Panel title="Timeline" focused={pane === 'timeline'} grow={20}>
           <Timeline snapshot={snapshot} filter={filter} />
         </Panel>
       </Box>

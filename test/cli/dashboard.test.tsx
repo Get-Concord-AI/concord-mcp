@@ -106,6 +106,53 @@ describe('dashboard snapshot', () => {
     expect(view.lastFrame()).toContain('summary 120m old');
   });
 
+  it('keeps every agent signal visible in a short stacked dashboard', async () => {
+    for (const agentId of ['claude-code:alpha', 'codex:beta']) {
+      repos.agents.upsert({ agentId, kind: 'test', summary: `work for ${agentId}` });
+      repos.agents.recordActivity(agentId);
+    }
+    const snapshot = buildDashboardSnapshot('/work/demo', repos);
+    const view = render(
+      <DashboardApp
+        initialSnapshot={snapshot}
+        loadSnapshot={() => snapshot}
+        refreshMs={60_000}
+        width={80}
+        height={24}
+      />,
+    );
+    await flushRender();
+    const frame = view.lastFrame() ?? '';
+
+    expect(frame).toContain('Agents');
+    expect(frame).toContain('Alerts');
+    for (const agentId of ['claude-code:alpha', 'codex:beta']) {
+      const line = frame.split('\n').find((row) => row.includes(agentId)) ?? '';
+      expect(line).toContain('hb 0s');
+      expect(line).toContain('act 0s');
+      expect(line).toContain('summary 0s old');
+    }
+  });
+
+  it('counts agents that do not fit in a short stacked dashboard', async () => {
+    for (const index of [1, 2, 3, 4, 5]) {
+      repos.agents.upsert({ agentId: `codex:agent-${String(index)}`, kind: 'codex' });
+    }
+    const snapshot = buildDashboardSnapshot('/work/demo', repos);
+    const view = render(
+      <DashboardApp
+        initialSnapshot={snapshot}
+        loadSnapshot={() => snapshot}
+        refreshMs={60_000}
+        width={80}
+        height={24}
+      />,
+    );
+    await flushRender();
+
+    expect(view.lastFrame()).toContain('+4 more');
+  });
+
   it('renders a wide overview and task context', async () => {
     seedDashboard();
     const snapshot = buildDashboardSnapshot('/work/concord-demo', repos);
