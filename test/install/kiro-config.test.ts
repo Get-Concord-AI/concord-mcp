@@ -95,6 +95,13 @@ describe('Kiro hooks config', () => {
       /unsupported hooks version/u,
     );
     expect(hasKiroHooks('{ not json')).toBe(false);
+
+    const unsupported = z
+      .object({ version: z.string() })
+      .loose()
+      .parse(JSON.parse(upsertKiroHooks(undefined, 'hooks.json')));
+    unsupported.version = 'v2';
+    expect(hasKiroHooks(JSON.stringify(unsupported))).toBe(false);
   });
 
   it('removes only Concord hooks and deletes the file content when nothing is left', () => {

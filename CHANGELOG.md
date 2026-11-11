@@ -25,6 +25,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Global mode adopts the Kiro MCP entry that setup wrote and removes it again
   with `concord setup --no-global`. Kiro status now requires CLI 3.0.0 or newer
   for lifecycle hooks, while IDE-only installs stay supported.
+- Kiro status no longer treats hooks in an unsupported file version as ready,
+  so setup reports the file instead of delivery appearing healthy.
 
 ## [0.22.0] - 2026-11-11
 
