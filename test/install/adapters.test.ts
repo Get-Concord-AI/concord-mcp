@@ -189,6 +189,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'harness-monitor',
+      'harness-monitor',
       'managed-controller',
       'harness-monitor',
       'harness-monitor',
@@ -346,6 +347,35 @@ describe('global harness adapters', () => {
     const secondRun = readFileSync(configPath, 'utf8');
     const occurrences = secondRun.match(/concord-relay/g) ?? [];
     expect(occurrences).toHaveLength(2);
+  });
+
+  it('reports OpenClaw by its state directory and registers it when detected', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-openclaw-home-'));
+    const env = { HOME: home, PATH: join(home, 'bin') };
+
+    const absent = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+    expect(absent.find((entry) => entry.harness === 'openclaw')).toMatchObject({
+      detected: false,
+      status: 'not_detected',
+    });
+    expect(existsSync(join(home, '.openclaw', 'openclaw.json'))).toBe(false);
+
+    mkdirSync(join(home, '.openclaw'));
+    const present = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+    expect(present.find((entry) => entry.harness === 'openclaw')).toMatchObject({
+      detected: true,
+      status: 'installed',
+      capabilities: ['pull', 'busy'],
+    });
+    const config = readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf8');
+    expect(config).toContain('@concord-ai/concord-mcp');
+    expect(config).toContain('"CONCORD_AGENT_KIND": "openclaw"');
+    expect(config).not.toContain('CONCORD_REPO_ROOT');
+
+    uninstallGlobalAdapters(env);
+    expect(readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf8')).not.toContain(
+      'concord-mcp',
+    );
   });
 
   it('does not install Goose config below the supported version', () => {

@@ -13,6 +13,7 @@ export const harnessNames = [
   'gemini',
   'grok',
   'goose',
+  'openclaw',
   'antigravity',
   'copilot-cli',
   'devin',
@@ -200,6 +201,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Concord MCP server is registered with Goose; durable inbox delivery is available.',
     unsupportedDetail: 'Goose does not meet the verified MCP baseline (1.52.0).',
+  },
+  openclaw: {
+    name: 'openclaw',
+    executable: 'openclaw',
+    minimumVersion: [0, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Concord MCP server is registered under `mcp.servers` in OpenClaw; agents pull their inbox during turns.',
+    unsupportedDetail: 'OpenClaw was not detected: no `openclaw` on PATH and no state directory.',
   },
   antigravity: {
     name: 'antigravity',

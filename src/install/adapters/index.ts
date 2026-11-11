@@ -1,6 +1,7 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { statusQwen } from './qwen.js';
+import { isOpenclawDetected, statusOpenclaw } from './openclaw.js';
 
 import {
   HARNESS_CONFIGS,
@@ -34,6 +35,7 @@ import {
   installGooseMcpConfig,
   uninstallGooseConfig,
 } from '../goose-config.js';
+import { installOpenclawMcpConfig, uninstallOpenclawConfig } from '../openclaw-config.js';
 import {
   globalAntigravityHooksPath,
   hasAntigravityHooks,
@@ -745,6 +747,8 @@ export function statusAdapter(
       return statusGrok(env);
     case 'goose':
       return statusGoose(env);
+    case 'openclaw':
+      return statusOpenclaw(executablePath(HARNESS_CONFIGS.openclaw.executable, env), env);
     case 'antigravity':
       return statusAntigravity(env, repoRoot);
     case 'copilot-cli':
@@ -803,6 +807,11 @@ export function installAdapter(
       );
     }
     installGlobalAntigravityHooks(env);
+    return;
+  }
+  if (harness === 'openclaw') {
+    const executable = executablePath(HARNESS_CONFIGS.openclaw.executable, env);
+    if (isOpenclawDetected(executable, env)) installOpenclawMcpConfig(env);
     return;
   }
 
@@ -924,6 +933,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
+  try {
+    uninstallOpenclawConfig(env);
+  } catch {
+    // Malformed or unreadable OpenClaw config is left untouched.
+  }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
   if (existsSync(antigravityMcp)) {

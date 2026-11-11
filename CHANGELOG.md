@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- OpenClaw support. `concord setup` registers Concord under `mcp.servers.concord`
+  in OpenClaw's `openclaw.json` when the `openclaw` CLI or its state directory is
+  detected, preserving the user's other servers and settings. Global mode writes
+  a Concord block into each configured OpenClaw agent's workspace `AGENTS.md`
+  with that agent's stable id (`openclaw:<agentId>`), so several agents on one
+  machine stay distinct; both are removed cleanly when global mode is turned off.
+  `concord adapters status` and `concord doctor` report OpenClaw. Delivery is
+  pull-only during turns; idle wake-up is not verified.
+
 ## [0.21.0] - 2026-11-09
 
 ### Added
