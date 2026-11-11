@@ -114,6 +114,42 @@ describe('applyGlobalMode', () => {
     expect(existsSync(researchFile)).toBe(false);
   });
 
+  it('removes the block from an OpenClaw workspace the agent has left since it was written', () => {
+    const env = machine(['openclaw']);
+    const configPath = join(env.HOME, '.openclaw', 'openclaw.json');
+    const oldDir = join(env.HOME, 'old-workspace');
+    const newDir = join(env.HOME, 'new-workspace');
+    mkdirSync(join(env.HOME, '.openclaw'));
+    mkdirSync(oldDir);
+    const oldFile = join(oldDir, 'AGENTS.md');
+    const newFile = join(newDir, 'AGENTS.md');
+    writeFileSync(oldFile, '# Old\n');
+    writeFileSync(
+      configPath,
+      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(oldDir)} }] } }\n`,
+    );
+    const on = applyGlobalMode(env, true);
+    expect(on.openclawFiles).toEqual([oldFile]);
+    expect(read(oldFile)).toContain('agent_id: "openclaw:a"');
+
+    // The agent moves; the next run writes the new file and clears the old one.
+    writeFileSync(
+      configPath,
+      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(newDir)} }] } }\n`,
+    );
+    const moved = applyGlobalMode(env, true, { openclawFiles: on.openclawFiles });
+    expect(read(oldFile)).toBe('# Old\n');
+    expect(read(newFile)).toContain('agent_id: "openclaw:a"');
+    expect(moved.openclawFiles).toEqual([newFile]);
+
+    // The agent is removed from the config; turning global mode off still finds its file.
+    writeFileSync(configPath, '{ agents: { list: [] } }\n');
+    const off = applyGlobalMode(env, false, { openclawFiles: moved.openclawFiles });
+    expect(off.warnings).toEqual([]);
+    expect(existsSync(newFile)).toBe(false);
+    expect(off.openclawFiles).toEqual([]);
+  });
+
   it('writes no agent id into a workspace that several OpenClaw agents share', () => {
     const env = machine(['openclaw']);
     const shared = join(env.HOME, 'shared');
@@ -380,8 +416,17 @@ describe('runSetup with global mode', () => {
       global: true,
     });
 
-    expect(readUserConfig(env)).toEqual({ globalMode: true, globalRegistrations: [] });
-    expect(result.globalMode).toEqual({ written: [], warnings: [], registrations: [] });
+    expect(readUserConfig(env)).toEqual({
+      globalMode: true,
+      globalRegistrations: [],
+      globalOpenclawFiles: [],
+    });
+    expect(result.globalMode).toEqual({
+      written: [],
+      warnings: [],
+      registrations: [],
+      openclawFiles: [],
+    });
     expect(result.repoFilesSkipped).toBe(true);
     expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(true);
     expect(present(repo)).toEqual([]);

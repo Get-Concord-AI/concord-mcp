@@ -276,14 +276,17 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
   const globalRun: { report?: GlobalModeReport } = {};
   const applyGlobal = (): void => {
     if (options.global === undefined || globalRun.report !== undefined) return;
+    const saved = readUserConfig(env);
     globalRun.report = applyGlobalMode(env, options.global, {
       mcp: options.mcp !== false,
-      registrations: readUserConfig(env).globalRegistrations ?? [],
+      registrations: saved.globalRegistrations ?? [],
+      openclawFiles: saved.globalOpenclawFiles ?? [],
     });
     written.push(
       writeUserConfig(env, {
         globalMode: options.global,
         globalRegistrations: globalRun.report.registrations,
+        globalOpenclawFiles: globalRun.report.openclawFiles,
       }),
       ...globalRun.report.written,
     );

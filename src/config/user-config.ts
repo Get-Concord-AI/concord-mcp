@@ -17,6 +17,7 @@ const userConfigSchema = z
   .object({
     globalMode: z.boolean().optional(),
     globalRegistrations: z.array(z.string()).optional(),
+    globalOpenclawFiles: z.array(z.string()).optional(),
     autoAdapters: z.boolean().optional(),
     cloudLink: z.boolean().optional(),
   })
@@ -30,6 +31,8 @@ export interface UserConfig {
   readonly globalMode?: boolean;
   /** The user-level MCP registrations global mode added: the only ones it removes. */
   readonly globalRegistrations?: readonly string[];
+  /** OpenClaw `AGENTS.md` files global mode wrote a block into: removal visits them all. */
+  readonly globalOpenclawFiles?: readonly string[];
   /** Install or repair a harness's adapter when a session finds it missing; undefined until asked. */
   readonly autoAdapters?: boolean;
   /**
@@ -65,6 +68,9 @@ export function readUserConfig(env: NodeJS.ProcessEnv): UserConfig {
       ...(parsed.globalRegistrations === undefined
         ? {}
         : { globalRegistrations: parsed.globalRegistrations }),
+      ...(parsed.globalOpenclawFiles === undefined
+        ? {}
+        : { globalOpenclawFiles: parsed.globalOpenclawFiles }),
       ...(parsed.autoAdapters === undefined ? {} : { autoAdapters: parsed.autoAdapters }),
       ...(parsed.cloudLink === undefined ? {} : { cloudLink: parsed.cloudLink }),
     };
