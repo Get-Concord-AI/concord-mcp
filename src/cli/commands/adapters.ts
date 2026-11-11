@@ -1,5 +1,6 @@
 import type { Command } from '@commander-js/extra-typings';
-import { spawnCommand } from '../../install/spawn-command.js';
+import { resolve } from 'node:path';
+import { spawnCommand, stopCommand } from '../../install/spawn-command.js';
 
 import { z } from 'zod';
 
@@ -164,6 +165,7 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
     reportMissingHarnessCli('Codex CLI', 'npm i -g @openai/codex');
     return;
   }
+  const selectedPath = resolve(executable);
   const port = await availablePort();
   const url = `ws://127.0.0.1:${String(port)}`;
   // The app-server, not the remote TUI, owns MCP child processes. Give both
@@ -173,13 +175,13 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
   // the complete managed tree from the resolved repository root.
   const context = codexManagedLaunchContext(repoRoot, url, process.env);
   const argv = codexLaunchArgv(url, args);
-  const server = spawnCommand(executable, argv.appServer, {
+  const server = spawnCommand(selectedPath, argv.appServer, {
     ...context,
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   try {
     await waitForCodexServer(url, server);
-    const tui = spawnCommand(executable, argv.tui, {
+    const tui = spawnCommand(selectedPath, argv.tui, {
       ...context,
       stdio: 'inherit',
     });
@@ -189,7 +191,7 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
     });
     if (code !== null && code !== 0) process.exitCode = code;
   } finally {
-    server.kill();
+    stopCommand(server, context.env);
   }
 }
 
