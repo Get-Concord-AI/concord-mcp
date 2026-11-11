@@ -145,6 +145,8 @@ describe('applyGlobalMode', () => {
   });
 
   it('keeps remembering an OpenClaw file it could not read, until the block is gone', () => {
+    // chmod 000 does not block reads on Windows or for root.
+    if (process.platform === 'win32' || process.getuid?.() === 0) return;
     const env = machine(['openclaw']);
     const configPath = join(env.HOME, '.openclaw', 'openclaw.json');
     const oldDir = join(env.HOME, 'old-workspace');
