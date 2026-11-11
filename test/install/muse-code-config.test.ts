@@ -37,7 +37,15 @@ function writeJson(path: string, json: string): void {
 const settingsSchema = z.object({
   schema_version: z.number(),
   tui: z.object({ theme: z.string() }).optional(),
-  mcp_servers: z.record(z.string(), z.object({ command: z.string() })).optional(),
+  mcp_servers: z
+    .record(
+      z.string(),
+      z.object({
+        command: z.string(),
+        env: z.record(z.string(), z.string()).optional(),
+      }),
+    )
+    .optional(),
 });
 
 describe('Muse Code configuration', () => {
@@ -82,6 +90,7 @@ describe('Muse Code configuration', () => {
     const parsed = settingsSchema.parse(JSON.parse(initial));
     expect(parsed.schema_version).toBe(1);
     expect(parsed.mcp_servers?.['concord']?.command).toBe('concord-mcp');
+    expect(parsed.mcp_servers?.['concord']?.env?.['CONCORD_AGENT_KIND']).toBe('muse-code');
 
     const fromEmpty = upsertMuseCodeMcpServer('');
     expect(JSON.parse(fromEmpty)).toEqual(JSON.parse(initial));
@@ -104,6 +113,7 @@ describe('Muse Code configuration', () => {
     expect(verified.tui?.theme).toBe('dark');
     expect(verified.mcp_servers?.['existing_tool']?.command).toBe('custom-tool');
     expect(verified.mcp_servers?.['concord']?.command).toBe('concord-mcp');
+    expect(verified.mcp_servers?.['concord']?.env?.['CONCORD_AGENT_KIND']).toBe('muse-code');
   });
 
   it('throws an error with path context on malformed JSON or non-object config', () => {

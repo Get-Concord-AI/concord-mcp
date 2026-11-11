@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 
 import { userHome } from '../config/paths.js';
-import { CONCORD_SERVER_COMMAND, isConcordWrittenEntry } from './mcp-config.js';
+import { agentKindEnv, CONCORD_SERVER_COMMAND, isConcordWrittenEntry } from './mcp-config.js';
 
 const MCP_SERVERS_KEY = 'mcp_servers';
 const CONCORD_SERVER_KEY = 'concord';
@@ -73,7 +73,12 @@ export function upsertMuseCodeMcpServer(
   if (existing === undefined || existing.trim() === '') {
     const initial: JsonObject = {
       schema_version: 1,
-      [MCP_SERVERS_KEY]: { [CONCORD_SERVER_KEY]: { command: CONCORD_SERVER_COMMAND } },
+      [MCP_SERVERS_KEY]: {
+        [CONCORD_SERVER_KEY]: {
+          command: CONCORD_SERVER_COMMAND,
+          env: agentKindEnv('muse-code'),
+        },
+      },
     };
     return `${JSON.stringify(initial, null, 2)}\n`;
   }
@@ -93,7 +98,10 @@ export function upsertMuseCodeMcpServer(
     nextServers = { ...parsedServers.data };
   }
 
-  nextServers[CONCORD_SERVER_KEY] = { command: CONCORD_SERVER_COMMAND };
+  nextServers[CONCORD_SERVER_KEY] = {
+    command: CONCORD_SERVER_COMMAND,
+    env: agentKindEnv('muse-code'),
+  };
   const next: JsonObject = {
     schema_version: config['schema_version'] ?? 1,
     ...config,
