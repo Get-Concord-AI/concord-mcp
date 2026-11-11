@@ -6,12 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-11
+
 ### Added
 
 - OpenCode 2 support. `concord setup` registers Concord's MCP server with
   OpenCode through `opencode mcp add --global`, so OpenCode edits its own
   config and keeps its comments and other settings. It also finds the CLI that
-  the OpenCode desktop app bundles, which is not on `PATH`.
+  the OpenCode desktop app bundles, which is not on `PATH`. Status checks read
+  the registration without starting OpenCode's background service (#306, #343).
 - OpenCode sessions are identified as `opencode:<hash>` from the session id
   OpenCode 2 sends in MCP request metadata, locally and through Concord Cloud,
   without storing the raw id. An operator-set `CONCORD_AGENT_ID` still wins
@@ -23,17 +26,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Harness version checks read versions printed with a `v` prefix. OpenCode 2
-  prints `opencode v2.2.7`, which Concord read as no version, so it reported
-  every real OpenCode 2 as unsupported and skipped it in setup and the launcher.
-- `concord adapters status` and `concord doctor` no longer start OpenCode's
-  background service to check Concord's registration. When the service is
-  stopped they say so instead of stalling.
+- Harness version checks accept a `v` prefix, as in `opencode v2.2.7` (#343).
 
 ### Changed
 
 - Copilot CLI's straggler sweep and session adapter now live in a shared
   module that the OpenCode adapter also uses. Copilot's behavior is unchanged.
+- The translated READMEs list OpenCode (#344).
 
 ## [0.21.1] - 2026-11-11
 
@@ -865,7 +864,8 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.1...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.1...v0.22.0
 [0.21.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.19.0...v0.20.0
