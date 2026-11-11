@@ -33,8 +33,9 @@ export function run(
   };
 }
 
+/** The first `x.y.z` in a `--version` output, allowing a `v` prefix (`opencode v2.2.7`). */
 export function versionTuple(output: string): number[] | undefined {
-  const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
+  const match = /(?<![\w.])v?(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
   if (match === null) return undefined;
   return match.slice(1).map((part) => Number.parseInt(part, 10));
 }

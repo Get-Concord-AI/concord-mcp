@@ -1,6 +1,10 @@
 import { HARNESS_CONFIGS } from '../../domain/harness-config.js';
 import { findOpenCodeExecutable } from '../../relay/opencode-api.js';
-import { installOpencodeMcpConfig, opencodeConfigInstalled } from '../opencode-config.js';
+import {
+  installOpencodeMcpConfig,
+  opencodeConfigInstalled,
+  opencodeServiceRunning,
+} from '../opencode-config.js';
 import type { AdapterReport } from './index.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
 
@@ -32,6 +36,18 @@ export function statusOpencode(env: NodeJS.ProcessEnv): AdapterReport {
       status: 'unsupported_version',
       capabilities: [],
       detail: config.unsupportedDetail,
+    };
+  }
+  // A status check must not start the user's OpenCode service to find out.
+  if (!opencodeServiceRunning(executable, env)) {
+    return {
+      ...base,
+      detected: true,
+      status: 'action_required',
+      capabilities: [],
+      detail:
+        "OpenCode's background service is not running, so Concord cannot check its registration. " +
+        'Start OpenCode, then check again.',
     };
   }
   const installed = opencodeConfigInstalled(executable, env);

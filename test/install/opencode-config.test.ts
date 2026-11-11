@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   installOpencodeMcpConfig,
   opencodeConfigInstalled,
+  opencodeServiceRunning,
 } from '../../src/install/opencode-config.js';
 import { recordedInvocations, writeFakeOpencode } from '../helpers/fake-opencode.js';
 
@@ -94,5 +95,14 @@ describe('opencodeConfigInstalled', () => {
     const junk = join(dir, 'junk.json');
     writeFileSync(junk, 'not json');
     expect(opencodeConfigInstalled(executable, { ...env, FAKE_OC_MCP: junk })).toBe(false);
+  });
+});
+
+describe('opencodeServiceRunning', () => {
+  it('reads `opencode service status` without starting the service', () => {
+    const { executable, env } = setup();
+
+    expect(opencodeServiceRunning(executable, env)).toBe(true);
+    expect(opencodeServiceRunning(executable, { ...env, FAKE_OC_SERVICE: 'stopped' })).toBe(false);
   });
 });

@@ -273,6 +273,17 @@ describe('global harness adapters', () => {
       });
     });
 
+    it('does not start a stopped OpenCode service to check registration', () => {
+      const { env, log } = opencodeEnv();
+
+      expect(opencodeReport({ ...env, FAKE_OC_SERVICE: 'stopped' })).toMatchObject({
+        detected: true,
+        status: 'action_required',
+        capabilities: [],
+      });
+      expect(recordedInvocations(log).filter((call) => call[0] === 'api')).toEqual([]);
+    });
+
     it('registers Concord through `opencode mcp add` when adapters are installed', () => {
       const { env, log } = opencodeEnv();
 
