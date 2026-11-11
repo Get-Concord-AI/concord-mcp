@@ -9,13 +9,21 @@ import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { relayAddress } from '../../src/relay/address.js';
 import { CodexAppServerAdapter } from '../../src/relay/adapters.js';
-import { encodeRelayFrame, type RelayDelivery } from '../../src/relay/protocol.js';
+import { RelayFrameReader } from '../../src/relay/frame-reader.js';
+import {
+  decodeRelayDelivery,
+  decodeRelayResponse,
+  encodeRelayFrame,
+  type RelayDelivery,
+  type RelayResponse,
+} from '../../src/relay/protocol.js';
 import {
   relayHeartbeatPhaseDelay,
   startAgentRelay,
   type AgentSessionDelivery,
 } from '../../src/relay/server.js';
 import { SocketAgentMessageDispatcher } from '../../src/relay/socket-dispatcher.js';
+import { renderPeerMessage } from '../../src/domain/pull-inbox.js';
 import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 import {
   handleSendAgentMessage,
@@ -43,6 +51,23 @@ async function listen(server: Server, address: string): Promise<void> {
     server.listen(address, () => {
       server.off('error', reject);
       resolve();
+    });
+  });
+}
+
+function relayResult(address: string, frame: RelayDelivery): Promise<RelayResponse> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(address);
+    const chunks: Buffer[] = [];
+    socket.once('error', reject);
+    socket.on('data', (chunk) => {
+      if (Buffer.isBuffer(chunk)) chunks.push(chunk);
+    });
+    socket.once('end', () => {
+      resolve(decodeRelayResponse(Buffer.concat(chunks).toString('utf8').trim()));
+    });
+    socket.once('connect', () => {
+      socket.end(encodeRelayFrame(frame));
     });
   });
 }
@@ -146,11 +171,18 @@ describe('local IPC relay', () => {
     try {
       const endpoint = repos.agentEndpoints.getByAgent('codex:target');
       if (endpoint === undefined) throw new Error('Relay endpoint was not registered.');
+      const pending = handleSendAgentMessage(repos, {
+        operation: 'prompt',
+        agentId: 'codex:sender',
+        toAgentId: 'codex:target',
+        content,
+        idempotencyKey: 'utf8-request-1',
+      });
 
       const request: RelayDelivery = {
         version: 1,
         type: 'deliver',
-        messageId: 'utf8-request-1',
+        messageId: pending.message.messageId,
         senderAgentId: 'codex:sender',
         recipientAgentId: 'codex:target',
         credentialProof: endpoint.credentialHash,
@@ -158,6 +190,14 @@ describe('local IPC relay', () => {
       };
       const frame = Buffer.from(encodeRelayFrame(request), 'utf8');
       const splitAt = frame.indexOf(Buffer.from('東', 'utf8')) + 1;
+      const reader = new RelayFrameReader();
+      reader.append(frame.subarray(0, splitAt));
+      expect(reader.readFrames()).toEqual([]);
+      reader.append(frame.subarray(splitAt));
+      const decodedFrame = reader.readFrames()[0];
+      if (decodedFrame === undefined) throw new Error('expected one relay frame');
+      expect(decodeRelayDelivery(decodedFrame).content).toBe(content);
+      expect(decodedFrame).not.toContain('\uFFFD');
       const response = await new Promise<Buffer>((resolve, reject) => {
         const socket = createConnection(address);
         const responseChunks: Buffer[] = [];
@@ -179,8 +219,103 @@ describe('local IPC relay', () => {
       });
 
       expect(response.toString('utf8')).toContain('"ok":true');
-      expect(deliveries[0]?.content).toBe(content);
-      expect(deliveries[0]?.content).not.toContain('\uFFFD');
+      expect(deliveries[0]?.content).toBe(renderPeerMessage(pending.message));
+    } finally {
+      await relay.close();
+    }
+  });
+
+  it('injects the stored message and rejects a frame with no pending row', async () => {
+    const deliveries: AgentSessionDelivery[] = [];
+    const address = relayAddress(mkdtempSync(join(tmpdir(), 'concord-relay-')), 'codex:target');
+    const relay = await startAgentRelay({
+      repos,
+      agentId: 'codex:target',
+      address,
+      adapter: {
+        provider: 'codex',
+        isBusy: () => false,
+        steer: () => Promise.reject(new Error('not busy')),
+        inject: (delivery) => {
+          deliveries.push(delivery);
+          return Promise.resolve('turn-stored');
+        },
+      },
+    });
+
+    try {
+      const endpoint = repos.agentEndpoints.getByAgent('codex:target');
+      if (endpoint === undefined) throw new Error('Relay endpoint was not registered.');
+      const proof = endpoint.credentialHash;
+      const forged = await relayResult(address, {
+        version: 1,
+        type: 'deliver',
+        messageId: 'not-a-row',
+        senderAgentId: 'alice',
+        recipientAgentId: 'codex:target',
+        credentialProof: proof,
+        content: 'CANARY-DO-NOT-RUN',
+      });
+      expect(forged).toEqual({
+        version: 1,
+        ok: false,
+        error: 'Relay delivery has no pending message.',
+      });
+      expect(deliveries).toEqual([]);
+
+      const pending = handleSendAgentMessage(repos, {
+        operation: 'prompt',
+        agentId: 'codex:sender',
+        toAgentId: 'codex:target',
+        content: 'stored body',
+        idempotencyKey: 'stored-1',
+      });
+      const accepted = await relayResult(address, {
+        version: 1,
+        type: 'deliver',
+        messageId: pending.message.messageId,
+        senderAgentId: 'someone-else',
+        recipientAgentId: 'codex:target',
+        credentialProof: proof,
+        content: 'CANARY-DO-NOT-RUN',
+      });
+      expect(accepted.ok).toBe(true);
+      expect(deliveries.map((delivery) => delivery.senderAgentId)).toEqual(['codex:sender']);
+      expect(deliveries.map((delivery) => delivery.content)).toEqual([
+        renderPeerMessage(pending.message),
+      ]);
+
+      repos.agentMessages.markDelivered(pending.message.messageId, 'codex', 'turn-stored');
+      const replay = await relayResult(address, {
+        version: 1,
+        type: 'deliver',
+        messageId: pending.message.messageId,
+        senderAgentId: 'codex:sender',
+        recipientAgentId: 'codex:target',
+        credentialProof: proof,
+        content: 'stored body',
+      });
+      expect(replay).toEqual({
+        version: 1,
+        ok: false,
+        error: 'Relay delivery has no pending message.',
+      });
+      expect(deliveries).toHaveLength(1);
+
+      const wrongProof = await relayResult(address, {
+        version: 1,
+        type: 'deliver',
+        messageId: pending.message.messageId,
+        senderAgentId: 'codex:sender',
+        recipientAgentId: 'codex:target',
+        credentialProof: 'wrong-proof',
+        content: 'stored body',
+      });
+      expect(wrongProof).toEqual({
+        version: 1,
+        ok: false,
+        error: 'Relay credential was rejected.',
+      });
     } finally {
       await relay.close();
     }

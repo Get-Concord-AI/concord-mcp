@@ -17,6 +17,7 @@ export const harnessNames = [
   'antigravity',
   'copilot-cli',
   'devin',
+  'opencode',
   'qwen',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
@@ -274,6 +275,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedCapabilities: ['pull', 'steer', 'busy'],
     installedDetail: 'Devin CLI hooks register sessions and inject inbox messages on user prompts.',
     unsupportedDetail: 'Devin CLI must be v3000.3 or newer for dedicated MCP config files.',
+  },
+  opencode: {
+    name: 'opencode',
+    executable: 'opencode',
+    minimumVersion: [2, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: idleInject,
+    monitor: {
+      kind: 'managed-controller',
+      lifecycle: 'managed',
+      completion: 'controller',
+      background: true,
+      verified: true,
+    },
+    installedCapabilities: ['pull', 'inject', 'steer', 'idle', 'busy'],
+    installedDetail:
+      'Sessions started with `concord adapters opencode` are steered and woken through the OpenCode server API; sessions opened any other way are identified from OpenCode request metadata and pull messages from the inbox.',
+    unsupportedDetail: 'OpenCode must be v2.0.0 or newer for the mcp.servers config shape.',
   },
   qwen: {
     name: 'qwen',

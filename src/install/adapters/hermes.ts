@@ -1,7 +1,7 @@
 import { HARNESS_CONFIGS } from '../../domain/harness-config.js';
 import { hermesConfigInstalled, installHermesMcpConfig } from '../hermes-config.js';
 import type { AdapterReport } from './index.js';
-import { atLeast, versionTuple } from './version.js';
+import { atLeast, versionTuple } from './probe.js';
 
 /** Whether `hermes --version` printed a version this adapter supports. */
 function supported(versionOutput: string): boolean {
