@@ -135,7 +135,12 @@ export async function runHermesHook(
   }
   if (access.kind === 'local') {
     const context = openContext(cwd, projectEnv);
-    return handleLocalHermesHook(context.repos, identity, context, first);
+    try {
+      return handleLocalHermesHook(context.repos, identity, context, first);
+    } finally {
+      // Hand the store back before returning: an open handle keeps Windows from removing it.
+      context.repos.db.close();
+    }
   }
   try {
     return await handleCloudHermesHook(access.runtime, identity, cwd, first);
