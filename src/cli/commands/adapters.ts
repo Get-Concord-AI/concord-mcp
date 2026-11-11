@@ -1,5 +1,6 @@
 import type { Command } from '@commander-js/extra-typings';
-import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
+import { spawnCommand, stopCommand } from '../../install/spawn-command.js';
 
 import { z } from 'zod';
 
@@ -85,7 +86,10 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
   });
 }
 
-async function waitForCodexServer(url: string, server: ReturnType<typeof spawn>): Promise<void> {
+async function waitForCodexServer(
+  url: string,
+  server: ReturnType<typeof spawnCommand>,
+): Promise<void> {
   const healthUrl = url.replace(/^ws:/u, 'http:') + '/readyz';
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (server.exitCode !== null) {
@@ -161,6 +165,7 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
     reportMissingHarnessCli('Codex CLI', 'npm i -g @openai/codex');
     return;
   }
+  const selectedPath = resolve(executable);
   const port = await availablePort();
   const url = `ws://127.0.0.1:${String(port)}`;
   // The app-server, not the remote TUI, owns MCP child processes. Give both
@@ -170,13 +175,13 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
   // the complete managed tree from the resolved repository root.
   const context = codexManagedLaunchContext(repoRoot, url, process.env);
   const argv = codexLaunchArgv(url, args);
-  const server = spawn('codex', argv.appServer, {
+  const server = spawnCommand(selectedPath, argv.appServer, {
     ...context,
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   try {
     await waitForCodexServer(url, server);
-    const tui = spawn('codex', argv.tui, {
+    const tui = spawnCommand(selectedPath, argv.tui, {
       ...context,
       stdio: 'inherit',
     });
@@ -186,7 +191,7 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
     });
     if (code !== null && code !== 0) process.exitCode = code;
   } finally {
-    server.kill();
+    stopCommand(server, context.env);
   }
 }
 
