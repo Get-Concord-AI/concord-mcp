@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   agentIdForSession,
+  parseOpenCodeRequestIdentityMetadata,
   resolveActorId,
   resolveIdentity,
+  resolveOpenCodeRequestIdentity,
   UNRESOLVED_IDENTITY_MESSAGE,
 } from '../../src/domain/identity.js';
 
@@ -46,6 +48,14 @@ describe('resolveIdentity', () => {
 
     expect(identity?.agentId).toBe(agentIdForSession('codex', SESSION));
     expect(identity?.origin).toBe('hook');
+  });
+
+  it('derives a Hermes identity from the session id passed to its MCP child', () => {
+    const identity = resolveIdentity({ HERMES_SESSION_ID: SESSION }, { kind: 'hermes' });
+
+    expect(identity?.agentId).toBe(agentIdForSession('hermes', SESSION));
+    expect(identity?.kind).toBe('hermes');
+    expect(identity?.origin).toBe('session');
   });
 
   it('derives a Goose identity from the session id Goose exports to extensions', () => {
@@ -120,6 +130,31 @@ describe('resolveIdentity', () => {
     });
 
     expect(first?.agentId).not.toBe(second?.agentId);
+  });
+});
+
+describe('resolveOpenCodeRequestIdentity', () => {
+  it('hashes OpenCode V2 request metadata without returning the opaque session ID', () => {
+    const rawSessionId = 'ses_private-open-code-session';
+    const metadata = parseOpenCodeRequestIdentityMetadata({
+      'ai.opencode/sessionID': rawSessionId,
+    });
+    const identity = resolveOpenCodeRequestIdentity(metadata);
+
+    expect(identity).toEqual({
+      agentId: agentIdForSession('opencode', rawSessionId),
+      kind: 'opencode',
+      origin: 'session',
+    });
+    expect(JSON.stringify(identity)).not.toContain(rawSessionId);
+  });
+
+  it('ignores absent or malformed request metadata', () => {
+    expect(parseOpenCodeRequestIdentityMetadata(undefined)).toBeUndefined();
+    expect(parseOpenCodeRequestIdentityMetadata(null)).toBeUndefined();
+    expect(parseOpenCodeRequestIdentityMetadata({ 'ai.opencode/sessionID': '  ' })).toBeUndefined();
+    expect(parseOpenCodeRequestIdentityMetadata({ 'ai.opencode/sessionID': 1 })).toBeUndefined();
+    expect(resolveOpenCodeRequestIdentity(undefined)).toBeUndefined();
   });
 });
 

@@ -111,7 +111,7 @@ describe('CLI read/export commands', () => {
 
   it('doctor reports schema version and adoption', () => {
     const report = runDoctor(dir);
-    expect(report).toContain('schema v15, expected v15');
+    expect(report).toContain('schema v17, expected v17');
     expect(report).toContain('TASK-12');
     expect(report).toContain('start_work: yes');
     // The resolved workspace path is surfaced so agents don't have to hunt for it.
@@ -155,7 +155,11 @@ describe('CLI read/export commands', () => {
     // Independent of where this checkout lives, including under /tmp.
     const lasting = (): boolean => false;
     mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
-    symlinkSync(join(home, 'deleted-scratchpad'), link);
+    symlinkSync(
+      join(home, 'deleted-scratchpad'),
+      link,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
 
     const before = await runDoctorCommand(dir, env, {
       moduleUrl: import.meta.url,

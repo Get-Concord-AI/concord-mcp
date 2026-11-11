@@ -13,9 +13,12 @@ export const harnessNames = [
   'gemini',
   'grok',
   'goose',
+  'hermes',
   'antigravity',
   'copilot-cli',
   'devin',
+  'opencode',
+  'qwen',
   'muse-code',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
@@ -201,6 +204,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
       'Concord MCP server is registered with Goose; durable inbox delivery is available.',
     unsupportedDetail: 'Goose does not meet the verified MCP baseline (1.52.0).',
   },
+  hermes: {
+    name: 'hermes',
+    executable: 'hermes',
+    minimumVersion: [0, 22, 5],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'A Hermes pre_llm_call hook registers each session and tells it its agent and workspace ids; messages are delivered at the start of its next turn. Approve the hook when Hermes asks, or start Hermes once with `hermes --accept-hooks`.',
+    unsupportedDetail: 'Hermes Agent must be v0.22.5 or newer.',
+  },
   antigravity: {
     name: 'antigravity',
     executable: 'agy',
@@ -255,6 +276,42 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedCapabilities: ['pull', 'steer', 'busy'],
     installedDetail: 'Devin CLI hooks register sessions and inject inbox messages on user prompts.',
     unsupportedDetail: 'Devin CLI must be v3000.3 or newer for dedicated MCP config files.',
+  },
+  opencode: {
+    name: 'opencode',
+    executable: 'opencode',
+    minimumVersion: [2, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: idleInject,
+    monitor: {
+      kind: 'managed-controller',
+      lifecycle: 'managed',
+      completion: 'controller',
+      background: true,
+      verified: true,
+    },
+    installedCapabilities: ['pull', 'inject', 'steer', 'idle', 'busy'],
+    installedDetail:
+      'Sessions started with `concord adapters opencode` are steered and woken through the OpenCode server API; sessions opened any other way are identified from OpenCode request metadata and pull messages from the inbox.',
+    unsupportedDetail: 'OpenCode must be v2.0.0 or newer for the mcp.servers config shape.',
+  },
+  qwen: {
+    name: 'qwen',
+    executable: 'qwen',
+    minimumVersion: [0, 26, 4],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
+    unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
   },
   'muse-code': {
     name: 'muse-code',

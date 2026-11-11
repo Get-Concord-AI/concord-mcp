@@ -1,6 +1,6 @@
 {
   "name": "@concord-ai/concord-mcp",
-  "version": "0.19.0",
+  "version": "0.22.0",
   "description": "Cross-harness communication and shared work-state for coding agents through MCP.",
   "mcpName": "io.github.Get-Concord-AI/concord-mcp",
   "keywords": [
@@ -51,6 +51,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "vitest run --config vitest.e2e.config.ts",
+    "smoke:windows": "node --experimental-strip-types scripts/windows-install-smoke.ts",
     "demo": "pnpm build && bash examples/whack-a-mole/run.sh",
     "demo:stop": "bash examples/whack-a-mole/stop.sh",
     "prepublishOnly": "npm run build"

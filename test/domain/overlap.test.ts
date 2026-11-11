@@ -118,6 +118,32 @@ describe('detectOverlaps', () => {
     expect(sameDir[0]?.reasons).toContain('same directory: app');
   });
 
+  it('normalizes Windows backslash paths so Windows and POSIX paths collide as the same file and directory', () => {
+    const windowsTask: OverlapSurface = {
+      taskId: 'TASK-WIN',
+      expectedFiles: ['.\\src\\billing\\retry.ts', 'src\\billing\\invoices.ts'],
+      modules: [],
+      domains: [],
+      riskTags: [],
+    };
+    const sameFile = detectOverlaps(windowsTask, [
+      task({ taskId: 'TASK-POSIX', expectedFiles: ['src/billing/retry.ts'] }),
+    ]);
+    expect(sameFile[0]?.reasons).toContain('same file(s): src/billing/retry.ts');
+
+    const sameDir = detectOverlaps(
+      {
+        taskId: 'TASK-WIN-DIR',
+        expectedFiles: ['src\\billing\\other.ts'],
+        modules: [],
+        domains: [],
+        riskTags: [],
+      },
+      [task({ taskId: 'TASK-POSIX-DIR', expectedFiles: ['src/billing/retry.ts'] })],
+    );
+    expect(sameDir[0]?.reasons).toContain('same directory: src/billing');
+  });
+
   it('returns nothing for disjoint tasks', () => {
     expect(
       detectOverlaps(candidate, [

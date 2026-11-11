@@ -6,6 +6,7 @@ import { dump, load } from 'js-yaml';
 
 import { standaloneInstall } from '../config/install-mode.js';
 import { userHome } from '../config/paths.js';
+import { agentKindEnv } from './mcp-config.js';
 
 const EXTENSIONS_KEY = 'extensions';
 const CONCORD_EXTENSION_KEY = 'concord-relay';
@@ -83,6 +84,9 @@ export function installGooseMcpConfig(env: NodeJS.ProcessEnv = process.env): voi
     name: CONCORD_EXTENSION_KEY,
     description: 'Concord shared work-state for coding agents',
     ...concordServerLaunch(),
+    // Goose names this key `envs`. Pinning the kind stops a Goose started from
+    // another harness's shell from taking that harness's session as its own.
+    envs: agentKindEnv('goose'),
     timeout: 300,
   };
 

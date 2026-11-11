@@ -24,6 +24,7 @@ import {
 } from './muse-code-config.js';
 import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
 import {
+  agentKindEnv,
   CONCORD_SERVER_COMMAND,
   CONCORD_SERVER_KEY,
   hasGrokMcpServer,
@@ -148,7 +149,7 @@ const USER_FILES: readonly UserFile[] = [
     executable: 'cursor',
     registration: { id: 'cursor', present: hasMcpServer },
     path: (env) => join(userHome(env), '.cursor', 'mcp.json'),
-    install: (existing) => upsertMcpServer(existing, undefined),
+    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('cursor')),
     uninstall: removeMcpServer,
   },
   {
@@ -166,8 +167,7 @@ const USER_FILES: readonly UserFile[] = [
     isDetected: isAntigravityDetected,
     registration: { id: 'antigravity', present: hasMcpServer },
     path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
-    install: (existing) =>
-      upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
+    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('antigravity')),
     uninstall: removeMcpServer,
   },
   {

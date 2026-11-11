@@ -3,6 +3,8 @@ import { chmodSync, existsSync, lstatSync, unlinkSync } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 
 import type { Repositories } from '../db/index.js';
+import { renderPeerMessage } from '../domain/pull-inbox.js';
+import { RelayFrameReader } from './frame-reader.js';
 import {
   decodeRelayDelivery,
   encodeRelayFrame,
@@ -30,6 +32,8 @@ export interface AgentRelayServerOptions {
   pullFallback?: boolean;
   /** The opaque key of the session this relay delivers into. */
   session?: string;
+  /** Maximum number of cached deliveries. Defaults to 1,000. */
+  maxCachedDeliveries?: number;
 }
 
 export interface RunningAgentRelay {
@@ -38,8 +42,21 @@ export interface RunningAgentRelay {
   close(): Promise<void>;
 }
 
+type SuccessfulRelayResponse = Extract<RelayResponse, { ok: true }>;
+
+interface CachedRelayDelivery {
+  fingerprint: string;
+  promise: Promise<SuccessfulRelayResponse>;
+  completedAt?: number;
+}
+
+const DELIVERY_CACHE_TTL_MS = 5 * 60 * 1_000;
+const MAX_CACHED_DELIVERIES = 1_000;
+
 function respond(socket: Socket, response: RelayResponse): void {
-  socket.end(encodeRelayFrame(response));
+  if (!socket.destroyed) {
+    socket.end(encodeRelayFrame(response));
+  }
 }
 
 function removeUnixSocket(address: string): void {
@@ -96,6 +113,21 @@ function authenticated(supplied: string, expected: string): boolean {
   );
 }
 
+function fingerprintDelivery(delivery: AgentSessionDelivery): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        version: delivery.version,
+        type: delivery.type,
+        messageId: delivery.messageId,
+        senderAgentId: delivery.senderAgentId,
+        recipientAgentId: delivery.recipientAgentId,
+        content: delivery.content,
+      }),
+    )
+    .digest('hex');
+}
+
 /** Deterministically spread relay heartbeat phases across one interval. */
 export function relayHeartbeatPhaseDelay(endpointId: string, intervalMs: number): number {
   let hash = 2_166_136_261;
@@ -113,25 +145,178 @@ export async function startAgentRelay(
   if (options.repos.agents.get(options.agentId) === undefined) {
     throw new Error(`Agent ${options.agentId} is not registered.`);
   }
+
   // Never unlink a live listener. Duplicate SessionStart hooks used to race
   // here: the second host detached the first host's pathname, making whichever
   // process survived impossible to reach even though its endpoint stayed live.
   await prepareRelayAddress(options.address);
 
   const ttlMs = options.ttlMs ?? 15_000;
+  const maxCachedDeliveries = options.maxCachedDeliveries ?? MAX_CACHED_DELIVERIES;
+
+  if (!Number.isSafeInteger(maxCachedDeliveries) || maxCachedDeliveries < 1) {
+    throw new Error('maxCachedDeliveries must be a positive safe integer.');
+  }
+
   const endpointId = randomUUID();
   const credential = randomBytes(32).toString('base64url');
   const credentialProof = createHash('sha256').update(credential).digest('hex');
   let closed = false;
 
+  // Keep successful deliveries so a retry after a lost socket response does
+  // not invoke the external session adapter a second time.
+  const deliveryCache = new Map<string, CachedRelayDelivery>();
+
+  const pruneDeliveryCache = (): void => {
+    const now = Date.now();
+
+    for (const [messageId, entry] of deliveryCache) {
+      if (entry.completedAt !== undefined && now - entry.completedAt >= DELIVERY_CACHE_TTL_MS) {
+        deliveryCache.delete(messageId);
+      }
+    }
+
+    if (deliveryCache.size <= maxCachedDeliveries) return;
+
+    const completedEntries = [...deliveryCache.entries()]
+      .filter(([, entry]) => entry.completedAt !== undefined)
+      .sort((left, right) => {
+        const leftCompletedAt = left[1].completedAt ?? 0;
+        const rightCompletedAt = right[1].completedAt ?? 0;
+
+        return leftCompletedAt - rightCompletedAt;
+      });
+
+    while (deliveryCache.size > maxCachedDeliveries && completedEntries.length > 0) {
+      const oldest = completedEntries.shift();
+      if (oldest !== undefined) deliveryCache.delete(oldest[0]);
+    }
+  };
+
+  // Make room for a new delivery without evicting active work. Existing
+  // message IDs are checked before this function is called, so retries can
+  // still reuse their original in-flight promise when the cache is full.
+  const makeRoomForDelivery = (): boolean => {
+    if (deliveryCache.size < maxCachedDeliveries) return true;
+
+    const completedEntries = [...deliveryCache.entries()]
+      .filter(([, entry]) => entry.completedAt !== undefined)
+      .sort((left, right) => {
+        const leftCompletedAt = left[1].completedAt ?? 0;
+        const rightCompletedAt = right[1].completedAt ?? 0;
+
+        return leftCompletedAt - rightCompletedAt;
+      });
+
+    while (deliveryCache.size >= maxCachedDeliveries && completedEntries.length > 0) {
+      const oldest = completedEntries.shift();
+      if (oldest !== undefined) deliveryCache.delete(oldest[0]);
+    }
+
+    return deliveryCache.size < maxCachedDeliveries;
+  };
+
+  const deliverOnce = (
+    delivery: RelayDelivery,
+    sessionDelivery: AgentSessionDelivery,
+  ): Promise<SuccessfulRelayResponse> => {
+    pruneDeliveryCache();
+
+    const fingerprint = fingerprintDelivery(sessionDelivery);
+    const existing = deliveryCache.get(delivery.messageId);
+
+    if (existing !== undefined) {
+      if (existing.fingerprint !== fingerprint) {
+        return Promise.reject(new Error('Message ID was reused with different delivery content.'));
+      }
+
+      return existing.promise;
+    }
+
+    if (!makeRoomForDelivery()) {
+      return Promise.reject(
+        new Error(
+          'Relay delivery cache is full because all cached deliveries are still pending. Retry later.',
+        ),
+      );
+    }
+
+    const promise = (async (): Promise<SuccessfulRelayResponse> => {
+      const deliveryMode = options.adapter.isBusy() ? 'steer' : 'inject';
+      const receipt =
+        deliveryMode === 'steer'
+          ? await options.adapter.steer(sessionDelivery)
+          : await options.adapter.inject(sessionDelivery);
+
+      return {
+        version: RELAY_PROTOCOL_VERSION,
+        ok: true,
+        provider: options.adapter.provider,
+        delivery: deliveryMode,
+        ...(receipt === undefined ? {} : { receipt }),
+        ...(options.session === undefined ? {} : { session: options.session }),
+      };
+    })();
+
+    const entry: CachedRelayDelivery = {
+      fingerprint,
+      promise,
+    };
+
+    // Store the promise immediately so concurrent retries share the same
+    // adapter invocation instead of starting another delivery.
+    deliveryCache.set(delivery.messageId, entry);
+
+    void promise.then(
+      () => {
+        entry.completedAt = Date.now();
+        pruneDeliveryCache();
+      },
+      () => {
+        // A failed attempt is not a successful delivery. Allow a later retry.
+        if (deliveryCache.get(delivery.messageId) === entry) {
+          deliveryCache.delete(delivery.messageId);
+        }
+      },
+    );
+
+    return promise;
+  };
+
+  const deliveryFromStore = (frame: RelayDelivery): AgentSessionDelivery => {
+    if (frame.recipientAgentId !== options.agentId) {
+      throw new Error(`Relay endpoint belongs to ${options.agentId}.`);
+    }
+    const message = options.repos.agentMessages.get(frame.messageId);
+    if (message?.status !== 'sent' || message.recipientAgentId !== options.agentId) {
+      throw new Error('Relay delivery has no pending message.');
+    }
+    return {
+      version: frame.version,
+      type: frame.type,
+      messageId: message.messageId,
+      senderAgentId: message.senderAgentId,
+      recipientAgentId: message.recipientAgentId,
+      content: renderPeerMessage(message),
+    };
+  };
+
   const server = createServer((socket) => {
-    let buffer = '';
+    const frameReader = new RelayFrameReader();
+
     socket.setTimeout(2_000, () => {
       socket.destroy();
     });
+
     socket.on('data', (chunk) => {
-      buffer += chunk.toString('utf8');
-      if (Buffer.byteLength(buffer, 'utf8') > MAX_RELAY_FRAME_BYTES) {
+      if (!Buffer.isBuffer(chunk)) {
+        socket.destroy();
+        return;
+      }
+
+      frameReader.append(chunk);
+
+      if (frameReader.bufferedByteLength > MAX_RELAY_FRAME_BYTES) {
         socket.removeAllListeners('data');
         respond(socket, {
           version: RELAY_PROTOCOL_VERSION,
@@ -140,39 +325,23 @@ export async function startAgentRelay(
         });
         return;
       }
-      const newline = buffer.indexOf('\n');
-      if (newline < 0) return;
+
+      const frame = frameReader.readFrames()[0];
+      if (frame === undefined) return;
+
       socket.removeAllListeners('data');
+
       void (async () => {
         try {
-          const delivery = decodeRelayDelivery(buffer.slice(0, newline));
+          const delivery = decodeRelayDelivery(frame);
+
           if (!authenticated(delivery.credentialProof, credentialProof)) {
             throw new Error('Relay credential was rejected.');
           }
-          if (delivery.recipientAgentId !== options.agentId) {
-            throw new Error(`Relay endpoint belongs to ${options.agentId}.`);
-          }
-          const sessionDelivery: AgentSessionDelivery = {
-            version: delivery.version,
-            type: delivery.type,
-            messageId: delivery.messageId,
-            senderAgentId: delivery.senderAgentId,
-            recipientAgentId: delivery.recipientAgentId,
-            content: delivery.content,
-          };
-          const deliveryMode = options.adapter.isBusy() ? 'steer' : 'inject';
-          const receipt =
-            deliveryMode === 'steer'
-              ? await options.adapter.steer(sessionDelivery)
-              : await options.adapter.inject(sessionDelivery);
-          respond(socket, {
-            version: RELAY_PROTOCOL_VERSION,
-            ok: true,
-            provider: options.adapter.provider,
-            delivery: deliveryMode,
-            ...(receipt === undefined ? {} : { receipt }),
-            ...(options.session === undefined ? {} : { session: options.session }),
-          });
+
+          const sessionDelivery = deliveryFromStore(delivery);
+          const response = await deliverOnce(delivery, sessionDelivery);
+          respond(socket, response);
         } catch (error) {
           respond(socket, {
             version: RELAY_PROTOCOL_VERSION,
@@ -188,6 +357,7 @@ export async function startAgentRelay(
   if (process.platform !== 'win32') chmodSync(options.address, 0o600);
 
   const expiresAt = (): string => new Date(Date.now() + ttlMs).toISOString();
+
   const capabilities = (): string[] => [
     'local-ipc',
     'inject',
@@ -195,6 +365,7 @@ export async function startAgentRelay(
     options.adapter.isBusy() ? 'busy' : 'idle',
     ...(options.pullFallback === true ? ['pull'] : []),
   ];
+
   const storeEndpoint = (): void => {
     options.repos.agentEndpoints.upsert({
       endpointId,
@@ -207,21 +378,27 @@ export async function startAgentRelay(
       expiresAt: expiresAt(),
     });
   };
+
   storeEndpoint();
 
   const heartbeatIntervalMs = Math.max(1_000, Math.floor(ttlMs / 3));
   let heartbeat: ReturnType<typeof setInterval> | undefined;
+
   const heartbeatOnce = (): void => {
     if (closed) return;
+
     const current = options.repos.agentEndpoints.getByAgent(options.agentId);
+
     if (current?.endpointId !== endpointId) {
       if (heartbeat !== undefined) clearInterval(heartbeat);
       closed = true;
       server.close();
       return;
     }
+
     storeEndpoint();
   };
+
   const heartbeatStarter = setTimeout(
     () => {
       heartbeatOnce();
@@ -231,6 +408,7 @@ export async function startAgentRelay(
     },
     relayHeartbeatPhaseDelay(endpointId, heartbeatIntervalMs),
   );
+
   heartbeatStarter.unref();
 
   return {
@@ -238,18 +416,23 @@ export async function startAgentRelay(
     address: options.address,
     close: async () => {
       if (closed) return;
+
       closed = true;
       clearTimeout(heartbeatStarter);
       if (heartbeat !== undefined) clearInterval(heartbeat);
+
       const current = options.repos.agentEndpoints.getByAgent(options.agentId);
       const ownsAddress = current?.endpointId === endpointId;
+
       if (ownsAddress) options.repos.agentEndpoints.disconnect(endpointId);
+
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error === undefined) resolve();
           else reject(error);
         });
       });
+
       if (ownsAddress) removeUnixSocket(options.address);
     },
   };
