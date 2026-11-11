@@ -1,5 +1,6 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { installHermes, statusHermes } from './hermes.js';
 import { statusQwen } from './qwen.js';
 
 import {
@@ -23,6 +24,7 @@ import {
 } from '../devin-user-hooks.js';
 import { devinHooksInstalled } from '../devin-hooks.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
+import { uninstallHermesMcpConfig } from '../hermes-config.js';
 import {
   copilotConfigInstalled,
   copilotHooksInstalled,
@@ -705,6 +707,14 @@ export function statusAdapter(
       return statusGrok(env);
     case 'goose':
       return statusGoose(env);
+    case 'hermes': {
+      const executable = executablePath(HARNESS_CONFIGS.hermes.executable, env);
+      return statusHermes(
+        executable,
+        () => (executable === undefined ? '' : run(executable, ['--version'], env).output),
+        env,
+      );
+    }
     case 'antigravity':
       return statusAntigravity(env, repoRoot);
     case 'copilot-cli':
@@ -799,6 +809,9 @@ export function installAdapter(
       }
       return;
     }
+    case 'hermes':
+      installHermes(run(executable, ['--version'], env).output, env);
+      return;
     case 'goose': {
       const version = versionTuple(run(executable, ['--version'], env).output);
       if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
@@ -885,6 +898,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
+  try {
+    uninstallHermesMcpConfig(env);
+  } catch {
+    // Preserve malformed Hermes settings and continue independent adapter cleanup.
+  }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
   if (existsSync(antigravityMcp)) {

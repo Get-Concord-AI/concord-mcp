@@ -13,6 +13,7 @@ export const harnessNames = [
   'gemini',
   'grok',
   'goose',
+  'hermes',
   'antigravity',
   'copilot-cli',
   'devin',
@@ -201,6 +202,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Concord MCP server is registered with Goose; durable inbox delivery is available.',
     unsupportedDetail: 'Goose does not meet the verified MCP baseline (1.52.0).',
+  },
+  hermes: {
+    name: 'hermes',
+    executable: 'hermes',
+    minimumVersion: [0, 22, 5],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'A Hermes pre_llm_call hook registers each session and tells it its agent and workspace ids; messages are delivered at the start of its next turn. Approve the hook when Hermes asks, or start Hermes once with `hermes --accept-hooks`.',
+    unsupportedDetail: 'Hermes Agent must be v0.22.5 or newer.',
   },
   antigravity: {
     name: 'antigravity',
