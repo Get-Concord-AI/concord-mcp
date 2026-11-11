@@ -121,13 +121,16 @@ describe('applyGlobalMode', () => {
     mkdirSync(join(env.HOME, '.openclaw'));
     const sharedFile = join(shared, 'AGENTS.md');
     mkdirSync(shared, { recursive: true });
-    writeFileSync(configPath, `{ agents: { list: [{ id: "a", workspace: "${shared}" }] } }\n`);
+    writeFileSync(
+      configPath,
+      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(shared)} }] } }\n`,
+    );
     applyGlobalMode(env, true);
     expect(read(sharedFile)).toContain('agent_id: "openclaw:a"');
 
     writeFileSync(
       configPath,
-      `{ agents: { list: [{ id: "a", workspace: "${shared}" }, { id: "b", workspace: "${shared}/" }] } }\n`,
+      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(shared)} }, { id: "b", workspace: ${JSON.stringify(`${shared}/`)} }] } }\n`,
     );
     const on = applyGlobalMode(env, true);
 
