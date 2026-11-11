@@ -1,5 +1,6 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
+import { statusQwen } from './qwen.js';
 
 import {
   HARNESS_CONFIGS,
@@ -8,8 +9,7 @@ import {
   type MonitorKind,
 } from '../../domain/harness-config.js';
 import { userHome } from '../../config/paths.js';
-import { atLeast, executablePath, run, versionTuple } from './runtime.js';
-import { installOpenCode, statusOpenCode } from './opencode.js';
+import { spawnCommandSync } from '../spawn-command.js';
 import {
   devinMcpInstalled,
   installDevinMcpConfig,
@@ -34,7 +34,6 @@ import {
   installGooseMcpConfig,
   uninstallGooseConfig,
 } from '../goose-config.js';
-import { removeOpenCodeMcpConfig } from '../opencode-config.js';
 import {
   globalAntigravityHooksPath,
   hasAntigravityHooks,
@@ -42,6 +41,7 @@ import {
   uninstallGlobalAntigravityHooks,
 } from '../antigravity-hooks.js';
 import {
+  agentKindEnv,
   hasMcpServer,
   isConcordServerOwned,
   removeMcpServer,
@@ -79,8 +79,48 @@ export interface AdapterReport {
   link?: LinkCheck | undefined;
 }
 
-export { atLeast, executablePath, run, versionTuple } from './runtime.js';
-export { openCodeSupportsV2 } from './opencode.js';
+export function executablePath(name: string, env: NodeJS.ProcessEnv): string | undefined {
+  const path = env['PATH'];
+  if (path === undefined) return undefined;
+  const extensions = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
+  for (const directory of path.split(delimiter)) {
+    for (const extension of extensions) {
+      const candidate = join(directory, `${name}${extension}`);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
+export function run(
+  command: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): {
+  ok: boolean;
+  output: string;
+} {
+  const result = spawnCommandSync(command, args, { env, timeout: 15_000 });
+  return {
+    ok: result.status === 0,
+    output: result.error?.message ?? `${result.stdout}${result.stderr}`.trim(),
+  };
+}
+
+export function versionTuple(output: string): number[] | undefined {
+  const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
+  if (match === null) return undefined;
+  return match.slice(1).map((part) => Number.parseInt(part, 10));
+}
+
+export function atLeast(actual: readonly number[], required: readonly number[]): boolean {
+  for (let index = 0; index < required.length; index += 1) {
+    const left = actual[index] ?? 0;
+    const right = required[index] ?? 0;
+    if (left !== right) return left > right;
+  }
+  return true;
+}
 
 /** Devin introduced dedicated MCP config files in v3000.3; its CLI omits the patch sometimes. */
 export function devinSupportsDedicatedMcpConfig(versionOutput: string): boolean {
@@ -331,9 +371,9 @@ function uninstallCursorHooks(env: NodeJS.ProcessEnv): void {
   });
 }
 
-function geminiCompletionInjectionReady(repoRoot: string): boolean {
+function geminiSettingsInjectReady(settingsPath: string): boolean {
   try {
-    const settings = readJsonObject(join(repoRoot, '.gemini', 'settings.json'));
+    const settings = readJsonObject(settingsPath);
     const tools = settings['tools'];
     if (!isRecord(tools)) return false;
     const shell = tools['shell'];
@@ -347,6 +387,14 @@ function geminiCompletionInjectionReady(repoRoot: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Gemini merges user and project settings, so either file can turn completion injection on. */
+function geminiCompletionInjectionReady(repoRoot: string, env: NodeJS.ProcessEnv): boolean {
+  return (
+    geminiSettingsInjectReady(join(repoRoot, '.gemini', 'settings.json')) ||
+    geminiSettingsInjectReady(join(userHome(env), '.gemini', 'settings.json'))
+  );
 }
 
 function statusGemini(
@@ -384,7 +432,7 @@ function statusGemini(
   if (
     installed.status !== 'installed' ||
     repoRoot === undefined ||
-    geminiCompletionInjectionReady(repoRoot)
+    geminiCompletionInjectionReady(repoRoot, env)
   ) {
     return installed;
   }
@@ -393,9 +441,9 @@ function statusGemini(
     status: 'action_required',
     capabilities: ['pull', 'steer', 'busy'],
     detail:
-      'The Gemini extension is installed, but this project is missing ' +
-      'tools.shell.backgroundCompletionBehavior = "inject" or ' +
-      'experimental.modelSteering = true. Run `concord setup` in the project.',
+      'The Gemini extension is installed, but neither this project nor ~/.gemini/settings.json sets ' +
+      'tools.shell.backgroundCompletionBehavior = "inject" and ' +
+      'experimental.modelSteering = true. Run `concord setup --repo-files` in the project.',
   };
 }
 
@@ -702,10 +750,10 @@ export function statusAdapter(
       return statusAntigravity(env, repoRoot);
     case 'copilot-cli':
       return statusCopilot(env);
-    case 'opencode':
-      return statusOpenCode(env, repoRoot);
     case 'devin':
       return statusDevin(env, repoRoot);
+    case 'qwen':
+      return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
   }
 }
 
@@ -729,7 +777,6 @@ export function installAdapter(
   moduleUrl: string,
   env: NodeJS.ProcessEnv = process.env,
   isEphemeral: EphemeralTest = isEphemeralPath,
-  repoRoot?: string,
 ): void {
   if (harness === 'antigravity') {
     const config = HARNESS_CONFIGS.antigravity;
@@ -744,17 +791,11 @@ export function installAdapter(
       const existing = readFileSync(path, 'utf8');
       if (!hasMcpServer(existing)) {
         mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(
-          path,
-          upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
-        );
+        writeFileSync(path, upsertMcpServer(existing, undefined, agentKindEnv('antigravity')));
       }
     } else {
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(
-        path,
-        upsertMcpServer(undefined, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
-      );
+      writeFileSync(path, upsertMcpServer(undefined, undefined, agentKindEnv('antigravity')));
     }
     installGlobalAntigravityHooks(env);
     return;
@@ -812,10 +853,6 @@ export function installAdapter(
       installCopilotHooks(env);
       return;
     }
-    case 'opencode': {
-      installOpenCode(env, repoRoot ?? process.cwd());
-      return;
-    }
     case 'devin': {
       if (devinCliSupportsDedicatedMcpConfig(env)) {
         installDevinMcpConfig(env);
@@ -831,15 +868,19 @@ export function installGlobalAdapters(
   env: NodeJS.ProcessEnv = process.env,
   repoRoot?: string,
   isEphemeral: EphemeralTest = isEphemeralPath,
+  afterInstall?: () => void,
 ): AdapterReport[] {
   const failures = new Map<HarnessName, string>();
   for (const harness of harnessNames) {
     try {
-      installAdapter(harness, moduleUrl, env, isEphemeral, repoRoot);
+      installAdapter(harness, moduleUrl, env, isEphemeral);
     } catch (error) {
       failures.set(harness, error instanceof Error ? error.message : String(error));
     }
   }
+  // Runs before readiness is judged: user-level settings it writes (global
+  // mode's Gemini settings) count towards a harness being ready.
+  afterInstall?.();
 
   const report = statusGlobalAdapters(env, repoRoot, moduleUrl, isEphemeral).map((entry) => {
     const failure = failures.get(entry.harness);
@@ -869,10 +910,7 @@ function removeOwnedLink(path: string): boolean {
   return true;
 }
 
-export function uninstallGlobalAdapters(
-  env: NodeJS.ProcessEnv = process.env,
-  repoRoot?: string,
-): AdapterReport[] {
+export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): AdapterReport[] {
   removeOwnedLink(linkTarget('claude-code', env));
   removeOwnedLink(linkTarget('gemini', env));
   removeOwnedLink(linkTarget('cursor', env));
@@ -900,10 +938,9 @@ export function uninstallGlobalAdapters(
   }
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
-  if (repoRoot !== undefined) removeOpenCodeMcpConfig(repoRoot);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
-  return statusGlobalAdapters(env, repoRoot);
+  return statusGlobalAdapters(env);
 }
 
 /** A harness that is set up but not working, or whose adapter link is broken. */

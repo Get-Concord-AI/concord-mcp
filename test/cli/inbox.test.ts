@@ -193,6 +193,19 @@ describe('pull-transport inbox', () => {
     );
   });
 
+  it('leaves the receiver to the watcher that replaced it', async () => {
+    registerPullEndpoint(repos, 'beta', 'claude-code');
+    send(repos, 'for the newer watcher', 'replaced-1');
+
+    await watchInbox(repos, 'beta', 'claude-code', 250, true, () => undefined, {
+      replaced: () => true,
+    });
+
+    expect(effectiveEndpointCapabilities(repos.agentEndpoints.getByAgent('beta'))).toContain(
+      'idle',
+    );
+  });
+
   it('keeps a live watcher running through transient SQLite contention', async () => {
     registerPullEndpoint(repos, 'beta', 'gemini');
     send(repos, 'wake up after contention', 'monitor-busy');

@@ -224,6 +224,19 @@ export function resolveIdentity(
   return undefined;
 }
 
+/**
+ * The identity of the MCP server process, from the environment its client gave it.
+ *
+ * `CONCORD_AGENT_KIND` is set in the server entry `concord setup` writes for a
+ * client, and restricts the lookup to that client's own session variable. Without
+ * it, the first session variable present wins, which is wrong whenever the client
+ * was started from another harness's shell and inherited that harness's session id.
+ */
+export function resolveServerIdentity(env: NodeJS.ProcessEnv): AgentIdentity | undefined {
+  const kind = env['CONCORD_AGENT_KIND']?.trim();
+  return resolveIdentity(env, kind !== undefined && kind !== '' ? { kind } : {});
+}
+
 /** The client prefix of an agent id, for ids supplied whole by an operator. */
 function kindOf(agentId: string): string {
   const separator = agentId.indexOf(':');

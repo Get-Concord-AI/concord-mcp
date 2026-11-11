@@ -11,8 +11,6 @@ import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
 import {
   devinSupportsDedicatedMcpConfig,
   installGlobalAdapters,
-  openCodeSupportsV2,
-  statusAdapter,
   statusGlobalAdapters,
   uninstallGlobalAdapters,
 } from '../../src/install/adapters/index.js';
@@ -192,79 +190,36 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'managed-controller',
-      'none',
+      'harness-monitor',
       'harness-monitor',
     ]);
   });
 
-  it('detects OpenCode V2, installs a repository entry, and removes only Concord config', () => {
-    const home = mkdtempSync(join(tmpdir(), 'concord-opencode-home-'));
-    const project = mkdtempSync(join(tmpdir(), 'concord-opencode-project-'));
+  it('accepts Gemini completion injection set in the user settings', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-gemini-home-'));
+    const project = mkdtempSync(join(tmpdir(), 'concord-gemini-project-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
-    writeFakeVersion(bin, 'opencode', 'opencode v2.2.3');
-    writeFileSync(
-      join(project, 'opencode.jsonc'),
-      '{\n  // Keep this project comment.\n  "theme": "dark"\n}\n',
-    );
+    writeFakeVersion(bin, 'gemini', '0.55.1');
     const env = { HOME: home, PATH: bin };
+    installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+    const geminiStatus = (): string | undefined =>
+      statusGlobalAdapters(env, project, undefined, LASTING).find(
+        (entry) => entry.harness === 'gemini',
+      )?.status;
 
-    expect(openCodeSupportsV2(env)).toBe(true);
-    const installed = installGlobalAdapters(import.meta.url, env, project, LASTING);
-    expect(installed.find((entry) => entry.harness === 'opencode')).toMatchObject({
-      detected: true,
-      status: 'installed',
-      monitor: 'none',
-      capabilities: ['pull'],
-    });
-    expect(statusAdapter('opencode', env, project)).toMatchObject({
-      status: 'installed',
-      monitor: 'none',
-      capabilities: ['pull'],
-    });
-    expect(readFileSync(join(project, 'opencode.jsonc'), 'utf8')).toContain(
-      '// Keep this project comment.',
-    );
+    expect(geminiStatus()).toBe('action_required');
 
-    const uninstalled = uninstallGlobalAdapters(env, project);
-    expect(uninstalled.find((entry) => entry.harness === 'opencode')?.status).toBe(
-      'action_required',
-    );
-    expect(readFileSync(join(project, 'opencode.jsonc'), 'utf8')).toContain('"theme": "dark"');
-    expect(readFileSync(join(project, 'opencode.jsonc'), 'utf8')).not.toContain('"concord"');
-  });
-
-  it('does not configure OpenCode V1', () => {
-    const home = mkdtempSync(join(tmpdir(), 'concord-opencode-v1-home-'));
-    const project = mkdtempSync(join(tmpdir(), 'concord-opencode-v1-project-'));
-    const bin = join(home, 'bin');
-    mkdirSync(bin);
-    writeFakeVersion(bin, 'opencode', 'opencode v1.8.0');
-    const env = { HOME: home, PATH: bin };
-
-    expect(openCodeSupportsV2(env)).toBe(false);
-    const report = installGlobalAdapters(import.meta.url, env, project, LASTING);
-    expect(report.find((entry) => entry.harness === 'opencode')?.status).toBe(
-      'unsupported_version',
-    );
-    expect(existsSync(join(project, 'opencode.json'))).toBe(false);
-  });
-
-  it('requires attention when a Concord OpenCode entry lacks request identity', () => {
-    const home = mkdtempSync(join(tmpdir(), 'concord-opencode-identity-home-'));
-    const project = mkdtempSync(join(tmpdir(), 'concord-opencode-identity-project-'));
-    const bin = join(home, 'bin');
-    mkdirSync(bin);
-    writeFakeVersion(bin, 'opencode', 'opencode v2.2.3');
+    mkdirSync(join(home, '.gemini'), { recursive: true });
     writeFileSync(
-      join(project, 'opencode.json'),
-      '{"mcp":{"servers":{"concord":{"type":"local","command":["concord-mcp"]}}}}\n',
+      join(home, '.gemini', 'settings.json'),
+      `${JSON.stringify({
+        tools: { shell: { backgroundCompletionBehavior: 'inject' } },
+        experimental: { modelSteering: true },
+      })}\n`,
     );
 
-    expect(statusAdapter('opencode', { HOME: home, PATH: bin }, project)).toMatchObject({
-      status: 'action_required',
-      detail: 'A custom Concord MCP entry exists; review it before replacing it.',
-    });
+    expect(geminiStatus()).toBe('installed');
   });
 
   it('requires Gemini completion injection in the current project', () => {

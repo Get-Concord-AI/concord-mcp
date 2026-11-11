@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -33,13 +34,30 @@ import { workspaceIdForRoot } from '../../src/config/paths.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 import { handleReviewReady } from '../../src/tools/review-ready.js';
-import { writeFakeVersion } from '../helpers/fake-command.js';
 
 function repoDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'concord-cli-'));
   mkdirSync(join(dir, '.git'));
   return realpathSync(dir);
 }
+
+const canSymlinkFile = (): boolean => {
+  if (process.platform !== 'win32') return true;
+  try {
+    const probeTarget = join(tmpdir(), `concord-probe-target-${String(Date.now())}`);
+    const probeLink = join(tmpdir(), `concord-probe-link-${String(Date.now())}`);
+    writeFileSync(probeTarget, '');
+    try {
+      symlinkSync(probeTarget, probeLink);
+      rmSync(probeLink);
+      return true;
+    } finally {
+      rmSync(probeTarget);
+    }
+  } catch {
+    return false;
+  }
+};
 
 describe('runSetup', () => {
   it('registers one setup command without separate init/install commands', () => {
@@ -84,43 +102,6 @@ describe('runSetup', () => {
     );
   });
 
-  it('registers OpenCode V2 in the project even when global adapters are skipped', () => {
-    const dir = repoDir();
-    const home = mkdtempSync(join(tmpdir(), 'concord-opencode-home-'));
-    const bin = join(home, 'bin');
-    mkdirSync(bin);
-    writeFakeVersion(bin, 'opencode', 'opencode 2.2.3');
-
-    const result = runSetup(dir, {
-      env: { ...process.env, HOME: home, PATH: bin, CONCORD_REPO_ROOT: dir },
-      adapters: false,
-    });
-
-    expect(result.written).toContain('opencode.json');
-    expect(readFileSync(join(dir, 'opencode.json'), 'utf8')).toContain('"CONCORD_AGENT_KIND"');
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('start_work');
-    expect(result.adapters).toEqual([]);
-  });
-
-  it('does not install client adapters when setup opts out of MCP', () => {
-    const dir = repoDir();
-    const home = mkdtempSync(join(tmpdir(), 'concord-no-mcp-home-'));
-    const bin = join(home, 'bin');
-    mkdirSync(bin);
-    writeFakeVersion(bin, 'opencode', 'opencode 2.2.3');
-
-    const result = runSetup(dir, {
-      env: { HOME: home, PATH: bin, CONCORD_REPO_ROOT: dir },
-      mcp: false,
-      adapters: true,
-    });
-
-    expect(result.adapters).toEqual([]);
-    expect(result.written).not.toContain('opencode.json');
-    expect(existsSync(join(dir, 'opencode.json'))).toBe(false);
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('start_work');
-  });
-
   it('leaves the repository gitignore and a customized Concord gitignore untouched', () => {
     const dir = repoDir();
     const gitignorePath = join(dir, '.gitignore');
@@ -149,18 +130,21 @@ describe('runSetup', () => {
     expect(rules.indexOf('*')).toBeLessThan(rules.indexOf('!HANDOFF.md'));
   });
 
-  it('replaces a symlinked Concord gitignore instead of writing through it', () => {
-    const dir = repoDir();
-    const rootIgnorePath = join(dir, '.gitignore');
-    writeFileSync(rootIgnorePath, 'node_modules/\n');
-    mkdirSync(join(dir, '.concord'));
-    symlinkSync(rootIgnorePath, join(dir, '.concord', '.gitignore'));
+  it.skipIf(!canSymlinkFile())(
+    'replaces a symlinked Concord gitignore instead of writing through it',
+    () => {
+      const dir = repoDir();
+      const rootIgnorePath = join(dir, '.gitignore');
+      writeFileSync(rootIgnorePath, 'node_modules/\n');
+      mkdirSync(join(dir, '.concord'));
+      symlinkSync(rootIgnorePath, join(dir, '.concord', '.gitignore'));
 
-    runSetup(dir, { mcp: false });
+      runSetup(dir, { mcp: false });
 
-    expect(readFileSync(rootIgnorePath, 'utf8')).toBe('node_modules/\n');
-    expect(lstatSync(join(dir, '.concord', '.gitignore')).isFile()).toBe(true);
-  });
+      expect(readFileSync(rootIgnorePath, 'utf8')).toBe('node_modules/\n');
+      expect(lstatSync(join(dir, '.concord', '.gitignore')).isFile()).toBe(true);
+    },
+  );
 
   it('strips a byte-order mark before prepending the catch-all', () => {
     const dir = repoDir();

@@ -42,23 +42,6 @@ describe('ensureHarnessAdapter', () => {
     expect(ensureHarnessAdapter('claude-code', options(env, true)).outcome).toBe('healthy');
   });
 
-  it('repairs OpenCode in the selected repository root', () => {
-    const home = mkdtempSync(join(tmpdir(), 'concord-self-heal-opencode-home-'));
-    const bin = join(home, 'bin');
-    const repoRoot = mkdtempSync(join(tmpdir(), 'concord-self-heal-opencode-repo-'));
-    mkdirSync(bin);
-    writeFakeVersion(bin, 'opencode', 'opencode v2.2.3');
-    const env = { HOME: home, PATH: bin };
-
-    const result = ensureHarnessAdapter('opencode', {
-      ...options(env, true),
-      repoRoot,
-    });
-
-    expect(result.outcome).toBe('repaired');
-    expect(existsSync(join(repoRoot, 'opencode.json'))).toBe(true);
-  });
-
   it('never replaces a path Concord does not own', () => {
     const { env, link } = claudeMachine();
     mkdirSync(link, { recursive: true });

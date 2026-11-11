@@ -15,8 +15,8 @@ export const harnessNames = [
   'goose',
   'antigravity',
   'copilot-cli',
-  'opencode',
   'devin',
+  'qwen',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -35,10 +35,10 @@ export interface EndpointCapability {
   operations: readonly DeliveryCapability[];
 }
 
-export type MonitorKind = 'none' | 'native-monitor' | 'managed-controller' | 'harness-monitor';
+export type MonitorKind = 'native-monitor' | 'managed-controller' | 'harness-monitor';
 
-export type MonitorLifecycle = 'none' | 'native' | 'managed' | 'persistent' | 'one-shot';
-export type MonitorCompletion = 'none' | 'native' | 'controller' | 'shell-inject';
+export type MonitorLifecycle = 'native' | 'managed' | 'persistent' | 'one-shot';
+export type MonitorCompletion = 'native' | 'controller' | 'shell-inject';
 
 export interface HarnessMonitorConfig {
   kind: MonitorKind;
@@ -84,12 +84,6 @@ const idleInject: EndpointCapability = {
   transport: 'pull',
   reach: ['busy', 'idle'],
   operations: ['pull', 'inject', 'steer'],
-};
-
-const durableInbox: EndpointCapability = {
-  transport: 'pull',
-  reach: [],
-  operations: ['pull'],
 };
 
 export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
@@ -245,25 +239,6 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
       'Sessions started with `concord adapters copilot` are steered and woken through the embedded server; plain `copilot` sessions get hook delivery after tool calls and at turn end.',
     unsupportedDetail: 'Copilot CLI does not meet the verified hooks baseline (1.0.0).',
   },
-  opencode: {
-    name: 'opencode',
-    executable: 'opencode',
-    minimumVersion: [2, 0, 0],
-    defaultCapability: durableInbox,
-    monitorCapability: durableInbox,
-    monitor: {
-      kind: 'none',
-      lifecycle: 'none',
-      completion: 'none',
-      background: false,
-      verified: false,
-    },
-    installedCapabilities: ['pull'],
-    installedDetail:
-      'OpenCode V2 session metadata identifies the agent; messages stay in its durable inbox, with no idle wake or resume receiver.',
-    unsupportedDetail:
-      'OpenCode V2.0 or newer is required for the verified config and request session metadata.',
-  },
   devin: {
     name: 'devin',
     executable: 'devin',
@@ -280,6 +255,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedCapabilities: ['pull', 'steer', 'busy'],
     installedDetail: 'Devin CLI hooks register sessions and inject inbox messages on user prompts.',
     unsupportedDetail: 'Devin CLI must be v3000.3 or newer for dedicated MCP config files.',
+  },
+  qwen: {
+    name: 'qwen',
+    executable: 'qwen',
+    minimumVersion: [0, 26, 4],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
+    unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
   },
 };
 

@@ -213,6 +213,14 @@ export function handleUpdateWork(
   dispatcher: AgentMessageDispatcher,
 ): UpdateWorkResult | Promise<UpdateWorkResult> {
   const operation = input.operation ?? 'record';
+  if (
+    operation !== 'record' &&
+    (input.supersedes !== undefined || input.supersede_reason !== undefined)
+  ) {
+    throw new Error(
+      `supersedes and supersede_reason work only with operation record, not ${operation}.`,
+    );
+  }
   if (operation !== 'record') {
     return handleSendAgentMessageWithDelivery(
       repos,
@@ -234,6 +242,8 @@ export function handleUpdateWork(
     content: input.content,
     agent_id: input.agent_id,
     agent: input.agent_id,
+    supersedes: input.supersedes,
+    supersede_reason: input.supersede_reason,
   });
 }
 
@@ -587,7 +597,7 @@ export function registerWorkflowTools(
           breadth_warning_count: result.claim.breadthReasons.length,
         });
       }
-      onWrite?.();
+      onWrite?.(workspace);
       const task = result.claim.task;
       return withSessionAdvisories({
         content: [
@@ -769,7 +779,10 @@ export function registerWorkflowTools(
               {
                 type: 'text',
                 text: withWorkspaceText(
-                  `Recorded ${result.update.kind} for ${result.update.taskId}.`,
+                  `Recorded ${result.update.kind} #${String(result.update.id)} for ${result.update.taskId}` +
+                    (args.supersedes === undefined
+                      ? '.'
+                      : ` (supersedes #${String(args.supersedes)}).`),
                   workspace,
                 ),
               },
@@ -892,7 +905,7 @@ export function registerWorkflowTools(
       const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
       const result = handleTransferWork(repos, withActor(args, requestMeta));
       recordTaskTransition(result.task.taskId, args.action, result.task.status);
-      onWrite?.();
+      onWrite?.(workspace);
       return withSessionAdvisories({
         content: [
           {
@@ -947,7 +960,7 @@ export function registerWorkflowTools(
           });
         }
       }
-      onWrite?.();
+      onWrite?.(workspace);
       return withSessionAdvisories({
         content: [
           {

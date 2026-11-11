@@ -29,6 +29,11 @@ describe('concord check', () => {
     expect(overlaps).toHaveLength(1);
     expect(overlaps[0]?.taskId).toBe('T1');
     expect(renderCheck(['src/billing/retry.ts'], overlaps)).toContain('Overlap');
+
+    // Windows backslash paths are normalized so they collide with POSIX claims.
+    const winOverlaps = checkFileOverlaps(repos, ['.\\src\\billing\\retry.ts']);
+    expect(winOverlaps).toHaveLength(1);
+    expect(winOverlaps[0]?.taskId).toBe('T1');
   });
 
   it('excludes your own task via --task', () => {
