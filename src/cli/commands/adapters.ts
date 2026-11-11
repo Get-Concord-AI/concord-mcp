@@ -33,6 +33,7 @@ import {
   launchCopilot,
 } from './copilot-adapter.js';
 import { launchGemini } from './gemini-adapter.js';
+import { launchOpencode } from './opencode-adapter.js';
 import { cloudAccess } from './cloud-inbox.js';
 import { reportMissingHarnessCli } from './missing-harness-cli.js';
 
@@ -265,6 +266,13 @@ export function registerAdaptersCommand(program: Command): void {
     // Copilot's own flags (-i, --allow-tool, ...) are forwarded, not parsed here.
     .allowUnknownOption()
     .action(async (args) => launchCopilot(args));
+  adapters
+    .command('opencode')
+    .description('Launch OpenCode as an identified session Concord can steer and wake')
+    .argument('[args...]', 'Arguments forwarded to OpenCode')
+    // OpenCode's own flags (--model, --prompt, ...) are forwarded, not parsed here.
+    .allowUnknownOption()
+    .action(async (args) => launchOpencode(args));
   adapters
     .command('gemini')
     .description('Launch Gemini CLI with its Concord inbox monitor started on the first turn')

@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- OpenCode 2 support. `concord setup` registers Concord's MCP server with
+  OpenCode through `opencode mcp add --global`, so OpenCode edits its own
+  config and keeps its comments and other settings. It also finds the CLI that
+  the OpenCode desktop app bundles, which is not on `PATH`.
+- OpenCode sessions are identified as `opencode:<hash>` from the session id
+  OpenCode 2 sends in MCP request metadata, locally and through Concord Cloud,
+  without storing the raw id. An operator-set `CONCORD_AGENT_ID` still wins
+  (#308).
+- `concord adapters opencode`: starts OpenCode as a hosted session that Concord
+  can steer mid-turn and wake while idle. Sessions started any other way are
+  identified but pull messages from their inbox. See
+  [docs/opencode.md](./docs/opencode.md).
+
+### Changed
+
+- Copilot CLI's straggler sweep and session adapter now live in a shared
+  module that the OpenCode adapter also uses. Copilot's behavior is unchanged.
+
 ## [0.21.1] - 2026-11-11
 
 ### Security
