@@ -50,10 +50,10 @@ import {
 import { handleUpdateTask, type UpdateTaskResult } from './update-task.js';
 import {
   AgentMessageDeliveryError,
-  handleSendAgentMessageWithDelivery,
   type AgentMessageDispatcher,
   type SendAgentMessageResult,
 } from './agent-messages.js';
+import { handleSendWithAttachments } from './shared-files.js';
 import {
   selectToolWorkspace,
   type SelectWorkspace,
@@ -221,8 +221,11 @@ export function handleUpdateWork(
       `supersedes and supersede_reason work only with operation record, not ${operation}.`,
     );
   }
+  if (operation === 'record' && input.attachments !== undefined) {
+    throw new Error('attachments apply only with update_work operation prompt or reply.');
+  }
   if (operation !== 'record') {
-    return handleSendAgentMessageWithDelivery(
+    return handleSendWithAttachments(
       repos,
       {
         operation,
@@ -232,6 +235,7 @@ export function handleUpdateWork(
         taskId: input.task_id,
         content: input.content,
         idempotencyKey: updateRequired(input.idempotency_key, 'idempotency_key', operation),
+        attachments: input.attachments,
       },
       dispatcher,
     );
@@ -749,7 +753,8 @@ export function registerWorkflowTools(
     {
       title: 'Update work',
       description:
-        'Record task context or deliver a live prompt/reply to another promptable workspace agent.',
+        'Record task context or deliver a live prompt/reply to another promptable workspace agent. ' +
+        'Prompt and reply can share files from your worktree with `attachments`.',
       inputSchema: updateWorkInputShape,
     },
     async (args, extra) => {

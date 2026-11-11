@@ -35,6 +35,8 @@ export interface SendAgentMessageInput {
   taskId?: string | undefined;
   content: string;
   idempotencyKey: string;
+  /** The id for a new message, chosen by a caller that must reference it before sending. */
+  messageId?: string | undefined;
 }
 
 export interface SendAgentMessageResult {
@@ -226,7 +228,7 @@ export function handleSendAgentMessage(
     idempotentReplay = true;
   } else {
     message = repos.agentMessages.create({
-      messageId: randomUUID(),
+      messageId: input.messageId ?? randomUUID(),
       project: taskProject,
       taskId: contextualTaskId,
       senderAgentId: input.agentId,

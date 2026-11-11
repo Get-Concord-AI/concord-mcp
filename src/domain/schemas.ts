@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { MAX_FILES_PER_MESSAGE } from './shared-files.js';
+
 /**
  * The five public MCP workflow contracts. Internal lifecycle operations derive
  * their TypeScript inputs from these shapes in operations.ts; they are not
@@ -186,6 +188,14 @@ export const updateWorkInputShape = {
     .literal('steer')
     .optional()
     .describe('Live delivery mode; steer is the only mode in v1'),
+  attachments: z
+    .array(z.string().min(1).max(4096))
+    .max(MAX_FILES_PER_MESSAGE)
+    .optional()
+    .describe(
+      'Prompt/reply only: files from your worktree to share, by path relative to it. ' +
+        'The recipient retrieves them with `concord files get`.',
+    ),
   workspace_id: workspaceIdField,
 } as const;
 export type UpdateWorkInput = z.infer<z.ZodObject<typeof updateWorkInputShape>>;
