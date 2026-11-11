@@ -34,6 +34,7 @@ import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
 import { copilotServerAddress } from './copilot-adapter.js';
 import { fileSpool } from './copilot-spool.js';
 import { isDevinHookEvent, runDevinHook } from './devin-hooks.js';
+import { isHermesHookEvent, runHermesHook } from './hermes-hooks.js';
 import { isKiroHookEvent, runKiroHook } from './kiro-hooks.js';
 import {
   cloudCopilotBackend,
@@ -322,6 +323,10 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
       }
       if (isDevinHookEvent(event)) {
         process.stdout.write(`${await runDevinHook(event, readStdin())}\n`);
+        return;
+      }
+      if (isHermesHookEvent(event)) {
+        process.stdout.write(`${await runHermesHook(event, readStdin())}\n`);
         return;
       }
       if (options.client === 'copilot-cli') {

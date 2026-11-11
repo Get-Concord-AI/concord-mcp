@@ -33,10 +33,12 @@ import {
   withoutKiroHooks,
 } from './kiro-config.js';
 import {
+  agentKindEnv,
   CONCORD_SERVER_COMMAND,
   CONCORD_SERVER_KEY,
   hasGrokMcpServer,
   hasMcpServer,
+  isConcordServerOwned,
   McpConfigParseError,
   removeGrokMcpServer,
   removeMcpServer,
@@ -56,6 +58,8 @@ export interface GlobalModeReport {
 interface Registration {
   readonly id: string;
   readonly present: (existing: string) => boolean;
+  /** True when an entry Concord wrote before global mode can be adopted. */
+  readonly adopt?: ((existing: string) => boolean) | undefined;
 }
 
 /** A user-level file global mode owns part of, for one harness. */
@@ -161,7 +165,7 @@ const USER_FILES: readonly UserFile[] = [
     executable: 'cursor',
     registration: { id: 'cursor', present: hasMcpServer },
     path: (env) => join(userHome(env), '.cursor', 'mcp.json'),
-    install: (existing) => upsertMcpServer(existing, undefined),
+    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('cursor')),
     uninstall: removeMcpServer,
   },
   {
@@ -179,8 +183,7 @@ const USER_FILES: readonly UserFile[] = [
     isDetected: isAntigravityDetected,
     registration: { id: 'antigravity', present: hasMcpServer },
     path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
-    install: (existing) =>
-      upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
+    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('antigravity')),
     uninstall: removeMcpServer,
   },
   instructionFile(
@@ -197,7 +200,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     isDetected: isKiroDetected,
-    registration: { id: 'kiro', present: hasMcpServer },
+    registration: { id: 'kiro', present: hasMcpServer, adopt: isConcordServerOwned },
     path: kiroUserMcpPath,
     install: (existing) => upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'kiro' }),
     uninstall: removeMcpServer,
@@ -212,7 +215,9 @@ function mayChange(
   owned: ReadonlySet<string>,
 ): boolean {
   if (owned.has(registration.id)) return true;
-  return enable && (existing === undefined || !registration.present(existing));
+  if (!enable) return false;
+  if (existing !== undefined && registration.adopt?.(existing) === true) return true;
+  return existing === undefined || !registration.present(existing);
 }
 
 function isFileDetected(file: UserFile, env: NodeJS.ProcessEnv): boolean {

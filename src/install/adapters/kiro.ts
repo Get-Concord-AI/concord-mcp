@@ -11,6 +11,7 @@ import {
 } from '../kiro-config.js';
 import { hasMcpServer } from '../mcp-config.js';
 import type { AdapterReport } from './index.js';
+import { atLeast, run, versionTuple } from './probe.js';
 
 type FileState = 'present' | 'missing' | 'unreadable';
 
@@ -47,17 +48,25 @@ function report(
 /**
  * Kiro's adapter status. Delivery is busy-only: Kiro hooks fire on session
  * start, prompt submit, and turn end but never wake an idle session, so an
- * installed Kiro session reports pull only — never idle reachability.
+ * installed Kiro session reports pull only - never idle reachability.
  */
 export function statusKiro(
   executable: string | undefined,
   repoRoot: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
+  cli?: string,
 ): AdapterReport {
   const config = HARNESS_CONFIGS.kiro;
   if (!kiroDetected(executable, repoRoot, env)) {
     return report('not_detected', 'Kiro was not found on PATH, in ~/.kiro, or in .kiro.');
   }
+
+  // A launcher-only install is the IDE, whose hook support predates the CLI
+  // check below; only a real CLI can be version-gated.
+  const versionOutput = cli === undefined ? undefined : run(cli, ['--version'], env).output;
+  const version = versionOutput === undefined ? undefined : versionTuple(versionOutput);
+  const cliSupportsHooks =
+    cli === undefined || (version !== undefined && atLeast(version, config.minimumVersion));
 
   const mcp = combine(
     repoRoot === undefined
@@ -85,6 +94,14 @@ export function statusKiro(
     );
   }
 
+  if (mcp === 'present' && !cliSupportsHooks) {
+    const versionText = versionOutput?.trim();
+    return report(
+      'unsupported_version',
+      `Kiro CLI${versionText === undefined || versionText === '' ? '' : ` ${versionText}`} is older than ${config.minimumVersion.join('.')}, so its lifecycle hooks cannot run. Update Kiro CLI or use Kiro IDE 1.0+; messages wait in the durable inbox until then.`,
+      ['pull'],
+    );
+  }
   if (mcp === 'present' && hooks === 'present') {
     return report('installed', config.installedDetail, config.installedCapabilities);
   }

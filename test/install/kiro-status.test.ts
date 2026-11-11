@@ -10,6 +10,7 @@ import {
   installKiroWorkspaceHooks,
   kiroWorkspaceMcpPath,
 } from '../../src/install/kiro-config.js';
+import { writeFakeVersion } from '../helpers/fake-command.js';
 
 const SERVER = {
   mcpServers: { concord: { command: 'concord-mcp' } },
@@ -92,5 +93,30 @@ describe('statusKiro', () => {
 
     const report = statusKiro(undefined, undefined, env);
     expect(report).toMatchObject({ detected: true, status: 'installed' });
+  });
+
+  it('reports unsupported_version for a Kiro CLI older than V3', () => {
+    const root = repoWithServer();
+    installKiroWorkspaceHooks(root);
+    const home = mkdtempSync(join(tmpdir(), 'concord-kiro-home-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    const cli = writeFakeVersion(bin, 'kiro-cli', 'kiro-cli 2.9.0');
+
+    const report = statusKiro(cli, root, { HOME: home }, cli);
+    expect(report).toMatchObject({ status: 'unsupported_version', capabilities: ['pull'] });
+    expect(report.detail).toContain('3.0.0');
+  });
+
+  it('reports installed for a Kiro CLI V3 or newer', () => {
+    const root = repoWithServer();
+    installKiroWorkspaceHooks(root);
+    const home = mkdtempSync(join(tmpdir(), 'concord-kiro-home-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    const cli = writeFakeVersion(bin, 'kiro-cli', 'kiro-cli 3.1.0');
+
+    const report = statusKiro(cli, root, { HOME: home }, cli);
+    expect(report.status).toBe('installed');
   });
 });

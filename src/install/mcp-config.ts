@@ -18,8 +18,27 @@ const JSON_TARGETS: readonly string[] = [
   join('.github', 'mcp.json'),
   join('.kiro', 'settings', 'mcp.json'),
 ];
-/** Harness kind each project file pins, for files only one harness reads. */
+/** The variable that names the client an MCP server runs in. */
+export const AGENT_KIND_ENV = 'CONCORD_AGENT_KIND';
+
+/**
+ * The environment entry that pins a server to one client.
+ *
+ * A harness started from another harness's shell inherits that shell's session
+ * variable, so a server told nothing would take the parent's identity. With the
+ * kind pinned it reads only its own client's session variable.
+ */
+export function agentKindEnv(kind: string): Record<string, string> {
+  return { [AGENT_KIND_ENV]: kind };
+}
+
+/**
+ * Harness kind each project file pins, for files only one harness reads. A file
+ * more than one harness reads, such as `.mcp.json`, pins nothing: whichever
+ * client loads it must still resolve its own session.
+ */
 const PINNED_KINDS: ReadonlyMap<string, string> = new Map([
+  [join('.cursor', 'mcp.json'), 'cursor'],
   [join('.agents', 'mcp_config.json'), 'antigravity'],
   [join('.github', 'mcp.json'), 'copilot-cli'],
   [join('.qwen', 'settings.json'), 'qwen'],
@@ -148,7 +167,9 @@ export function removeMcpServer(existing: string): string {
  * idle injection effect is gated separately by experimental model steering.
  */
 export function upsertGeminiSettings(existing: string | undefined, repoRoot?: string): string {
-  const withServer = looseObjectSchema.parse(JSON.parse(upsertMcpServer(existing, repoRoot)));
+  const withServer = looseObjectSchema.parse(
+    JSON.parse(upsertMcpServer(existing, repoRoot, agentKindEnv('gemini'))),
+  );
   const currentTools = looseObjectSchema.safeParse(withServer['tools']);
   const tools = currentTools.success ? currentTools.data : {};
   const currentShell = looseObjectSchema.safeParse(tools['shell']);
@@ -194,9 +215,10 @@ export function upsertGrokMcpServer(
     `command = ${JSON.stringify(CONCORD_SERVER_COMMAND)}`,
     'args = []',
     'enabled = true',
-    ...(repoRoot === undefined
-      ? []
-      : ['', '[mcp_servers.concord.env]', `CONCORD_REPO_ROOT = ${JSON.stringify(repoRoot)}`]),
+    '',
+    '[mcp_servers.concord.env]',
+    `${AGENT_KIND_ENV} = ${JSON.stringify('grok')}`,
+    ...(repoRoot === undefined ? [] : [`CONCORD_REPO_ROOT = ${JSON.stringify(repoRoot)}`]),
     GROK_FENCE_END,
   ].join('\n');
   return `${base}${base === '' ? '' : '\n\n'}${block}\n`;
@@ -244,7 +266,7 @@ function writeMcpConfig(repoRoot: string, relPath: string): string {
     updated = upsertMcpServer(
       existing,
       repoRoot,
-      kind === undefined ? undefined : { CONCORD_AGENT_KIND: kind },
+      kind === undefined ? undefined : agentKindEnv(kind),
     );
   } catch {
     throw new McpConfigParseError(relPath);
@@ -320,7 +342,7 @@ export function isConcordWrittenEntry(entry: unknown): boolean {
   }
   // If the user specified custom environment variables (other than CONCORD_REPO_ROOT or CONCORD_AGENT_KIND), it is custom.
   const envKeys = Object.keys(parsed.data.env ?? {});
-  if (envKeys.some((key) => key !== 'CONCORD_REPO_ROOT' && key !== 'CONCORD_AGENT_KIND')) {
+  if (envKeys.some((key) => key !== 'CONCORD_REPO_ROOT' && key !== AGENT_KIND_ENV)) {
     return false;
   }
   if (parsed.data.command === CONCORD_SERVER_COMMAND) return true;

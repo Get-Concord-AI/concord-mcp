@@ -111,6 +111,23 @@ describe('Kiro hooks config', () => {
     expect(hasKiroHooks(removed)).toBe(false);
     expect(withoutKiroHooks(upsertKiroHooks(undefined, 'hooks.json'))).toBe('');
   });
+
+  it('keeps unrelated top-level settings when the last Concord hook is removed', () => {
+    const existing = `${JSON.stringify({
+      version: 'v1',
+      theme: 'dark',
+      hooks: [
+        {
+          name: 'concord-stop',
+          trigger: 'Stop',
+          action: { type: 'command', command: 'concord hook kiro-stop' },
+        },
+      ],
+    })}\n`;
+
+    const removed = withoutKiroHooks(existing);
+    expect(JSON.parse(removed)).toEqual({ version: 'v1', theme: 'dark' });
+  });
 });
 
 describe('Kiro installation', () => {

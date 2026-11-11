@@ -8,6 +8,7 @@ import { readUserConfig, writeUserConfig } from '../../src/config/user-config.js
 import { resolveGlobalChoice, runSetup } from '../../src/cli/commands/setup.js';
 import { BLOCK_START, removeBlock, upsertBlock } from '../../src/install/block.js';
 import { applyGlobalMode } from '../../src/install/global-mode.js';
+import { upsertMcpServer } from '../../src/install/mcp-config.js';
 import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
 
 const CLAUDE_LOGGING_CALLS = `import { appendFileSync } from 'node:fs';
@@ -118,6 +119,35 @@ describe('applyGlobalMode', () => {
     const remaining = read(hooks);
     expect(remaining).toContain('my-lint');
     expect(remaining).not.toContain('concord hook kiro-');
+  });
+
+  it('adopts a Kiro MCP entry written by the adapter and removes it with global mode', () => {
+    const env = machine(['kiro']);
+    const path = join(env.HOME, '.kiro', 'settings', 'mcp.json');
+    mkdirSync(join(env.HOME, '.kiro', 'settings'), { recursive: true });
+    writeFileSync(path, upsertMcpServer(undefined, undefined, { CONCORD_AGENT_KIND: 'kiro' }));
+
+    const on = applyGlobalMode(env, true);
+    expect(on.registrations).toEqual(['kiro']);
+
+    const off = applyGlobalMode(env, false, { registrations: on.registrations });
+    expect(off.registrations).toEqual([]);
+    expect(read(path)).not.toContain('concord-mcp');
+  });
+
+  it('does not adopt a user-authored Kiro MCP entry', () => {
+    const env = machine(['kiro']);
+    const path = join(env.HOME, '.kiro', 'settings', 'mcp.json');
+    const custom = `${JSON.stringify({
+      mcpServers: { concord: { command: 'my-kiro-proxy', args: ['--custom'] } },
+    })}\n`;
+    mkdirSync(join(env.HOME, '.kiro', 'settings'), { recursive: true });
+    writeFileSync(path, custom);
+
+    const on = applyGlobalMode(env, true);
+    expect(on.registrations).toEqual([]);
+    applyGlobalMode(env, false, { registrations: on.registrations });
+    expect(read(path)).toBe(custom);
   });
 
   it('registers and instructs each installed harness, then removes only its own additions', () => {

@@ -148,14 +148,25 @@ export function hasKiroHooks(existing: string): boolean {
 }
 
 /**
- * Remove Concord's hooks, returning '' when nothing else is left so the caller
- * can delete the file. A malformed file throws for the caller to report.
+ * Remove Concord's hooks, keeping unrelated hooks and top-level settings.
+ * Returns '' only when nothing user-authored remains, so the caller can delete
+ * the file. A malformed file throws for the caller to report.
  */
 export function withoutKiroHooks(existing: string): string {
   const parsed = kiroHooksFileSchema.parse(JSON.parse(existing));
+  const { version, ...settings } = parsed;
+  delete settings.hooks;
   const hooks = (parsed.hooks ?? []).filter((hook) => !isConcordHook(hook));
-  if (hooks.length === 0) return '';
-  return `${JSON.stringify({ ...parsed, hooks }, null, 2)}\n`;
+  if (hooks.length === 0 && Object.keys(settings).length === 0) return '';
+  return `${JSON.stringify(
+    {
+      ...(version === undefined ? {} : { version }),
+      ...settings,
+      ...(hooks.length === 0 ? {} : { hooks }),
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 function writeHooksFile(path: string, displayPath: string): void {
