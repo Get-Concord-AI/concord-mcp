@@ -1,5 +1,4 @@
 import { spawnSync } from 'node:child_process';
-import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, inject, it, onTestFailed } from 'vitest';
 import { z } from 'zod';
@@ -113,6 +112,8 @@ async function untilCalled(model: FakeModel, tool: string): Promise<void> {
 for (const harness of REAL_HARNESSES) {
   const binaryDir = hostBinaryDir(harness.executable);
 
+  // Goose has no delivery path, and Hermes delivers only at the start of a turn.
+  const midTurn = harness.name !== 'goose' && harness.name !== 'hermes';
   describe.skipIf(binaryDir === undefined && !required(harness))(`real ${harness.name}`, () => {
     // Each case's fixtures; anything set up is torn down even if a later step failed.
     let fixtures: { model?: FakeModel; sandbox?: Sandbox; probe?: Probe; runs: HarnessRun[] } = {
@@ -136,21 +137,12 @@ for (const harness of REAL_HARNESSES) {
         realHarnesses: [binaryDir],
       });
       fixtures.sandbox = sandbox;
-      const harnessEnv = {
-        ...harness.env(model),
-        ...(harness.name === 'hermes' ? { HERMES_HOME: join(sandbox.home, '.hermes') } : {}),
-      };
+      await harness.prepare?.(sandbox, model);
       const setup = await sandbox.concord(['setup'], {
-        env: harnessEnv,
+        env: harness.env(model),
         timeoutMs: 120_000,
       });
       expect(setup.status, setup.stderr).toBe(0);
-      if (harness.name === 'hermes') {
-        // Explicitly exercise the global adapter installer in this isolated
-        // sandbox before the real Hermes binary reads its user config.
-        const adapters = await sandbox.concord(['adapters', 'install'], { env: harnessEnv });
-        expect(adapters.status, adapters.stderr).toBe(0);
-      }
       harness.configure(sandbox, model);
       fixtures.probe = await Probe.start(sandbox);
       onTestFailed(() => {
@@ -177,6 +169,7 @@ for (const harness of REAL_HARNESSES) {
       try {
         await Promise.all(runs.map((run) => run.stop()));
         await probe?.close();
+        if (sandbox !== undefined) await harness.dispose?.(sandbox);
       } finally {
         try {
           await model?.close();
@@ -187,20 +180,17 @@ for (const harness of REAL_HARNESSES) {
     });
 
     function launch(
-      mode: 'headless' | 'interactive',
+      mode: 'headless' | 'interactive' | 'resume',
       prompt: string,
       env: Record<string, string> = {},
     ): HarnessRun {
       const { model, sandbox } = ready();
-      const run = HarnessRun.start(sandbox, harness, model, mode, prompt, {
-        ...env,
-        ...(harness.name === 'hermes' ? { HERMES_HOME: join(sandbox.home, '.hermes') } : {}),
-      });
+      const run = HarnessRun.start(sandbox, harness, model, mode, prompt, env);
       fixtures.runs.push(run);
       return run;
     }
 
-    it.skipIf(harness.name === 'goose')(
+    it.skipIf(!midTurn)(
       'receives a message mid-turn and replies',
       async () => {
         const { model, probe } = ready();
@@ -237,7 +227,7 @@ for (const harness of REAL_HARNESSES) {
       150_000,
     );
 
-    it.skipIf(harness.name === 'goose')(
+    it.skipIf(!midTurn)(
       'marks a message read mid-turn, with no reply, only once the model was shown it',
       async () => {
         const { model, probe } = ready();
@@ -516,8 +506,8 @@ for (const harness of REAL_HARNESSES) {
         );
         expect(received.senderAgentId).toBe(agentId);
 
-        // A Goose session cannot take messages: v2 queues the message as sent
-        // instead of failing, and says so, rather than pretending to deliver.
+        // A session that has ended cannot take messages: v2 queues the message
+        // as sent instead of failing, and says so, rather than pretending to deliver.
         const queued = await probe.send(agentId, nonce(`to-${harness.name}`));
         expect(queued.status).toBe('sent');
         expect(queued.outlook).toMatch(/no live session|only checks between steps/u);
@@ -529,6 +519,35 @@ for (const harness of REAL_HARNESSES) {
         });
       },
       150_000,
+    );
+
+    it.skipIf(harness.resume === undefined)(
+      "delivers a waiting message at the start of the session's next turn, and it replies",
+      async () => {
+        const { probe } = ready();
+        const first = launch('headless', 'begin');
+        const agentId = await probe.sessionOf(harness.name);
+        await first.exited();
+
+        const body = nonce(`${harness.name}-next-turn`);
+        const sent = await probe.send(agentId, body);
+        expect(sent.status).toBe('sent');
+
+        launch('resume', 'continue');
+        const answer = await probe.received(
+          (message) => message.replyToMessageId === sent.message_id,
+          `${agentId} to reply on its next turn`,
+        );
+        expect(answer).toMatchObject({ senderAgentId: agentId, content: `ACK ${body}` });
+        const receipt = await receiptReaching(
+          probe,
+          { harness: harness.name, scenario: 'next turn: reply', atSend: sent.status },
+          sent.message_id,
+          ['replied'],
+        );
+        expect(receipt.read_at).not.toBeNull();
+      },
+      240_000,
     );
   });
 }
