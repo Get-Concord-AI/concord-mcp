@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { userHome } from '../config/paths.js';
@@ -223,9 +223,15 @@ function openclawInstructionFiles(
       });
     }
   }
-  const current = new Set([...byWorkspace.keys()].map((workspace) => join(workspace, 'AGENTS.md')));
+  // Compare physical files: a workspace that became a symlink to an old one is the same file.
+  const current = new Set(
+    [...byWorkspace.keys()].map((workspace) => physicalPath(join(workspace, 'AGENTS.md'))),
+  );
+  const seen = new Set<string>();
   for (const path of new Set(saved.map((saved) => resolve(saved)))) {
-    if (current.has(path) || !existsSync(path)) continue;
+    const physical = physicalPath(path);
+    if (current.has(physical) || seen.has(physical) || !existsSync(path)) continue;
+    seen.add(physical);
     files.push({
       isDetected,
       path: () => path,
@@ -236,11 +242,20 @@ function openclawInstructionFiles(
   return { files, warnings };
 }
 
+function physicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** A file that cannot be read now may still hold a block, so only a missing one counts as clear. */
 function hasConcordBlock(path: string): boolean {
   try {
     return readFileSync(path, 'utf8').includes(BLOCK_START);
-  } catch {
-    return false;
+  } catch (error) {
+    return !(error instanceof Error && 'code' in error && error.code === 'ENOENT');
   }
 }
 

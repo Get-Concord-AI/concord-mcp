@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -112,6 +120,53 @@ describe('applyGlobalMode', () => {
     expect(off.warnings).toEqual([]);
     expect(read(mainFile)).toBe('# Main agent\n');
     expect(existsSync(researchFile)).toBe(false);
+  });
+
+  it('keeps the block when a saved OpenClaw path is now a symlink to the live workspace', () => {
+    const env = machine(['openclaw']);
+    const configPath = join(env.HOME, '.openclaw', 'openclaw.json');
+    const oldDir = join(env.HOME, 'old-workspace');
+    const linkDir = join(env.HOME, 'link-workspace');
+    mkdirSync(join(env.HOME, '.openclaw'));
+    mkdirSync(oldDir);
+    writeFileSync(
+      configPath,
+      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(oldDir)} }] } }\n`,
+    );
+    const on = applyGlobalMode(env, true);
+    symlinkSync(oldDir, linkDir);
+    writeFileSync(
+      configPath,
+      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(linkDir)} }] } }\n`,
+    );
+    const again = applyGlobalMode(env, true, { openclawFiles: on.openclawFiles });
+    expect(read(join(oldDir, 'AGENTS.md'))).toContain('agent_id: "openclaw:a"');
+    expect(again.openclawFiles).toEqual([join(linkDir, 'AGENTS.md')]);
+  });
+
+  it('keeps remembering an OpenClaw file it could not read, until the block is gone', () => {
+    const env = machine(['openclaw']);
+    const configPath = join(env.HOME, '.openclaw', 'openclaw.json');
+    const oldDir = join(env.HOME, 'old-workspace');
+    mkdirSync(join(env.HOME, '.openclaw'));
+    mkdirSync(oldDir);
+    const oldFile = join(oldDir, 'AGENTS.md');
+    writeFileSync(
+      configPath,
+      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(oldDir)} }] } }\n`,
+    );
+    const on = applyGlobalMode(env, true);
+    writeFileSync(configPath, '{ agents: { list: [] } }\n');
+    chmodSync(oldFile, 0o000);
+    try {
+      const blocked = applyGlobalMode(env, true, { openclawFiles: on.openclawFiles });
+      expect(blocked.openclawFiles).toContain(oldFile);
+    } finally {
+      chmodSync(oldFile, 0o644);
+    }
+    const retry = applyGlobalMode(env, true, { openclawFiles: [oldFile] });
+    expect(retry.openclawFiles).not.toContain(oldFile);
+    expect(existsSync(oldFile)).toBe(false);
   });
 
   it('removes the block from an OpenClaw workspace the agent has left since it was written', () => {
