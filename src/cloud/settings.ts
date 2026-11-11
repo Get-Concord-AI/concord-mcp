@@ -14,15 +14,17 @@ import { z } from 'zod';
 import { concordDir, userHome } from '../config/paths.js';
 
 /**
- * Where Concord Cloud mode is configured. Two files, deliberately separate:
+ * Where Concord Cloud mode is configured, all of it per user and machine:
  *
  * - **Credentials** (`~/.concord/credentials.json`, mode 0600) — the API URL and
- *   key. Per user, never in a repository: `.mcp.json` and friends are usually
- *   committed, and a key must not ride along.
- * - **Link** (`<repo>/.concord/cloud.json`) — this repository's own choice: to
- *   work through the cloud as a named project, or (`{ "local": true }`) to stay
- *   local. Without one, a signed-in machine works through the cloud by default;
- *   see `cloud/target.ts`.
+ *   key. Never in a repository: `.mcp.json` and friends are usually committed,
+ *   and a key must not ride along.
+ * - **Machine** (`~/.concord/machine.json`) — this machine's identity.
+ * - **Link** — `cloudLink` in `~/.concord/config.json`; see `cloud/target.ts`.
+ *
+ * Nothing in a repository configures the cloud. Before 0.17 a repository could
+ * hold its own link or local choice in `.concord/cloud.json`; that file is now
+ * ignored, and `concord doctor` points it out.
  */
 
 const oauthTokensSchema = z.object({
@@ -45,16 +47,6 @@ const credentialsSchema = z.union([
   z.object({ apiUrl: z.url(), oauth: oauthTokensSchema }),
 ]);
 export type CloudCredentials = z.infer<typeof credentialsSchema>;
-
-const linkSchema = z.object({
-  apiUrl: z.url(),
-  /** The repository's normalised git remote; see `normalizeProjectKey`. */
-  projectKey: z.string().min(1),
-});
-export type CloudLink = z.infer<typeof linkSchema>;
-
-/** A repository's choice to stay local while this machine is signed in. */
-const localChoiceSchema = z.object({ local: z.literal(true) });
 
 export function credentialsPath(env: NodeJS.ProcessEnv): string {
   return join(userHome(env), '.concord', 'credentials.json');
@@ -124,7 +116,8 @@ export function ensureMachineKey(
   return machineKey;
 }
 
-export function linkPath(repoRoot: string): string {
+/** A repository's link or local choice from before 0.17, which nothing reads any more. */
+export function obsoleteLinkPath(repoRoot: string): string {
   return join(concordDir(repoRoot), 'cloud.json');
 }
 
@@ -164,32 +157,6 @@ export function readCredentials(env: NodeJS.ProcessEnv): CloudCredentials | unde
 
 export function writeCredentials(env: NodeJS.ProcessEnv, credentials: CloudCredentials): void {
   writeJson(credentialsPath(env), credentialsSchema.parse(credentials), 0o600);
-}
-
-export function readLink(repoRoot: string): CloudLink | undefined {
-  return readJson(linkPath(repoRoot), linkSchema);
-}
-
-export function writeLink(repoRoot: string, link: CloudLink): void {
-  writeJson(linkPath(repoRoot), linkSchema.parse(link));
-}
-
-/** Whether this repository chose to stay local (`concord cloud unlink`). */
-export function readLocalChoice(repoRoot: string): boolean {
-  return readJson(linkPath(repoRoot), localChoiceSchema) !== undefined;
-}
-
-/** Keep this repository local while the machine is signed in, replacing any link. */
-export function writeLocalChoice(repoRoot: string): void {
-  writeJson(linkPath(repoRoot), { local: true });
-}
-
-/** Returns whether a link was there to remove. */
-export function removeLink(repoRoot: string): boolean {
-  const path = linkPath(repoRoot);
-  if (!existsSync(path)) return false;
-  rmSync(path);
-  return true;
 }
 
 /** Returns whether there were credentials to remove. */

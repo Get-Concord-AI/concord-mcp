@@ -8,12 +8,14 @@ import { readUserConfig, writeUserConfig } from '../../src/config/user-config.js
 import { resolveGlobalChoice, runSetup } from '../../src/cli/commands/setup.js';
 import { BLOCK_START, removeBlock, upsertBlock } from '../../src/install/block.js';
 import { applyGlobalMode } from '../../src/install/global-mode.js';
-import { writeFakeCommand } from '../helpers/fake-command.js';
+import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
 
 const CLAUDE_LOGGING_CALLS = `import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 appendFileSync(join(process.env.HOME ?? '', 'claude-calls'), process.argv.slice(2).join(' ') + '\\n');
 `;
+
+const DEVIN_VERSION_SCRIPT = `console.log('Devin CLI v3000.3.0');\n`;
 
 const HARNESSES = ['claude', 'codex', 'cursor', 'gemini', 'grok', 'goose', 'agy'] as const;
 
@@ -23,7 +25,11 @@ function machine(harnesses: readonly string[] = HARNESSES): NodeJS.ProcessEnv & 
   const bin = join(home, 'bin');
   mkdirSync(bin);
   for (const name of harnesses) {
-    writeFakeCommand(bin, name, name === 'claude' ? CLAUDE_LOGGING_CALLS : '');
+    writeFakeCommand(
+      bin,
+      name,
+      name === 'claude' ? CLAUDE_LOGGING_CALLS : name === 'devin' ? DEVIN_VERSION_SCRIPT : '',
+    );
   }
   return { HOME: home, PATH: bin, CODEX_HOME: join(home, '.codex') };
 }
@@ -31,6 +37,55 @@ function machine(harnesses: readonly string[] = HARNESSES): NodeJS.ProcessEnv & 
 const read = (path: string): string => readFileSync(path, 'utf8');
 
 describe('applyGlobalMode', () => {
+  it('installs and removes Devin user MCP config and instructions', () => {
+    const env = machine(['devin']);
+    const on = applyGlobalMode(env, true);
+    expect(on.registrations).toEqual(['devin']);
+    expect(read(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).toContain('concord-mcp');
+    expect(read(join(env.HOME, '.config', 'devin', 'AGENTS.md'))).toContain('start_work');
+    const off = applyGlobalMode(env, false, { registrations: on.registrations });
+    expect(off.registrations).toEqual([]);
+    expect(existsSync(join(env.HOME, '.config', 'devin', 'AGENTS.md'))).toBe(false);
+    expect(read(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).not.toContain(
+      'concord-mcp',
+    );
+    const userConfig = read(join(env.HOME, '.config', 'devin', 'config.json'));
+    expect(userConfig).not.toContain('concord hook devin-');
+    expect(userConfig).not.toContain('"hooks"');
+  });
+
+  it('adds global Devin hooks while preserving existing user config, then removes Concord hooks', () => {
+    const env = machine(['devin']);
+    const config = join(env.HOME, '.config', 'devin', 'config.json');
+    mkdirSync(join(env.HOME, '.config', 'devin'), { recursive: true });
+    writeFileSync(config, '{\n  // User setting\n  "theme_mode": "dark"\n}\n');
+
+    const on = applyGlobalMode(env, true);
+    const installed = read(config);
+    expect(installed).toContain('// User setting');
+    expect(installed).toContain('"theme_mode": "dark"');
+    expect(installed).toContain('concord hook devin-session-start');
+    expect(installed).toContain('concord hook devin-user-prompt-submit');
+    expect(installed).toContain('concord hook devin-session-end');
+
+    applyGlobalMode(env, false, { registrations: on.registrations });
+    const removed = read(config);
+    expect(removed).toContain('// User setting');
+    expect(removed).toContain('"theme_mode": "dark"');
+    expect(removed).not.toContain('"hooks"');
+    expect(removed).not.toContain('concord hook devin-');
+  });
+
+  it('does not register the dedicated Devin MCP file on an older CLI', () => {
+    const env = machine(['devin']);
+    writeFakeVersion(join(env.HOME, 'bin'), 'devin', 'Devin CLI v3000.2.9');
+
+    const report = applyGlobalMode(env, true);
+
+    expect(report.registrations).toEqual([]);
+    expect(existsSync(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).toBe(false);
+  });
+
   it('registers and instructs each installed harness, then removes only its own additions', () => {
     const env = machine();
     mkdirSync(join(env.HOME, '.claude'));
@@ -61,7 +116,9 @@ describe('applyGlobalMode', () => {
       expect(read(path)).toMatch(/concord-mcp/u);
       expect(read(path)).not.toContain('CONCORD_REPO_ROOT');
     }
-    expect(read(join(env.HOME, 'claude-calls'))).toBe('mcp add --scope user concord concord-mcp\n');
+    expect(read(join(env.HOME, 'claude-calls')).trim()).toBe(
+      'mcp add --scope user concord concord-mcp',
+    );
     expect(applyGlobalMode(env, true, on).written).toEqual([
       'claude mcp add --scope user concord concord-mcp',
     ]);
@@ -228,20 +285,130 @@ describe('resolveGlobalChoice', () => {
 });
 
 describe('runSetup with global mode', () => {
-  it('saves the choice and still sets the repository up locally', () => {
-    const env = machine([]);
+  const REPO_FILES = [
+    'CLAUDE.md',
+    'AGENTS.md',
+    join('.codex', 'concord.md'),
+    join('.cursor', 'rules', 'concord.mdc'),
+    join('.github', 'copilot-instructions.md'),
+    join('.agents', 'rules', 'concord.md'),
+    '.mcp.json',
+    join('.cursor', 'mcp.json'),
+    join('.agents', 'mcp_config.json'),
+    join('.agents', 'hooks.json'),
+    join('.github', 'mcp.json'),
+    join('.gemini', 'settings.json'),
+    join('.grok', 'config.toml'),
+    join('.devin', 'hooks.v1.json'),
+    join('.devin', 'mcp_config.json'),
+  ];
+
+  function repository(): string {
     const repo = mkdtempSync(join(tmpdir(), 'concord-global-repo-'));
     mkdirSync(join(repo, '.git'));
+    return repo;
+  }
+
+  const present = (repo: string): string[] =>
+    REPO_FILES.filter((relPath) => existsSync(join(repo, relPath)));
+
+  it('saves the choice and sets the repository up locally without writing repository files', () => {
+    const env = machine([]);
+    const repo = repository();
 
     const result = runSetup(repo, {
       env: { ...env, CONCORD_REPO_ROOT: repo },
-      mcp: false,
       global: true,
     });
 
     expect(readUserConfig(env)).toEqual({ globalMode: true, globalRegistrations: [] });
     expect(result.globalMode).toEqual({ written: [], warnings: [], registrations: [] });
+    expect(result.repoFilesSkipped).toBe(true);
     expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(true);
+    expect(present(repo)).toEqual([]);
+    expect(result.written.filter((path) => !path.startsWith(env.HOME))).toEqual([]);
+  });
+
+  it('skips the repository files when global mode was saved earlier', () => {
+    const env = machine([]);
+    writeUserConfig(env, { globalMode: true });
+    const repo = repository();
+
+    const result = runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo } });
+
+    expect(result.repoFilesSkipped).toBe(true);
+    expect(present(repo)).toEqual([]);
+  });
+
+  it('skips the repository files with --no-mcp too, and leaves existing ones alone', () => {
+    const env = machine([]);
+    const repo = repository();
+    const existing = upsertBlock('# Mine\n', 'old instructions');
+    writeFileSync(join(repo, 'CLAUDE.md'), existing);
+
+    runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, mcp: false, global: true });
+
+    expect(read(join(repo, 'CLAUDE.md'))).toBe(existing);
+    expect(present(repo)).toEqual(['CLAUDE.md']);
+  });
+
+  it('writes the repository files when asked with repoFiles', () => {
+    const env = machine([]);
+    const repo = repository();
+
+    const result = runSetup(repo, {
+      env: { ...env, CONCORD_REPO_ROOT: repo },
+      global: true,
+      repoFiles: true,
+    });
+
+    expect(result.repoFilesSkipped).toBe(false);
+    expect(present(repo)).toEqual(REPO_FILES);
     expect(read(join(repo, 'CLAUDE.md'))).toContain(BLOCK_START);
+  });
+
+  it('writes the repository files when global mode is off or was never chosen', () => {
+    const env = machine([]);
+    const turnedOff = repository();
+    runSetup(turnedOff, { env: { ...env, CONCORD_REPO_ROOT: turnedOff }, global: false });
+    expect(present(turnedOff)).toEqual(REPO_FILES);
+
+    const neverChosen = repository();
+    const result = runSetup(neverChosen, {
+      env: { ...machine([]), CONCORD_REPO_ROOT: neverChosen },
+    });
+    expect(result.repoFilesSkipped).toBe(false);
+    expect(present(neverChosen)).toEqual(REPO_FILES);
+  });
+
+  it('judges Gemini by the settings global mode writes, so a first --require-adapters run passes', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-global-home-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'gemini', '0.55.1');
+    const env = { HOME: home, PATH: bin, CODEX_HOME: join(home, '.codex') };
+    const repo = repository();
+
+    const result = runSetup(repo, {
+      env: { ...env, CONCORD_REPO_ROOT: repo },
+      global: true,
+      adapters: true,
+      requireAdapters: true,
+    });
+
+    expect(read(join(home, '.gemini', 'settings.json'))).toContain('modelSteering');
+    expect(result.adapters.find((entry) => entry.harness === 'gemini')?.status).toBe('installed');
+    expect(result.globalMode?.registrations).toContain('gemini');
+    expect(present(repo)).toEqual([]);
+  });
+
+  it('writes the repository files when saved global mode is turned off in the same run', () => {
+    const env = machine([]);
+    writeUserConfig(env, { globalMode: true });
+    const repo = repository();
+
+    runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, global: false });
+
+    expect(present(repo)).toEqual(REPO_FILES);
   });
 });

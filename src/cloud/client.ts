@@ -151,3 +151,50 @@ export async function registerMachine(
   }
   return 'ok';
 }
+
+const machinesSchema = z.object({
+  machines: z.array(z.object({ id: z.string(), machineKey: z.string() })),
+});
+const agentsSchema = z.object({
+  agents: z.array(z.object({ id: z.string(), kind: z.string(), lastSeenAt: z.string() })),
+});
+
+/** An agent as Concord Cloud last saw it on one machine. */
+export type AgentSighting = z.infer<typeof agentsSchema>['agents'][number];
+
+async function getJson<T>(
+  apiUrl: string,
+  path: string,
+  bearer: string,
+  schema: z.ZodType<T>,
+  fetchImpl: Fetch,
+): Promise<T> {
+  assertKeySafeUrl(apiUrl);
+  const response = await fetchImpl(url(apiUrl, path), {
+    headers: { Authorization: `Bearer ${bearer}` },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`${apiUrl} answered ${String(response.status)} to ${path}.`);
+  }
+  const raw: unknown = await response.json();
+  return schema.parse(raw);
+}
+
+/**
+ * The agents Concord Cloud has seen on this machine, or undefined while it has
+ * not registered the machine. Two reads: agents are listed by the cloud's own
+ * machine id, which only the machine list maps from this machine's key.
+ */
+export async function agentsOnMachine(
+  apiUrl: string,
+  bearer: string,
+  machineKey: string,
+  fetchImpl: Fetch = fetch,
+): Promise<readonly AgentSighting[] | undefined> {
+  const { machines } = await getJson(apiUrl, '/v1/machines', bearer, machinesSchema, fetchImpl);
+  const machine = machines.find((entry) => entry.machineKey === machineKey);
+  if (machine === undefined) return undefined;
+  const path = `/v1/agents?machineId=${encodeURIComponent(machine.id)}`;
+  return (await getJson(apiUrl, path, bearer, agentsSchema, fetchImpl)).agents;
+}

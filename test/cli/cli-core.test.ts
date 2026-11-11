@@ -26,6 +26,8 @@ import {
 import { renderTasks } from '../../src/cli/commands/tasks.js';
 import { runWho } from '../../src/cli/commands/who.js';
 import { openContext } from '../../src/cli/context.js';
+import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
+import { cloudTargetFor } from '../../src/cloud/target.js';
 import { configureCliWorkspace } from '../../src/cli/workspace-options.js';
 import { workspaceIdForRoot } from '../../src/config/paths.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
@@ -46,15 +48,34 @@ describe('runSetup', () => {
     expect(program.commands.map((command) => command.name())).toEqual(['setup']);
   });
 
+  it('on a linked machine, installs instructions but creates no local state', () => {
+    // The 0.16 bug: setup created .concord/concord.db, which then kept the
+    // repository local on a linked machine, out of reach of its cloud peers.
+    const dir = repoDir();
+    const home = mkdtempSync(join(tmpdir(), 'concord-home-'));
+    const env = { HOME: home, CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-')) };
+    writeCredentials(env, { apiUrl: 'https://api.concord.test', apiKey: 'ck_test' });
+    ensureMachineKey(env, () => 'machine-1');
+
+    const result = runSetup(dir, { env });
+
+    expect(result.state).toMatchObject({ kind: 'cloud', apiUrl: 'https://api.concord.test' });
+    expect(existsSync(join(dir, '.concord'))).toBe(false);
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('start_work');
+    // And the repository still works through the cloud afterwards.
+    expect(cloudTargetFor(dir, env)).toBeDefined();
+    expect(() => openContext(dir, env)).toThrow(/works through Concord Cloud/u);
+  });
+
   it('creates state, instructions, and repository-pinned MCP configs', () => {
     const dir = repoDir();
     const codexHome = mkdtempSync(join(tmpdir(), 'concord-codex-'));
     const result = runSetup(dir, { env: { CODEX_HOME: codexHome } });
 
-    expect(result.concordPath).toBe(join(dir, '.concord'));
-    expect(existsSync(join(result.concordPath, 'concord.db'))).toBe(true);
-    expect(existsSync(join(result.concordPath, 'WORK_STATE.json'))).toBe(true);
-    expect(readFileSync(join(result.concordPath, '.gitignore'), 'utf8')).toContain('\n*\n');
+    expect(result.state).toEqual({ kind: 'local', concordPath: join(dir, '.concord') });
+    expect(existsSync(join(dir, '.concord', 'concord.db'))).toBe(true);
+    expect(existsSync(join(dir, '.concord', 'WORK_STATE.json'))).toBe(true);
+    expect(readFileSync(join(dir, '.concord', '.gitignore'), 'utf8')).toContain('\n*\n');
     expect(existsSync(join(dir, '.gitignore'))).toBe(false);
     expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('start_work');
     expect(readFileSync(join(dir, '.cursor', 'mcp.json'), 'utf8')).toContain(

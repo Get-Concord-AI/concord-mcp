@@ -2,12 +2,19 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 
 import { userHome } from '../config/paths.js';
-import { executablePath, run } from './adapters/index.js';
+import { devinCliSupportsDedicatedMcpConfig, executablePath, run } from './adapters/index.js';
 import { removeBlock, upsertBlock } from './block.js';
 import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
 import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
+import {
+  devinMcpConfigPath,
+  hasDevinMcpServer,
+  removeDevinMcpConfig,
+  upsertDevinMcpConfig,
+} from './devin-config.js';
+import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-user-hooks.js';
 import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
 import {
   CONCORD_SERVER_COMMAND,
@@ -43,6 +50,8 @@ interface UserFile {
   readonly isDetected?: ((env: NodeJS.ProcessEnv) => boolean) | undefined;
   /** Set for an MCP registration, which `--no-mcp` skips. */
   readonly registration?: Registration | undefined;
+  /** Optional harness version gate for a registration format. */
+  readonly supported?: ((env: NodeJS.ProcessEnv) => boolean) | undefined;
   readonly path: (env: NodeJS.ProcessEnv) => string;
   readonly install: (existing: string | undefined, path: string) => string;
   readonly uninstall: (existing: string) => string;
@@ -104,6 +113,21 @@ const USER_FILES: readonly UserFile[] = [
     ANTIGRAVITY_RULE_HEADER,
     isAntigravityDetected,
   ),
+  instructionFile('devin', (env) => join(dirname(devinMcpConfigPath(env)), 'AGENTS.md')),
+  {
+    executable: 'devin',
+    path: (env) => join(dirname(devinMcpConfigPath(env)), 'config.json'),
+    install: (existing) => upsertDevinUserHooksConfig(existing),
+    uninstall: removeDevinUserHooksConfig,
+  },
+  {
+    executable: 'devin',
+    registration: { id: 'devin', present: hasDevinMcpServer },
+    supported: devinCliSupportsDedicatedMcpConfig,
+    path: devinMcpConfigPath,
+    install: (existing) => upsertDevinMcpConfig(existing),
+    uninstall: removeDevinMcpConfig,
+  },
   {
     executable: 'gemini',
     registration: { id: 'gemini', present: hasMcpServer },
@@ -167,6 +191,7 @@ function applyFile(
   const path = file.path(env);
   const exists = existsSync(path);
   if (enable ? !isFileDetected(file, env) : !exists) return;
+  if (enable && file.supported !== undefined && !file.supported(env)) return;
   try {
     const existing = exists ? readFileSync(path, 'utf8') : undefined;
     const { registration } = file;

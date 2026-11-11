@@ -20,24 +20,18 @@ export function hasExplicitRepoRoot(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
-export interface ClientRootOptions {
-  /** Whether a repository works through Concord Cloud (linked, or by default), which a local server cannot serve. */
-  readonly isCloudLinked?: (repoRoot: string) => boolean;
-}
-
 /**
  * Join the folder the client has open. A server registered at user scope runs
  * wherever the client launched it (Cursor's global servers, notably), which
  * says nothing about the project in the window; a client that supports MCP
  * roots names that folder. Returns undefined when nothing was joined: the
  * client names no folder, or a tool call chose a workspace while the answer
- * was on its way, which stands. A folder linked to Concord Cloud is refused
- * rather than served from a local store its cloud peers would never see.
+ * was on its way, which stands. Only an unlinked machine's server gets here:
+ * a linked machine's works through the cloud from the start.
  */
 export async function joinClientRoot(
   client: RootsClient,
   manager: WorkspaceManager,
-  options: ClientRootOptions = {},
 ): Promise<WorkspaceSelection | undefined> {
   if (client.getClientCapabilities()?.roots === undefined) return undefined;
   const before = manager.selections;
@@ -46,13 +40,5 @@ export async function joinClientRoot(
   const folder = roots.find((root) => root.uri.startsWith('file://'));
   if (folder === undefined) return undefined;
   const root = resolveExplicitRepoRoot(fileURLToPath(folder.uri));
-  if (options.isCloudLinked?.(root) === true) {
-    manager.refuse(
-      `${root} works through Concord Cloud, which this user-level Concord server does not ` +
-        "serve. Use the project's own Concord server, which `concord setup` registers, or " +
-        '`concord cloud unlink` there to keep it local.',
-    );
-    return undefined;
-  }
   return manager.join(root);
 }

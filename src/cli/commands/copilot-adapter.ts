@@ -18,6 +18,7 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { openContext } from '../context.js';
 import { availablePort } from '../local-port.js';
 import { deliverToSession } from './cloud-codex.js';
+import { reportMissingHarnessCli } from './missing-harness-cli.js';
 import { watchCloud } from './cloud-inbox.js';
 
 /**
@@ -69,7 +70,10 @@ export function supportsUiServer(versionOutput: string): boolean {
  */
 export async function launchCopilot(args: readonly string[]): Promise<void> {
   const executable = executablePath('copilot', process.env);
-  if (executable === undefined) throw new Error('Copilot CLI was not found on PATH.');
+  if (executable === undefined) {
+    reportMissingHarnessCli('Copilot CLI', 'npm i -g @github/copilot');
+    return;
+  }
   const version = run(executable, ['--version'], process.env).output;
   let plan = { args: [...args], env: process.env };
   if (supportsUiServer(version)) {

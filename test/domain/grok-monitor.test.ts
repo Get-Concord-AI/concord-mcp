@@ -10,7 +10,7 @@ function stop(fields: Record<string, unknown>): string {
 
 describe('grokMonitorNudge', () => {
   it('asks for the monitor, agent id included, when none is running', () => {
-    const nudge = grokMonitorNudge(stop({ backgroundTasks: [] }), AGENT);
+    const nudge = grokMonitorNudge(stop({ backgroundTasks: [] }), AGENT, false);
     expect(nudge).toContain(grokMonitorCommand(AGENT));
     expect(grokMonitorCommand(AGENT)).toBe(
       'concord inbox watch --agent grok:1094f0e0 --provider grok',
@@ -21,22 +21,30 @@ describe('grokMonitorNudge', () => {
     const tasks = [
       { id: 't1', type: 'monitor', status: 'running', description: grokMonitorCommand(AGENT) },
     ];
-    expect(grokMonitorNudge(stop({ backgroundTasks: tasks }), AGENT)).toBeUndefined();
+    expect(grokMonitorNudge(stop({ backgroundTasks: tasks }), AGENT, false)).toBeUndefined();
+  });
+
+  it('trusts the active receiver lease with free-text Grok monitor descriptions', () => {
+    const tasks = [
+      { id: 't1', type: 'monitor', status: 'running', description: '[monitor] Concord inbox' },
+    ];
+    expect(grokMonitorNudge(stop({ backgroundTasks: tasks }), AGENT, true)).toBeUndefined();
+    expect(grokMonitorNudge(stop({ backgroundTasks: tasks }), AGENT, false)).toBeDefined();
   });
 
   it('ignores unrelated monitors', () => {
     const tasks = [{ id: 't1', type: 'monitor', status: 'running', description: 'tail -f log' }];
-    expect(grokMonitorNudge(stop({ backgroundTasks: tasks }), AGENT)).toBeDefined();
+    expect(grokMonitorNudge(stop({ backgroundTasks: tasks }), AGENT, false)).toBeDefined();
   });
 
   it('never nudges twice in a row, inside a subagent, or at session end', () => {
-    expect(grokMonitorNudge(stop({ stopHookActive: true }), AGENT)).toBeUndefined();
-    expect(grokMonitorNudge(stop({ subagentType: 'explore' }), AGENT)).toBeUndefined();
-    expect(grokMonitorNudge(stop({ reason: 'session_end' }), AGENT)).toBeUndefined();
+    expect(grokMonitorNudge(stop({ stopHookActive: true }), AGENT, false)).toBeUndefined();
+    expect(grokMonitorNudge(stop({ subagentType: 'explore' }), AGENT, false)).toBeUndefined();
+    expect(grokMonitorNudge(stop({ reason: 'session_end' }), AGENT, false)).toBeUndefined();
   });
 
   it('stays quiet on a payload it cannot read', () => {
-    expect(grokMonitorNudge('', AGENT)).toBeUndefined();
-    expect(grokMonitorNudge('{"backgroundTasks": 3}', AGENT)).toBeUndefined();
+    expect(grokMonitorNudge('', AGENT, false)).toBeUndefined();
+    expect(grokMonitorNudge('{"backgroundTasks": 3}', AGENT, false)).toBeUndefined();
   });
 });

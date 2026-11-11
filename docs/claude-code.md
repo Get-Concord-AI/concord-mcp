@@ -60,6 +60,13 @@ polls for the lifetime of an interactive session, so a line of output wakes an
 idle Claude session; PostToolUse and Stop hooks cover messages received while a
 turn is active or ending. Existing sessions need one restart after installation.
 
+Apps that drive Claude Code through the Claude Agent SDK, such as
+[Conductor](./conductor.md), never start plugin monitors. For those sessions
+(`CLAUDE_CODE_ENTRYPOINT` is `sdk-ts` or `sdk-py`), the plugin's Stop hook arms
+`concord inbox rewake`, an `asyncRewake` hook. It waits for the next message
+and exits with code 2, which wakes the idle session with it. In interactive
+sessions it exits at once and leaves delivery to the monitor.
+
 Claude Code holds a monitor notification while the agent is blocked on its user
 (an `AskUserQuestion` picker or a permission prompt), so a message the monitor
 drained is `delivered` (✓✓) but not yet `read`. It becomes read only on

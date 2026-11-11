@@ -74,7 +74,11 @@ const evidenceInputShape = {
 const provenanceField = z
   .array(z.object({ field: z.string(), source: z.string() }))
   .optional()
-  .describe('Evidence source for review claims');
+  .describe(
+    'Evidence source for review claims, as { field, source } pairs. Whenever reported_outcome ' +
+      'is supplied, include { field: "reported_outcome", source: "<CI run, PR, or reviewer>" } or ' +
+      'one { field: "reported_outcome.<key>", source } per measured value',
+  );
 
 export const reportedOutcomeSchema = z
   .object({
@@ -129,6 +133,10 @@ export const inspectWorkInputShape = {
         'your session.',
     ),
   message_id: z.string().min(1).optional().describe('Prompt/reply thread to inspect'),
+  include_superseded: z
+    .boolean()
+    .optional()
+    .describe('Include superseded decisions in task context (hidden by default)'),
   workspace_id: workspaceIdField,
 } as const;
 export type InspectWorkInput = z.infer<z.ZodObject<typeof inspectWorkInputShape>>;
@@ -153,6 +161,18 @@ export const updateWorkInputShape = {
     .optional()
     .describe('Kind of task-scoped update'),
   content: z.string().min(1).max(16_384).describe('Concise context another agent needs'),
+  supersedes: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('For kind decision: id of an earlier decision on this task that this one replaces'),
+  supersede_reason: z
+    .string()
+    .min(1)
+    .max(1024)
+    .optional()
+    .describe('Why the replaced decision no longer holds'),
   agent_id: agentIdField,
   to_agent_id: z.string().min(1).optional().describe('Recipient required for prompt'),
   reply_to_message_id: z.string().min(1).optional().describe('Message being answered for reply'),
@@ -225,7 +245,11 @@ export const finishWorkInputShape = {
   provenance: provenanceField,
   reported_outcome: reportedOutcomeSchema
     .optional()
-    .describe('Optional measured acceptance, integration, or intervention result'),
+    .describe(
+      'Optional measured acceptance, integration, or intervention result. Requires a provenance ' +
+        'entry with field "reported_outcome" (or "reported_outcome.acceptance", ' +
+        '"reported_outcome.integration", etc.) naming where the result came from',
+    ),
   reason: z
     .string()
     .min(1)

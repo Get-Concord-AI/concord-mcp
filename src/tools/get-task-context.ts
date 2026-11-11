@@ -1,3 +1,4 @@
+import { deriveLiveness, type Liveness } from '../domain/presence.js';
 import type {
   HandoffRecord,
   OwnershipEventRecord,
@@ -12,6 +13,7 @@ import { detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
 
 export interface TaskContextResult {
   task: TaskRecord;
+  ownerLiveness: Liveness | 'unregistered' | null;
   updates: TaskUpdateRecord[];
   latestHandoff: HandoffRecord | undefined;
   latestReview: ReviewRecord | undefined;
@@ -19,6 +21,14 @@ export interface TaskContextResult {
   pendingHandoff: HandoffRecord | undefined;
   ownershipHistory: OwnershipEventRecord[];
   messages: AgentMessageRecord[];
+}
+
+/** Superseded decisions stay in the log but are hidden unless the caller asks for them. */
+function visibleUpdates(
+  updates: TaskUpdateRecord[],
+  includeSuperseded: boolean,
+): TaskUpdateRecord[] {
+  return includeSuperseded ? updates : updates.filter((update) => update.supersededBy === null);
 }
 
 export function handleGetTaskContext(
@@ -51,7 +61,19 @@ export function handleGetTaskContext(
 
   return {
     task,
-    updates: repos.taskUpdates.listByTask(task.taskId),
+    ownerLiveness:
+      task.agentId === null
+        ? null
+        : (() => {
+            const owner = repos.agents.get(task.agentId);
+            return owner === undefined
+              ? 'unregistered'
+              : deriveLiveness(owner.lastSeen, Date.now());
+          })(),
+    updates: visibleUpdates(
+      repos.taskUpdates.listByTask(task.taskId),
+      input.include_superseded === true,
+    ),
     latestHandoff: repos.handoffs.latestForTask(task.taskId),
     latestReview: repos.reviews.latestForTask(task.taskId),
     overlaps,

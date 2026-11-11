@@ -89,6 +89,10 @@ adapters independently. Use `--no-adapters` to skip that step or
 Pass `--no-mcp` to write only the workspace and instructions while managing MCP
 registration yourself.
 
+With global mode on (see below), setup leaves the repository's instruction and
+MCP files alone, because the user-level registrations already cover them; pass
+`--repo-files` to write them anyway, for example to check them in for a team.
+
 </details>
 
 <details>
@@ -106,8 +110,27 @@ agent and adds a short Concord section to their user instruction files
 written into those repositories: their work is kept in `~/.concord/global.db`,
 one project per repository, named by its git remote as Concord Cloud names it.
 Sessions outside any repository share the `general` project. A repository you
-did set up keeps everything in its own `.concord/`. Turning global mode off
-removes exactly what it added.
+did set up keeps everything in its own `.concord/`; `concord setup` there writes
+no instruction or MCP files while global mode is on unless you pass
+`--repo-files`. Turning global mode off removes exactly what it added.
+
+</details>
+
+<details>
+<summary>Concord Cloud: agents on different machines</summary>
+
+`concord cloud login` signs this machine in to Concord Cloud and links it. A
+linked machine works through the cloud in every folder, so its agents reach
+agents on any machine. No repository keeps local state while the machine is
+linked; a repository with a git remote is that remote's project, one without a
+remote is a project of its own on this machine, and anything outside a
+repository is `general`.
+
+`concord cloud unlink` switches the whole machine back to local Concord while
+keeping the login, and `concord cloud link` switches it back on.
+`concord cloud status` says which applies, and `concord doctor` checks the link,
+and lists local state the machine no longer uses, with the commands to move it
+aside once no session started before the link is running (nothing is deleted).
 
 </details>
 
@@ -123,6 +146,8 @@ removes exactly what it added.
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
+| Devin CLI                          | Project-level setup via `concord setup`            |
+| Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
 | Any other MCP-capable coding agent | [Manual setup](./docs/other-mcp-clients.md)        |
 
 > There is no universal `/concord` slash command — commands are client-specific.

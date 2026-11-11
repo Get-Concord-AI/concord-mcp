@@ -16,6 +16,8 @@ export const harnessNames = [
   'hermes',
   'antigravity',
   'copilot-cli',
+  'devin',
+  'qwen',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -159,7 +161,7 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     },
     installedCapabilities: ['pull', 'steer', 'idle', 'busy', 'monitor-command'],
     installedDetail:
-      'A one-shot Gemini background shell monitor injects its completion into the agent; lifecycle hooks provide busy-turn fallback.',
+      'A one-shot Gemini background shell monitor injects its completion into the agent; lifecycle hooks provide busy-turn fallback. Start with `concord adapters gemini` so the monitor runs before the first prompt.',
     unsupportedDetail:
       'Gemini CLI does not meet the verified background shell injection baseline (0.55.0).',
   },
@@ -256,6 +258,41 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Sessions started with `concord adapters copilot` are steered and woken through the embedded server; plain `copilot` sessions get hook delivery after tool calls and at turn end.',
     unsupportedDetail: 'Copilot CLI does not meet the verified hooks baseline (1.0.0).',
+  },
+  devin: {
+    name: 'devin',
+    executable: 'devin',
+    minimumVersion: [3000, 3, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'steer', 'busy'],
+    installedDetail: 'Devin CLI hooks register sessions and inject inbox messages on user prompts.',
+    unsupportedDetail: 'Devin CLI must be v3000.3 or newer for dedicated MCP config files.',
+  },
+  qwen: {
+    name: 'qwen',
+    executable: 'qwen',
+    minimumVersion: [0, 26, 4],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
+    unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
   },
 };
 

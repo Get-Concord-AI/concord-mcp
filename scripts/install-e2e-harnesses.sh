@@ -31,8 +31,15 @@ trap 'rm -rf "${WORK}"' EXIT
 mkdir -p "${BIN_DIR}"
 
 fetch() {
-  local url="$1" sha="$2" out="$3"
-  curl -fsSL --retry 3 -o "${out}" "${url}"
+  local url="$1" sha="$2" out="$3" fallback="${4:-}"
+  if ! curl -fsSL --retry 3 -o "${out}" "${url}"; then
+    if [[ -n "${fallback}" ]]; then
+      echo "Primary download failed; trying fallback URL ${fallback}..." >&2
+      curl -fsSL --retry 3 -o "${out}" "${fallback}"
+    else
+      return 1
+    fi
+  fi
   echo "${sha}  ${out}" | sha256sum --check --quiet
 }
 
@@ -43,7 +50,11 @@ npm install --global --no-audit --no-fund \
   "@github/copilot@${COPILOT_VERSION}"
 
 # The binaries Grok's and Goose's install scripts would download, fetched directly.
-fetch "https://x.ai/cli/grok-${GROK_VERSION}-linux-x86_64" "${GROK_SHA256}" "${WORK}/grok"
+# Grok's primary endpoint (x.ai/cli) is fronted by Cloudflare and can return 504;
+# prefer the direct GCS bucket used by x.ai's own install.sh, with x.ai as fallback.
+fetch "https://storage.googleapis.com/grok-build-public-artifacts/cli/grok-${GROK_VERSION}-linux-x86_64" \
+  "${GROK_SHA256}" "${WORK}/grok" \
+  "https://x.ai/cli/grok-${GROK_VERSION}-linux-x86_64"
 install -m 0755 "${WORK}/grok" "${BIN_DIR}/grok"
 
 fetch "https://github.com/block/goose/releases/download/${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.bz2" \

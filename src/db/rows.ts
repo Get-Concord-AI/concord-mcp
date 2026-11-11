@@ -203,6 +203,9 @@ export interface TaskUpdateRecord {
   content: string;
   agent: string | null;
   createdAt: string;
+  supersededBy: number | null;
+  supersedeReason: string | null;
+  supersededAt: string | null;
 }
 
 const taskUpdateDbRowSchema = z.object({
@@ -212,6 +215,9 @@ const taskUpdateDbRowSchema = z.object({
   content: z.string(),
   agent: z.string().nullable(),
   created_at: z.string(),
+  superseded_by: z.number().int().nullable(),
+  supersede_reason: z.string().nullable(),
+  superseded_at: z.string().nullable(),
 });
 
 export function parseTaskUpdateRow(raw: unknown): TaskUpdateRecord {
@@ -223,6 +229,9 @@ export function parseTaskUpdateRow(raw: unknown): TaskUpdateRecord {
     content: row.content,
     agent: row.agent,
     createdAt: row.created_at,
+    supersededBy: row.superseded_by,
+    supersedeReason: row.supersede_reason,
+    supersededAt: row.superseded_at,
   };
 }
 

@@ -207,6 +207,14 @@ export function handleUpdateWork(
   dispatcher: AgentMessageDispatcher,
 ): UpdateWorkResult | Promise<UpdateWorkResult> {
   const operation = input.operation ?? 'record';
+  if (
+    operation !== 'record' &&
+    (input.supersedes !== undefined || input.supersede_reason !== undefined)
+  ) {
+    throw new Error(
+      `supersedes and supersede_reason work only with operation record, not ${operation}.`,
+    );
+  }
   if (operation !== 'record') {
     return handleSendAgentMessageWithDelivery(
       repos,
@@ -228,6 +236,8 @@ export function handleUpdateWork(
     content: input.content,
     agent_id: input.agent_id,
     agent: input.agent_id,
+    supersedes: input.supersedes,
+    supersede_reason: input.supersede_reason,
   });
 }
 
@@ -703,6 +713,7 @@ export function registerWorkflowTools(
           ...workspaceStructured(workspace),
           scope: result.scope,
           task: result.context.task,
+          owner_liveness: result.context.ownerLiveness,
           updates: result.context.updates,
           latest_handoff: result.context.latestHandoff ?? null,
           latest_review: result.context.latestReview ?? null,
@@ -749,7 +760,10 @@ export function registerWorkflowTools(
               {
                 type: 'text',
                 text: withWorkspaceText(
-                  `Recorded ${result.update.kind} for ${result.update.taskId}.`,
+                  `Recorded ${result.update.kind} #${String(result.update.id)} for ${result.update.taskId}` +
+                    (args.supersedes === undefined
+                      ? '.'
+                      : ` (supersedes #${String(args.supersedes)}).`),
                   workspace,
                 ),
               },

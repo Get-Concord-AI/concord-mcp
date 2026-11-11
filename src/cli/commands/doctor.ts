@@ -23,7 +23,11 @@ import {
 } from '../../install/adapters/links.js';
 import { CONCORD_INSTRUCTION_VERSION } from '../../install/instructions.js';
 import { endpointPromptable } from '../../tools/agent-messages.js';
+import { linkedMachine } from '../../cloud/target.js';
+import { resolveRepoRoot } from '../../config/paths.js';
+import { gitOriginRemote } from '../../workspaces/store.js';
 import { openContext, type CliContext } from '../context.js';
+import { buildCloudDoctorReport } from './doctor-cloud.js';
 import { askQuestion } from './setup.js';
 
 const instructionTargets = [
@@ -133,8 +137,8 @@ export async function runDoctorCommand(
       options.fix === true || (options.confirm !== undefined && (await options.confirm(broken)));
     if (approved) preface.push(renderRepairs(repairAdapterLinks(moduleUrl, env, isEphemeral)), '');
   }
-  const ctx = openContext(cwd, env);
-  const adapters = statusGlobalAdapters(env, ctx.repoRoot, moduleUrl, isEphemeral);
+  const repoRoot = resolveRepoRoot(cwd, env);
+  const adapters = statusGlobalAdapters(env, repoRoot, moduleUrl, isEphemeral);
   if (options.fix === true && broken.length === 0) {
     const stillBroken = adapters.some(
       (entry) => entry.link !== undefined && linkNeedsRepair(entry.link, isEphemeral),
@@ -147,9 +151,42 @@ export async function runDoctorCommand(
       '',
     );
   }
+  const adaptersHealthy = !adapters.some(adapterNeedsAttention);
+
+  if (linkedMachine(env) !== undefined) {
+    const cloud = await buildCloudDoctorReport(cwd, env, {
+      fetch,
+      originRemote: gitOriginRemote,
+    });
+    return {
+      output: [...preface, cloud.output, '', renderAdapterReport(adapters)].join('\n'),
+      healthy: cloud.healthy && adaptersHealthy,
+    };
+  }
+
+  let ctx: CliContext;
+  try {
+    ctx = openContext(cwd, env);
+  } catch (error) {
+    // A store this build cannot migrate (one a development build changed, say)
+    // is a finding to report, not a crash.
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      output: [
+        ...preface,
+        'Concord doctor',
+        '',
+        `Workspace\n  store        unreadable: ${reason}`,
+        '  Move the store aside to start a fresh one; its tasks stay in the moved file.',
+        '',
+        renderAdapterReport(adapters),
+      ].join('\n'),
+      healthy: false,
+    };
+  }
   return {
     output: [...preface, buildDoctorReport(ctx, env, adapters)].join('\n'),
-    healthy: !adapters.some(adapterNeedsAttention),
+    healthy: adaptersHealthy,
   };
 }
 
@@ -176,7 +213,7 @@ async function confirmRepair(repairs: readonly LinkRepair[]): Promise<boolean> {
 export function registerDoctorCommand(program: Command): void {
   program
     .command('doctor')
-    .description('Check the workspace and report tool adoption')
+    .description('Check the workspace, or the Concord Cloud link, and report tool adoption')
     .option('--fix', 'Re-point broken harness adapter links at this installed package')
     .action(async (options) => {
       const interactive = process.stdin.isTTY && process.stdout.isTTY;
