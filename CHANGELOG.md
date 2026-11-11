@@ -21,6 +21,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   identified but pull messages from their inbox. See
   [docs/opencode.md](./docs/opencode.md).
 
+### Fixed
+
+- Harness version checks read versions printed with a `v` prefix. OpenCode 2
+  prints `opencode v2.2.7`, which Concord read as no version, so it reported
+  every real OpenCode 2 as unsupported and skipped it in setup and the launcher.
+- `concord adapters status` and `concord doctor` no longer start OpenCode's
+  background service to check Concord's registration. When the service is
+  stopped they say so instead of stalling.
+
 ### Changed
 
 - Copilot CLI's straggler sweep and session adapter now live in a shared

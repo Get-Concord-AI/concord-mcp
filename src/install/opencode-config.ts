@@ -47,7 +47,21 @@ export function installOpencodeMcpConfig(executable: string, env: NodeJS.Process
   }
 }
 
-/** Whether OpenCode lists Concord's server and has not disabled it. */
+/**
+ * Whether OpenCode's background service is running. Unlike `opencode api` and
+ * `opencode mcp list`, which start the service when it is stopped (and, on a
+ * port already taken, stall for about 20 seconds before failing),
+ * `opencode service status` only reports: the server URL, or `stopped`.
+ */
+export function opencodeServiceRunning(executable: string, env: NodeJS.ProcessEnv): boolean {
+  const result = spawnCommandSync(executable, ['service', 'status'], {
+    env,
+    timeout: COMMAND_TIMEOUT_MS,
+  });
+  return result.status === 0 && /^https?:\/\//u.test(result.stdout.trim());
+}
+
+/** Whether OpenCode lists Concord's server and has not disabled it. Starts the service if stopped. */
 export function opencodeConfigInstalled(executable: string, env: NodeJS.ProcessEnv): boolean {
   const result = spawnCommandSync(executable, ['api', 'GET', '/api/mcp'], {
     env,
