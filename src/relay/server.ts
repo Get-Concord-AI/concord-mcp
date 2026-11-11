@@ -3,6 +3,7 @@ import { chmodSync, existsSync, lstatSync, unlinkSync } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 
 import type { Repositories } from '../db/index.js';
+import { renderPeerMessage } from '../domain/pull-inbox.js';
 import { RelayFrameReader } from './frame-reader.js';
 import {
   decodeRelayDelivery,
@@ -112,7 +113,7 @@ function authenticated(supplied: string, expected: string): boolean {
   );
 }
 
-function fingerprintDelivery(delivery: RelayDelivery): string {
+function fingerprintDelivery(delivery: AgentSessionDelivery): string {
   return createHash('sha256')
     .update(
       JSON.stringify({
@@ -221,7 +222,7 @@ export async function startAgentRelay(
   ): Promise<SuccessfulRelayResponse> => {
     pruneDeliveryCache();
 
-    const fingerprint = fingerprintDelivery(delivery);
+    const fingerprint = fingerprintDelivery(sessionDelivery);
     const existing = deliveryCache.get(delivery.messageId);
 
     if (existing !== undefined) {
@@ -282,6 +283,24 @@ export async function startAgentRelay(
     return promise;
   };
 
+  const deliveryFromStore = (frame: RelayDelivery): AgentSessionDelivery => {
+    if (frame.recipientAgentId !== options.agentId) {
+      throw new Error(`Relay endpoint belongs to ${options.agentId}.`);
+    }
+    const message = options.repos.agentMessages.get(frame.messageId);
+    if (message?.status !== 'sent' || message.recipientAgentId !== options.agentId) {
+      throw new Error('Relay delivery has no pending message.');
+    }
+    return {
+      version: frame.version,
+      type: frame.type,
+      messageId: message.messageId,
+      senderAgentId: message.senderAgentId,
+      recipientAgentId: message.recipientAgentId,
+      content: renderPeerMessage(message),
+    };
+  };
+
   const server = createServer((socket) => {
     const frameReader = new RelayFrameReader();
 
@@ -320,19 +339,7 @@ export async function startAgentRelay(
             throw new Error('Relay credential was rejected.');
           }
 
-          if (delivery.recipientAgentId !== options.agentId) {
-            throw new Error(`Relay endpoint belongs to ${options.agentId}.`);
-          }
-
-          const sessionDelivery: AgentSessionDelivery = {
-            version: delivery.version,
-            type: delivery.type,
-            messageId: delivery.messageId,
-            senderAgentId: delivery.senderAgentId,
-            recipientAgentId: delivery.recipientAgentId,
-            content: delivery.content,
-          };
-
+          const sessionDelivery = deliveryFromStore(delivery);
           const response = await deliverOnce(delivery, sessionDelivery);
           respond(socket, response);
         } catch (error) {
