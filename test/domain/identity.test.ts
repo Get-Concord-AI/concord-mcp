@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   agentIdForSession,
+  defaultActorIdFor,
   resolveActorId,
   resolveIdentity,
   UNRESOLVED_IDENTITY_MESSAGE,
@@ -134,6 +135,19 @@ describe('resolveActorId', () => {
     // Codex scrubs the environment of the processes it spawns, so its MCP
     // server cannot see the session; its SessionStart hook tells the model the id.
     expect(resolveActorId(undefined, 'codex:1a2b3c4d')).toBe('codex:1a2b3c4d');
+  });
+
+  it('gives a repository-only OpenClaw setup the default agent id, but never over a supplied one', () => {
+    const fallback = defaultActorIdFor({ CONCORD_AGENT_KIND: 'openclaw' });
+    expect(fallback).toBe('openclaw:main');
+    expect(resolveActorId(undefined, undefined, fallback)).toBe('openclaw:main');
+    expect(resolveActorId(undefined, 'openclaw:alpha', fallback)).toBe('openclaw:alpha');
+    expect(resolveActorId(session, undefined, fallback)).toBe('claude-code:abcd1234');
+  });
+
+  it('has no default id for other clients', () => {
+    expect(defaultActorIdFor({ CONCORD_AGENT_KIND: 'codex' })).toBeUndefined();
+    expect(defaultActorIdFor({})).toBeUndefined();
   });
 
   it('explains how to fix an unidentifiable caller instead of minting an id', () => {

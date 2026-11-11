@@ -207,9 +207,20 @@ export const UNRESOLVED_IDENTITY_MESSAGE =
 export function resolveActorId(
   session: AgentIdentity | undefined,
   supplied: string | undefined,
+  fallback?: string,
 ): string {
   if (session !== undefined) return session.agentId;
   const given = supplied?.trim();
   if (given !== undefined && given !== '') return given;
+  if (fallback !== undefined) return fallback;
   throw new Error(UNRESOLVED_IDENTITY_MESSAGE);
+}
+
+/**
+ * The id used when a client that never reveals a session was set up without
+ * per-agent instructions (OpenClaw with global mode off). It is the id OpenClaw's
+ * default agent gets in global mode, so both setups name that agent the same way.
+ */
+export function defaultActorIdFor(env: NodeJS.ProcessEnv): string | undefined {
+  return env['CONCORD_AGENT_KIND']?.trim() === 'openclaw' ? 'openclaw:main' : undefined;
 }

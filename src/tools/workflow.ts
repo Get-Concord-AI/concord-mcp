@@ -8,7 +8,7 @@ import type { AdapterNotice } from '../adapter-check.js';
 import type { AvailableUpdate } from '../update-notifier.js';
 import { receiverActive } from '../domain/delivery.js';
 import { harnessConfigFor } from '../domain/harness-config.js';
-import { resolveActorId, type AgentIdentity } from '../domain/identity.js';
+import { defaultActorIdFor, resolveActorId, type AgentIdentity } from '../domain/identity.js';
 import type { SemanticTelemetryEvent, TelemetryRecorder } from '../telemetry/events.js';
 import type { WorkspaceContext } from '../workspaces/manager.js';
 import { SocketAgentMessageDispatcher } from '../relay/socket-dispatcher.js';
@@ -545,7 +545,7 @@ export function registerWorkflowTools(
    *  fix-it message when neither the session nor the caller identifies anyone. */
   const withActor = <T extends { agent_id?: string | undefined }>(args: T): WithActor<T> => ({
     ...args,
-    agent_id: resolveActorId(session, args.agent_id),
+    agent_id: resolveActorId(session, args.agent_id, defaultActorIdFor(process.env)),
   });
 
   server.registerTool(
