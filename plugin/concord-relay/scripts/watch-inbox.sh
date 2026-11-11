@@ -39,9 +39,29 @@ harness_alive() {
 # CONCORD_AGENT_ID overrides it when a human wants to name the agents.
 
 # Once installed, this plugin loads in every session, most of which have nothing
-# to do with Concord. Exit immediately rather than leaving a poll loop spawning
-# a subprocess every couple of seconds for the life of an unrelated project.
-if ! "${CONCORD_BIN}" inbox status >/dev/null 2>&1; then
+# to do with Concord. Exit rather than leaving a poll loop spawning a subprocess
+# every couple of seconds for the life of an unrelated project.
+#
+# A single failed check is not proof, though: a resumed session can start while
+# the previous process is still shutting down, and one transient failure here
+# used to kill the monitor for the rest of the session without a word (#180).
+# So retry a few times with a short backoff before deciding this directory is
+# not a Concord workspace. An unrelated project pays a few extra seconds once,
+# at session start.
+CONCORD_INBOX_STARTUP_ATTEMPTS="${CONCORD_INBOX_STARTUP_ATTEMPTS:-3}"
+CONCORD_INBOX_STARTUP_BACKOFF_SECONDS="${CONCORD_INBOX_STARTUP_BACKOFF_SECONDS:-1}"
+workspace_ready() {
+  local attempt=1 delay="${CONCORD_INBOX_STARTUP_BACKOFF_SECONDS}"
+  while true; do
+    "${CONCORD_BIN}" inbox status >/dev/null 2>&1 && return 0
+    [ "${attempt}" -ge "${CONCORD_INBOX_STARTUP_ATTEMPTS}" ] && return 1
+    harness_alive || return 1
+    sleep "${delay}"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
+if ! workspace_ready; then
   exit 0
 fi
 
