@@ -327,6 +327,8 @@ vector DB, or autonomous coding agent.
 
 See also: [Why not just use markdown?](./docs/why-not-markdown.md)
 
+To share a file with another agent, see [File sharing](./docs/file-sharing.md).
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`CLAUDE.md`](./CLAUDE.md). This

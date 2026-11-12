@@ -17,6 +17,10 @@ import {
 } from './repositories/ownership-events.js';
 import { createReviewRepository, type ReviewRepository } from './repositories/reviews.js';
 import {
+  createSharedFileRepository,
+  type SharedFileRepository,
+} from './repositories/shared-files.js';
+import {
   createTaskUpdateRepository,
   type TaskUpdateRepository,
 } from './repositories/task-updates.js';
@@ -31,6 +35,12 @@ export type { NewHandoff, HandoffRepository } from './repositories/handoffs.js';
 export type { NewReview, ReviewRepository } from './repositories/reviews.js';
 export type { NewTaskUpdate, TaskUpdateRepository } from './repositories/task-updates.js';
 export type { NewEvent, EventRepository } from './repositories/events.js';
+export type {
+  NewSharedFile,
+  SharedFileRecord,
+  SharedFileRepository,
+  StoredSharedFile,
+} from './repositories/shared-files.js';
 export type {
   NewOwnershipEvent,
   OwnershipEventRepository,
@@ -80,6 +90,7 @@ export interface Repositories {
   agentEndpoints: AgentEndpointRepository;
   agentMessages: AgentMessageRepository;
   ownershipEvents: OwnershipEventRepository;
+  sharedFiles: SharedFileRepository;
 }
 
 /** Bind all repositories to an open database; task-scoped ones see only `project`. */
@@ -99,6 +110,7 @@ export function createRepositories(
     agentEndpoints: createAgentEndpointRepository(db),
     agentMessages: createAgentMessageRepository(db, project),
     ownershipEvents: createOwnershipEventRepository(db, project),
+    sharedFiles: createSharedFileRepository(db),
   };
 }
 

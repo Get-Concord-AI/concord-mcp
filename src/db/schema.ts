@@ -290,4 +290,26 @@ export const migrations: readonly string[] = [
     summary_updated_at = CASE WHEN summary IS NULL THEN NULL ELSE last_seen END,
     execution_status = CASE WHEN status = 'active' THEN 'executing' ELSE 'not_executing' END;
   `,
+  // 018 — files shared with a prompt or reply. The bytes live in the same
+  // database as the message they came with, so one transaction holds both and
+  // retention can clear them. message_id is a soft reference (no FK), as
+  // elsewhere: these rows are written before their message exists, so a
+  // recipient can never be handed a message whose files are not yet stored.
+  `
+  CREATE TABLE shared_files (
+    file_id          TEXT PRIMARY KEY,
+    message_id       TEXT NOT NULL,
+    sender_agent_id  TEXT NOT NULL,
+    filename         TEXT NOT NULL,
+    media_type       TEXT NOT NULL,
+    size_bytes       INTEGER NOT NULL,
+    sha256           TEXT NOT NULL,
+    content          BLOB,
+    created_at       TEXT NOT NULL,
+    expires_at       TEXT NOT NULL,
+    purged_at        TEXT
+  );
+  CREATE INDEX idx_shared_files_message ON shared_files(message_id);
+  CREATE INDEX idx_shared_files_expiry ON shared_files(purged_at, expires_at);
+  `,
 ];
