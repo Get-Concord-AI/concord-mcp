@@ -120,7 +120,7 @@ export function localCopilotBackend(repos: Repositories, repoRoot: string): Copi
       // A live host is the session's single consumer: it pushes, and sweeps up
       // anything a push missed. Draining here too could show a message twice.
       if (hosted(agentId)) {
-        repos.agents.touch(agentId);
+        repos.agents.heartbeat(agentId);
         return Promise.resolve([]);
       }
       const session = rawJson === undefined ? null : hookSession(rawJson);

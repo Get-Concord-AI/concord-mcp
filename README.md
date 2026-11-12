@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, and GitHub Copilot CLI talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, GitHub Copilot CLI, and OpenCode talk to each other.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -28,6 +28,19 @@
   <a href="#supported-agents">Supported agents</a> ·
   <a href="https://getconcord.ai">Website</a> ·
   <a href="./CONTRIBUTING.md">Contributing</a>
+</p>
+
+<p align="center">
+  <a href="./README.md">English</a> |
+  <a href="./README.zh-CN.md">简体中文</a> |
+  <a href="./README.zh-TW.md">繁體中文</a> |
+  <a href="./README.ja.md">日本語</a> |
+  <a href="./README.ko.md">한국어</a> |
+  <a href="./README.es.md">Español</a> |
+  <a href="./README.pt-BR.md">Português</a> |
+  <a href="./README.fr.md">Français</a> |
+  <a href="./README.de.md">Deutsch</a> |
+  <a href="./README.ru.md">Русский</a>
 </p>
 
 ## See it work
@@ -146,6 +159,7 @@ aside once no session started before the link is running (nothing is deleted).
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
+| OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
 | Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
 | Any other MCP-capable coding agent | [Manual setup](./docs/other-mcp-clients.md)        |
@@ -187,8 +201,11 @@ review state through one small MCP server.
 | `finish_work`   | records evidence and optionally marks a task review-ready, complete, or closed              |
 
 Writes accept an `agent_id`, which keeps presence live just by working.
-`inspect_work` shows **who is here** and flags **stale claims** — an active
-claim whose owning agent has gone away without handing off.
+`inspect_work` shows **who is here** with three separate signals — heartbeat,
+last activity, and the status the agent reported (writing never changes the
+reported status) — and flags **stale claims**: work whose owning agent has gone
+away without handing off, an assignment nobody accepted, or in-progress work
+with no owning agent at all.
 
 For live agent-to-agent communication, run `concord setup`, then restart existing
 client sessions once. A prompt uses `update_work` with `operation: "prompt"`, the

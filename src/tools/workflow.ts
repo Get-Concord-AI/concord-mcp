@@ -8,7 +8,13 @@ import type { AdapterNotice } from '../adapter-check.js';
 import type { AvailableUpdate } from '../update-notifier.js';
 import { receiverActive } from '../domain/delivery.js';
 import { harnessConfigFor } from '../domain/harness-config.js';
-import { resolveActorId, type AgentIdentity } from '../domain/identity.js';
+import {
+  identityForRequest,
+  parseOpenCodeRequestIdentityMetadata,
+  resolveActorId,
+  type AgentIdentity,
+  type OpenCodeRequestIdentityMetadata,
+} from '../domain/identity.js';
 import type { SemanticTelemetryEvent, TelemetryRecorder } from '../telemetry/events.js';
 import type { WorkspaceContext } from '../workspaces/manager.js';
 import { SocketAgentMessageDispatcher } from '../relay/socket-dispatcher.js';
@@ -207,6 +213,14 @@ export function handleUpdateWork(
   dispatcher: AgentMessageDispatcher,
 ): UpdateWorkResult | Promise<UpdateWorkResult> {
   const operation = input.operation ?? 'record';
+  if (
+    operation !== 'record' &&
+    (input.supersedes !== undefined || input.supersede_reason !== undefined)
+  ) {
+    throw new Error(
+      `supersedes and supersede_reason work only with operation record, not ${operation}.`,
+    );
+  }
   if (operation !== 'record') {
     return handleSendAgentMessageWithDelivery(
       repos,
@@ -228,6 +242,8 @@ export function handleUpdateWork(
     content: input.content,
     agent_id: input.agent_id,
     agent: input.agent_id,
+    supersedes: input.supersedes,
+    supersede_reason: input.supersede_reason,
   });
 }
 
@@ -412,6 +428,9 @@ export function registerWorkflowTools(
   dispatcher: AgentMessageDispatcher = new SocketAgentMessageDispatcher(),
   telemetry?: TelemetryRecorder,
   getAdapterNotice?: () => AdapterNotice | undefined,
+  requestIdentity?: (
+    meta: OpenCodeRequestIdentityMetadata | undefined,
+  ) => AgentIdentity | undefined,
 ): void {
   interface WorkflowToolResponse {
     content: { type: 'text'; text: string }[];
@@ -533,9 +552,15 @@ export function registerWorkflowTools(
 
   /** Stamp the resolved actor onto a write tool's arguments. Throws with the
    *  fix-it message when neither the session nor the caller identifies anyone. */
-  const withActor = <T extends { agent_id?: string | undefined }>(args: T): WithActor<T> => ({
+  const sessionForRequest = (
+    meta: OpenCodeRequestIdentityMetadata | undefined,
+  ): AgentIdentity | undefined => identityForRequest(session, requestIdentity?.(meta));
+  const withActor = <T extends { agent_id?: string | undefined }>(
+    args: T,
+    meta: OpenCodeRequestIdentityMetadata | undefined,
+  ): WithActor<T> => ({
     ...args,
-    agent_id: resolveActorId(session, args.agent_id),
+    agent_id: resolveActorId(sessionForRequest(meta), args.agent_id),
   });
 
   server.registerTool(
@@ -547,14 +572,16 @@ export function registerWorkflowTools(
         'when needed, claim the declared scope, and return actionable overlap warnings.',
       inputSchema: startWorkInputShape,
     },
-    (args) => {
+    (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
+      const requestSession = sessionForRequest(requestMeta);
       // The session's kind wins alongside its id: the id embeds the kind, so
       // registering under a different one would describe an agent that is not
       // the one being addressed.
       const result = handleStartWork(repos, {
-        ...withActor(args),
-        kind: session?.kind ?? args.kind,
+        ...withActor(args, requestMeta),
+        kind: requestSession?.kind ?? args.kind,
       });
       const startedTaskFlowId = taskFlowId(result.claim.task.taskId);
       if (startedTaskFlowId !== undefined) {
@@ -570,7 +597,7 @@ export function registerWorkflowTools(
           breadth_warning_count: result.claim.breadthReasons.length,
         });
       }
-      onWrite?.();
+      onWrite?.(workspace);
       const task = result.claim.task;
       return withSessionAdvisories({
         content: [
@@ -613,9 +640,10 @@ export function registerWorkflowTools(
         openWorldHint: false,
       },
     },
-    (args) => {
+    (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleInspectWork(repos, args, session?.agentId);
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
+      const result = handleInspectWork(repos, args, sessionForRequest(requestMeta)?.agentId);
       if (result.scope === 'workspace') {
         return withSessionAdvisories({
           content: [
@@ -724,8 +752,9 @@ export function registerWorkflowTools(
         'Record task context or deliver a live prompt/reply to another promptable workspace agent.',
       inputSchema: updateWorkInputShape,
     },
-    async (args) => {
+    async (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
       // Delivery awaits, and the client's folder may become the active workspace meanwhile:
       // the whole call stays with the workspace it started in.
       const callRepos = workspace?.repos ?? repos;
@@ -742,7 +771,7 @@ export function registerWorkflowTools(
           ? null
           : (taskFlowId(messageTaskId) ?? null);
       try {
-        const result = await handleUpdateWork(callRepos, withActor(args), dispatcher);
+        const result = await handleUpdateWork(callRepos, withActor(args, requestMeta), dispatcher);
         onWrite?.(workspace);
         if ('update' in result) {
           return withCallAdvisories({
@@ -750,7 +779,10 @@ export function registerWorkflowTools(
               {
                 type: 'text',
                 text: withWorkspaceText(
-                  `Recorded ${result.update.kind} for ${result.update.taskId}.`,
+                  `Recorded ${result.update.kind} #${String(result.update.id)} for ${result.update.taskId}` +
+                    (args.supersedes === undefined
+                      ? '.'
+                      : ` (supersedes #${String(args.supersedes)}).`),
                   workspace,
                 ),
               },
@@ -868,11 +900,12 @@ export function registerWorkflowTools(
         'offer an evidence-bearing handoff, or reopen terminal work.',
       inputSchema: transferWorkInputShape,
     },
-    (args) => {
+    (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleTransferWork(repos, withActor(args));
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
+      const result = handleTransferWork(repos, withActor(args, requestMeta));
       recordTaskTransition(result.task.taskId, args.action, result.task.status);
-      onWrite?.();
+      onWrite?.(workspace);
       return withSessionAdvisories({
         content: [
           {
@@ -902,9 +935,10 @@ export function registerWorkflowTools(
         'review-ready, or close it with a complete/closed outcome.',
       inputSchema: finishWorkInputShape,
     },
-    (args) => {
+    (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
-      const result = handleFinishWork(repos, withActor(args));
+      const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
+      const result = handleFinishWork(repos, withActor(args, requestMeta));
       const finishedTaskFlowId = taskFlowId(result.task.taskId);
       if (finishedTaskFlowId !== undefined) {
         telemetry?.recordEvent({
@@ -926,7 +960,7 @@ export function registerWorkflowTools(
           });
         }
       }
-      onWrite?.();
+      onWrite?.(workspace);
       return withSessionAdvisories({
         content: [
           {

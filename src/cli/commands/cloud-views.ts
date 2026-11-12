@@ -9,7 +9,7 @@ import {
   type CloudRuntime,
 } from '../../cloud/runtime.js';
 import { agentStatusValues } from '../../db/rows.js';
-import { deriveLiveness, type PresenceEntry } from '../../domain/presence.js';
+import { presenceEntryOf, type PresenceEntry } from '../../domain/presence.js';
 import { cloudAccess } from './cloud-inbox.js';
 
 /**
@@ -30,16 +30,31 @@ export async function runCloudWho(
   now: number = Date.now(),
 ): Promise<string> {
   const roster: PresenceEntry[] = (await listCloudAgents(runtime))
-    .map((agent) => ({
-      agentId: agent.agentKey,
-      kind: agent.kind,
-      owner: null,
-      summary: agent.summary,
-      status: agentStatus.parse(agent.status),
-      liveness: deriveLiveness(agent.lastSeenAt, now),
-      lastSeen: agent.lastSeenAt,
-      ageSeconds: Math.max(0, Math.floor((now - Date.parse(agent.lastSeenAt)) / 1000)),
-    }))
+    .map((agent) => {
+      const status = agentStatus.parse(agent.status);
+      // The cloud reports a single timestamp, used as the heartbeat.
+      return presenceEntryOf(
+        {
+          agentId: agent.agentKey,
+          kind: agent.kind,
+          owner: null,
+          model: null,
+          pid: null,
+          cwd: null,
+          worktree: null,
+          branch: null,
+          summary: agent.summary,
+          status,
+          executionStatus: status === 'active' ? 'executing' : 'not_executing',
+          firstSeen: agent.lastSeenAt,
+          lastSeen: agent.lastSeenAt,
+          heartbeatAt: agent.lastSeenAt,
+          activityAt: null,
+          summaryUpdatedAt: null,
+        },
+        now,
+      );
+    })
     .filter((entry) => entry.liveness !== 'archived')
     // Liveness only decays with time, so the most recently seen are the liveliest.
     .sort((first, second) => second.lastSeen.localeCompare(first.lastSeen));

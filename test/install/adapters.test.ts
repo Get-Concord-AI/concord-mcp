@@ -7,12 +7,14 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
+import { recordedInvocations, writeFakeOpencode } from '../helpers/fake-opencode.js';
 
 import {
   devinSupportsDedicatedMcpConfig,
   installGlobalAdapters,
   statusGlobalAdapters,
   uninstallGlobalAdapters,
+  versionTuple,
 } from '../../src/install/adapters/index.js';
 
 // Links into this checkout count as lasting even when it lives under /tmp.
@@ -189,6 +191,9 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'harness-monitor',
+      'harness-monitor',
+      'managed-controller',
+      'harness-monitor',
       'managed-controller',
       'harness-monitor',
     ]);
@@ -219,6 +224,92 @@ describe('global harness adapters', () => {
     );
 
     expect(geminiStatus()).toBe('installed');
+  });
+
+  describe('OpenCode', () => {
+    function opencodeEnv(version = '2.2.3') {
+      const home = mkdtempSync(join(tmpdir(), 'concord-oc-home-'));
+      const bin = join(home, 'bin');
+      mkdirSync(bin);
+      writeFakeOpencode(bin);
+      const log = join(home, 'calls.log');
+      return {
+        home,
+        log,
+        env: { HOME: home, PATH: bin, FAKE_OC_LOG: log, FAKE_OC_VERSION: version },
+      };
+    }
+    const opencodeReport = (env: NodeJS.ProcessEnv) =>
+      statusGlobalAdapters(env, undefined, undefined, LASTING).find(
+        (entry) => entry.harness === 'opencode',
+      );
+
+    it('is not detected without an OpenCode CLI', () => {
+      const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-empty-')), PATH: '' };
+
+      expect(opencodeReport(env)).toMatchObject({ detected: false, status: 'not_detected' });
+    });
+
+    it('rejects OpenCode releases before 2.0', () => {
+      const { env } = opencodeEnv('1.19.0');
+
+      expect(opencodeReport(env)).toMatchObject({
+        detected: true,
+        status: 'unsupported_version',
+        capabilities: [],
+      });
+    });
+
+    it('needs setup until Concord is registered, and reports launcher capabilities after', () => {
+      const { home, env } = opencodeEnv();
+      expect(opencodeReport(env)).toMatchObject({ status: 'action_required', capabilities: [] });
+
+      const mcp = join(home, 'mcp.json');
+      writeFileSync(
+        mcp,
+        JSON.stringify({ data: [{ name: 'concord', status: { status: 'connected' } }] }),
+      );
+      expect(opencodeReport({ ...env, FAKE_OC_MCP: mcp })).toMatchObject({
+        status: 'installed',
+        capabilities: ['pull', 'inject', 'steer', 'idle', 'busy'],
+      });
+    });
+
+    it('does not start a stopped OpenCode service to check registration', () => {
+      const { env, log } = opencodeEnv();
+
+      expect(opencodeReport({ ...env, FAKE_OC_SERVICE: 'stopped' })).toMatchObject({
+        detected: true,
+        status: 'action_required',
+        capabilities: [],
+      });
+      expect(recordedInvocations(log).filter((call) => call[0] === 'api')).toEqual([]);
+    });
+
+    it('registers Concord through `opencode mcp add` when adapters are installed', () => {
+      const { env, log } = opencodeEnv();
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      expect(recordedInvocations(log)).toContainEqual([
+        'mcp',
+        'add',
+        '--global',
+        '--env',
+        'CONCORD_AGENT_KIND=opencode',
+        'concord',
+        '--',
+        'concord-mcp',
+      ]);
+    });
+
+    it('does not touch an unsupported OpenCode', () => {
+      const { env, log } = opencodeEnv('1.19.0');
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      expect(recordedInvocations(log).filter((call) => call[0] === 'mcp')).toEqual([]);
+    });
   });
 
   it('requires Gemini completion injection in the current project', () => {
@@ -549,5 +640,16 @@ describe('global harness adapters', () => {
     const agEntry = report.find((entry) => entry.harness === 'antigravity');
     expect(agEntry?.status).toBe('action_required');
     expect(agEntry?.detail).toContain('Concord lifecycle hooks remain installed');
+  });
+});
+
+describe('versionTuple', () => {
+  it('parses a v-prefixed version from Hermes output', () => {
+    expect(versionTuple('Hermes Agent v0.22.5')).toEqual([0, 22, 5]);
+    expect(versionTuple('v1.2.3')).toEqual([1, 2, 3]);
+  });
+
+  it('keeps rejecting version numbers embedded in identifiers', () => {
+    expect(versionTuple('HermesAgent0.22.5')).toBeUndefined();
   });
 });
