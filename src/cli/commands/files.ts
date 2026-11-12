@@ -1,29 +1,8 @@
 import type { Command } from '@commander-js/extra-typings';
 
-import { resolveIdentity } from '../../domain/identity.js';
 import { fetchSharedFile } from '../../tools/shared-files.js';
-import { resolveAgentId } from '../agent-identity.js';
+import { resolveSessionBoundAgent } from '../agent-identity.js';
 import { openContext } from '../context.js';
-
-/**
- * The agent a retrieval acts as. Retrieval reads another agent's file, so where
- * this session can be identified, `--agent` must name that session: naming
- * someone else would read their mail. Where no session is visible, the named
- * agent is trusted, as elsewhere in Concord.
- */
-export function retrievingAgentId(
-  explicit: string | undefined,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  const agentId = resolveAgentId(explicit, env);
-  const own = resolveIdentity(env);
-  if (own !== undefined && own.agentId !== agentId) {
-    throw new Error(
-      `This session is agent ${own.agentId}; it cannot save files shared with ${agentId}.`,
-    );
-  }
-  return agentId;
-}
 
 /**
  * Retrieval is a CLI command rather than an MCP tool: saving a file writes to
@@ -49,7 +28,12 @@ export function registerFilesCommand(program: Command): void {
         const { repos } = openContext(process.cwd());
         const saved = fetchSharedFile(repos, {
           fileId,
-          agentId: retrievingAgentId(options.agent),
+          agentId: resolveSessionBoundAgent(
+            options.agent,
+            process.env,
+            {},
+            'save files shared with',
+          ),
           destination: options.to,
         });
         process.stdout.write(

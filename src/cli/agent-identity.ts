@@ -70,12 +70,24 @@ export function resolveInboxOwner(
   env: NodeJS.ProcessEnv = process.env,
   options: ResolveIdentityOptions = {},
 ): string {
+  return resolveSessionBoundAgent(explicit, env, options, 'take messages addressed to');
+}
+
+/**
+ * The agent a session may act for, when `--agent` is given. Where this session
+ * can be identified, `--agent` must name it; `action` completes the refusal
+ * ("it cannot <action> X"). Where no session is visible, the named agent is trusted.
+ */
+export function resolveSessionBoundAgent(
+  explicit: string | undefined,
+  env: NodeJS.ProcessEnv,
+  options: ResolveIdentityOptions,
+  action: string,
+): string {
   const agentId = resolveAgentId(explicit, env, options);
   const own = resolveIdentity(env, options);
   if (own !== undefined && own.agentId !== agentId) {
-    throw new Error(
-      `This session is agent ${own.agentId}; it cannot take messages addressed to ${agentId}.`,
-    );
+    throw new Error(`This session is agent ${own.agentId}; it cannot ${action} ${agentId}.`);
   }
   return agentId;
 }
