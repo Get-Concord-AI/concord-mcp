@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  closeSync,
   existsSync,
   mkdirSync,
-  readFileSync,
+  openSync,
+  readSync,
   realpathSync,
   statSync,
   writeFileSync,
@@ -23,6 +25,8 @@ import {
   retentionEnd,
 } from '../domain/shared-files.js';
 import {
+  deliverAcceptedMessage,
+  handleSendAgentMessage,
   handleSendAgentMessageWithDelivery,
   type AgentMessageDispatcher,
   type SendAgentMessageInput,
@@ -31,10 +35,9 @@ import {
 
 /**
  * Files an agent shares with a prompt or reply. Each file is read from the
- * sender's own worktree, copied into the store with its message, and retrieved
- * by a recipient through `concord files get`, which checks the checksum and
- * writes only inside the recipient's worktree. Nothing else on either machine
- * is reachable through these paths.
+ * sender's own worktree, stored with its message, and retrieved by a recipient
+ * through `concord files get`, which checks the checksum and writes only inside
+ * the recipient's worktree.
  */
 
 /** A file read from the sender's worktree, not yet stored with its message. */
@@ -96,6 +99,27 @@ function sharedSource(root: string, path: string): string {
   return real;
 }
 
+/**
+ * Read at most `limit + 1` bytes. The extra byte shows a caller that a file is
+ * over the limit, even one that grew after it was measured, without loading all
+ * of it into memory.
+ */
+export function readAtMost(path: string, limit: number): Buffer {
+  const descriptor = openSync(path, 'r');
+  try {
+    const buffer = Buffer.alloc(limit + 1);
+    let filled = 0;
+    while (filled < buffer.length) {
+      const count = readSync(descriptor, buffer, filled, buffer.length - filled, filled);
+      if (count === 0) break;
+      filled += count;
+    }
+    return Buffer.from(buffer.subarray(0, filled));
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 /** Check and read every file a message names, before anything is sent. */
 export function stageAttachments(
   repos: Repositories,
@@ -110,18 +134,16 @@ export function stageAttachments(
   let total = 0;
   return paths.map((path, index) => {
     const source = sharedSource(root, path);
-    const info = statSync(source);
-    if (!info.isFile()) throw new Error(`${path} is not a regular file.`);
-    if (info.size > MAX_FILE_BYTES) {
-      throw new Error(
-        `${path} is ${String(info.size)} bytes; the limit is ${String(MAX_FILE_BYTES)} bytes per file.`,
-      );
+    if (!statSync(source).isFile()) throw new Error(`${path} is not a regular file.`);
+    // Measured by what is actually read, not by an earlier stat: the file may grow in between.
+    const content = readAtMost(source, MAX_FILE_BYTES);
+    if (content.length > MAX_FILE_BYTES) {
+      throw new Error(`${path} is larger than the ${String(MAX_FILE_BYTES)}-byte limit per file.`);
     }
-    total += info.size;
+    total += content.length;
     if (total > MAX_TOTAL_BYTES) {
       throw new Error(`These files total more than ${String(MAX_TOTAL_BYTES)} bytes.`);
     }
-    const content = readFileSync(source);
     const sha256 = sha256Hex(content);
     const filename = displayFilename(basename(path));
     return {
@@ -140,10 +162,10 @@ export interface SendWithFilesInput extends SendAgentMessageInput {
 }
 
 /**
- * Send a prompt or reply, with the files it names. Files are checked and read
- * first, then stored before the message is delivered, so a recipient can never
- * be told about a file that is not there yet. A send that does not go through
- * leaves none of its files behind.
+ * Send a prompt or reply, with the files it names. The message and its files
+ * are stored in one transaction, so a retry finds both or neither, and no file
+ * is ever left pointing at a message that does not exist. Delivery happens after
+ * the commit, so a recipient is never told about a file that is not stored yet.
  */
 export async function handleSendWithAttachments(
   repos: Repositories,
@@ -158,22 +180,33 @@ export async function handleSendWithAttachments(
   const staged = stageAttachments(repos, send.agentId, attachments, send.idempotencyKey);
   const messageId = randomUUID();
   const expiresAt = retentionEnd(Date.now());
-  repos.sharedFiles.createMany(
-    staged.map((file) => ({ ...file, messageId, senderAgentId: send.agentId, expiresAt })),
-  );
+
+  // `immediate` takes the write lock before reading, so two processes sending
+  // with the same key serialize, and the second one replays the first.
+  const accepted = repos.db
+    .transaction(() => {
+      const result = handleSendAgentMessage(repos, {
+        ...send,
+        messageId,
+        content: send.content + attachmentBlock(staged),
+      });
+      if (!result.idempotentReplay) {
+        repos.sharedFiles.createMany(
+          staged.map((file) => ({ ...file, messageId, senderAgentId: send.agentId, expiresAt })),
+        );
+      }
+      return result;
+    })
+    .immediate();
 
   let result: SendAgentMessageResult;
   try {
-    result = await handleSendAgentMessageWithDelivery(
-      repos,
-      { ...send, messageId, content: send.content + attachmentBlock(staged) },
-      dispatcher,
-    );
+    result = await deliverAcceptedMessage(repos, accepted, dispatcher);
   } catch (error) {
-    repos.sharedFiles.deleteForMessage(messageId);
+    // Delivery failed after the commit, so the message is marked failed and its files go too.
+    if (!accepted.idempotentReplay) repos.sharedFiles.deleteForMessage(messageId);
     throw error;
   }
-  if (result.idempotentReplay) repos.sharedFiles.deleteForMessage(messageId);
 
   const attached = repos.sharedFiles.listByMessage(result.message.messageId);
   const ids = attached.map((file) => file.fileId).join(', ');

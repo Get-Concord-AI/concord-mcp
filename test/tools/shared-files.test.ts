@@ -22,7 +22,11 @@ import { createServer } from '../../src/server.js';
 import { handleUpdateWork } from '../../src/tools/workflow.js';
 import type { AgentMessageDispatcher } from '../../src/tools/agent-messages.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
-import { fetchSharedFile, handleSendWithAttachments } from '../../src/tools/shared-files.js';
+import {
+  fetchSharedFile,
+  handleSendWithAttachments,
+  readAtMost,
+} from '../../src/tools/shared-files.js';
 
 /** No agent has a live session in these tests, so messages wait in the queue. */
 const noLiveSession: AgentMessageDispatcher = {
@@ -171,7 +175,7 @@ describe('files shared with agent messages', () => {
     await expect(send(six)).rejects.toThrow('at most 5 files');
 
     write(join(alpha, 'big.bin'), Buffer.alloc(MAX_FILE_BYTES + 1));
-    await expect(send(['big.bin'])).rejects.toThrow('the limit is');
+    await expect(send(['big.bin'])).rejects.toThrow('larger than the');
 
     mkdirSync(join(alpha, 'dir'));
     await expect(send(['dir'])).rejects.toThrow('not a regular file');
@@ -296,6 +300,61 @@ describe('files shared with agent messages', () => {
         noLiveSession,
       ),
     ).toThrow('attachments apply only with update_work operation prompt or reply.');
+  });
+
+  it('a failed send stores nothing, and retrying with the same key works once the recipient exists', async () => {
+    const late = join(scratch, 'late');
+    mkdirSync(late);
+    write(join(alpha, 'run.log'), 'data');
+    const sendTo = (to: string) =>
+      handleSendWithAttachments(
+        repos,
+        {
+          operation: 'prompt',
+          agentId: 'agent-alpha',
+          toAgentId: to,
+          content: 'Here is the log',
+          idempotencyKey: 'retry-1',
+          attachments: ['run.log'],
+        },
+        noLiveSession,
+      );
+
+    await expect(sendTo('agent-late')).rejects.toThrow('not registered');
+    expect(storedCount()).toBe(0);
+
+    handleRegisterAgent(repos, {
+      agent_id: 'agent-late',
+      kind: 'cursor',
+      worktree: late,
+      status: 'active',
+    });
+    const retried = await sendTo('agent-late');
+
+    expect(retried.idempotentReplay).toBe(false);
+    expect(storedCount()).toBe(1);
+    const saved = fetchSharedFile(repos, {
+      fileId: fileIdOf(retried.message.messageId),
+      agentId: 'agent-late',
+      destination: 'run.log',
+    });
+    expect(readFileSync(saved.path, 'utf8')).toBe('data');
+  });
+
+  it('purging a file twice removes it only once', async () => {
+    write(join(alpha, 'run.log'), 'data');
+    await send(['run.log']);
+    const later = new Date(Date.now() + RETENTION_MS + 1000).toISOString();
+
+    expect(repos.sharedFiles.purgeExpired(later)).toBe(1);
+    expect(repos.sharedFiles.purgeExpired(later)).toBe(0);
+  });
+
+  it('reads at most one byte past a limit, however large the file', () => {
+    write(join(scratch, 'long.txt'), 'x'.repeat(100));
+
+    expect(readAtMost(join(scratch, 'long.txt'), 10)).toHaveLength(11);
+    expect(readAtMost(join(scratch, 'long.txt'), 200)).toHaveLength(100);
   });
 
   it('accepts attachments through update_work over MCP and refuses files outside the worktree', async () => {

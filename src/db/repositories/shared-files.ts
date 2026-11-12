@@ -101,7 +101,7 @@ export function createSharedFileRepository(db: ConcordDatabase): SharedFileRepos
   );
   const getStmt = db.prepare(`SELECT ${META_COLUMNS}, content FROM shared_files WHERE file_id = ?`);
   const purgeStmt = db.prepare(
-    'UPDATE shared_files SET content = NULL, purged_at = ? WHERE content IS NOT NULL AND expires_at <= ?',
+    'UPDATE shared_files SET content = NULL, purged_at = ? WHERE purged_at IS NULL AND expires_at <= ?',
   );
 
   const insertAll = db.transaction((files: readonly NewSharedFile[], createdAt: string) => {

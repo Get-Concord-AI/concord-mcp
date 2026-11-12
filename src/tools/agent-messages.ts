@@ -291,7 +291,18 @@ export async function handleSendAgentMessageWithDelivery(
   input: SendAgentMessageInput,
   dispatcher: AgentMessageDispatcher,
 ): Promise<SendAgentMessageResult> {
-  const result = handleSendAgentMessage(repos, input);
+  return deliverAcceptedMessage(repos, handleSendAgentMessage(repos, input), dispatcher);
+}
+
+/**
+ * Deliver a message whose row is already stored. Split from creating the row, so
+ * a caller can commit the row together with other writes, and deliver afterwards.
+ */
+export async function deliverAcceptedMessage(
+  repos: Repositories,
+  result: SendAgentMessageResult,
+  dispatcher: AgentMessageDispatcher,
+): Promise<SendAgentMessageResult> {
   if (result.message.status !== 'sent') return result;
 
   const endpoint = repos.agentEndpoints.getByAgent(result.message.recipientAgentId);
