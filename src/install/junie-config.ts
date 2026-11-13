@@ -1,50 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { delimiter, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { HARNESS_CONFIGS } from '../domain/harness-config.js';
 import { userHome } from '../config/paths.js';
-import { spawnCommandSync } from './spawn-command.js';
+import { atLeast, executablePath, run, versionTuple } from './adapters/probe.js';
+import { junieHooksInstalled } from './junie-hooks.js';
 import {
+  agentKindEnv,
   hasMcpServer,
   isConcordServerOwned,
   removeMcpServer,
   upsertMcpServer,
 } from './mcp-config.js';
-
-function executablePath(name: string, env: NodeJS.ProcessEnv): string | undefined {
-  const path = env['PATH'];
-  if (path === undefined) return undefined;
-  const extensions = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
-  for (const directory of path.split(delimiter)) {
-    for (const extension of extensions) {
-      const candidate = join(directory, `${name}${extension}`);
-      if (existsSync(candidate)) return candidate;
-    }
-  }
-  return undefined;
-}
-
-function run(command: string, args: readonly string[], env: NodeJS.ProcessEnv): { output: string } {
-  const result = spawnCommandSync(command, args, { env, timeout: 15_000 });
-  return { output: result.error?.message ?? `${result.stdout}${result.stderr}`.trim() };
-}
-
-function versionTuple(output: string): number[] | undefined {
-  const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
-  if (match === null) return undefined;
-  return match.slice(1).map((part) => Number.parseInt(part, 10));
-}
-
-function atLeast(version: number[], minimum: readonly number[]): boolean {
-  for (let i = 0; i < minimum.length; i += 1) {
-    const a = version[i];
-    const m = minimum[i];
-    if (a === undefined || m === undefined) return false;
-    if (a > m) return true;
-    if (a < m) return false;
-  }
-  return true;
-}
 
 function junieMcpPath(env: NodeJS.ProcessEnv): string {
   return join(userHome(env), '.junie', 'mcp', 'mcp.json');
@@ -61,11 +28,11 @@ export function installJunieMcpConfig(env: NodeJS.ProcessEnv): void {
     const existing = readFileSync(mcpPath, 'utf8');
     if (!hasMcpServer(existing)) {
       mkdirSync(dirname(mcpPath), { recursive: true });
-      writeFileSync(mcpPath, upsertMcpServer(existing));
+      writeFileSync(mcpPath, upsertMcpServer(existing, undefined, agentKindEnv('junie')));
     }
   } else {
     mkdirSync(dirname(mcpPath), { recursive: true });
-    writeFileSync(mcpPath, upsertMcpServer(undefined));
+    writeFileSync(mcpPath, upsertMcpServer(undefined, undefined, agentKindEnv('junie')));
   }
 }
 
@@ -108,7 +75,12 @@ export function statusJunie(env: NodeJS.ProcessEnv): AdapterReport {
       detail: config.unsupportedDetail,
     };
   }
-  const installed = junieMcpInstalled(env);
+  const mcpInstalled = junieMcpInstalled(env);
+  const hooksInstalled = junieHooksInstalled(env);
+  const installed = mcpInstalled && hooksInstalled;
+  const missing: string[] = [];
+  if (!mcpInstalled) missing.push('the Concord MCP server is not registered');
+  if (!hooksInstalled) missing.push('the lifecycle hooks are missing from ~/.junie/config.json');
   return {
     harness: config.name,
     detected: true,
@@ -117,6 +89,6 @@ export function statusJunie(env: NodeJS.ProcessEnv): AdapterReport {
     capabilities: installed ? [...config.installedCapabilities] : ['pull', 'busy'],
     detail: installed
       ? config.installedDetail
-      : 'Concord MCP server is not yet registered with Junie.',
+      : `Junie needs repair: ${missing.join(' and ')}. Run \`concord setup\` to install both.`,
   };
 }
