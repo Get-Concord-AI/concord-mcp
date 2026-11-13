@@ -29,6 +29,7 @@ import {
   installHermesMcpConfig,
   uninstallHermesMcpConfig,
 } from '../../src/install/hermes-config.js';
+import { canSymlinkFile } from '../helpers/symlink.js';
 
 const temporaryHomes: string[] = [];
 afterEach(() => {
@@ -117,16 +118,30 @@ describe('Hermes MCP config', () => {
     expect(hermesConfigPath({ ...env, HERMES_HOME: '   ' })).toBe(path);
   });
 
-  it('preserves a symlinked config when installing and uninstalling', () => {
+  it.skipIf(!canSymlinkFile())(
+    'preserves a symlinked config when installing and uninstalling',
+    () => {
+      const { env, path } = fixture();
+      const target = join(env.HOME, 'shared.yaml');
+      seed(target, 'model: original\n');
+      mkdirSync(dirname(path), { recursive: true });
+      symlinkSync(target, path);
+      installHermesMcpConfig(env);
+      expect(readFileSync(target, 'utf8')).toContain('@concord-ai/concord-mcp');
+      uninstallHermesMcpConfig(env);
+      expect(readFileSync(target, 'utf8')).toContain('model: original');
+      expect(readFileSync(path, 'utf8')).toBe(readFileSync(target, 'utf8'));
+    },
+  );
+
+  it.skipIf(!canSymlinkFile())('preserves a dangling symlinked config when installing', () => {
     const { env, path } = fixture();
-    const target = join(env.HOME, 'shared.yaml');
-    seed(target, 'model: original\n');
+    const target = join(env.HOME, 'non-existent-target.yaml');
     mkdirSync(dirname(path), { recursive: true });
     symlinkSync(target, path);
     installHermesMcpConfig(env);
+    expect(existsSync(target)).toBe(true);
     expect(readFileSync(target, 'utf8')).toContain('@concord-ai/concord-mcp');
-    uninstallHermesMcpConfig(env);
-    expect(readFileSync(target, 'utf8')).toContain('model: original');
     expect(readFileSync(path, 'utf8')).toBe(readFileSync(target, 'utf8'));
   });
 
