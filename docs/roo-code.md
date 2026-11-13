@@ -15,10 +15,10 @@ Roo Code has no verified session wake or resume mechanism. Concord can register
 its MCP server with Roo Code, but live inbox messaging is not currently
 supported. Do not expect live inbox messages to reach Roo Code sessions yet.
 
-Concord has no verified way to read a Roo Code session id, so it cannot derive
-the agent's identity on its own. The installed rule tells the agent to run
-`concord inbox register` and pass the `agent_id` it prints. You can also set
-`CONCORD_AGENT_ID` before starting the session.
+The installed rule tells the agent to pick an id that no other session uses and
+to run `concord inbox register --provider roo --agent <id>`, then pass that id as
+`agent_id` on every Concord tool call. You can also set `CONCORD_AGENT_ID` before
+starting the session. Two Roo sessions that use the same id would share an inbox.
 
 ## Configuration
 

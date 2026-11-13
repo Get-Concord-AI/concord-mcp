@@ -61,6 +61,7 @@ describe('installConcord', () => {
     const rooRule = readFileSync(join(root, '.roo', 'rules', 'concord.md'), 'utf8');
     expect(rooRule).toContain('start_work');
     expect(rooRule).toContain('concord inbox register');
+    expect(rooRule).toContain('--provider roo --agent');
     expect(rooRule).not.toContain('omit it');
 
     expect(readFileSync(join(root, '.agents', 'rules', 'concord.md'), 'utf8')).toContain(
