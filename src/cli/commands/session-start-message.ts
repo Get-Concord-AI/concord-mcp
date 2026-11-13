@@ -54,6 +54,34 @@ export function sessionStartMessage(
 }
 
 /**
+ * Hermes starts one MCP server per process, from `$HOME`, before any session
+ * exists: it can see neither the session nor the project. The hook that knows
+ * both says which `agent_id` and, for a local store, which `workspace_id` to pass.
+ */
+export function hermesSessionStartMessage(
+  agentId: string,
+  workspaceId: string | undefined,
+  others: readonly RosterLine[],
+): string {
+  const ids =
+    workspaceId === undefined
+      ? `include \`agent_id: "${agentId}"\` on start_work, update_work, transfer_work, and finish_work calls.`
+      : `include \`agent_id: "${agentId}"\` and \`workspace_id: "${workspaceId}"\` on start_work, ` +
+        `update_work, transfer_work, and finish_work calls, and \`workspace_id\` on inspect_work.`;
+  return [
+    `Concord: this session is agent \`${agentId}\`` +
+      (workspaceId === undefined ? '. ' : ` in workspace \`${workspaceId}\`. `) +
+      "Hermes starts Concord's MCP server without your session or project, so " +
+      ids +
+      ' On inspect_work, `agent_id` selects whose inbox to read: pass your own id only to read ' +
+      `your inbox. Do not invent an id. ${CONCORD_SERVER_ONLY}`,
+    "Other agents' messages are delivered at the start of your next turn. To check sooner, run " +
+      `\`concord inbox drain --agent ${agentId} --provider hermes\` from this repository.`,
+    ...rosterLines(others),
+  ].join('\n');
+}
+
+/**
  * Antigravity's MCP server cannot see the session, so the id must be passed explicitly on writes.
  * Hooks only reach a running turn; an idle session hears peers through a one-shot background
  * monitor whose completion wakes it.

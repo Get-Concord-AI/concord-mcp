@@ -24,6 +24,98 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the main path. Workflow instructions move to version 8 and the global block
   to version 2.
 
+## [0.22.0] - 2026-11-11
+
+### Added
+
+- OpenCode 2 support. `concord setup` registers Concord's MCP server with
+  OpenCode through `opencode mcp add --global`, so OpenCode edits its own
+  config and keeps its comments and other settings. It also finds the CLI that
+  the OpenCode desktop app bundles, which is not on `PATH`. Status checks read
+  the registration without starting OpenCode's background service (#306, #343).
+- OpenCode sessions are identified as `opencode:<hash>` from the session id
+  OpenCode 2 sends in MCP request metadata, locally and through Concord Cloud,
+  without storing the raw id. An operator-set `CONCORD_AGENT_ID` still wins
+  (#308).
+- `concord adapters opencode`: starts OpenCode as a hosted session that Concord
+  can steer mid-turn and wake while idle. Sessions started any other way are
+  identified but pull messages from their inbox. See
+  [docs/opencode.md](./docs/opencode.md).
+
+### Fixed
+
+- Harness version checks accept a `v` prefix, as in `opencode v2.2.7` (#343).
+
+### Changed
+
+- Copilot CLI's straggler sweep and session adapter now live in a shared
+  module that the OpenCode adapter also uses. Copilot's behavior is unchanged.
+- The translated READMEs list OpenCode (#344).
+
+## [0.21.1] - 2026-11-11
+
+### Security
+
+- The local relay no longer trusts the sender, recipient or text in a delivery
+  frame. It delivers only a message stored in Concord as pending for that agent,
+  and renders the sender and content from the database. Before, any process able
+  to read `concord.db` could reuse the stored credential hash to inject text into
+  another agent's live session with no record in Concord (#333).
+
+### Fixed
+
+- A harness started from another harness's shell no longer acts as its parent.
+  Goose, Grok Build, Gemini CLI and Cursor inherited the parent's session
+  variable (for example `CLAUDE_CODE_SESSION_ID`), so their Concord server
+  claimed work, sent messages and read the inbox as the parent agent.
+  `concord setup` and global mode now pin `CONCORD_AGENT_KIND` in each of their
+  MCP entries, which restricts the server to that harness's own session variable
+  (as Antigravity, Copilot CLI and Devin already did). `.mcp.json` stays
+  unpinned because more than one client reads it. Existing installs pick the
+  pin up the next time `concord setup` runs (#317).
+- Overlap detection and `concord check` treat Windows backslash paths and POSIX
+  paths as the same file, so `src\app\page.tsx` and `src/app/page.tsx` collide,
+  and directory overlaps work for backslash paths (#336).
+- Surface unowned work and overdue assignments. Acceptance age comes from the
+  latest ownership transition, so reminders cannot hide an overdue assignment.
+- Show heartbeat, activity, and summary ages separately in the roster, dashboard,
+  and exported work state (#68). Reported agent status stays independent of work.
+  A short dashboard pane shows one line per agent instead of clipping them.
+- Preserve omitted agent registration fields and store heartbeat, activity, and
+  summary timestamps independently (#68). Migration 017 appends to the existing
+  migration history.
+- `concord adapters codex` launches Codex through its resolved path on Windows,
+  where npm installs a `.cmd` shim that Node cannot start by name (#330).
+
+### Changed
+
+- The README is available in Simplified and Traditional Chinese, Japanese,
+  Korean, Spanish, Brazilian Portuguese, French, German and Russian (#337).
+
+## [0.21.0] - 2026-11-09
+
+### Added
+
+- Qwen Code project setup registers Concord in `.qwen/settings.json`, preserving
+  existing settings. Adapter checks report unreadable settings without stopping
+  doctor. Qwen supports delivery during a turn; idle wake-up is not verified.
+- Decisions can replace earlier decisions on the same task with `supersedes` and
+  `supersede_reason` on `update_work`. Task context hides replaced decisions by
+  default; pass `include_superseded: true` to `inspect_work` to include them.
+
+### Fixed
+
+- Local relay preserves multibyte UTF-8 content when frames arrive across socket chunks.
+- Local relay reuses results for duplicate deliveries and rejects the same message
+  ID with different content. Failed deliveries can be retried; duplicate protection
+  lasts for the relay process and does not persist across restarts.
+- Grok's Stop hook no longer asks for another inbox monitor when a live local or
+  cloud receiver already holds the session's receiver lease.
+
+### Changed
+
+- CI now smoke-tests the installed npm command shim on Windows.
+
 ## [0.20.0] - 2026-11-05
 
 ### Added
@@ -59,6 +151,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `update_work` with `kind: decision` can supersede an earlier decision on the same task
+  (`supersedes`, with an optional `supersede_reason`). Superseded decisions are hidden from
+  `inspect_work` task context unless `include_superseded` is set.
 - `concord adapters gemini`: starts Gemini CLI with a first turn that runs its
   Concord inbox monitor, so a fresh session can be reached while idle before
   the user types anything. A session started with plain `gemini` has no monitor
@@ -787,7 +882,15 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.1...v0.22.0
+[0.21.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.0...v0.21.1
+[0.21.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.20.0...v0.21.0
+[0.20.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.19.0...v0.20.0
+[0.19.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.18.0...v0.19.0
+[0.18.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.17.1...v0.18.0
+[0.17.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.17.0...v0.17.1
+[0.17.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.2...v0.15.0
 [0.14.2]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.14.1...v0.14.2
