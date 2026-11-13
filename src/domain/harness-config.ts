@@ -19,6 +19,7 @@ export const harnessNames = [
   'devin',
   'opencode',
   'qwen',
+  'junie',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -312,6 +313,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
       'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
     unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
   },
+  junie: {
+    name: 'junie',
+    executable: 'junie',
+    minimumVersion: [26, 11, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: true,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Concord MCP server and lifecycle hooks are registered with Junie (~/.junie/config.json).',
+    unsupportedDetail: 'Junie does not meet the verified MCP baseline (26.11.0).',
+  },
 };
 
 const fallbackCapability: EndpointCapability = {
@@ -359,5 +378,9 @@ then immediately start a fresh background monitor.
 
 In Antigravity, start exactly one background command for \`${antigravity}\`
 and end the turn without waiting on it. Its completion wakes the idle session:
-answer the peer message, then immediately start a fresh background monitor.`;
+answer the peer message, then immediately start a fresh background monitor.
+
+In Junie CLI, lifecycle hooks are registered in \`~/.junie/config.json\`. Concord
+auto-registers session identity on \`SessionStart\`, drains pending peer messages
+on \`UserPromptSubmit\`, and cleans up on \`SessionEnd\`.`;
 }

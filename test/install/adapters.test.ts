@@ -196,6 +196,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'managed-controller',
       'harness-monitor',
+      'harness-monitor',
     ]);
   });
 
@@ -640,6 +641,96 @@ describe('global harness adapters', () => {
     const agEntry = report.find((entry) => entry.harness === 'antigravity');
     expect(agEntry?.status).toBe('action_required');
     expect(agEntry?.detail).toContain('Concord lifecycle hooks remain installed');
+  });
+
+  it('reports Junie as not_detected when the CLI is absent', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-junie-missing-'));
+    const env = { HOME: home, PATH: '' };
+    const report = statusGlobalAdapters(env);
+    expect(report.find((entry) => entry.harness === 'junie')).toMatchObject({
+      detected: false,
+      status: 'not_detected',
+      capabilities: [],
+    });
+  });
+
+  it('reports Junie as unsupported_version when below the minimum', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-junie-old-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'junie', '25.10.0');
+
+    const report = statusGlobalAdapters({ HOME: home, PATH: bin });
+    expect(report.find((entry) => entry.harness === 'junie')).toMatchObject({
+      detected: true,
+      status: 'unsupported_version',
+      capabilities: [],
+    });
+  });
+
+  it('installs Junie MCP config and hooks, reporting it as installed', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-junie-current-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'junie', '26.11.1');
+
+    const env = { HOME: home, PATH: bin };
+    const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+    expect(report.find((entry) => entry.harness === 'junie')).toMatchObject({
+      detected: true,
+      status: 'installed',
+      capabilities: ['pull', 'busy'],
+    });
+    expect(readFileSync(join(home, '.junie', 'mcp', 'mcp.json'), 'utf8')).toContain('concord-mcp');
+    const hooksConfig = readFileSync(join(home, '.junie', 'config.json'), 'utf8');
+    expect(hooksConfig).toContain('concord hook junie-session-start');
+    expect(hooksConfig).toContain('concord hook junie-user-prompt-submit');
+    expect(hooksConfig).toContain('concord hook junie-session-end');
+  });
+
+  it('reports Junie as action_required when MCP config is missing', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-junie-no-mcp-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'junie', '26.11.1');
+
+    // Pre-create the config dir without Concord
+    const mcpDir = join(home, '.junie', 'mcp');
+    mkdirSync(mcpDir, { recursive: true });
+    writeFileSync(join(mcpDir, 'mcp.json'), JSON.stringify({ mcpServers: {} }));
+
+    const report = statusGlobalAdapters({ HOME: home, PATH: bin });
+    expect(report.find((entry) => entry.harness === 'junie')).toMatchObject({
+      detected: true,
+      status: 'action_required',
+      capabilities: ['pull', 'busy'],
+    });
+  });
+
+  it('uninstall removes Junie MCP server and hooks', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-junie-uninstall-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'junie', '26.11.1');
+
+    const env = { HOME: home, PATH: bin };
+    installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+    const uninstallReport = uninstallGlobalAdapters(env);
+    const junieEntry = uninstallReport.find((entry) => entry.harness === 'junie');
+    expect(junieEntry?.status).toBe('action_required');
+
+    const mcpPath = join(home, '.junie', 'mcp', 'mcp.json');
+    if (existsSync(mcpPath)) {
+      const remaining = readFileSync(mcpPath, 'utf8');
+      expect(remaining).not.toContain('concord-mcp');
+    }
+    const hooksPath = join(home, '.junie', 'config.json');
+    if (existsSync(hooksPath)) {
+      const hooksRemaining = readFileSync(hooksPath, 'utf8');
+      expect(hooksRemaining).not.toContain('concord hook junie-');
+    }
   });
 });
 

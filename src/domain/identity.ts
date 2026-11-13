@@ -49,6 +49,9 @@ export const SESSION_SOURCES: readonly SessionSource[] = [
   // there resolve through hookPayload (SessionStart / PreInvocation hooks).
   { kind: 'antigravity', envVar: 'ANTIGRAVITY_CONVERSATION_ID' },
   { kind: 'antigravity', envVar: 'ANTIGRAVITY_SESSION_ID' },
+  // Junie CLI passes its session id through the JUNIE_SESSION_ID environment
+  // variable when spawning hook commands.
+  { kind: 'junie', envVar: 'JUNIE_SESSION_ID' },
 ];
 
 /** How an identity was established, for diagnostics and error messages. */
