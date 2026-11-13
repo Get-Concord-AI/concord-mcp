@@ -6,7 +6,6 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -34,30 +33,13 @@ import { workspaceIdForRoot } from '../../src/config/paths.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 import { handleReviewReady } from '../../src/tools/review-ready.js';
+import { canSymlinkFile } from '../helpers/symlink.js';
 
 function repoDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'concord-cli-'));
   mkdirSync(join(dir, '.git'));
   return realpathSync(dir);
 }
-
-const canSymlinkFile = (): boolean => {
-  if (process.platform !== 'win32') return true;
-  try {
-    const probeTarget = join(tmpdir(), `concord-probe-target-${String(Date.now())}`);
-    const probeLink = join(tmpdir(), `concord-probe-link-${String(Date.now())}`);
-    writeFileSync(probeTarget, '');
-    try {
-      symlinkSync(probeTarget, probeLink);
-      rmSync(probeLink);
-      return true;
-    } finally {
-      rmSync(probeTarget);
-    }
-  } catch {
-    return false;
-  }
-};
 
 describe('runSetup', () => {
   it('registers one setup command without separate init/install commands', () => {

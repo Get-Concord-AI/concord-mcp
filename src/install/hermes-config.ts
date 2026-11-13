@@ -2,15 +2,17 @@ import { randomUUID } from 'node:crypto';
 import {
   closeSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { dump, load } from 'js-yaml';
 import { z } from 'zod';
@@ -85,8 +87,21 @@ function readConfig(path: string): Mapping {
   return mappingSchema.parse(parsed);
 }
 
+function resolveConfigTarget(path: string): string {
+  try {
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    if (stat?.isSymbolicLink()) {
+      const target = resolve(dirname(path), readlinkSync(path));
+      return existsSync(target) ? realpathSync(target) : target;
+    }
+    return existsSync(path) ? realpathSync(path) : path;
+  } catch {
+    return path;
+  }
+}
+
 function writeConfig(path: string, config: Mapping): void {
-  const target = existsSync(path) ? realpathSync(path) : path;
+  const target = resolveConfigTarget(path);
   mkdirSync(dirname(target), { recursive: true });
   // A unique, exclusive temporary file prevents clobbering a pre-existing file or symlink.
   const temporary = `${target}.${randomUUID()}.tmp`;
