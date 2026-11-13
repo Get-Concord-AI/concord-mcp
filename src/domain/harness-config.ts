@@ -324,11 +324,11 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
       lifecycle: 'one-shot',
       completion: 'native',
       background: false,
-      verified: true,
+      verified: false,
     },
     installedCapabilities: ['pull', 'busy'],
     installedDetail:
-      'Concord MCP server and lifecycle hooks are registered with Junie (~/.junie/config.json).',
+      'Concord MCP server and lifecycle hooks are registered with Junie (~/.junie/config.json). Idle wake-up is not verified, so messages reach it only when a turn runs.',
     unsupportedDetail: 'Junie does not meet the verified MCP baseline (26.11.0).',
   },
 };
