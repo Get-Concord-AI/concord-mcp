@@ -14,6 +14,7 @@ import {
   upsertGrokMcpServer,
   upsertMcpServer,
   hasGrokMcpServer,
+  hasUserGrokMcpServer,
   removeGrokMcpServer,
 } from '../../src/install/mcp-config.js';
 
@@ -254,6 +255,110 @@ describe('upsertGrokMcpServer', () => {
       );
       const existing = `${before}\n[mcp_servers.concord]\ncommand = "old"\n`;
       expect(removeGrokMcpServer(existing)).toBe(before);
+    }
+  });
+});
+
+describe('installMcpConfigs with a concord server the user wrote', () => {
+  const customGemini = {
+    theme: 'dark',
+    mcpServers: {
+      concord: {
+        command: 'node',
+        args: ['/opt/my-concord/server.js'],
+        env: { MY_TOKEN: 'abc' },
+      },
+    },
+  };
+  const customGrok =
+    '[mcp_servers.concord]\ncommand = "node"\nargs = ["/opt/my-concord/server.js"]\n\n' +
+    '[mcp_servers.concord.env]\nMY_TOKEN = "abc"\n';
+
+  function project(files: Record<string, string>): string {
+    const root = mkdtempSync(join(tmpdir(), 'concord-mcp-config-'));
+    for (const [relPath, content] of Object.entries(files)) {
+      mkdirSync(join(root, relPath, '..'), { recursive: true });
+      writeFileSync(join(root, relPath), content);
+    }
+    return root;
+  }
+
+  it('keeps the entry in .gemini/settings.json and still applies the shell settings', () => {
+    const geminiPath = join('.gemini', 'settings.json');
+    const root = project({ [geminiPath]: `${JSON.stringify(customGemini, null, 2)}\n` });
+
+    installMcpConfigs(root);
+    const first = readFileSync(join(root, geminiPath), 'utf8');
+    installMcpConfigs(root);
+
+    const parsed = z
+      .object({
+        theme: z.string(),
+        mcpServers: z.object({ concord: z.unknown() }),
+        tools: z.object({ shell: z.object({ backgroundCompletionBehavior: z.string() }) }),
+        experimental: z.object({ modelSteering: z.boolean() }),
+      })
+      .parse(JSON.parse(first));
+    expect(parsed.mcpServers.concord).toEqual(customGemini.mcpServers.concord);
+    expect(parsed.theme).toBe('dark');
+    expect(parsed.tools.shell.backgroundCompletionBehavior).toBe('inject');
+    expect(parsed.experimental.modelSteering).toBe(true);
+    expect(readFileSync(join(root, geminiPath), 'utf8')).toBe(first);
+  });
+
+  it('keeps the tables in .grok/config.toml untouched', () => {
+    const grokPath = join('.grok', 'config.toml');
+    const root = project({ [grokPath]: customGrok });
+
+    installMcpConfigs(root);
+
+    expect(readFileSync(join(root, grokPath), 'utf8')).toBe(customGrok);
+  });
+
+  it('refreshes a Gemini entry that Concord wrote', () => {
+    const geminiPath = join('.gemini', 'settings.json');
+    const root = project({ [geminiPath]: upsertGeminiSettings(undefined, '/old/root') });
+
+    installMcpConfigs(root);
+
+    expect(readFileSync(join(root, geminiPath), 'utf8')).toContain(JSON.stringify(root));
+  });
+
+  it('refreshes a Grok fence that Concord wrote', () => {
+    const grokPath = join('.grok', 'config.toml');
+    const root = project({ [grokPath]: upsertGrokMcpServer('[ui]\nmode = 1\n', '/old/root') });
+
+    installMcpConfigs(root);
+
+    const content = readFileSync(join(root, grokPath), 'utf8');
+    expect(content).toContain(`CONCORD_REPO_ROOT = ${JSON.stringify(root)}`);
+    expect(content).not.toContain('/old/root');
+    expect(content).toContain('[ui]');
+  });
+});
+
+describe('hasUserGrokMcpServer', () => {
+  it("is false without a concord server, inside Concord's fence, and for what Concord writes", () => {
+    expect(hasUserGrokMcpServer('[mcp_servers.other]\ncommand = "x"\n')).toBe(false);
+    expect(hasUserGrokMcpServer(upsertGrokMcpServer(undefined, '/repo'))).toBe(false);
+    const written =
+      '[mcp_servers.concord]\ncommand = "concord-mcp" # added by grok\nargs = []\nenabled = true\n\n' +
+      '[mcp_servers.concord.env]\nCONCORD_REPO_ROOT = "/repo"\nCONCORD_AGENT_KIND = "grok"\n';
+    expect(hasUserGrokMcpServer(written)).toBe(false);
+  });
+
+  it('is true for another command, arguments, extra environment, or another spelling', () => {
+    const entries = [
+      '[mcp_servers.concord]\ncommand = "old"\nargs = []\n',
+      '[mcp_servers.concord]\ncommand = "concord-mcp"\nargs = ["--flag"]\n',
+      '[mcp_servers.concord]\ncommand = "concord-mcp"\n[mcp_servers.concord.env]\nMY_TOKEN = "a"\n',
+      '[mcp_servers.concord]\ncommand = "concord-mcp"\n[mcp_servers.concord.tools]\nx = 1\n',
+      'mcp_servers.concord.command = "node"\n',
+      '[mcp_servers]\nconcord = { command = "node" }\n',
+      '[mcp_servers."concord"]\ncommand = "node"\n',
+    ];
+    for (const entry of entries) {
+      expect(hasUserGrokMcpServer(entry)).toBe(true);
     }
   });
 });
