@@ -143,6 +143,22 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
     }
   }
 
+  const assignmentTimes = new Map(
+    active
+      .filter((task) => task.status === 'assigned')
+      .map((task) => {
+        const event = repos.ownershipEvents
+          .listByTask(task.taskId)
+          .findLast(
+            (entry) =>
+              entry.toStatus === 'assigned' &&
+              entry.toVersion === task.version &&
+              entry.toAgentId === task.assignedAgentId,
+          );
+        return [task.taskId, event?.createdAt ?? task.createdAt] as const;
+      }),
+  );
+
   return {
     active: active.map((task) => ({
       taskId: task.taskId,
@@ -160,7 +176,7 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
     reviewReady,
     openQuestions,
     presence: buildRoster(agents, now),
-    staleClaims: detectStaleClaims(active, agents, now),
+    staleClaims: detectStaleClaims(active, agents, now, undefined, assignmentTimes),
     communications: agents.map((agent) => {
       const endpoint = endpointsByAgent.get(agent.agentId);
       return {
@@ -174,6 +190,22 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
   };
 }
 
+function formatAge(seconds: number): string {
+  if (seconds < 60) return `${String(seconds)}s`;
+  if (seconds < 3600) return `${String(Math.floor(seconds / 60))}m`;
+  return `${String(Math.floor(seconds / 3600))}h`;
+}
+
+function presenceSignals(entry: PresenceEntry): string {
+  const activity =
+    entry.activityAgeSeconds === null
+      ? 'no activity'
+      : `activity ${formatAge(entry.activityAgeSeconds)} ago`;
+  const summary =
+    entry.summaryAgeSeconds === null ? '' : `, summary ${formatAge(entry.summaryAgeSeconds)} old`;
+  return `heartbeat ${formatAge(entry.heartbeatAgeSeconds)} ago, ${activity}${summary}`;
+}
+
 /** Render the presence roster as indented lines, or a placeholder when empty. */
 export function renderRosterLines(roster: readonly PresenceEntry[]): string[] {
   if (roster.length === 0) {
@@ -182,8 +214,22 @@ export function renderRosterLines(roster: readonly PresenceEntry[]): string[] {
   return roster.map((entry) => {
     const state = `${entry.liveness}/${entry.status}`;
     const doing = entry.summary ?? '-';
-    return `  ${entry.agentId.padEnd(18)} ${state.padEnd(20)} ${doing}  (${String(entry.ageSeconds)}s ago)`;
+    return `  ${entry.agentId.padEnd(18)} ${state.padEnd(20)} ${doing}  (${presenceSignals(entry)})`;
   });
+}
+
+function staleDetail(claim: StaleClaim): string {
+  const seconds = String(claim.ageSeconds ?? 0);
+  switch (claim.reason) {
+    case 'agent-unregistered':
+      return 'agent never registered';
+    case 'agent-away':
+      return `agent away ${seconds}s`;
+    case 'assignment-unaccepted':
+      return `assignment not accepted after ${seconds}s`;
+    case 'unowned':
+      return 'in progress with no owning agent';
+  }
 }
 
 export function renderStatusText(view: StatusView): string {
@@ -230,11 +276,9 @@ export function renderStatusText(view: StatusView): string {
     lines.push('  none');
   } else {
     for (const claim of view.staleClaims) {
-      const detail =
-        claim.reason === 'agent-unregistered'
-          ? 'agent never registered'
-          : `agent away ${String(claim.ageSeconds ?? 0)}s`;
-      lines.push(`  ${claim.taskId.padEnd(10)} ${claim.agentId} (${detail})`);
+      lines.push(
+        `  ${claim.taskId.padEnd(10)} ${claim.agentId ?? 'no holder'} (${staleDetail(claim)})`,
+      );
     }
   }
 

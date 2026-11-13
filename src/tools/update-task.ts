@@ -36,12 +36,23 @@ export function handleUpdateTask(repos: Repositories, input: UpdateTaskInput): U
   }
 
   const transact = repos.db.transaction(() => {
+    // Checked inside the transaction: .immediate() takes the write lock first,
+    // so no other writer can replace this decision between the check and the write.
+    const superseded = findSupersededDecision(repos, input);
     const update = repos.taskUpdates.create({
       taskId: input.task_id,
       kind: input.kind,
       content: input.content,
       agent: input.agent ?? input.agent_id ?? task.agent,
     });
+    if (superseded !== undefined) {
+      repos.taskUpdates.markSuperseded(
+        superseded.id,
+        update.id,
+        input.supersede_reason ?? null,
+        update.createdAt,
+      );
+    }
     const updatedTask = repos.tasks.touchActivity(input.task_id);
     if (updatedTask === undefined) {
       throw new Error(`Task ${input.task_id} disappeared while its update was recorded.`);
@@ -53,9 +64,43 @@ export function handleUpdateTask(repos: Repositories, input: UpdateTaskInput): U
       detail: input.kind,
     });
     if (input.agent_id !== undefined) {
-      repos.agents.touch(input.agent_id);
+      repos.agents.recordActivity(input.agent_id);
     }
     return { update, task: updatedTask };
   });
-  return transact();
+  return transact.immediate();
+}
+
+/**
+ * A decision can replace one earlier decision on the same task. Only a live,
+ * not-yet-replaced decision can be replaced, and the reason needs a replacement.
+ */
+function findSupersededDecision(
+  repos: Repositories,
+  input: UpdateTaskInput,
+): TaskUpdateRecord | undefined {
+  if (input.supersedes === undefined) {
+    if (input.supersede_reason !== undefined) {
+      throw new Error('supersede_reason requires supersedes.');
+    }
+    return undefined;
+  }
+  if (input.kind !== 'decision') {
+    throw new Error(`supersedes applies only to decision updates, not ${input.kind}.`);
+  }
+  const target = repos.taskUpdates.get(input.supersedes);
+  if (target?.taskId !== input.task_id) {
+    throw new Error(`Decision ${String(input.supersedes)} is not recorded on ${input.task_id}.`);
+  }
+  if (target.kind !== 'decision') {
+    throw new Error(
+      `Update ${String(input.supersedes)} has kind '${target.kind}', not 'decision'.`,
+    );
+  }
+  if (target.supersededBy !== null) {
+    throw new Error(
+      `Decision ${String(input.supersedes)} is already superseded by ${String(target.supersededBy)}.`,
+    );
+  }
+  return target;
 }

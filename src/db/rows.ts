@@ -203,6 +203,9 @@ export interface TaskUpdateRecord {
   content: string;
   agent: string | null;
   createdAt: string;
+  supersededBy: number | null;
+  supersedeReason: string | null;
+  supersededAt: string | null;
 }
 
 const taskUpdateDbRowSchema = z.object({
@@ -212,6 +215,9 @@ const taskUpdateDbRowSchema = z.object({
   content: z.string(),
   agent: z.string().nullable(),
   created_at: z.string(),
+  superseded_by: z.number().int().nullable(),
+  supersede_reason: z.string().nullable(),
+  superseded_at: z.string().nullable(),
 });
 
 export function parseTaskUpdateRow(raw: unknown): TaskUpdateRecord {
@@ -223,6 +229,9 @@ export function parseTaskUpdateRow(raw: unknown): TaskUpdateRecord {
     content: row.content,
     agent: row.agent,
     createdAt: row.created_at,
+    supersededBy: row.superseded_by,
+    supersedeReason: row.supersede_reason,
+    supersededAt: row.superseded_at,
   };
 }
 
@@ -447,6 +456,11 @@ export const agentStatusValues = ['active', 'blocked', 'waiting_review', 'done']
 export type AgentStatus = (typeof agentStatusValues)[number];
 const agentStatusSchema = z.enum(agentStatusValues);
 
+/** Set only by an explicit status transition; tool activity never changes it. */
+export const agentExecutionValues = ['executing', 'not_executing'] as const;
+export type AgentExecutionStatus = (typeof agentExecutionValues)[number];
+const agentExecutionSchema = z.enum(agentExecutionValues);
+
 /** A registered agent instance. `agentId` is a distinct per-session identity
  * (e.g. `claude-code:7p8v`), unlike the `agent` *kind* string on a task. */
 export interface AgentRecord {
@@ -460,8 +474,12 @@ export interface AgentRecord {
   branch: string | null;
   summary: string | null;
   status: AgentStatus;
+  executionStatus: AgentExecutionStatus;
   firstSeen: string;
   lastSeen: string;
+  heartbeatAt: string;
+  activityAt: string | null;
+  summaryUpdatedAt: string | null;
 }
 
 const agentDbRowSchema = z.object({
@@ -475,8 +493,12 @@ const agentDbRowSchema = z.object({
   branch: z.string().nullable(),
   summary: z.string().nullable(),
   status: agentStatusSchema,
+  execution_status: agentExecutionSchema,
   first_seen: z.string(),
   last_seen: z.string(),
+  heartbeat_at: z.string().nullable(),
+  activity_at: z.string().nullable(),
+  summary_updated_at: z.string().nullable(),
 });
 
 export function parseAgentRow(raw: unknown): AgentRecord {
@@ -492,8 +514,12 @@ export function parseAgentRow(raw: unknown): AgentRecord {
     branch: row.branch,
     summary: row.summary,
     status: row.status,
+    executionStatus: row.execution_status,
     firstSeen: row.first_seen,
     lastSeen: row.last_seen,
+    heartbeatAt: row.heartbeat_at ?? row.last_seen,
+    activityAt: row.activity_at,
+    summaryUpdatedAt: row.summary_updated_at,
   };
 }
 
