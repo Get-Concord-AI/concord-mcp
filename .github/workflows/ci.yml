@@ -99,3 +99,30 @@ jobs:
         run: pnpm e2e test/e2e/real
         env:
           CONCORD_E2E_REAL_HARNESSES: all
+
+  # Node 22.x only. Verify already runs the unit suite on Windows for 22.x and
+  # 24.x; this job covers the npm .cmd shim, which is the same launch path on both.
+  windows-install-smoke:
+    name: Windows install smoke
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Pack, install, and launch through the npm shim
+        shell: pwsh
+        run: pnpm smoke:windows

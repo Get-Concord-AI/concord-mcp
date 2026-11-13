@@ -21,12 +21,18 @@ This creates `.concord/` and registers a repository-pinned MCP server in
     "concord": {
       "command": "concord-mcp",
       "env": {
+        "CONCORD_AGENT_KIND": "cursor",
         "CONCORD_REPO_ROOT": "/absolute/path/to/this/repository"
       }
     }
   }
 }
 ```
+
+`CONCORD_AGENT_KIND` keeps the server from adopting the session of whichever
+harness started Cursor: a Cursor opened from a Claude Code terminal inherits that
+terminal's `CLAUDE_CODE_SESSION_ID`, and without the pin its server would act as
+that Claude Code agent.
 
 It also writes `.cursor/rules/concord.mdc` (with `alwaysApply: true`) so the agent
 knows when to claim work, share task context, and hand off. Existing servers and

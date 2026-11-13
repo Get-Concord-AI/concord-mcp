@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -39,6 +40,24 @@ function repoDir(): string {
   mkdirSync(join(dir, '.git'));
   return realpathSync(dir);
 }
+
+const canSymlinkFile = (): boolean => {
+  if (process.platform !== 'win32') return true;
+  try {
+    const probeTarget = join(tmpdir(), `concord-probe-target-${String(Date.now())}`);
+    const probeLink = join(tmpdir(), `concord-probe-link-${String(Date.now())}`);
+    writeFileSync(probeTarget, '');
+    try {
+      symlinkSync(probeTarget, probeLink);
+      rmSync(probeLink);
+      return true;
+    } finally {
+      rmSync(probeTarget);
+    }
+  } catch {
+    return false;
+  }
+};
 
 describe('runSetup', () => {
   it('registers one setup command without separate init/install commands', () => {
@@ -111,18 +130,21 @@ describe('runSetup', () => {
     expect(rules.indexOf('*')).toBeLessThan(rules.indexOf('!HANDOFF.md'));
   });
 
-  it('replaces a symlinked Concord gitignore instead of writing through it', () => {
-    const dir = repoDir();
-    const rootIgnorePath = join(dir, '.gitignore');
-    writeFileSync(rootIgnorePath, 'node_modules/\n');
-    mkdirSync(join(dir, '.concord'));
-    symlinkSync(rootIgnorePath, join(dir, '.concord', '.gitignore'));
+  it.skipIf(!canSymlinkFile())(
+    'replaces a symlinked Concord gitignore instead of writing through it',
+    () => {
+      const dir = repoDir();
+      const rootIgnorePath = join(dir, '.gitignore');
+      writeFileSync(rootIgnorePath, 'node_modules/\n');
+      mkdirSync(join(dir, '.concord'));
+      symlinkSync(rootIgnorePath, join(dir, '.concord', '.gitignore'));
 
-    runSetup(dir, { mcp: false });
+      runSetup(dir, { mcp: false });
 
-    expect(readFileSync(rootIgnorePath, 'utf8')).toBe('node_modules/\n');
-    expect(lstatSync(join(dir, '.concord', '.gitignore')).isFile()).toBe(true);
-  });
+      expect(readFileSync(rootIgnorePath, 'utf8')).toBe('node_modules/\n');
+      expect(lstatSync(join(dir, '.concord', '.gitignore')).isFile()).toBe(true);
+    },
+  );
 
   it('strips a byte-order mark before prepending the catch-all', () => {
     const dir = repoDir();

@@ -34,6 +34,9 @@ export function handleInspectWork(
   if (scoped.length > 1) {
     throw new Error('inspect_work accepts only one of task_id, agent_id, or message_id.');
   }
+  if (input.include_superseded !== undefined && input.task_id === undefined) {
+    throw new Error('include_superseded applies only with task_id.');
+  }
   const viewer: Viewer | undefined =
     sessionAgentId !== undefined
       ? { agentId: sessionAgentId, verified: true }
@@ -41,7 +44,10 @@ export function handleInspectWork(
         ? undefined
         : { agentId: input.agent_id, verified: false };
   if (input.task_id !== undefined) {
-    const context = handleGetTaskContext(repos, { task_id: input.task_id });
+    const context = handleGetTaskContext(repos, {
+      task_id: input.task_id,
+      include_superseded: input.include_superseded,
+    });
     return {
       scope: 'task',
       context: { ...context, messages: visibleTaskMessages(repos, context.messages, viewer) },

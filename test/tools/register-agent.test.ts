@@ -84,9 +84,7 @@ describe('ensureAgentRegistered', () => {
   });
 
   it('never blanks metadata a richer registration already recorded', () => {
-    // The relay calls this every couple of seconds. `upsert` is a full
-    // replacement, so refreshing rather than preserving would erase the summary
-    // and owner that start_work stored (issue #68).
+    // The relay calls this every couple of seconds; it must not erase start_work's metadata.
     handleRegisterAgent(repos, {
       agent_id: 'claude-code:abcd1234',
       kind: 'claude-code',
