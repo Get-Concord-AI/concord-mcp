@@ -157,6 +157,11 @@ export function removeMcpServer(existing: string): string {
   return `${JSON.stringify({ ...config, mcpServers: servers }, null, 2)}\n`;
 }
 
+/** Whether an `mcpServers` config string holds a `concord` server somebody other than Concord wrote. */
+function hasUserMcpServer(existing: string): boolean {
+  return hasMcpServer(existing) && !isConcordServerOwned(existing);
+}
+
 /**
  * Register Concord and make Gemini return native background shell completions
  * to the agent. Existing Gemini settings, shell options, and MCP servers are
@@ -166,7 +171,11 @@ export function removeMcpServer(existing: string): string {
  */
 export function upsertGeminiSettings(existing: string | undefined, repoRoot?: string): string {
   const withServer = looseObjectSchema.parse(
-    JSON.parse(upsertMcpServer(existing, repoRoot, agentKindEnv('gemini'))),
+    JSON.parse(
+      existing !== undefined && hasUserMcpServer(existing)
+        ? existing
+        : upsertMcpServer(existing, repoRoot, agentKindEnv('gemini')),
+    ),
   );
   const currentTools = looseObjectSchema.safeParse(withServer['tools']);
   const tools = currentTools.success ? currentTools.data : {};
@@ -250,11 +259,62 @@ export function removeGrokMcpServer(existing: string): string {
   return preserved.join('\n').trimEnd();
 }
 
+/** What Concord writes under `mcp_servers.concord`: each key path with the value it takes, or any value. */
+const GROK_WRITTEN_VALUES: ReadonlyMap<string, string | undefined> = new Map([
+  ['mcp_servers.concord.command', JSON.stringify(CONCORD_SERVER_COMMAND)],
+  ['mcp_servers.concord.args', '[]'],
+  ['mcp_servers.concord.enabled', 'true'],
+  ['mcp_servers.concord.env.CONCORD_REPO_ROOT', undefined],
+  [`mcp_servers.concord.env.${AGENT_KIND_ENV}`, undefined],
+]);
+const GROK_WRITTEN_TABLES: ReadonlySet<string> = new Set([
+  'mcp_servers.concord',
+  'mcp_servers.concord.env',
+]);
+
+/**
+ * Whether Grok TOML has a `concord` server outside Concord's own fence that
+ * holds anything Concord does not write: another command, arguments, extra
+ * environment, or a spelling such as an inline table. Setup leaves it alone.
+ */
+export function hasUserGrokMcpServer(existing: string): boolean {
+  let inFence = false;
+  let table = '';
+  for (const { text, inString } of tomlLines(existing)) {
+    const trimmed = text.trim();
+    if (!inString && trimmed === GROK_FENCE_START) inFence = true;
+    if (inFence) {
+      if (!inString && trimmed === GROK_FENCE_END) inFence = false;
+      continue;
+    }
+    if (inString) {
+      if (CONCORD_TOML_KEY.test(table)) return true;
+      continue;
+    }
+    const header = /^\s*\[([^\]]+)\]/u.exec(text)?.[1];
+    if (header !== undefined) {
+      table = tomlKeyPath(header);
+      if (CONCORD_TOML_KEY.test(table) && !GROK_WRITTEN_TABLES.has(table)) return true;
+      continue;
+    }
+    const assignment = /^\s*([^=#]+?)\s*=(.*)$/u.exec(text);
+    const key = assignment?.[1];
+    if (assignment === null || key === undefined) continue;
+    const path = tomlKeyPath(table === '' ? key : `${table}.${key}`);
+    if (!CONCORD_TOML_KEY.test(path)) continue;
+    if (!GROK_WRITTEN_VALUES.has(path)) return true;
+    const written = GROK_WRITTEN_VALUES.get(path);
+    const value = (assignment[2] ?? '').replace(/\s+#.*$/u, '').trim();
+    if (written !== undefined && value !== written) return true;
+  }
+  return false;
+}
+
 function writeMcpConfig(repoRoot: string, relPath: string): string {
   const fullPath = join(repoRoot, relPath);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
 
-  if (existing !== undefined && hasMcpServer(existing) && !isConcordServerOwned(existing)) {
+  if (existing !== undefined && hasUserMcpServer(existing)) {
     return relPath;
   }
 
@@ -278,6 +338,7 @@ function writeMcpConfig(repoRoot: string, relPath: string): string {
 function writeGrokMcpConfig(repoRoot: string): string {
   const fullPath = join(repoRoot, GROK_CONFIG_PATH);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
+  if (existing !== undefined && hasUserGrokMcpServer(existing)) return GROK_CONFIG_PATH;
   mkdirSync(dirname(fullPath), { recursive: true });
   writeFileSync(fullPath, upsertGrokMcpServer(existing, repoRoot));
   return GROK_CONFIG_PATH;
