@@ -197,5 +197,8 @@ export function routedRepositories(manager: WorkspaceManager): Repositories {
     get agentMessages() {
       return manager.current().repos.agentMessages;
     },
+    get sessionBindings() {
+      return manager.current().repos.sessionBindings;
+    },
   };
 }
