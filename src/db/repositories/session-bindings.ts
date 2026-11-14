@@ -23,6 +23,8 @@ export interface SessionBindingRepository {
   upsert(clientPid: number, agentId: string, kind: string, at?: string): void;
   /** Refresh `updated_at` on every binding naming `agentId`; rows touched. */
   touch(agentId: string, at?: string): number;
+  /** Drop every binding naming `agentId` — stale rows from dead hook shells. */
+  removeForAgent(agentId: string): number;
   /** The binding recorded for one client pid, if any. */
   forClientPid(clientPid: number): SessionBinding | undefined;
 }
@@ -41,6 +43,7 @@ export function createSessionBindingRepository(db: ConcordDatabase): SessionBind
        kind = excluded.kind, updated_at = excluded.updated_at`,
   );
   const touchStmt = db.prepare('UPDATE session_bindings SET updated_at = ? WHERE agent_id = ?');
+  const removeStmt = db.prepare('DELETE FROM session_bindings WHERE agent_id = ?');
   const getStmt = db.prepare(
     'SELECT client_pid, agent_id, kind, updated_at FROM session_bindings WHERE client_pid = ?',
   );
@@ -51,6 +54,9 @@ export function createSessionBindingRepository(db: ConcordDatabase): SessionBind
     },
     touch(agentId, at = new Date().toISOString()) {
       return touchStmt.run(at, agentId).changes;
+    },
+    removeForAgent(agentId) {
+      return removeStmt.run(agentId).changes;
     },
     forClientPid(clientPid) {
       const raw: unknown = getStmt.get(clientPid);

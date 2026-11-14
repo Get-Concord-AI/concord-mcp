@@ -9,10 +9,11 @@ import {
 } from '../domain/identity.js';
 import { deriveLiveness } from '../domain/presence.js';
 
-/** The response shape a drift advisory can be appended to. */
-export interface AdvisoryResponse {
-  content: { type: 'text'; text: string }[];
-  structuredContent?: Record<string, unknown>;
+/** The one-time advisory produced when env and hook identities diverge. */
+export interface DriftAdvisory {
+  text: string;
+  envAgentId: string;
+  liveAgentId: string;
 }
 
 /**
@@ -30,10 +31,11 @@ export function liveSession(
     callRepos: Repositories,
     meta: OpenCodeRequestIdentityMetadata | undefined,
   ) => AgentIdentity | undefined;
-  withDriftAdvisory: <T extends AdvisoryResponse>(result: T) => T;
+  /** The pending drift advisory, if one is owed — consumed once. */
+  takeDriftAdvisory: () => DriftAdvisory | undefined;
 } {
   /** Set on the first env-vs-hook identity drift, surfaced once per session. */
-  let driftAdvisory: { text: string; from: string; to: string } | undefined;
+  let driftAdvisory: DriftAdvisory | undefined;
   let driftAdvisoryShown = false;
   // The client pid this server answers to: its own parent, unless a shim sat
   // between them — then it is whichever ancestor a hook bound. The walk runs
@@ -74,8 +76,8 @@ export function liveSession(
       !driftAdvisoryShown
     ) {
       driftAdvisory = {
-        from: base?.agentId ?? '(none)',
-        to: live.identity.agentId,
+        envAgentId: base?.agentId ?? '(none)',
+        liveAgentId: live.identity.agentId,
         text:
           `Concord: this server was launched as ${base?.agentId ?? 'an unnamed agent'} but ` +
           `the session hook for this client now reports ${live.identity.agentId} — the ` +
@@ -85,20 +87,13 @@ export function liveSession(
     return live.identity;
   };
 
-  const withDriftAdvisory = <T extends AdvisoryResponse>(result: T): T => {
-    if (driftAdvisory === undefined) return result;
+  const takeDriftAdvisory = (): DriftAdvisory | undefined => {
     const advisory = driftAdvisory;
+    if (advisory === undefined) return undefined;
     driftAdvisory = undefined;
     driftAdvisoryShown = true;
-    return {
-      ...result,
-      content: [...result.content, { type: 'text', text: advisory.text }],
-      structuredContent: {
-        ...result.structuredContent,
-        identity_drift: { env_agent_id: advisory.from, live_agent_id: advisory.to },
-      },
-    };
+    return advisory;
   };
 
-  return { sessionForRequest, withDriftAdvisory };
+  return { sessionForRequest, takeDriftAdvisory };
 }

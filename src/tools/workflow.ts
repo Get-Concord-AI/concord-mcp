@@ -15,7 +15,8 @@ import {
   type OpenCodeRequestIdentityMetadata,
 } from '../domain/identity.js';
 import { liveSession } from './live-session.js';
-import type { SemanticTelemetryEvent, TelemetryRecorder } from '../telemetry/events.js';
+import { recordTaskTransition, taskFlowId } from '../telemetry/task-transitions.js';
+import type { TelemetryRecorder } from '../telemetry/events.js';
 import type { WorkspaceContext } from '../workspaces/manager.js';
 import { SocketAgentMessageDispatcher } from '../relay/socket-dispatcher.js';
 import {
@@ -523,7 +524,19 @@ export function registerWorkflowTools(
     };
   };
 
-  const { sessionForRequest, withDriftAdvisory } = liveSession(session, requestIdentity);
+  const { sessionForRequest, takeDriftAdvisory } = liveSession(session, requestIdentity);
+
+  /** Once per session: env identity and the hook-bound session diverged. */
+  const withDriftAdvisory = <T extends WorkflowToolResponse>(result: T): T => {
+    const advisory = takeDriftAdvisory();
+    if (advisory === undefined) return result;
+    const drift = { env_agent_id: advisory.envAgentId, live_agent_id: advisory.liveAgentId };
+    return {
+      ...result,
+      content: [...result.content, { type: 'text', text: advisory.text }],
+      structuredContent: { ...result.structuredContent, identity_drift: drift },
+    };
+  };
 
   const withSessionAdvisories = <T extends WorkflowToolResponse>(
     result: T,
@@ -532,28 +545,6 @@ export function registerWorkflowTools(
     withAdapterAdvisory(
       withUpdateAdvisory(withDriftAdvisory(withReceiverAdvisory(result, callRepos))),
     );
-
-  type TaskTransition = Extract<
-    SemanticTelemetryEvent,
-    { event_type: 'task_lifecycle' }
-  >['transition'];
-  const taskFlowId = (taskId: string): string | undefined =>
-    telemetry?.taskPseudonym(taskId) ?? undefined;
-  const recordTaskTransition = (
-    taskId: string,
-    transition: TaskTransition,
-    status: string,
-  ): void => {
-    const telemetryTaskFlowId = taskFlowId(taskId);
-    if (telemetryTaskFlowId === undefined) return;
-    telemetry?.recordEvent({
-      event_type: 'task_lifecycle',
-      task_flow_id: telemetryTaskFlowId,
-      transition,
-      status,
-      elapsed_ms: null,
-    });
-  };
 
   const withActor = <T extends { agent_id?: string | undefined }>(
     callRepos: Repositories,
@@ -584,7 +575,7 @@ export function registerWorkflowTools(
         ...withActor(repos, args, requestMeta),
         kind: requestSession?.kind ?? args.kind,
       });
-      const startedTaskFlowId = taskFlowId(result.claim.task.taskId);
+      const startedTaskFlowId = taskFlowId(telemetry, result.claim.task.taskId);
       if (startedTaskFlowId !== undefined) {
         telemetry?.recordEvent({
           event_type: 'claim_evaluated',
@@ -770,7 +761,7 @@ export function registerWorkflowTools(
       const messageTaskFlowId =
         messageTaskId === undefined || messageTaskId === null
           ? null
-          : (taskFlowId(messageTaskId) ?? null);
+          : (taskFlowId(telemetry, messageTaskId) ?? null);
       try {
         const result = await handleUpdateWork(
           callRepos,
@@ -909,7 +900,7 @@ export function registerWorkflowTools(
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
       const result = handleTransferWork(repos, withActor(repos, args, requestMeta));
-      recordTaskTransition(result.task.taskId, args.action, result.task.status);
+      recordTaskTransition(telemetry, result.task.taskId, args.action, result.task.status);
       onWrite?.(workspace);
       return withSessionAdvisories({
         content: [
@@ -944,7 +935,7 @@ export function registerWorkflowTools(
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
       const result = handleFinishWork(repos, withActor(repos, args, requestMeta));
-      const finishedTaskFlowId = taskFlowId(result.task.taskId);
+      const finishedTaskFlowId = taskFlowId(telemetry, result.task.taskId);
       if (finishedTaskFlowId !== undefined) {
         telemetry?.recordEvent({
           event_type: 'task_lifecycle',

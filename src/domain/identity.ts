@@ -262,13 +262,23 @@ export interface LiveSessionResolution {
  * The identity a server should act as: the binding a hook recorded for its
  * client, when one exists. A binding only ever *corrects* an env identity —
  * with no env identity at all, naming one anyway would hand a caller proof it
- * never earned, so it keeps its unproven path instead.
+ * never earned, so it keeps its unproven path instead. Two more guards keep
+ * it that way: an operator-chosen identity stays authoritative, and a binding
+ * belongs to this client only when it names the same kind — a nested client's
+ * ancestor chain can include a process an outer session of another kind bound.
  */
 export function liveSessionIdentity(
   env: AgentIdentity | undefined,
   binding: LiveSessionBinding | undefined,
 ): LiveSessionResolution {
-  if (env === undefined || binding === undefined) return { identity: env, drifted: false };
+  if (
+    env === undefined ||
+    binding === undefined ||
+    env.origin === 'operator' ||
+    binding.kind !== env.kind
+  ) {
+    return { identity: env, drifted: false };
+  }
   const identity: AgentIdentity = {
     agentId: binding.agentId,
     kind: binding.kind,

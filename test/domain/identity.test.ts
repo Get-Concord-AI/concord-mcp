@@ -213,3 +213,23 @@ describe('liveSessionIdentity', () => {
     expect(result.drifted).toBe(false);
   });
 });
+
+describe('liveSessionIdentity binding proof', () => {
+  it('rejects a binding of another kind — a nested client keeps its own identity', () => {
+    const result = liveSessionIdentity(
+      { agentId: 'grok:11112222', kind: 'grok', origin: 'session' },
+      { agentId: 'claude-code:aaaabbbb', kind: 'claude-code' },
+    );
+    expect(result.identity?.agentId).toBe('grok:11112222');
+    expect(result.drifted).toBe(false);
+  });
+
+  it('never overrides an operator-chosen identity', () => {
+    const result = liveSessionIdentity(
+      { agentId: 'operator:chosen', kind: 'operator', origin: 'operator' },
+      { agentId: 'operator:other', kind: 'operator' },
+    );
+    expect(result.identity?.agentId).toBe('operator:chosen');
+    expect(result.drifted).toBe(false);
+  });
+});

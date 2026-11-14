@@ -104,6 +104,28 @@ describe('live session binding (issue #358)', () => {
     }
   });
 
+  it('ignores a binding of another kind on the same client pid', async () => {
+    // Grok launched inside a Claude session's shell: the Claude hook bound this
+    // client pid, but Grok's server keeps its own env identity — sharing an
+    // ancestor is not proof the binding is ours.
+    repos.agents.upsert({ agentId: RESUMED.agentId, kind: 'claude-code' });
+    repos.sessionBindings.upsert(process.ppid, RESUMED.agentId, 'claude-code');
+    const grok: AgentIdentity = { agentId: 'grok:55556666', kind: 'grok', origin: 'session' };
+    const harness = await connect(repos, grok);
+    try {
+      const result = await harness.client.callTool({
+        name: 'start_work',
+        arguments: { task_id: 'T-NESTED', title: 'T-NESTED', kind: 'grok' },
+      });
+      expect(JSON.stringify(result)).not.toContain('identity_drift');
+      expect(repos.tasks.get('T-NESTED')?.agentId).toBe(grok.agentId);
+      expect(repos.agents.get(RESUMED.agentId)).toBeDefined();
+      expect(repos.agents.get(RESUMED.agentId)?.lastSeen).toBeDefined();
+    } finally {
+      await close(harness);
+    }
+  });
+
   it('keeps the env identity when no hook has bound this client', async () => {
     const harness = await connect(repos, ENV_IDENTITY);
     try {
