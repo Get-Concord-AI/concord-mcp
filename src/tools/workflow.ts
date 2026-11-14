@@ -55,6 +55,7 @@ import {
   type SendAgentMessageResult,
 } from './agent-messages.js';
 import {
+  filesInWorkspace,
   selectToolWorkspace,
   type SelectWorkspace,
   workspaceStructured,
@@ -579,8 +580,11 @@ export function registerWorkflowTools(
       // The session's kind wins alongside its id: the id embeds the kind, so
       // registering under a different one would describe an agent that is not
       // the one being addressed.
+      const expectedFiles = filesInWorkspace(args.expected_files, workspace);
+      const declared =
+        expectedFiles === undefined ? args : { ...args, expected_files: expectedFiles };
       const result = handleStartWork(repos, {
-        ...withActor(args, requestMeta),
+        ...withActor(declared, requestMeta),
         kind: requestSession?.kind ?? args.kind,
       });
       const startedTaskFlowId = taskFlowId(result.claim.task.taskId);

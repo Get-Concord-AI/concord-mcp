@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import type { Command } from '@commander-js/extra-typings';
 import { z } from 'zod';
 
+import { repoRelativePath } from '../../config/paths.js';
 import type { Repositories } from '../../db/index.js';
 import {
   agentIdForSession,
@@ -77,6 +78,7 @@ export function decidePreToolUse(
   repos: Repositories,
   rawJson: string,
   selfTaskId?: string,
+  repoRoot?: string,
 ): HookDecision {
   let parsed: unknown;
   try {
@@ -90,7 +92,10 @@ export function decidePreToolUse(
     return { block: false, message: '', result: 'not_applicable', conflictingTaskCount: 0 };
   }
 
-  const overlaps = checkFileOverlaps(repos, [filePath], selfTaskId);
+  // Harnesses pass absolute paths (Claude Code's Edit always does); claims are
+  // repo-relative, so compare the file as the repository names it.
+  const file = repoRoot === undefined ? filePath : repoRelativePath([repoRoot], filePath);
+  const overlaps = checkFileOverlaps(repos, [file], selfTaskId);
   if (overlaps.length === 0) {
     return { block: false, message: '', result: 'clear', conflictingTaskCount: 0 };
   }
@@ -387,10 +392,12 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
         process.exitCode = 1;
         return;
       }
+      const hookContext = openContext(process.cwd());
       const decision = decidePreToolUse(
-        openContext(process.cwd()).repos,
+        hookContext.repos,
         readStdin(),
         process.env['CONCORD_TASK'],
+        hookContext.repoRoot,
       );
       if (decision.result !== 'not_applicable') {
         const taskId = process.env['CONCORD_TASK'];

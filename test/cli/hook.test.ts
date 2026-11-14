@@ -1,3 +1,6 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -52,6 +55,16 @@ describe('decidePreToolUse', () => {
     const decision = decidePreToolUse(repos, preToolUse('src/app.ts'), undefined);
     expect(decision.block).toBe(false);
     expect(decision.message).toContain('CONCORD_TASK');
+  });
+
+  it('blocks an absolute path to a file claimed by its repo-relative path', () => {
+    handleClaimWork(repos, { task_id: 'OTHER', title: 'Owns app', expected_files: ['src/app.ts'] });
+    const root = join(tmpdir(), 'concord-hook-repo');
+    const absolute = join(root, 'src', 'app.ts');
+    expect(decidePreToolUse(repos, preToolUse(absolute), 'MINE', root).block).toBe(true);
+    expect(
+      decidePreToolUse(repos, preToolUse(join(tmpdir(), 'elsewhere.ts')), 'MINE', root).block,
+    ).toBe(false);
   });
 
   it('allows when there is no file path or the payload is malformed', () => {

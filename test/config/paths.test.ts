@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, parse } from 'node:path';
 
@@ -8,6 +8,7 @@ import {
   concordDir,
   databasePath,
   findRepoRoot,
+  repoRelativePath,
   resolveExplicitRepoRoot,
   resolveRepoRoot,
   workspaceIdForRoot,
@@ -131,5 +132,21 @@ describe('resolveRepoRoot', () => {
     expect(() => resolveRepoRoot(parent, { CONCORD_REPO_ROOT: join(parent, 'missing') })).toThrow(
       /Workspace root does not exist/u,
     );
+  });
+
+  it('names a file the way the repository does, however it was spelled', () => {
+    const root = realpathSync(tempDir('concord-relpath-'));
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'src', 'a.ts'), '');
+    symlinkSync(join(root, 'src', 'a.ts'), join(root, 'link.ts'));
+
+    expect(repoRelativePath([root], join(root, 'src', 'a.ts'))).toBe('src/a.ts');
+    expect(repoRelativePath([root], 'link.ts')).toBe('src/a.ts');
+    expect(repoRelativePath([root], join(root, 'link.ts'))).toBe('src/a.ts');
+    expect(repoRelativePath([root], 'src/new.ts')).toBe('src/new.ts');
+    expect(repoRelativePath([root], join(tmpdir(), 'outside.ts'))).toBe(
+      join(tmpdir(), 'outside.ts'),
+    );
+    expect(repoRelativePath([], 'src/a.ts')).toBe('src/a.ts');
   });
 });
