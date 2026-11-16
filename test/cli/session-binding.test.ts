@@ -17,7 +17,20 @@ const chain = (...entries: readonly [number, string][]): AncestorProcess[] =>
 
 describe('isShellWrapper', () => {
   it('names the shells a harness puts between client and hook', () => {
-    for (const name of ['sh', 'bash', 'zsh', 'cmd.exe', 'powershell.exe', 'pwsh', 'BASH']) {
+    for (const name of [
+      'sh',
+      'bash',
+      'zsh',
+      'cmd.exe',
+      'powershell.exe',
+      'pwsh',
+      'BASH',
+      // `ps -o comm=` reports full paths on macOS, and login shells carry a `-`.
+      '/bin/bash',
+      '/usr/bin/zsh',
+      '-zsh',
+      'C:\\Windows\\System32\\cmd.exe',
+    ]) {
       expect(isShellWrapper(name)).toBe(true);
     }
     for (const name of ['node', 'claude', 'code', '', 'fish-shell-helper']) {

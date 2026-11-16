@@ -31,6 +31,8 @@ export function isShellWrapper(name: string): boolean {
     name
       .trim()
       .toLowerCase()
+      .replace(/^.*[\\/]/, '')
+      .replace(/^-/, '')
       .replace(/\.exe$/, ''),
   );
 }
