@@ -9,7 +9,7 @@ import type { Viewer } from './inspect-messages.js';
  *
  * Messages stay private as everywhere else: without a viewer, none are
  * searched. Searching never marks a message read; a snippet in a result list
- * is not the message shown whole. The response mirrors Concord Cloud's.
+ * is not the message shown whole.
  */
 
 export const DEFAULT_SEARCH_LIMIT = 20;
