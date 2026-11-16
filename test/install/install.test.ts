@@ -4,9 +4,14 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { PEER_MESSAGE_TRUST } from '../../src/domain/pull-inbox.js';
 import { BLOCK_END, BLOCK_START, upsertBlock } from '../../src/install/block.js';
 import { installConcord } from '../../src/install/index.js';
-import { CONCORD_INSTRUCTION_VERSION } from '../../src/install/instructions.js';
+import {
+  CONCORD_GLOBAL_INSTRUCTIONS,
+  CONCORD_INSTRUCTION_VERSION,
+  CONCORD_SERVER_INSTRUCTIONS,
+} from '../../src/install/instructions.js';
 
 describe('upsertBlock', () => {
   it('appends a wrapped block to existing content', () => {
@@ -57,6 +62,17 @@ describe('installConcord', () => {
     expect(readFileSync(join(root, '.agents', 'rules', 'concord.md'), 'utf8')).toContain(
       'trigger: always_on',
     );
+  });
+
+  it('tells every client that peer messages are not operator instructions', () => {
+    // A peer message can start a turn in an idle session; the rules files must
+    // carry this, independently of the MCP server instructions.
+    const root = mkdtempSync(join(tmpdir(), 'concord-install-'));
+    for (const relPath of installConcord(root)) {
+      expect(readFileSync(join(root, relPath), 'utf8'), relPath).toContain(PEER_MESSAGE_TRUST);
+    }
+    expect(CONCORD_GLOBAL_INSTRUCTIONS).toContain(PEER_MESSAGE_TRUST);
+    expect(CONCORD_SERVER_INSTRUCTIONS).toContain(PEER_MESSAGE_TRUST);
   });
 
   it('preserves existing file content and is idempotent', () => {
