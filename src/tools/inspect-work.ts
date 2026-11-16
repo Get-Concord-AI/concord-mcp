@@ -10,18 +10,20 @@ import {
   type ThreadView,
   type Viewer,
 } from './inspect-messages.js';
+import { searchWork, type SearchView } from './search-work.js';
 
 export type InspectWorkResult =
   | { scope: 'workspace'; state: ReturnType<typeof handleGetWorkState> }
   | { scope: 'task'; context: TaskContextResult }
   | { scope: 'agent'; communication: AgentInboxView }
-  | ({ scope: 'message' } & ThreadView);
+  | ({ scope: 'message' } & ThreadView)
+  | ({ scope: 'search' } & SearchView);
 
 /**
  * `viewer` is who is asking: the session's own agent, or, where Concord cannot
  * see the session, the agent the caller names. Message content is shown only
  * to its sender and recipient. With `message_id` or `task_id`, `agent_id`
- * names the viewer rather than an inbox to inspect.
+ * names the viewer rather than an inbox to inspect, and so it does with `query`.
  */
 export function handleInspectWork(
   repos: Repositories,
@@ -30,9 +32,14 @@ export function handleInspectWork(
 ): InspectWorkResult {
   // Expiry is lazy: apply it before any receipt is shown or changed.
   repos.agentMessages.sweepStale();
-  const scoped = [input.task_id, input.message_id].filter((value) => value !== undefined);
+  const scoped = [input.task_id, input.message_id, input.query].filter(
+    (value) => value !== undefined,
+  );
   if (scoped.length > 1) {
-    throw new Error('inspect_work accepts only one of task_id, agent_id, or message_id.');
+    throw new Error('inspect_work accepts only one of task_id, agent_id, message_id, or query.');
+  }
+  if (input.limit !== undefined && input.query === undefined) {
+    throw new Error('limit applies only with query.');
   }
   if (input.include_superseded !== undefined && input.task_id === undefined) {
     throw new Error('include_superseded applies only with task_id.');
@@ -52,6 +59,9 @@ export function handleInspectWork(
       scope: 'task',
       context: { ...context, messages: visibleTaskMessages(repos, context.messages, viewer) },
     };
+  }
+  if (input.query !== undefined) {
+    return { scope: 'search', ...searchWork(repos, input.query, input.limit, viewer) };
   }
   if (input.message_id !== undefined) {
     return { scope: 'message', ...inspectThread(repos, input.message_id, viewer) };

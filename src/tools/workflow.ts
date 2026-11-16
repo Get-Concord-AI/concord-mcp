@@ -1,4 +1,5 @@
 import { outboxReceiptLines } from './inspect-messages.js';
+import { searchText } from './search-work.js';
 import { handleInspectWork } from './inspect-work.js';
 import { describeReceipt, toReceipt } from '../domain/receipts.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -631,7 +632,8 @@ export function registerWorkflowTools(
       title: 'Inspect work',
       description:
         'Read the workspace, one task, one agent communication inbox/outbox, or one durable ' +
-        'prompt/reply thread by supplying at most one selector.',
+        'prompt/reply thread by supplying at most one selector. query searches past messages, ' +
+        'findings, decisions and handoffs; search before asking a peer what was already found.',
       inputSchema: inspectWorkInputShape,
       annotations: {
         readOnlyHint: true,
@@ -693,6 +695,17 @@ export function registerWorkflowTools(
             ...workspaceStructured(workspace),
             scope: result.scope,
             ...result.communication,
+          },
+        });
+      }
+      if (result.scope === 'search') {
+        return withSessionAdvisories({
+          content: [{ type: 'text', text: withWorkspaceText(searchText(result), workspace) }],
+          structuredContent: {
+            ...workspaceStructured(workspace),
+            scope: result.scope,
+            query: result.query,
+            results: result.results,
           },
         });
       }

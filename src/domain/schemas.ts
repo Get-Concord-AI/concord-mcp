@@ -133,6 +133,17 @@ export const inspectWorkInputShape = {
         'your session.',
     ),
   message_id: z.string().min(1).optional().describe('Prompt/reply thread to inspect'),
+  query: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Search past messages you sent or received, and task findings, decisions and handoffs, ' +
+        'for this text. Results name the task_id or message_id to open next.',
+    ),
+  limit: z.number().int().min(1).max(50).optional().describe('Most search results (default 20)'),
   include_superseded: z
     .boolean()
     .optional()
