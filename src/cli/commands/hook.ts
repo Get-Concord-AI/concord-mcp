@@ -234,7 +234,7 @@ function observeThenDrain(
   rawJson: string,
   sessionId: string,
 ): DeliverableMessage[] {
-  observeHookEvent(repos, agentId, rawJson);
+  observeHookEvent(repos, agentId, rawJson, 'antigravity');
   return drainInbox(repos, agentId, 'antigravity', undefined, {
     session: sessionKey(sessionId),
     via: 'hook',

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { createServer } from '../../src/server.js';
+import { liveSession } from '../../src/tools/live-session.js';
 import type { AgentIdentity } from '../../src/domain/identity.js';
 
 interface Harness {
@@ -135,5 +136,65 @@ describe('live session binding (issue #358)', () => {
     } finally {
       await close(harness);
     }
+  });
+});
+
+describe('live session lookup', () => {
+  let repos: Repositories;
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    repos.agents.upsert({ agentId: RESUMED.agentId, kind: 'claude-code' });
+    repos.agents.upsert({ agentId: ENV_IDENTITY.agentId, kind: 'claude-code' });
+  });
+
+  it('discovers a binding in a later workspace’s database after an earlier miss', () => {
+    // The pid list is cached, the lookup result is not: a miss against one
+    // routed database must not shadow a binding that exists in another.
+    const other = createRepositories(openDatabase(':memory:'));
+    repos.sessionBindings.upsert(42, RESUMED.agentId, 'claude-code');
+    const session = liveSession(ENV_IDENTITY, undefined, { ancestors: () => [42] });
+
+    expect(session.sessionForRequest(other, undefined)?.agentId).toBe(ENV_IDENTITY.agentId);
+    expect(session.sessionForRequest(repos, undefined)?.agentId).toBe(RESUMED.agentId);
+    expect(session.sessionForRequest(other, undefined)?.agentId).toBe(ENV_IDENTITY.agentId);
+  });
+
+  it('trusts an ancestor binding only while the server lived to see it written', () => {
+    // Server spawned at t=1000 under an unbound shim (10); its client (20) was
+    // bound at t=2000 by a /resume — the row postdates the server, so it wins.
+    const resumed = liveSession(ENV_IDENTITY, undefined, {
+      ancestors: () => [10, 20],
+      startedAt: 1000,
+    });
+    repos.sessionBindings.upsert(20, RESUMED.agentId, 'claude-code', '1970-01-01T00:00:02.000Z');
+    expect(resumed.sessionForRequest(repos, undefined)?.agentId).toBe(RESUMED.agentId);
+
+    // Same layout, but the binding predates the server: it belongs to a
+    // session the spawn-time environment already names — a nested client
+    // keeps its own identity rather than adopting an outer session’s.
+    const nested = liveSession(ENV_IDENTITY, undefined, {
+      ancestors: () => [10, 20],
+      startedAt: 3000,
+    });
+    expect(nested.sessionForRequest(repos, undefined)?.agentId).toBe(ENV_IDENTITY.agentId);
+  });
+
+  it('lets a stale binding on the nearest ancestor end the search', () => {
+    // The client (10) still carries its pre-spawn binding; the row a deeper
+    // session just refreshed must not be reached past it.
+    repos.sessionBindings.upsert(
+      10,
+      ENV_IDENTITY.agentId,
+      'claude-code',
+      '1970-01-01T00:00:01.000Z',
+    );
+    repos.sessionBindings.upsert(20, RESUMED.agentId, 'claude-code', '1970-01-01T00:00:05.000Z');
+    const session = liveSession(ENV_IDENTITY, undefined, {
+      ancestors: () => [10, 20],
+      startedAt: 3000,
+    });
+
+    expect(session.sessionForRequest(repos, undefined)?.agentId).toBe(ENV_IDENTITY.agentId);
   });
 });

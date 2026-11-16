@@ -1,44 +1,75 @@
 import { execFileSync } from 'node:child_process';
+import { z } from 'zod';
 
-/** The parent pid of `pid`, or undefined when the process table cannot say. */
-function parentPid(pid: number): number | undefined {
+/** How far a hook walks up to find its client: wrappers plus the client itself. */
+export const CLIENT_BINDING_DEPTH = 4;
+/** How far a server looks for its client: the direct parent, or one shim past it. */
+export const SERVER_BINDING_DEPTH = 2;
+
+export interface AncestorProcess {
+  pid: number;
+  /** Executable basename as the process table reports it, '' when unknown. */
+  name: string;
+}
+
+const windowsProcessRow = z.object({
+  ParentProcessId: z.number().nullable(),
+  Name: z.string(),
+});
+
+/** The parent pid and executable name of `pid`, or undefined when the table cannot say. */
+function processInfo(pid: number): { ppid: number | undefined; name: string } | undefined {
   try {
-    const out =
-      process.platform === 'win32'
-        ? execFileSync(
-            'powershell.exe',
-            [
-              '-NoProfile',
-              '-Command',
-              `(Get-CimInstance Win32_Process -Filter "ProcessId=${String(pid)}").ParentProcessId`,
-            ],
-            { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
-          )
-        : execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], {
-            encoding: 'utf8',
-            timeout: 5000,
-            stdio: ['ignore', 'pipe', 'ignore'],
-          });
-    const parsed = Number.parseInt(out.trim(), 10);
-    return Number.isFinite(parsed) ? parsed : undefined;
+    if (process.platform === 'win32') {
+      const out = execFileSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-Command',
+          `(Get-CimInstance Win32_Process -Filter "ProcessId=${String(pid)}") | Select-Object ParentProcessId,Name | ConvertTo-Json -Compress`,
+        ],
+        { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
+      );
+      const raw: unknown = JSON.parse(out.trim() === '' ? 'null' : out);
+      const row = windowsProcessRow.nullable().parse(raw);
+      if (row === null) return undefined;
+      return { ppid: row.ParentProcessId ?? undefined, name: row.Name };
+    }
+    const out = execFileSync('ps', ['-o', 'ppid=,comm=', '-p', String(pid)], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const match = /^\s*(\d+)\s+(.+)$/.exec(out.trim());
+    if (match === null) return undefined;
+    const parsed = Number.parseInt(match[1] ?? '', 10);
+    return { ppid: Number.isFinite(parsed) ? parsed : undefined, name: match[2] ?? '' };
   } catch {
     return undefined;
   }
 }
 
 /**
- * This process's ancestor pids, nearest first — its own parent included. A
- * client hook and the MCP server the same client launched share the client as
- * an ancestor, but a shell between client and hook shifts the hook's ppid
- * away from the server's; recording the chain makes the binding robust to
- * that wrap. Best-effort: the walk stops where the process table stops.
+ * This process's ancestors, nearest first — its own parent included — with
+ * the executable name the process table reports for each. A client hook and
+ * the MCP server the same client launched share the client as an ancestor,
+ * but wrappers between client and hook shift the hook's ppid away from the
+ * server's; the names let a hook tell wrapper shells from the client itself.
+ * Best-effort: the walk stops where the process table stops.
  */
-export function ancestorPids(limit = 4, ppid: number = process.ppid): number[] {
-  const chain: number[] = [];
+export function ancestorChain(limit = 4, ppid: number = process.ppid): AncestorProcess[] {
+  const chain: AncestorProcess[] = [];
   let current: number | undefined = ppid;
-  while (current !== undefined && current > 1 && chain.length < limit && !chain.includes(current)) {
-    chain.push(current);
-    current = parentPid(current);
+  while (current !== undefined && current > 1 && chain.length < limit) {
+    if (chain.some((ancestor) => ancestor.pid === current)) break;
+    const info = processInfo(current);
+    chain.push({ pid: current, name: info?.name ?? '' });
+    current = info?.ppid;
   }
   return chain;
+}
+
+/** This process's ancestor pids, nearest first — the pids of ancestorChain. */
+export function ancestorPids(limit = 4, ppid: number = process.ppid): number[] {
+  return ancestorChain(limit, ppid).map((ancestor) => ancestor.pid);
 }

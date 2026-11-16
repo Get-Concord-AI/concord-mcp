@@ -1,5 +1,5 @@
 import type { Repositories } from '../db/index.js';
-import { ancestorPids } from '../parent-chain.js';
+import { SERVER_BINDING_DEPTH, ancestorPids } from '../parent-chain.js';
 import {
   identityForRequest,
   liveSessionIdentity,
@@ -16,6 +16,12 @@ export interface DriftAdvisory {
   liveAgentId: string;
 }
 
+/** Test seams: which ancestors to probe and when this server started. */
+export interface LiveSessionDeps {
+  ancestors?: () => number[];
+  startedAt?: number;
+}
+
 /**
  * The session a call acts as: the binding a session-start hook recorded for
  * this server's client when one exists — it reflects a `/resume` the
@@ -26,6 +32,7 @@ export function liveSession(
   session: AgentIdentity | undefined,
   requestIdentity:
     ((meta: OpenCodeRequestIdentityMetadata | undefined) => AgentIdentity | undefined) | undefined,
+  deps: LiveSessionDeps = {},
 ): {
   sessionForRequest: (
     callRepos: Repositories,
@@ -37,22 +44,26 @@ export function liveSession(
   /** Set on the first env-vs-hook identity drift, surfaced once per session. */
   let driftAdvisory: DriftAdvisory | undefined;
   let driftAdvisoryShown = false;
-  // The client pid this server answers to: its own parent, unless a shim sat
-  // between them — then it is whichever ancestor a hook bound. The walk runs
-  // at most once: session-start hooks precede tool use, so a miss now would
-  // keep missing while paying the process-table read on every request.
-  let boundPid = process.ppid;
-  let searchedAncestors = false;
+  // The client's pid list is process-stable, so it is computed once — but the
+  // lookup result is not cached: each call selects its own workspace's
+  // repositories, and a binding that exists in one database must not be
+  // shadowed by a miss in another. A server trusts at most its parent and
+  // one shim past it: hooks bind the client and its own wrappers only.
+  const ancestors = deps.ancestors ?? ((): number[] => ancestorPids(SERVER_BINDING_DEPTH));
+  const startedAt = deps.startedAt ?? Date.now() - process.uptime() * 1000;
+  let candidates: number[] | undefined;
   const bindingFor = (callRepos: Repositories): LiveSessionBinding | undefined => {
-    const direct = callRepos.sessionBindings.forClientPid(boundPid);
-    if (direct !== undefined || searchedAncestors) return direct;
-    searchedAncestors = true;
-    for (const pid of ancestorPids(6)) {
+    candidates ??= ancestors();
+    for (const pid of candidates) {
       const found = callRepos.sessionBindings.forClientPid(pid);
-      if (found !== undefined) {
-        boundPid = pid;
-        return found;
-      }
+      if (found === undefined) continue;
+      // The nearest bound ancestor names the client — but only a row written
+      // while this server lived can correct its environment. An older row
+      // belongs to a session that predates the server, whose identity the
+      // spawn-time environment already carries; deeper pids host other
+      // clients' sessions, so a stale row ends the search rather than
+      // continuing it.
+      return Date.parse(found.updatedAt) >= startedAt ? found : undefined;
     }
     return undefined;
   };
