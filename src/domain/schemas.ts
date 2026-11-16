@@ -187,6 +187,13 @@ export const updateWorkInputShape = {
   agent_id: agentIdField,
   to_agent_id: z.string().min(1).optional().describe('Recipient required for prompt'),
   reply_to_message_id: z.string().min(1).optional().describe('Message being answered for reply'),
+  expects_reply: z
+    .boolean()
+    .optional()
+    .describe(
+      'For prompt/reply: whether you want an answer. Defaults to true for a prompt and false ' +
+        'for a reply; set it on a reply only when you ask something back',
+    ),
   idempotency_key: z
     .string()
     .min(1)

@@ -26,6 +26,7 @@ function message(messageId: string, content: string): DeliverableMessage {
     content,
     taskId: null,
     messageKind: 'prompt',
+    expectsReply: true,
     deliveryLatencyMs: 0,
   };
 }

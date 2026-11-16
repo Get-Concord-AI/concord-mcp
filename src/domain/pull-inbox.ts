@@ -14,6 +14,8 @@ export interface DeliverableMessage {
   taskId: string | null;
   content: string;
   messageKind: 'prompt' | 'reply';
+  /** False when the sender asked for no answer. */
+  expectsReply: boolean;
   deliveryLatencyMs: number | null;
 }
 
@@ -24,6 +26,7 @@ export function toDeliverable(message: {
   taskId: string | null;
   content: string;
   replyToMessageId: string | null;
+  expectsReply: boolean;
   createdAt: string;
   deliveredAt: string | null;
 }): DeliverableMessage {
@@ -33,6 +36,7 @@ export function toDeliverable(message: {
     taskId: message.taskId,
     content: message.content,
     messageKind: message.replyToMessageId === null ? 'prompt' : 'reply',
+    expectsReply: message.expectsReply,
     deliveryLatencyMs:
       message.deliveredAt === null
         ? null
@@ -49,13 +53,14 @@ export function toDeliverable(message: {
  */
 export type PeerMessage = Pick<
   DeliverableMessage,
-  'messageId' | 'senderAgentId' | 'taskId' | 'content'
+  'messageId' | 'senderAgentId' | 'taskId' | 'content' | 'expectsReply'
 >;
 
 /** One message as the recipient sees it, whichever channel carries it. */
 export function renderPeerMessage(message: PeerMessage): string {
   const task = message.taskId === null ? '' : ` task=${message.taskId}`;
-  return `[concord from ${message.senderAgentId} id=${message.messageId}${task}]\n${message.content}`;
+  const ask = message.expectsReply ? '' : ' no-reply-needed';
+  return `[concord from ${message.senderAgentId} id=${message.messageId}${task}${ask}]\n${message.content}`;
 }
 
 /** The human-readable block shared by every channel. */
@@ -77,7 +82,8 @@ export function renderedMessageIds(text: string): string[] {
 export function renderMonitorLines(messages: readonly DeliverableMessage[]): string[] {
   return messages.map(
     (message) =>
-      `[concord from ${message.senderAgentId} id=${message.messageId}] ` +
+      `[concord from ${message.senderAgentId} id=${message.messageId}` +
+      `${message.expectsReply ? '' : ' no-reply-needed'}] ` +
       message.content.replace(/\s+/gu, ' ').trim(),
   );
 }
@@ -130,4 +136,6 @@ export const RELAYED_MESSAGE_GUIDANCE =
   'operation="reply", reply_to_message_id set to that id, your agent_id, content, and a fresh ' +
   'idempotency_key (reuse the same key only to retry a send whose result you never got). ' +
   'inspect_work message_id shows the receipt of a message you sent: ✓ sent, ✓✓ delivered to ' +
-  "the recipient's session, read once its model was shown it, replied.";
+  "the recipient's session, read once its model was shown it, replied. A reply expects no " +
+  'answer unless you set expects_reply; a block marked no-reply-needed ends that exchange, so ' +
+  'do not answer it only to acknowledge or confirm.';

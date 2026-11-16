@@ -34,6 +34,8 @@ export interface SendAgentMessageInput {
   replyToMessageId?: string | undefined;
   taskId?: string | undefined;
   content: string;
+  /** Omitted, a prompt expects an answer and a reply does not. */
+  expectsReply?: boolean | undefined;
   idempotencyKey: string;
 }
 
@@ -189,6 +191,7 @@ export function handleSendAgentMessage(
   const contextualTaskId = input.taskId ?? parent?.taskId ?? null;
   const task = contextualTaskId === null ? undefined : tasks.get(contextualTaskId);
 
+  const expectsReply = input.expectsReply ?? input.operation === 'prompt';
   const replay = repos.agentMessages.getByIdempotency(input.agentId, input.idempotencyKey);
   let message: AgentMessageRecord;
   let idempotentReplay = false;
@@ -197,7 +200,8 @@ export function handleSendAgentMessage(
       replay.recipientAgentId !== recipientAgentId ||
       replay.content !== input.content ||
       replay.replyToMessageId !== (parent?.messageId ?? null) ||
-      replay.taskId !== contextualTaskId
+      replay.taskId !== contextualTaskId ||
+      replay.expectsReply !== expectsReply
     ) {
       throw new AgentMessageDeliveryError(
         'unauthorized',
@@ -233,6 +237,7 @@ export function handleSendAgentMessage(
       recipientAgentId,
       replyToMessageId: parent?.messageId ?? null,
       content: input.content,
+      expectsReply,
       idempotencyKey: input.idempotencyKey,
     });
   }

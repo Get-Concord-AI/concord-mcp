@@ -18,7 +18,7 @@ describe('openDatabase', () => {
   it('applies all migrations (user_version at head) and creates tables', () => {
     const db = openDatabase(':memory:');
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(17);
+    expect(version).toBe(18);
 
     const raw: unknown = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     const names = new Set(
@@ -99,7 +99,7 @@ describe('openDatabase', () => {
     const task = parseTaskRow(
       upgraded.prepare('SELECT * FROM tasks WHERE task_id = ?').get('LEGACY'),
     );
-    expect(upgraded.pragma('user_version', { simple: true })).toBe(17);
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(18);
     expect(task.status).toBe('handed_off');
     expect(task.agentId).toBe('codex:old');
     expect(task.version).toBe(1);
@@ -263,7 +263,7 @@ describe('presence signal migration', () => {
       .all()
       .map(parseAgentRow);
     const [one, two] = rows;
-    expect(upgraded.pragma('user_version', { simple: true })).toBe(17);
+    expect(upgraded.pragma('user_version', { simple: true })).toBe(18);
     expect(one?.cwd).toBe('/work');
     expect(one?.heartbeatAt).toBe('2026-01-02T00:00:00.000Z');
     expect(one?.activityAt).toBe('2026-01-02T00:00:00.000Z');
