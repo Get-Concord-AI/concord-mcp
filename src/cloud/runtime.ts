@@ -334,7 +334,7 @@ const messageSchema = z.object({
   taskKey: z.string().nullable(),
   replyToMessageId: z.string().nullable(),
   content: z.string(),
-  /** Absent from a cloud that predates it, where every message wanted an answer. */
+  /** Absent from an older server, where every message wanted an answer. */
   expectsReply: z.boolean().optional(),
   createdAt: z.string(),
   deliveredAt: z.string().nullable(),
