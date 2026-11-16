@@ -4,13 +4,6 @@ import type { InspectWorkResult } from './inspect-work.js';
 import { searchText } from './search-work.js';
 import { withWorkspaceText, workspaceStructured } from './workspace-routing.js';
 
-/** An MCP tool result as the workflow tools return it. */
-export interface InspectWorkResponse {
-  [key: string]: unknown;
-  content: { type: 'text'; text: string }[];
-  structuredContent: Record<string, unknown>;
-}
-
 /**
  * The MCP response for each `inspect_work` scope: a line of text for clients
  * that show only text, and the full view as structured content.
@@ -18,12 +11,12 @@ export interface InspectWorkResponse {
 export function inspectWorkResponse(
   result: InspectWorkResult,
   workspace: WorkspaceIdentity | undefined,
-): InspectWorkResponse {
+) {
   if (result.scope === 'workspace') {
     return {
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: withWorkspaceText(
             `${String(result.state.active.length)} active task(s), ` +
               `${String(result.state.overlaps.length)} overlap(s), ` +
@@ -49,7 +42,7 @@ export function inspectWorkResponse(
     return {
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: withWorkspaceText(
             `${result.communication.agentId}; promptable ${String(result.communication.promptable)}, ` +
               (result.communication.private
@@ -73,7 +66,7 @@ export function inspectWorkResponse(
   }
   if (result.scope === 'search') {
     return {
-      content: [{ type: 'text', text: withWorkspaceText(searchText(result), workspace) }],
+      content: [{ type: 'text' as const, text: withWorkspaceText(searchText(result), workspace) }],
       structuredContent: {
         ...workspaceStructured(workspace),
         scope: result.scope,
@@ -86,7 +79,7 @@ export function inspectWorkResponse(
     return {
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: withWorkspaceText(
             `${String(result.thread.length)} message(s) in thread.`,
             workspace,
@@ -104,7 +97,7 @@ export function inspectWorkResponse(
   return {
     content: [
       {
-        type: 'text',
+        type: 'text' as const,
         text: withWorkspaceText(
           `${result.context.task.taskId}; status ${result.context.task.status}, ` +
             `version ${String(result.context.task.version)}, ` +
