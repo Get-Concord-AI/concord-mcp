@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
-import { renderPeerMessage } from '../../src/domain/pull-inbox.js';
+import { renderMonitorLines, renderPeerMessage } from '../../src/domain/pull-inbox.js';
 import { handleSendAgentMessage } from '../../src/tools/agent-messages.js';
 import { handleUpdateWork } from '../../src/tools/workflow.js';
 
@@ -73,6 +73,36 @@ describe('expects_reply', () => {
     expect(renderPeerMessage({ ...base, expectsReply: true })).toBe(
       '[concord from beta id=m1 task=T-1]\nDone.',
     );
+  });
+
+  it('marks it in the one-line monitor format too', () => {
+    const [line] = renderMonitorLines([
+      {
+        messageId: 'm1',
+        senderAgentId: 'beta',
+        taskId: null,
+        content: 'Done.',
+        messageKind: 'reply',
+        expectsReply: false,
+        deliveryLatencyMs: null,
+      },
+    ]);
+    expect(line).toBe('[concord from beta id=m1 no-reply-needed] Done.');
+  });
+
+  it('refuses a retry under the same key that changes expects_reply', () => {
+    const send = (expectsReply: boolean | undefined) =>
+      handleSendAgentMessage(repos, {
+        operation: 'reply',
+        agentId: 'beta',
+        replyToMessageId: promptId,
+        content: 'EU or US first?',
+        expectsReply,
+        idempotencyKey: 'answer',
+      });
+    send(true);
+    expect(send(true).idempotentReplay).toBe(true);
+    expect(() => send(undefined)).toThrow(/already used for a different message/u);
   });
 
   it('refuses expects_reply on a record', () => {

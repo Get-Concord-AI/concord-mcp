@@ -82,7 +82,8 @@ export function renderedMessageIds(text: string): string[] {
 export function renderMonitorLines(messages: readonly DeliverableMessage[]): string[] {
   return messages.map(
     (message) =>
-      `[concord from ${message.senderAgentId} id=${message.messageId}] ` +
+      `[concord from ${message.senderAgentId} id=${message.messageId}` +
+      `${message.expectsReply ? '' : ' no-reply-needed'}] ` +
       message.content.replace(/\s+/gu, ' ').trim(),
   );
 }
