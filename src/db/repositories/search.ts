@@ -14,11 +14,11 @@ import {
 /**
  * Case-insensitive keyword search over what agents wrote down: messages,
  * task updates, and handoff packets. Each listing is newest first and bounded
- * by `limit`. Updates and handoffs are scoped to `project`, like every other
- * task-scoped repository; messages span the store, so they are narrowed to one
- * agent's own conversations instead.
+ * by `limit`, and scoped to `project` so every hit can be opened from this
+ * workspace. Messages are further narrowed to one agent's own conversations,
+ * and superseded decisions are left out, as task context hides them.
  *
- * SQLite's LIKE is case-insensitive for ASCII, which is enough for keywords.
+ * SQLite's LIKE folds case for ASCII letters only, which is enough for keywords.
  */
 export interface SearchRepository {
   messagesFor(agentId: string, query: string, limit: number): AgentMessageRecord[];
@@ -39,14 +39,14 @@ export function createSearchRepository(
 ): SearchRepository {
   const messagesStmt = db.prepare(`
     SELECT * FROM agent_messages
-    WHERE (sender_agent_id = @agent OR recipient_agent_id = @agent)
+    WHERE project = @project AND (sender_agent_id = @agent OR recipient_agent_id = @agent)
       AND content LIKE @pattern ESCAPE '\\'
     ORDER BY created_at DESC, message_id DESC
     LIMIT @limit
   `);
   const updatesStmt = db.prepare(`
     SELECT * FROM task_updates
-    WHERE project = @project AND content LIKE @pattern ESCAPE '\\'
+    WHERE project = @project AND superseded_by IS NULL AND content LIKE @pattern ESCAPE '\\'
     ORDER BY created_at DESC, id DESC
     LIMIT @limit
   `);
@@ -69,7 +69,12 @@ export function createSearchRepository(
 
   return {
     messagesFor(agentId, query, limit) {
-      const raw: unknown = messagesStmt.all({ agent: agentId, pattern: likePattern(query), limit });
+      const raw: unknown = messagesStmt.all({
+        project,
+        agent: agentId,
+        pattern: likePattern(query),
+        limit,
+      });
       return rawListSchema.parse(raw).map(parseAgentMessageRow);
     },
     taskUpdates(query, limit) {

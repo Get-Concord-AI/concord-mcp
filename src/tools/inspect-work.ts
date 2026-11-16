@@ -36,7 +36,10 @@ export function handleInspectWork(
     (value) => value !== undefined,
   );
   if (scoped.length > 1) {
-    throw new Error('inspect_work accepts only one of task_id, agent_id, message_id, or query.');
+    throw new Error(
+      'inspect_work accepts only one of task_id, message_id, or query (agent_id may name you ' +
+        'beside any of them).',
+    );
   }
   if (input.limit !== undefined && input.query === undefined) {
     throw new Error('limit applies only with query.');

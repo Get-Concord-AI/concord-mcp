@@ -91,6 +91,26 @@ describe('inspect_work query', () => {
     expect(repos.agentMessages.get(messageId)?.readAt).toBeNull();
   });
 
+  it('leaves out a decision that was superseded, as task context does', () => {
+    const first = handleUpdateTask(repos, {
+      task_id: 'TASK-1',
+      kind: 'decision',
+      content: 'Use the osprey queue',
+      agent_id: 'alpha',
+    });
+    handleUpdateTask(repos, {
+      task_id: 'TASK-1',
+      kind: 'decision',
+      content: 'Drop the osprey queue; retry inline',
+      agent_id: 'alpha',
+      supersedes: first.update.id,
+      supersede_reason: 'Queue adds latency',
+    });
+    expect(search({ query: 'osprey' }, 'alpha').results.map((hit) => hit.snippet)).toEqual([
+      'Drop the osprey queue; retry inline',
+    ]);
+  });
+
   it('treats LIKE wildcards as characters and JSON syntax as no match', () => {
     expect(search({ query: '100%' }, 'alpha').results).toHaveLength(1);
     expect(search({ query: '_' }, 'alpha').results).toHaveLength(0);
