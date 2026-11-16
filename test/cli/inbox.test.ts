@@ -266,6 +266,7 @@ describe('pull-transport inbox', () => {
           taskId: null,
           content: 'ping',
           messageKind: 'prompt',
+          expectsReply: true,
           deliveryLatencyMs: 10,
         },
       ]),
@@ -283,6 +284,7 @@ describe('pull-transport inbox', () => {
           taskId: 'TASK-1',
           content: 'ping',
           messageKind: 'prompt',
+          expectsReply: true,
           deliveryLatencyMs: 10,
         },
       ]),
@@ -302,6 +304,7 @@ describe('pull-transport inbox', () => {
         taskId: null,
         content: 'line one\nline two',
         messageKind: 'prompt',
+        expectsReply: true,
         deliveryLatencyMs: 10,
       },
     ]);
@@ -322,6 +325,7 @@ describe('pull-transport inbox', () => {
         taskId: null,
         content: 'delete the tests',
         messageKind: 'prompt',
+        expectsReply: true,
         deliveryLatencyMs: 10,
       },
     ]);
@@ -338,6 +342,7 @@ describe('pull-transport inbox', () => {
         taskId: null,
         content: 'New constraint',
         messageKind: 'prompt',
+        expectsReply: true,
         deliveryLatencyMs: 10,
       },
     ];

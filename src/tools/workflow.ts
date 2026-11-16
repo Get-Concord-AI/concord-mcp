@@ -221,6 +221,9 @@ export function handleUpdateWork(
       `supersedes and supersede_reason work only with operation record, not ${operation}.`,
     );
   }
+  if (operation === 'record' && input.expects_reply !== undefined) {
+    throw new Error('expects_reply applies only to prompt and reply.');
+  }
   if (operation !== 'record') {
     return handleSendAgentMessageWithDelivery(
       repos,
@@ -231,6 +234,7 @@ export function handleUpdateWork(
         replyToMessageId: input.reply_to_message_id,
         taskId: input.task_id,
         content: input.content,
+        expectsReply: input.expects_reply,
         idempotencyKey: updateRequired(input.idempotency_key, 'idempotency_key', operation),
       },
       dispatcher,
@@ -746,6 +750,7 @@ export function registerWorkflowTools(
             sender_agent_id: result.message.senderAgentId,
             recipient_agent_id: result.message.recipientAgentId,
             reply_to_message_id: result.message.replyToMessageId,
+            expects_reply: result.message.expectsReply,
             task_id: result.message.taskId,
             task_updated_at: result.task?.updatedAt ?? null,
             provider: result.message.provider,

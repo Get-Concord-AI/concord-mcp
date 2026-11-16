@@ -34,6 +34,8 @@ export interface SendAgentMessageInput {
   replyToMessageId?: string | undefined;
   taskId?: string | undefined;
   content: string;
+  /** Omitted, a prompt expects an answer and a reply does not. */
+  expectsReply?: boolean | undefined;
   idempotencyKey: string;
 }
 
@@ -233,6 +235,7 @@ export function handleSendAgentMessage(
       recipientAgentId,
       replyToMessageId: parent?.messageId ?? null,
       content: input.content,
+      expectsReply: input.expectsReply ?? input.operation === 'prompt',
       idempotencyKey: input.idempotencyKey,
     });
   }

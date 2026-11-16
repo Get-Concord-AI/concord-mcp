@@ -154,6 +154,8 @@ describe('cloud runtime', () => {
         taskId: 'AUTH-12',
         content: 'done',
         messageKind: 'reply',
+        // A cloud that predates expects_reply: every message wanted an answer.
+        expectsReply: true,
         // A clock skew between machines never shows as negative latency.
         deliveryLatencyMs: 0,
       },

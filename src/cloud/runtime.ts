@@ -334,6 +334,8 @@ const messageSchema = z.object({
   taskKey: z.string().nullable(),
   replyToMessageId: z.string().nullable(),
   content: z.string(),
+  /** Absent from a cloud that predates it, where every message wanted an answer. */
+  expectsReply: z.boolean().optional(),
   createdAt: z.string(),
   deliveredAt: z.string().nullable(),
 });
@@ -397,6 +399,7 @@ export function toDeliverables(messages: readonly CloudMessage[]): DeliverableMe
       taskId: message.taskKey,
       content: message.content,
       replyToMessageId: message.replyToMessageId,
+      expectsReply: message.expectsReply ?? true,
       createdAt: message.createdAt,
       deliveredAt: message.deliveredAt,
     }),
