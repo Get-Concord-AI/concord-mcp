@@ -48,8 +48,21 @@ harness_alive() {
 # So retry a few times with a short backoff before deciding this directory is
 # not a Concord workspace. An unrelated project pays a few extra seconds once,
 # at session start.
-CONCORD_INBOX_STARTUP_ATTEMPTS="${CONCORD_INBOX_STARTUP_ATTEMPTS:-3}"
-CONCORD_INBOX_STARTUP_BACKOFF_SECONDS="${CONCORD_INBOX_STARTUP_BACKOFF_SECONDS:-1}"
+#
+# Both knobs are whole numbers: the backoff doubles with shell arithmetic,
+# which rejects `0.5`, and a value like `3.0` would break the attempt
+# comparison so the gate never gave up. Anything else falls back to the
+# default rather than crashing or retrying forever. Leading zeros are refused
+# too, since shell arithmetic reads `08` as a bad octal number.
+whole_number_or() {
+  case "$1" in
+    0) [ "${3:-}" = "allow-zero" ] && printf '%s' "$1" || printf '%s' "$2" ;;
+    '' | *[!0-9]* | 0*) printf '%s' "$2" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+CONCORD_INBOX_STARTUP_ATTEMPTS="$(whole_number_or "${CONCORD_INBOX_STARTUP_ATTEMPTS:-}" 3)"
+CONCORD_INBOX_STARTUP_BACKOFF_SECONDS="$(whole_number_or "${CONCORD_INBOX_STARTUP_BACKOFF_SECONDS:-}" 1 allow-zero)"
 workspace_ready() {
   local attempt=1 delay="${CONCORD_INBOX_STARTUP_BACKOFF_SECONDS}"
   while true; do

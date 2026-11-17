@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -37,30 +37,68 @@ function fakeConcord(directory: string): { executable: string; log: string } {
   return { executable, log };
 }
 
+/**
+ * A stand-in `sleep`, put first on `PATH`, that logs how long it was asked to
+ * wait and returns at once, so the backoff can be checked without waiting.
+ */
+function fakeSleep(directory: string): string {
+  const log = join(directory, 'sleeps.log');
+  writeFileSync(
+    join(directory, 'sleep'),
+    ['#!/bin/sh', `printf "%s\\n" "$1" >> "${log}"`, 'exit 0', ''].join('\n'),
+  );
+  chmodSync(join(directory, 'sleep'), 0o755);
+  return log;
+}
+
+interface MonitorOptions {
+  /** Overrides the startup knobs; `undefined` leaves a knob unset so its default applies. */
+  readonly startup?: { attempts?: string; backoffSeconds?: string };
+  /** Replaces `sleep` with a logger that returns at once. */
+  readonly recordSleeps?: boolean;
+}
+
+const fastStartup = { attempts: '3', backoffSeconds: '0' };
+
 /** Runs the monitor until it exits on its own or the timeout stops its poll loop. */
 function runMonitor(
   statusFailures: number,
   timeoutMs: number,
-): { calls: string[]; exited: boolean } {
+  { startup = fastStartup, recordSleeps = false }: MonitorOptions = {},
+): { calls: string[]; exited: boolean; sleeps: string[] } {
   const directory = mkdtempSync(join(tmpdir(), 'concord-watch-inbox-'));
   const fake = fakeConcord(directory);
+  const sleepLog = recordSleeps ? fakeSleep(directory) : undefined;
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    CONCORD_BIN: fake.executable,
+    CONCORD_TEST_LOG: fake.log,
+    CONCORD_TEST_COUNTER: join(directory, 'status-calls'),
+    CONCORD_TEST_STATUS_FAILURES: String(statusFailures),
+    CONCORD_INBOX_POLL_SECONDS: '0.2',
+  };
+  delete env['CONCORD_INBOX_STARTUP_ATTEMPTS'];
+  delete env['CONCORD_INBOX_STARTUP_BACKOFF_SECONDS'];
+  if (startup.attempts !== undefined) env['CONCORD_INBOX_STARTUP_ATTEMPTS'] = startup.attempts;
+  if (startup.backoffSeconds !== undefined) {
+    env['CONCORD_INBOX_STARTUP_BACKOFF_SECONDS'] = startup.backoffSeconds;
+  }
+  if (sleepLog !== undefined) {
+    env['PATH'] = `${directory}${delimiter}${process.env['PATH'] ?? ''}`;
+  }
   const result = spawnSync('bash', [script], {
     cwd: directory,
     encoding: 'utf8',
     timeout: timeoutMs,
-    env: {
-      ...process.env,
-      CONCORD_BIN: fake.executable,
-      CONCORD_TEST_LOG: fake.log,
-      CONCORD_TEST_COUNTER: join(directory, 'status-calls'),
-      CONCORD_TEST_STATUS_FAILURES: String(statusFailures),
-      CONCORD_INBOX_POLL_SECONDS: '0.2',
-      CONCORD_INBOX_STARTUP_ATTEMPTS: '3',
-      CONCORD_INBOX_STARTUP_BACKOFF_SECONDS: '0',
-    },
+    env,
   });
-  const calls = existsSync(fake.log) ? readFileSync(fake.log, 'utf8').trim().split('\n') : [];
-  return { calls, exited: result.signal === null && result.status === 0 };
+  const lines = (file: string | undefined): string[] =>
+    file !== undefined && existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n') : [];
+  return {
+    calls: lines(fake.log),
+    exited: result.signal === null && result.status === 0,
+    sleeps: lines(sleepLog),
+  };
 }
 
 const statusChecks = (calls: readonly string[]): number =>
@@ -91,5 +129,30 @@ describe.skipIf(process.platform === 'win32')('Claude Code relay monitor startup
     expect(exited).toBe(true);
     expect(statusChecks(calls)).toBe(3);
     expect(drains(calls)).toBe(0);
+  });
+
+  it('waits 1s then 2s between workspace checks by default', () => {
+    const { calls, exited, sleeps } = runMonitor(1_000, 10_000, {
+      startup: {},
+      recordSleeps: true,
+    });
+
+    expect(exited).toBe(true);
+    expect(statusChecks(calls)).toBe(3);
+    expect(sleeps).toEqual(['1', '2']);
+  });
+
+  it.each([
+    ['a fractional backoff', { backoffSeconds: '0.5' }],
+    ['a non-integer attempt count', { attempts: '3.0' }],
+    ['a negative attempt count', { attempts: '-1' }],
+    ['a zero attempt count', { attempts: '0' }],
+    ['an empty backoff', { backoffSeconds: '' }],
+  ])('falls back to the defaults given %s', (_label, startup) => {
+    const { calls, exited, sleeps } = runMonitor(1_000, 10_000, { startup, recordSleeps: true });
+
+    expect(exited).toBe(true);
+    expect(statusChecks(calls)).toBe(3);
+    expect(sleeps).toEqual(['1', '2']);
   });
 });
