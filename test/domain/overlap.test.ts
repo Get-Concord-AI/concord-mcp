@@ -200,4 +200,41 @@ describe('detectOverlaps', () => {
     expect(warnings.map((warning) => warning.taskId)).toEqual(['TASK-C']);
     expect(warnings[0]?.reasons).toContain('shared domain(s): payments');
   });
+
+  it('flags a directory claim that contains another task file, in both directions', () => {
+    const dir: OverlapSurface = {
+      taskId: 'DIR',
+      expectedFiles: ['src/app/'],
+      modules: [],
+      domains: [],
+      riskTags: [],
+    };
+    const file = task({ taskId: 'FILE', expectedFiles: ['src/app/page.tsx'] });
+    const forward = detectOverlaps(dir, [file]);
+    expect(forward[0]?.kinds).toContain('same_file');
+    expect(forward[0]?.reasons).toContain(
+      'directory claim covers file(s): src/app -> src/app/page.tsx',
+    );
+
+    const reverse = detectOverlaps({ ...dir, expectedFiles: ['src/app/page.tsx'] }, [
+      task({ taskId: 'D2', expectedFiles: ['src/app'] }),
+    ]);
+    expect(reverse.map((warning) => warning.taskId)).toEqual(['D2']);
+  });
+
+  it('does not treat a sibling with a shared name prefix as inside the directory', () => {
+    const dir: OverlapSurface = {
+      taskId: 'DIR',
+      expectedFiles: ['src/app'],
+      modules: [],
+      domains: [],
+      riskTags: [],
+    };
+    const warnings = detectOverlaps(dir, [
+      task({ taskId: 'OTHER', expectedFiles: ['src/application/page.tsx'] }),
+    ]);
+    expect(warnings.some((w) => w.reasons.some((r) => r.startsWith('directory claim')))).toBe(
+      false,
+    );
+  });
 });

@@ -78,6 +78,42 @@ export function normalizePath(file: string): string {
   return normalized === '.' ? '' : normalized;
 }
 
+/** True when `outer` is a strict ancestor directory of `inner`. Both must be
+ * normalized. Matches whole path segments, so `src/app` does not contain
+ * `src/application/x.ts`. */
+function containsPath(outer: string, inner: string): boolean {
+  return outer !== '' && inner.startsWith(`${outer}/`);
+}
+
+/** Pairs where one declared entry is a directory containing the other, as
+ * `dir -> path`. A file and a directory cannot share a path, so any entry that
+ * is a strict path prefix of another is a directory claim. */
+function containedPairs(a: readonly string[], b: readonly string[]): string[] {
+  const left = [...new Set(a.map(normalizePath).filter((file) => file !== ''))];
+  const right = [...new Set(b.map(normalizePath).filter((file) => file !== ''))];
+  const pairs = new Set<string>();
+  for (const x of left) {
+    for (const y of right) {
+      if (containsPath(x, y)) {
+        pairs.add(`${x} -> ${y}`);
+      } else if (containsPath(y, x)) {
+        pairs.add(`${y} -> ${x}`);
+      }
+    }
+  }
+  return [...pairs].sort((p, q) => p.localeCompare(q));
+}
+
+/** True when a declared entry equals the file or is a directory containing it. */
+export function entryCoversFile(entry: string, file: string): boolean {
+  const normalizedEntry = normalizePath(entry);
+  const normalizedFile = normalizePath(file);
+  return (
+    normalizedEntry !== '' &&
+    (normalizedEntry === normalizedFile || containsPath(normalizedEntry, normalizedFile))
+  );
+}
+
 function directories(files: readonly string[]): string[] {
   return files
     .map((file) => normalizePath(file))
@@ -118,11 +154,17 @@ function detailsFor(
     kinds.push('same_file');
   }
 
+  const nested = containedPairs(candidate.expectedFiles, existing.expectedFiles);
+  if (nested.length > 0) {
+    reasons.push(`directory claim covers file(s): ${nested.join(', ')}`);
+    kinds.push('same_file');
+  }
+
   const sameDirs = sortedIntersection(
     directories(candidate.expectedFiles),
     directories(existing.expectedFiles),
   );
-  if (sameDirs.length > 0 && sameFiles.length === 0) {
+  if (sameDirs.length > 0 && sameFiles.length === 0 && nested.length === 0) {
     reasons.push(`same directory: ${sameDirs.join(', ')}`);
     kinds.push('same_directory');
   }
