@@ -1,9 +1,11 @@
 import type { Command } from '@commander-js/extra-typings';
 
-import type { Repositories } from '../../db/index.js';
-import { CLAIMED_STATUSES, normalizePath, type OverlapWarning } from '../../domain/overlap.js';
 import { linkedMachine } from '../../cloud/target.js';
+import type { OverlapWarning } from '../../domain/overlap.js';
 import { openContext } from '../context.js';
+import { checkFileOverlaps } from './overlap-check.js';
+
+export { checkFileOverlaps } from './overlap-check.js';
 
 /**
  * Exact-file collisions between the given files and OTHER active tasks' declared
@@ -18,31 +20,6 @@ import { openContext } from '../context.js';
  * only on the *same file*, since blocking an edit on a coarse signal like a
  * shared top-level directory would be too noisy to be useful.
  */
-export function checkFileOverlaps(
-  repos: Repositories,
-  files: readonly string[],
-  selfTaskId?: string,
-): OverlapWarning[] {
-  const wanted = new Set(files.map(normalizePath).filter((file) => file !== ''));
-  const warnings: OverlapWarning[] = [];
-  for (const task of repos.tasks.list()) {
-    if (!CLAIMED_STATUSES.has(task.status) || task.taskId === selfTaskId) {
-      continue;
-    }
-    const shared = task.expectedFiles.map(normalizePath).filter((file) => wanted.has(file));
-    if (shared.length > 0) {
-      const unique = [...new Set(shared)].sort((a, b) => a.localeCompare(b));
-      warnings.push({
-        taskId: task.taskId,
-        title: task.title,
-        reasons: [`same file(s): ${unique.join(', ')}`],
-        kinds: ['same_file'],
-      });
-    }
-  }
-  return warnings;
-}
-
 /** Human-readable result for `concord check`. */
 export function renderCheck(files: readonly string[], overlaps: readonly OverlapWarning[]): string {
   if (files.length === 0) {

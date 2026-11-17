@@ -4,8 +4,6 @@ import { listCloudAgents, type CloudAgent } from '../../cloud/runtime.js';
 import { obsoleteLinkPath, readCredentials } from '../../cloud/settings.js';
 import { databasePath, resolveRepoRoot } from '../../config/paths.js';
 import { globalDatabasePath } from '../../config/user-config.js';
-import { countTasksReadOnly } from '../../db/read-only.js';
-import { CLAIMED_STATUSES } from '../../domain/overlap.js';
 import type { Fetch } from '../../cloud/client.js';
 import { gitOriginRemote, type OriginRemote } from '../../workspaces/store.js';
 import { apiCheckLines, folderLine, loginLine, machineLine } from './cloud.js';
@@ -42,14 +40,9 @@ export function findLeftovers(repoRoot: string, env: NodeJS.ProcessEnv): Leftove
   const leftovers: Leftover[] = stores
     .filter((store) => existsSync(store.path))
     .map((store) => {
-      const open = countTasksReadOnly(store.path, [...CLAIMED_STATUSES]);
       return {
         path: store.path,
-        description: `${store.label}, ${
-          open === undefined
-            ? 'open tasks not counted (in use, or unreadable by this version)'
-            : `${String(open)} open task(s)`
-        }`,
+        description: `${store.label}, open tasks not counted while Concord Cloud keeps local stores closed`,
         files: ['', ...COMPANION_SUFFIXES]
           .map((suffix) => `${store.path}${suffix}`)
           .filter((path) => existsSync(path)),

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { concordDir, databasePath } from '../config/paths.js';
 import { globalDatabasePath, readUserConfig, userConcordDir } from '../config/user-config.js';
-import { LOCAL_PROJECT } from '../db/index.js';
+import { LOCAL_PROJECT } from '../db/project-scope-migration.js';
 import { normalizeProjectKey } from '../domain/project-key.js';
 
 /**

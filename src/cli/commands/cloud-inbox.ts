@@ -56,7 +56,12 @@ export function cloudAccess(
       undefined,
       resolveCheckoutRoot(cwd, env),
     );
-    if (session === undefined) return { kind: 'local' };
+    if (session === undefined) {
+      return {
+        kind: 'unusable',
+        reason: 'No Concord Cloud workspace could be resolved for this repository.',
+      };
+    }
     const deadline =
       options.timeoutMs === undefined ? {} : { deadline: Date.now() + options.timeoutMs };
     return { kind: 'cloud', runtime: { ...session, fetch, ...deadline } };
