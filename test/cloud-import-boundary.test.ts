@@ -22,13 +22,15 @@ function runtimeImportGraph(entrypoint: string): Set<string> {
       true,
     );
     for (const statement of source.statements) {
-      if (
-        !ts.isImportDeclaration(statement) ||
-        statement.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword
-      )
-        continue;
-      const specifier = statement.moduleSpecifier;
-      if (!ts.isStringLiteral(specifier)) continue;
+      let specifier: ts.Expression | undefined;
+      if (ts.isImportDeclaration(statement)) {
+        if (statement.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
+        specifier = statement.moduleSpecifier;
+      } else if (ts.isExportDeclaration(statement)) {
+        if (statement.isTypeOnly) continue;
+        specifier = statement.moduleSpecifier;
+      }
+      if (specifier === undefined || !ts.isStringLiteral(specifier)) continue;
       if (specifier.text === 'better-sqlite3') {
         visited.add('package:better-sqlite3');
         continue;
@@ -44,12 +46,12 @@ function runtimeImportGraph(entrypoint: string): Set<string> {
 }
 
 describe('Cloud entrypoint import boundary', () => {
-  it.each(['src/index.ts', 'src/cli/cloud-index.ts'])(
+  it.each(['src/index.ts', 'src/cli/index.ts', 'src/cli/cloud-index.ts'])(
     '%s does not import the local SQLite runtime',
     (entrypoint) => {
       const modules = runtimeImportGraph(entrypoint);
       const localSqliteModules = [...modules].filter((file) =>
-        /[\\/]db[\\/](?:connection|hermes-session|read-only)\.ts$/u.test(file),
+        /[\\/]db[\\/](?:connection|hermes-session|read-only|schema)\.ts$/u.test(file),
       );
 
       expect(localSqliteModules).toEqual([]);

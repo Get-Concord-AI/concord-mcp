@@ -319,18 +319,23 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
           return;
         }
       }
-      if (event === 'hermes-pre-llm-call' && linkedMachine(process.env) !== undefined) {
-        // Hermes exposes the project path only through its state database. A
-        // Cloud hook must not load that native SQLite binding before it knows
-        // it can safely select the linked project.
-        process.stderr.write(
-          'Concord: Hermes Cloud hooks need a project path; this hook skipped the local Hermes state database.\n',
-        );
-        process.stdout.write('{}\n');
-        return;
-      }
       if (event.startsWith('hermes-')) {
-        const { isHermesHookEvent, runHermesHook } = await import('./hermes-hooks.js');
+        let hermesHooks: typeof import('./hermes-hooks.js');
+        try {
+          hermesHooks = await import('./hermes-hooks.js');
+        } catch (error) {
+          if (event !== 'hermes-pre-llm-call' || linkedMachine(process.env) === undefined) {
+            throw error;
+          }
+          // Hermes exposes the session project only through its own state
+          // database. Some machines cannot load its native SQLite binding.
+          process.stderr.write(
+            'Concord: Hermes Cloud hook could not load Hermes local state; no context was added.\n',
+          );
+          process.stdout.write('{}\n');
+          return;
+        }
+        const { isHermesHookEvent, runHermesHook } = hermesHooks;
         if (isHermesHookEvent(event)) {
           process.stdout.write(`${await runHermesHook(event, readStdin())}\n`);
           return;

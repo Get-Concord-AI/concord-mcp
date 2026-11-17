@@ -147,9 +147,9 @@ aside once no session started before the link is running (nothing is deleted).
 
 The Cloud-backed CLI commands and hooks do not open the local SQLite store.
 Commands that operate only on local work state are unavailable while the machine
-is linked. Concord's Hermes `pre_llm_call` hook currently returns no context
-while linked because Hermes exposes the session's project path only through its
-local state database.
+is linked. Concord's Hermes `pre_llm_call` hook may return no context if its
+local state database cannot be loaded or does not contain the session's project
+path.
 
 </details>
 

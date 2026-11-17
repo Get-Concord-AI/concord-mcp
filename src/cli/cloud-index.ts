@@ -11,6 +11,7 @@ import { VERSION } from '../version.js';
 import { configureCliWorkspace, parseCliWorkspaceOptions } from './workspace-options.js';
 import { cloudAccess } from './commands/cloud-inbox.js';
 import { registerAdaptersCommand } from './commands/adapters.js';
+import { registerCloudCompatibleCommands } from './commands/cloud-compatible.js';
 import {
   CLOUD_EXPORT_MESSAGE,
   runCloudStatus,
@@ -18,7 +19,6 @@ import {
   runCloudWho,
 } from './commands/cloud-views.js';
 import { registerCloudCommand } from './commands/cloud.js';
-import { buildCloudDoctorReport } from './commands/doctor-cloud.js';
 import { registerHookCommand } from './commands/hook.js';
 import { registerInboxCommand } from './commands/inbox.js';
 
@@ -117,38 +117,10 @@ program
     process.exitCode = 1;
   });
 
-program
-  .command('check [files...]')
-  .description(
-    'Check whether files you are about to edit overlap another active task (for hooks/CI)',
-  )
-  .action(() => {
-    process.stderr.write(
-      'This machine works through Concord Cloud, which reports overlaps from start_work; ' +
-        '`concord check` covers local Concord only.\n',
-    );
-  });
-
-program
-  .command('doctor')
-  .description('Check the workspace and Concord Cloud link without opening local stores')
-  .option('--fix', 'Re-point broken harness adapter links at this installed package')
-  .action(async (options) => {
-    if (options.fix === true) {
-      process.stderr.write(
-        'The Cloud-only doctor does not change adapter settings. Use `concord adapters doctor` to inspect them.\n',
-      );
-      process.exitCode = 1;
-      return;
-    }
-    const report = await buildCloudDoctorReport(process.cwd(), process.env);
-    process.stdout.write(`${report.output}\n`);
-    if (!report.healthy) process.exitCode = 1;
-  });
-
 registerHookCommand(program, telemetry);
 registerInboxCommand(program, telemetry);
 registerAdaptersCommand(program);
+registerCloudCompatibleCommands(program);
 registerCloudCommand(program);
 
 try {

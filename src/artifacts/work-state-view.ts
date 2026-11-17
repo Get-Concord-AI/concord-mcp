@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import type { Repositories, TaskRecord, TaskStatus } from '../db/index.js';
 import { effectiveEndpointCapabilities } from '../domain/delivery.js';
 import { detectOverlaps } from '../domain/overlap.js';
-import { endpointPromptable } from '../tools/agent-messages.js';
+import { endpointPromptable } from '../domain/delivery.js';
 import { renderRosterLines } from '../domain/presence-render.js';
 import {
   buildRoster,

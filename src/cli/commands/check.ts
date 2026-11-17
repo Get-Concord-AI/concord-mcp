@@ -2,7 +2,6 @@ import type { Command } from '@commander-js/extra-typings';
 
 import { linkedMachine } from '../../cloud/target.js';
 import type { OverlapWarning } from '../../domain/overlap.js';
-import { openContext } from '../context.js';
 import { checkFileOverlaps } from './overlap-check.js';
 
 export { checkFileOverlaps } from './overlap-check.js';
@@ -44,7 +43,7 @@ export function registerCheckCommand(program: Command): void {
       'Check whether files you are about to edit overlap another active task (for hooks/CI)',
     )
     .option('-t, --task <id>', "your own task id, so its own claim isn't flagged as an overlap")
-    .action((files, options) => {
+    .action(async (files, options) => {
       // Never a failure: hooks wrap this as `concord check … || exit 2`, and a
       // linked machine must not have every edit denied. The cloud reports
       // overlaps from start_work instead.
@@ -55,6 +54,7 @@ export function registerCheckCommand(program: Command): void {
         );
         return;
       }
+      const { openContext } = await import('../context.js');
       const overlaps = checkFileOverlaps(openContext(process.cwd()).repos, files, options.task);
       process.stdout.write(`${renderCheck(files, overlaps)}\n`);
       if (overlaps.length > 0) {
