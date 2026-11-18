@@ -450,8 +450,9 @@ export function registerWorkflowTools(
   const withReceiverAdvisory = <T extends WorkflowToolResponse>(
     result: T,
     callRepos: Repositories,
+    meta: OpenCodeRequestIdentityMetadata | undefined,
   ): T => {
-    const agentId = session?.agentId;
+    const agentId = sessionForRequest(callRepos, meta)?.agentId;
     if (agentId === undefined) return result;
     const endpoint = callRepos.agentEndpoints.getByAgent(agentId);
     const config = endpoint === undefined ? undefined : harnessConfigFor(endpoint.provider);
@@ -545,9 +546,10 @@ export function registerWorkflowTools(
   const withSessionAdvisories = <T extends WorkflowToolResponse>(
     result: T,
     callRepos: Repositories = repos,
+    meta: OpenCodeRequestIdentityMetadata | undefined = undefined,
   ): T =>
     withAdapterAdvisory(
-      withUpdateAdvisory(withDriftAdvisory(withReceiverAdvisory(result, callRepos))),
+      withUpdateAdvisory(withDriftAdvisory(withReceiverAdvisory(result, callRepos, meta))),
     );
 
   const withActor = <T extends { agent_id?: string | undefined }>(
@@ -617,7 +619,7 @@ export function registerWorkflowTools(
           })),
           breadth_reasons: result.claim.breadthReasons,
         },
-      });
+      }, repos, requestMeta);
     },
   );
 
@@ -641,7 +643,11 @@ export function registerWorkflowTools(
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
       const result = handleInspectWork(repos, args, sessionForRequest(repos, requestMeta)?.agentId);
-      return withSessionAdvisories(inspectWorkResponse(result, workspace));
+      return withSessionAdvisories(
+        inspectWorkResponse(result, workspace),
+        repos,
+        requestMeta,
+      );
     },
   );
 
@@ -660,7 +666,7 @@ export function registerWorkflowTools(
       // the whole call stays with the workspace it started in.
       const callRepos = workspace?.repos ?? repos;
       const withCallAdvisories = <T extends WorkflowToolResponse>(result: T): T =>
-        withSessionAdvisories(result, callRepos);
+        withSessionAdvisories(result, callRepos, requestMeta);
       const telemetryWorkspaceRoot = workspace?.repoRoot;
       const messageTaskId =
         args.task_id ??
@@ -828,7 +834,7 @@ export function registerWorkflowTools(
           action: args.action,
           ...transferFields(result),
         },
-      });
+      }, repos, requestMeta);
     },
   );
 
@@ -885,7 +891,7 @@ export function registerWorkflowTools(
           handoff_id: result.evidence.handoff.id,
           review_ready: result.evidence.reviewReady,
         },
-      });
+      }, repos, requestMeta);
     },
   );
 }
