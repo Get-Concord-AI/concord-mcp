@@ -31,10 +31,7 @@ export function isDevinHookEvent(event: string): event is DevinHookEvent {
   return DEVIN_HOOK_EVENTS.some((known) => known === event);
 }
 
-export function devinSessionStartOutput(
-  agentId: string,
-  others: readonly RosterLine[],
-): string {
+export function devinSessionStartOutput(agentId: string, others: readonly RosterLine[]): string {
   return hooks.sessionStartOutput(agentId, others);
 }
 

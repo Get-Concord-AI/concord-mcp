@@ -126,10 +126,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
     switch (event) {
       case events.sessionStart:
         await registerInCloud(runtime, identity.agentId, spec.kind, cwd);
-        return sessionStartOutput(
-          identity.agentId,
-          await cloudRoster(runtime, identity.agentId),
-        );
+        return sessionStartOutput(identity.agentId, await cloudRoster(runtime, identity.agentId));
       case events.promptSubmit:
         return promptSubmitOutput(await drainFromCloud(runtime, identity.agentId, spec.kind));
       case events.sessionEnd:

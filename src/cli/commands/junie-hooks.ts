@@ -65,10 +65,7 @@ export function isJunieHookEvent(event: string): event is JunieHookEvent {
   return JUNIE_HOOK_EVENTS.some((known) => known === event);
 }
 
-export function junieSessionStartOutput(
-  agentId: string,
-  others: readonly RosterLine[],
-): string {
+export function junieSessionStartOutput(agentId: string, others: readonly RosterLine[]): string {
   return hooks.sessionStartOutput(agentId, others);
 }
 

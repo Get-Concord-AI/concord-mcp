@@ -13,9 +13,7 @@ import {
 /** Junie's config home: `JUNIE_HOME` when set, else `~/.junie`. */
 export function junieHome(env: NodeJS.ProcessEnv): string {
   const configured = env['JUNIE_HOME']?.trim();
-  return configured === undefined || configured === ''
-    ? join(userHome(env), '.junie')
-    : configured;
+  return configured === undefined || configured === '' ? join(userHome(env), '.junie') : configured;
 }
 
 function junieMcpPath(env: NodeJS.ProcessEnv): string {
