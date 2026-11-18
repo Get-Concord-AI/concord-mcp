@@ -122,4 +122,18 @@ describe('junie-hooks', () => {
     writeFileSync(configPath, JSON.stringify({ model: 'test' }));
     expect(junieHooksInstalled({ HOME: home })).toBe(false);
   });
+
+  it('honours JUNIE_HOME for the config location', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-junie-home-'));
+    const junieHome = join(home, 'custom-junie');
+    const configPath = join(junieHome, 'config.json');
+    mkdirSync(junieHome, { recursive: true });
+
+    expect(junieHooksInstalled({ HOME: home, JUNIE_HOME: junieHome })).toBe(false);
+
+    const withHooks = upsertJunieHooksConfig(undefined);
+    writeFileSync(configPath, withHooks);
+    expect(junieHooksInstalled({ HOME: home, JUNIE_HOME: junieHome })).toBe(true);
+    expect(junieHooksInstalled({ HOME: home })).toBe(false);
+  });
 });

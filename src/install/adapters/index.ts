@@ -23,8 +23,9 @@ import {
   removeDevinUserHooks,
 } from '../devin-user-hooks.js';
 import { devinHooksInstalled } from '../devin-hooks.js';
+import { statusJunie } from './junie.js';
 import { installJunieHooks, removeJunieHooks } from '../junie-hooks.js';
-import { installJunieMcpConfig, statusJunie, uninstallJunieMcpConfig } from '../junie-config.js';
+import { installJunieMcpConfig, uninstallJunieMcpConfig } from '../junie-config.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import { uninstallHermesMcpConfig } from '../hermes-config.js';
 import {

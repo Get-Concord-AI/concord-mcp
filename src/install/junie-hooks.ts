@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { userHome } from '../config/paths.js';
+import { junieHome } from './junie-config.js';
 import {
   hooksInstalled,
   installHooks,
@@ -10,7 +10,7 @@ import {
 } from './hooks-config.js';
 
 function junieConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(userHome(env), '.junie', 'config.json');
+  return join(junieHome(env), 'config.json');
 }
 
 const OPS = { configPath: junieConfigPath, commandPrefix: 'junie', label: 'Junie' };
