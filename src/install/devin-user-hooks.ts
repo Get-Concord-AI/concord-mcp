@@ -1,27 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { z } from 'zod';
-
 import { devinMcpConfigPath } from './devin-config.js';
+import { type JsonObject, type JsonValue, jsonObjectSchema } from './json.js';
 
 const EVENTS = ['SessionStart', 'UserPromptSubmit', 'SessionEnd'] as const;
-type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
-interface JsonObject {
-  [key: string]: JsonValue;
-}
-
-const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.null(),
-    z.array(jsonValueSchema),
-    z.record(z.string(), jsonValueSchema),
-  ]),
-);
-const objectSchema = z.record(z.string(), jsonValueSchema);
 
 interface ObjectRange {
   key: number;
@@ -129,7 +112,7 @@ function rootObjectRange(text: string, key: string): ObjectRange | undefined {
 
 function parsedObject(text: string): JsonObject {
   const value: unknown = JSON.parse(uncomment(text));
-  return objectSchema.parse(value);
+  return jsonObjectSchema.parse(value);
 }
 
 function commentsIn(text: string): string[] {
@@ -143,7 +126,19 @@ function formatNestedObject(value: JsonObject, comments: readonly string[] = [])
     .map((line, index) => (index === 0 ? line : `  ${line}`))
     .join('\n');
   if (comments.length === 0) return formatted;
-  return `${formatted.slice(0, -1)}\n${comments.map((comment) => `  ${comment}`).join('\n')}\n}`;
+  const lines = formatted.split('\n');
+  const lastLine = lines[lines.length - 1];
+  const indent = lastLine?.match(/^\s*/u)?.[0] ?? '  ';
+  if (lastLine?.trim() === '}') {
+    lines.splice(lines.length - 1, 0, ...comments.map((comment) => `${indent}${comment}`));
+    return `${lines.join('\n')}\n`;
+  }
+  // Fallback: append comments before the final brace if possible
+  if (formatted.endsWith('}')) {
+    const base = formatted.slice(0, -1).trimEnd();
+    return `${base}\n${comments.map((comment) => `${indent}${comment}`).join('\n')}\n}\n`;
+  }
+  return `${formatted}\n${comments.map((comment) => `  ${comment}`).join('\n')}\n`;
 }
 
 function userConfigPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -187,8 +182,8 @@ export function upsertDevinUserHooksConfig(existing: string | undefined): string
   ) {
     throw new Error('Devin config hooks must be an object.');
   }
-  const hooks = objectSchema.parse(previous ?? {});
-  const nextHooks = { ...hooks };
+  const hooks = jsonObjectSchema.parse(previous ?? {});
+  const nextHooks: JsonObject = { ...hooks };
   for (const event of EVENTS) {
     const current = hooks[event];
     const entries = Array.isArray(current) ? current : [];
