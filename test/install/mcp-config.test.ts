@@ -294,7 +294,13 @@ describe('installMcpConfigs with a concord server the user wrote', () => {
     const parsed = z
       .object({
         theme: z.string(),
-        mcpServers: z.object({ concord: z.unknown() }),
+        mcpServers: z.object({
+          concord: z.object({
+            command: z.string(),
+            args: z.array(z.string()),
+            env: z.record(z.string(), z.string()),
+          }),
+        }),
         tools: z.object({ shell: z.object({ backgroundCompletionBehavior: z.string() }) }),
         experimental: z.object({ modelSteering: z.boolean() }),
       })
@@ -313,6 +319,18 @@ describe('installMcpConfigs with a concord server the user wrote', () => {
     installMcpConfigs(root);
 
     expect(readFileSync(join(root, grokPath), 'utf8')).toBe(customGrok);
+  });
+
+  it.each([
+    ['an inline table', 'mcp_servers = { concord = { command = "node" } }\n'],
+    ['a top-level dotted key', 'mcp_servers.concord.command = "concord-mcp"\n'],
+    ['a dotted key under [mcp_servers]', '[mcp_servers]\nconcord.command = "concord-mcp"\n'],
+  ])('keeps a Grok entry written as %s and finishes setup', (_shape, content) => {
+    const grokPath = join('.grok', 'config.toml');
+    const root = project({ [grokPath]: content });
+
+    expect(installMcpConfigs(root)).toContain(grokPath);
+    expect(readFileSync(join(root, grokPath), 'utf8')).toBe(content);
   });
 
   it('refreshes a Gemini entry that Concord wrote', () => {
@@ -354,7 +372,10 @@ describe('hasUserGrokMcpServer', () => {
       '[mcp_servers.concord]\ncommand = "concord-mcp"\n[mcp_servers.concord.env]\nMY_TOKEN = "a"\n',
       '[mcp_servers.concord]\ncommand = "concord-mcp"\n[mcp_servers.concord.tools]\nx = 1\n',
       'mcp_servers.concord.command = "node"\n',
+      'mcp_servers.concord.command = "concord-mcp"\n',
+      '[mcp_servers]\nconcord.command = "concord-mcp"\n',
       '[mcp_servers]\nconcord = { command = "node" }\n',
+      'mcp_servers = { concord = { command = "node" } }\n',
       '[mcp_servers."concord"]\ncommand = "node"\n',
     ];
     for (const entry of entries) {

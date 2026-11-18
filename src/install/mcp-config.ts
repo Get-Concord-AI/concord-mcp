@@ -120,25 +120,53 @@ export function hasMcpServer(existing: string): boolean {
 /** Matches Concord's `mcp_servers.concord` TOML key path and every key or subtable under it. */
 export const CONCORD_TOML_KEY = /^mcp_servers\.concord(?:\.|$)/u;
 
-/** Each key path Grok TOML assigns or opens as a table, spacing and quotes removed. */
-function* grokKeyPaths(existing: string): Generator<{ path: string; header: boolean }> {
+/** Where a Grok TOML key path comes from; Concord itself only writes `header` and `key` paths. */
+type GrokKeySource = 'header' | 'key' | 'dotted' | 'inline' | 'string';
+
+interface GrokKeyPath {
+  readonly path: string;
+  readonly source: GrokKeySource;
+  /** The assigned value's text, for `key` and `dotted` paths. */
+  readonly value: string;
+  readonly fenced: boolean;
+}
+
+/**
+ * Each key path Grok TOML assigns or opens as a table, spacing and quotes removed. A `dotted`
+ * path is one whose key reaches into a table the current header does not name; a `string`
+ * path is the table a multi-line string line sits in.
+ */
+function* grokKeyPaths(existing: string): Generator<GrokKeyPath> {
   let table = '';
+  let fenced = false;
   for (const { text, inString } of tomlLines(existing)) {
+    const trimmed = text.trim();
+    if (!inString && trimmed === GROK_FENCE_START) fenced = true;
+    if (!inString && trimmed === GROK_FENCE_END) {
+      fenced = false;
+      continue;
+    }
     // A line inside a multi-line string is text, however much it looks like TOML.
-    if (inString) continue;
+    if (inString) {
+      yield { path: table, source: 'string', value: '', fenced };
+      continue;
+    }
     const header = /^\s*\[([^\]]+)\]/u.exec(text)?.[1];
     if (header !== undefined) {
       table = tomlKeyPath(header);
-      yield { path: table, header: true };
+      yield { path: table, source: 'header', value: '', fenced };
       continue;
     }
-    const assignment = /^\s*([^=#]+?)\s*=/u.exec(text);
+    const assignment = /^\s*([^=#]+?)\s*=(.*)$/u.exec(text);
     const key = assignment?.[1];
     if (assignment === null || key === undefined) continue;
+    const rest = assignment[2] ?? '';
     const path = tomlKeyPath(table === '' ? key : `${table}.${key}`);
-    yield { path, header: false };
-    for (const inner of inlineTableKeys(text.slice(assignment[0].length))) {
-      yield { path: `${path}.${inner}`, header: false };
+    const value = rest.replace(/\s+#.*$/u, '').trim();
+    const dotted = tomlKeyPath(key).split('.').length > 1;
+    yield { path, source: dotted ? 'dotted' : 'key', value, fenced };
+    for (const inner of inlineTableKeys(rest)) {
+      yield { path: `${path}.${inner}`, source: 'inline', value: '', fenced };
     }
   }
 }
@@ -210,7 +238,9 @@ export function upsertGrokMcpServer(
 ): string {
   const base = removeGrokMcpServer(existing ?? '');
   // TOML cannot add a `[mcp_servers.concord]` table to an inline `mcp_servers = { ... }`.
-  if ([...grokKeyPaths(base)].some(({ path, header }) => !header && path === 'mcp_servers')) {
+  if (
+    [...grokKeyPaths(base)].some(({ path, source }) => source === 'key' && path === 'mcp_servers')
+  ) {
     throw new McpConfigParseError(
       configPath,
       'sets mcp_servers as an inline table, which Concord cannot add to',
@@ -275,36 +305,18 @@ const GROK_WRITTEN_TABLES: ReadonlySet<string> = new Set([
 /**
  * Whether Grok TOML has a `concord` server outside Concord's own fence that
  * holds anything Concord does not write: another command, arguments, extra
- * environment, or a spelling such as an inline table. Setup leaves it alone.
+ * environment, or a spelling Concord never uses (dotted keys, inline tables)
+ * and so could not cleanly replace. Setup leaves it alone.
  */
 export function hasUserGrokMcpServer(existing: string): boolean {
-  let inFence = false;
-  let table = '';
-  for (const { text, inString } of tomlLines(existing)) {
-    const trimmed = text.trim();
-    if (!inString && trimmed === GROK_FENCE_START) inFence = true;
-    if (inFence) {
-      if (!inString && trimmed === GROK_FENCE_END) inFence = false;
+  for (const { path, source, value, fenced } of grokKeyPaths(existing)) {
+    if (fenced || !CONCORD_TOML_KEY.test(path)) continue;
+    if (source === 'header') {
+      if (!GROK_WRITTEN_TABLES.has(path)) return true;
       continue;
     }
-    if (inString) {
-      if (CONCORD_TOML_KEY.test(table)) return true;
-      continue;
-    }
-    const header = /^\s*\[([^\]]+)\]/u.exec(text)?.[1];
-    if (header !== undefined) {
-      table = tomlKeyPath(header);
-      if (CONCORD_TOML_KEY.test(table) && !GROK_WRITTEN_TABLES.has(table)) return true;
-      continue;
-    }
-    const assignment = /^\s*([^=#]+?)\s*=(.*)$/u.exec(text);
-    const key = assignment?.[1];
-    if (assignment === null || key === undefined) continue;
-    const path = tomlKeyPath(table === '' ? key : `${table}.${key}`);
-    if (!CONCORD_TOML_KEY.test(path)) continue;
-    if (!GROK_WRITTEN_VALUES.has(path)) return true;
+    if (source !== 'key' || !GROK_WRITTEN_VALUES.has(path)) return true;
     const written = GROK_WRITTEN_VALUES.get(path);
-    const value = (assignment[2] ?? '').replace(/\s+#.*$/u, '').trim();
     if (written !== undefined && value !== written) return true;
   }
   return false;
