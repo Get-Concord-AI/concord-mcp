@@ -28,6 +28,8 @@ const spooledSchema = z.array(
     taskId: z.string().nullable(),
     content: z.string(),
     messageKind: z.enum(['prompt', 'reply']),
+    // Spooled before the field existed: every message then wanted an answer.
+    expectsReply: z.boolean().default(true),
     deliveryLatencyMs: z.number().nullable(),
   }),
 );

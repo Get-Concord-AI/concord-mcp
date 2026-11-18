@@ -13,6 +13,7 @@ const message: DeliverableMessage = {
   taskId: null,
   content: 'held for the next hook',
   messageKind: 'prompt',
+  expectsReply: true,
   deliveryLatencyMs: 12,
 };
 
