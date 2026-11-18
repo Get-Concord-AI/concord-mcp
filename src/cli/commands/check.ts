@@ -11,17 +11,16 @@ import { linkedMachine } from '../../cloud/target.js';
 import { openContext } from '../context.js';
 
 /**
- * Exact-file collisions between the given files and OTHER active tasks' declared
- * files. This is the client-agnostic primitive behind edit-time enforcement: a
+ * Collisions between the given files and OTHER active tasks' claimed paths.
+ * This is the client-agnostic primitive behind edit-time enforcement: a
  * PreToolUse hook (Claude Code), a git pre-commit hook, or CI can call it to
  * find out whether the files about to change are already claimed by someone
  * else. `selfTaskId` excludes your own claim so you are not flagged against
  * yourself.
  *
  * Unlike claim-time overlap detection (which also warns on shared
- * directories/modules/domains), this gate is intentionally precise: it fires
- * only on the *same file*, since blocking an edit on a coarse signal like a
- * shared top-level directory would be too noisy to be useful.
+ * directories/modules/domains), this gate fires only for files claimed
+ * directly or through a directory claim.
  */
 export function checkFileOverlaps(
   repos: Repositories,
@@ -34,10 +33,10 @@ export function checkFileOverlaps(
     if (!CLAIMED_STATUSES.has(task.status) || task.taskId === selfTaskId) {
       continue;
     }
-    const entries = task.expectedFiles.map(normalizePath).filter((file) => file !== '');
-    const shared = entries.filter((entry) => wanted.includes(entry));
+    const shared = task.expectedFiles.map(normalizePath).filter((entry) => wanted.includes(entry));
     const covered = wanted.filter(
-      (file) => !shared.includes(file) && entries.some((entry) => entryCoversFile(entry, file)),
+      (file) =>
+        !shared.includes(file) && task.expectedFiles.some((entry) => entryCoversFile(entry, file)),
     );
     const reasons: string[] = [];
     if (shared.length > 0) {

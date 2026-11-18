@@ -78,10 +78,19 @@ export function normalizePath(file: string): string {
   return normalized === '.' ? '' : normalized;
 }
 
+/** Preserve explicit repo-root claims before file normalization drops them. */
+function normalizeClaimEntry(entry: string): string {
+  const trimmed = entry.trim();
+  return trimmed === '.' || trimmed === './' || trimmed === '/' ? '.' : normalizePath(trimmed);
+}
+
 /** True when `outer` is a strict ancestor directory of `inner`. Both must be
  * normalized. Matches whole path segments, so `src/app` does not contain
  * `src/application/x.ts`. */
 function containsPath(outer: string, inner: string): boolean {
+  if (outer === '.') {
+    return inner !== '' && inner !== '.';
+  }
   return outer !== '' && inner.startsWith(`${outer}/`);
 }
 
@@ -89,8 +98,8 @@ function containsPath(outer: string, inner: string): boolean {
  * `dir -> path`. A file and a directory cannot share a path, so any entry that
  * is a strict path prefix of another is a directory claim. */
 function containedPairs(a: readonly string[], b: readonly string[]): string[] {
-  const left = [...new Set(a.map(normalizePath).filter((file) => file !== ''))];
-  const right = [...new Set(b.map(normalizePath).filter((file) => file !== ''))];
+  const left = [...new Set(a.map(normalizeClaimEntry).filter((file) => file !== ''))];
+  const right = [...new Set(b.map(normalizeClaimEntry).filter((file) => file !== ''))];
   const pairs = new Set<string>();
   for (const x of left) {
     for (const y of right) {
@@ -106,7 +115,7 @@ function containedPairs(a: readonly string[], b: readonly string[]): string[] {
 
 /** True when a declared entry equals the file or is a directory containing it. */
 export function entryCoversFile(entry: string, file: string): boolean {
-  const normalizedEntry = normalizePath(entry);
+  const normalizedEntry = normalizeClaimEntry(entry);
   const normalizedFile = normalizePath(file);
   return (
     normalizedEntry !== '' &&
@@ -151,22 +160,24 @@ function detailsFor(
   );
   if (sameFiles.length > 0) {
     reasons.push(`same file(s): ${sameFiles.join(', ')}`);
-    kinds.push('same_file');
   }
 
   const nested = containedPairs(candidate.expectedFiles, existing.expectedFiles);
   if (nested.length > 0) {
     reasons.push(`directory claim covers file(s): ${nested.join(', ')}`);
-    kinds.push('same_file');
   }
 
-  const sameDirs = sortedIntersection(
-    directories(candidate.expectedFiles),
-    directories(existing.expectedFiles),
-  );
-  if (sameDirs.length > 0 && sameFiles.length === 0 && nested.length === 0) {
-    reasons.push(`same directory: ${sameDirs.join(', ')}`);
-    kinds.push('same_directory');
+  if (sameFiles.length > 0 || nested.length > 0) {
+    kinds.push('same_file');
+  } else {
+    const sameDirs = sortedIntersection(
+      directories(candidate.expectedFiles),
+      directories(existing.expectedFiles),
+    );
+    if (sameDirs.length > 0) {
+      reasons.push(`same directory: ${sameDirs.join(', ')}`);
+      kinds.push('same_directory');
+    }
   }
 
   const sameModules = sortedIntersection(tokensOf(candidate.modules), tokensOf(existing.modules));

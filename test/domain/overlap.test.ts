@@ -222,6 +222,44 @@ describe('detectOverlaps', () => {
     expect(reverse.map((warning) => warning.taskId)).toEqual(['D2']);
   });
 
+  it.each(['.', './', '/'])('flags root claim %j in both directions', (root) => {
+    const rootClaim = task({ taskId: 'ROOT', expectedFiles: [root] });
+    const fileClaim = task({ taskId: 'FILE', expectedFiles: ['src/app/page.tsx'] });
+    const reasons = ['directory claim covers file(s): . -> src/app/page.tsx'];
+
+    expect(detectOverlaps(rootClaim, [fileClaim])).toEqual([
+      { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(fileClaim, [rootClaim])).toEqual([
+      { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
+    ]);
+  });
+
+  it.each(['', ' \t '])('ignores blank claim %j', (blank) => {
+    const blankClaim = task({ taskId: 'BLANK', expectedFiles: [blank] });
+    const fileClaim = task({ taskId: 'FILE', expectedFiles: ['src/app/page.tsx'] });
+
+    expect(detectOverlaps(blankClaim, [fileClaim])).toEqual([]);
+    expect(detectOverlaps(fileClaim, [blankClaim])).toEqual([]);
+  });
+
+  it('reports the same_file kind once for exact and nested overlaps', () => {
+    const left = task({ taskId: 'LEFT', expectedFiles: ['src/app', 'src/x.ts'] });
+    const right = task({ taskId: 'RIGHT', expectedFiles: ['src/x.ts', 'src/app/page.tsx'] });
+
+    expect(detectOverlaps(left, [right])).toEqual([
+      {
+        taskId: 'RIGHT',
+        title: 'RIGHT',
+        reasons: [
+          'same file(s): src/x.ts',
+          'directory claim covers file(s): src/app -> src/app/page.tsx',
+        ],
+        kinds: ['same_file'],
+      },
+    ]);
+  });
+
   it('does not treat a sibling with a shared name prefix as inside the directory', () => {
     const dir: OverlapSurface = {
       taskId: 'DIR',
