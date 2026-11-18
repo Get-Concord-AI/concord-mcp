@@ -33,10 +33,7 @@ import {
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { LINKED_MACHINE_MESSAGE } from '../../src/cloud/target.js';
 import { openRepositories, type Repositories } from '../../src/db/index.js';
-import {
-  agentIdForSession,
-  UNRESOLVED_IDENTITY_MESSAGE,
-} from '../../src/domain/identity.js';
+import { agentIdForSession, UNRESOLVED_IDENTITY_MESSAGE } from '../../src/domain/identity.js';
 import {
   CONCORD_GLOBAL_INSTRUCTIONS,
   CONCORD_INSTRUCTIONS,
