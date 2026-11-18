@@ -843,14 +843,11 @@ describe('concord work', () => {
 
 describe('concord work in agent guidance', () => {
   it('offers the shell path next to the MCP tools', () => {
-    for (const text of [
-      CONCORD_INSTRUCTIONS,
-      CONCORD_GLOBAL_INSTRUCTIONS,
-      CONCORD_SERVER_INSTRUCTIONS,
-      CONCORD_SERVER_ONLY,
-    ]) {
+    for (const text of [CONCORD_INSTRUCTIONS, CONCORD_GLOBAL_INSTRUCTIONS, CONCORD_SERVER_ONLY]) {
       expect(text).toContain('concord work');
     }
+    // MCP clients already have the tools; the shell form is noise there.
+    expect(CONCORD_SERVER_INSTRUCTIONS).not.toContain('concord work');
     expect(CONCORD_INSTRUCTIONS).toContain('start_work');
     expect(CONCORD_SERVER_ONLY).toContain('MCP server');
   });
