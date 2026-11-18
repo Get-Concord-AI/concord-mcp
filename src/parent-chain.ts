@@ -57,13 +57,19 @@ function processInfo(pid: number): { ppid: number | undefined; name: string } | 
  * server's; the names let a hook tell wrapper shells from the client itself.
  * Best-effort: the walk stops where the process table stops.
  */
-export function ancestorChain(limit = 4, ppid: number = process.ppid): AncestorProcess[] {
+export function ancestorChain(
+  limit = 4,
+  ppid: number = process.ppid,
+  stopAfter?: (ancestor: AncestorProcess) => boolean,
+): AncestorProcess[] {
   const chain: AncestorProcess[] = [];
   let current: number | undefined = ppid;
   while (current !== undefined && current > 1 && chain.length < limit) {
     if (chain.some((ancestor) => ancestor.pid === current)) break;
     const info = processInfo(current);
-    chain.push({ pid: current, name: info?.name ?? '' });
+    const ancestor = { pid: current, name: info?.name ?? '' };
+    chain.push(ancestor);
+    if (stopAfter?.(ancestor) === true) break;
     current = info?.ppid;
   }
   return chain;

@@ -107,12 +107,21 @@ describe('recordClientBinding', () => {
 
   it('re-records the same pids on a repeated fire', () => {
     recordClientBinding(repos, AGENT_A, chain([100, 'claude']));
-    repos.sessionBindings.touch(AGENT_A.agentId, '2026-01-01T00:00:00Z');
+    repos.sessionBindings.upsert(100, AGENT_A.agentId, AGENT_A.kind, '2026-01-01T00:00:00Z');
 
     recordClientBinding(repos, AGENT_A, chain([100, 'claude'], [200, 'claude']));
 
     expect(repos.sessionBindings.forClientPid(100)?.updatedAt).not.toBe('2026-01-01T00:00:00Z');
     // 200 is the client's parent — outside the window, so no row is written.
     expect(repos.sessionBindings.forClientPid(200)).toBeUndefined();
+  });
+
+  it('writes nothing for kinds whose MCP server has no env identity', () => {
+    // Codex and Hermes servers resolve identity without an environment
+    // session id, so a binding they could never adopt is not worth the walk.
+    recordClientBinding(repos, { agentId: 'codex:aaaabbbb', kind: 'codex' });
+    recordClientBinding(repos, { agentId: 'hermes:aaaabbbb', kind: 'hermes' });
+
+    expect(repos.sessionBindings.forClientPid(process.ppid)).toBeUndefined();
   });
 });

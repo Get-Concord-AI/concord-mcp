@@ -53,6 +53,14 @@ export function bindingTargetPids(ancestors: readonly AncestorProcess[]): number
 }
 
 /**
+ * Kinds whose MCP server never holds an environment identity, so a recorded
+ * binding can never be adopted (`liveSessionIdentity` needs an env identity
+ * to correct). Walking the process table and writing rows for them is pure
+ * overhead — on Windows each lookup is a powershell spawn per hook fire.
+ */
+const BINDINGLESS_KINDS: ReadonlySet<string> = new Set(['codex', 'hermes']);
+
+/**
  * Record that this hook's client hosts `identity` — the client pid and any
  * wrapper shells below it, so a shell between client and hook still leaves
  * the binding where the client's MCP servers can see it. The rows are
@@ -63,11 +71,18 @@ export function bindingTargetPids(ancestors: readonly AncestorProcess[]): number
 export function recordClientBinding(
   repos: Repositories,
   identity: { agentId: string; kind: string },
-  ancestors: readonly AncestorProcess[] = ancestorChain(CLIENT_BINDING_DEPTH),
+  ancestors?: readonly AncestorProcess[],
 ): void {
+  if (BINDINGLESS_KINDS.has(identity.kind)) return;
+  const chain =
+    ancestors ??
+    // Stop the walk at the first non-shell ancestor instead of always
+    // climbing CLIENT_BINDING_DEPTH levels that bindingTargetPids would
+    // discard anyway.
+    ancestorChain(CLIENT_BINDING_DEPTH, process.ppid, (a) => !isShellWrapper(a.name));
   const at = new Date().toISOString();
   repos.sessionBindings.removeForAgent(identity.agentId);
-  for (const pid of bindingTargetPids(ancestors)) {
+  for (const pid of bindingTargetPids(chain)) {
     repos.sessionBindings.upsert(pid, identity.agentId, identity.kind, at);
   }
 }
