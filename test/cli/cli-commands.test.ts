@@ -109,8 +109,8 @@ describe('CLI read/export commands', () => {
     expect(existsSync(join(dir, '.concord', 'REVIEW_PACKET.md'))).toBe(true);
   });
 
-  it('doctor reports schema version and adoption', () => {
-    const report = runDoctor(dir);
+  it('doctor reports schema version and adoption', async () => {
+    const report = await runDoctor(dir);
     expect(report).toContain('schema v18, expected v18');
     expect(report).toContain('TASK-12');
     expect(report).toContain('start_work: yes');
@@ -119,32 +119,32 @@ describe('CLI read/export commands', () => {
     expect(report).toContain(join(dir, '.concord'));
   });
 
-  it('doctor reports stale generated Concord instructions', () => {
+  it('doctor reports stale generated Concord instructions', async () => {
     writeFileSync(
       join(dir, 'AGENTS.md'),
       '<!-- concord:start -->\n## Concord\nOld tool instructions\n<!-- concord:end -->\n',
     );
 
-    expect(runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
+    expect(await runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
   });
 
-  it('doctor ignores generic headings and reports invalid instruction paths', () => {
+  it('doctor ignores generic headings and reports invalid instruction paths', async () => {
     writeFileSync(join(dir, 'AGENTS.md'), '## Concord\nHuman-authored project notes\n');
     mkdirSync(join(dir, 'CLAUDE.md'));
 
-    const report = runDoctor(dir);
+    const report = await runDoctor(dir);
     expect(report).not.toContain('stale -> AGENTS.md');
     expect(report).toContain('instructions unreadable -> CLAUDE.md');
   });
 
-  it('doctor requires the workflow marker inside the generated block', () => {
+  it('doctor requires the workflow marker inside the generated block', async () => {
     writeFileSync(
       join(dir, 'AGENTS.md'),
       `<!-- concord:workflow-version=${CONCORD_INSTRUCTION_VERSION} -->\n` +
         '<!-- concord:start -->\n## Concord\nOld generated instructions\n<!-- concord:end -->\n',
     );
 
-    expect(runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
+    expect(await runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
   });
 
   it('doctor fails on a dangling Claude plugin link and --fix re-points it', async () => {

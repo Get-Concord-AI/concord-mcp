@@ -104,7 +104,9 @@ describe('doctor on a linked machine', () => {
 
     const listed = await report();
     const resolved = realpathSync(store);
-    expect(listed.output).toContain(`${resolved}: this repository's local store, 1 open task(s)`);
+    expect(listed.output).toContain(
+      `${resolved}: this repository's local store, open tasks not counted while Concord Cloud keeps local stores closed`,
+    );
     expect(listed.output).toContain('a repository link from before Concord 0.17');
     // SQLite's pairing is kept, so a log holding committed work stays with its database.
     expect(listed.output).toMatch(
@@ -170,7 +172,7 @@ describe('doctor on a linked machine', () => {
     mkdirSync(join(repo, '.concord'), { recursive: true });
     writeFileSync(join(repo, '.concord', 'concord.db'), 'not a database');
     expect(findLeftovers(repo, env)[0]?.description).toContain(
-      'open tasks not counted (in use, or unreadable by this version)',
+      'open tasks not counted while Concord Cloud keeps local stores closed',
     );
   });
 

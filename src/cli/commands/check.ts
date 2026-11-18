@@ -1,9 +1,10 @@
 import type { Command } from '@commander-js/extra-typings';
 
-import type { Repositories } from '../../db/index.js';
-import { CLAIMED_STATUSES, normalizePath, type OverlapWarning } from '../../domain/overlap.js';
 import { linkedMachine } from '../../cloud/target.js';
-import { openContext } from '../context.js';
+import type { OverlapWarning } from '../../domain/overlap.js';
+import { checkFileOverlaps } from './overlap-check.js';
+
+export { checkFileOverlaps } from './overlap-check.js';
 
 /**
  * Exact-file collisions between the given files and OTHER active tasks' declared
@@ -18,31 +19,6 @@ import { openContext } from '../context.js';
  * only on the *same file*, since blocking an edit on a coarse signal like a
  * shared top-level directory would be too noisy to be useful.
  */
-export function checkFileOverlaps(
-  repos: Repositories,
-  files: readonly string[],
-  selfTaskId?: string,
-): OverlapWarning[] {
-  const wanted = new Set(files.map(normalizePath).filter((file) => file !== ''));
-  const warnings: OverlapWarning[] = [];
-  for (const task of repos.tasks.list()) {
-    if (!CLAIMED_STATUSES.has(task.status) || task.taskId === selfTaskId) {
-      continue;
-    }
-    const shared = task.expectedFiles.map(normalizePath).filter((file) => wanted.has(file));
-    if (shared.length > 0) {
-      const unique = [...new Set(shared)].sort((a, b) => a.localeCompare(b));
-      warnings.push({
-        taskId: task.taskId,
-        title: task.title,
-        reasons: [`same file(s): ${unique.join(', ')}`],
-        kinds: ['same_file'],
-      });
-    }
-  }
-  return warnings;
-}
-
 /** Human-readable result for `concord check`. */
 export function renderCheck(files: readonly string[], overlaps: readonly OverlapWarning[]): string {
   if (files.length === 0) {
@@ -67,7 +43,7 @@ export function registerCheckCommand(program: Command): void {
       'Check whether files you are about to edit overlap another active task (for hooks/CI)',
     )
     .option('-t, --task <id>', "your own task id, so its own claim isn't flagged as an overlap")
-    .action((files, options) => {
+    .action(async (files, options) => {
       // Never a failure: hooks wrap this as `concord check … || exit 2`, and a
       // linked machine must not have every edit denied. The cloud reports
       // overlaps from start_work instead.
@@ -78,6 +54,7 @@ export function registerCheckCommand(program: Command): void {
         );
         return;
       }
+      const { openContext } = await import('../context.js');
       const overlaps = checkFileOverlaps(openContext(process.cwd()).repos, files, options.task);
       process.stdout.write(`${renderCheck(files, overlaps)}\n`);
       if (overlaps.length > 0) {

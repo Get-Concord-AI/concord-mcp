@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import type { Command } from '@commander-js/extra-typings';
 import { z } from 'zod';
 
-import { migrations } from '../../db/schema.js';
 import { buildAdoption } from '../../domain/adoption.js';
 import { BLOCK_END, BLOCK_START } from '../../install/block.js';
 import {
@@ -22,11 +21,11 @@ import {
   type LinkRepair,
 } from '../../install/adapters/links.js';
 import { CONCORD_INSTRUCTION_VERSION } from '../../install/instructions.js';
-import { endpointPromptable } from '../../tools/agent-messages.js';
+import { endpointPromptable } from '../../domain/delivery.js';
 import { linkedMachine } from '../../cloud/target.js';
 import { resolveRepoRoot } from '../../config/paths.js';
 import { gitOriginRemote } from '../../workspaces/store.js';
-import { openContext, type CliContext } from '../context.js';
+import type { CliContext } from '../context.js';
 import { buildCloudDoctorReport } from './doctor-cloud.js';
 import { askQuestion } from './setup.js';
 
@@ -63,11 +62,12 @@ function instructionStatus(repoRoot: string): string {
 }
 
 /** Produce a human-readable diagnostics report for the workspace. */
-export function buildDoctorReport(
+export async function buildDoctorReport(
   ctx: CliContext,
   env: NodeJS.ProcessEnv = process.env,
   adapters: readonly AdapterReport[] = statusGlobalAdapters(env, ctx.repoRoot),
-): string {
+): Promise<string> {
+  const { migrations } = await import('../../db/schema.js');
   const schemaVersion = z.number().parse(ctx.repos.db.pragma('user_version', { simple: true }));
   const tasks = ctx.repos.tasks.list();
   const events = ctx.repos.events.list();
@@ -166,6 +166,7 @@ export async function runDoctorCommand(
 
   let ctx: CliContext;
   try {
+    const { openContext } = await import('../context.js');
     ctx = openContext(cwd, env);
   } catch (error) {
     // A store this build cannot migrate (one a development build changed, say)
@@ -185,12 +186,16 @@ export async function runDoctorCommand(
     };
   }
   return {
-    output: [...preface, buildDoctorReport(ctx, env, adapters)].join('\n'),
+    output: [...preface, await buildDoctorReport(ctx, env, adapters)].join('\n'),
     healthy: adaptersHealthy,
   };
 }
 
-export function runDoctor(cwd: string, env: NodeJS.ProcessEnv = process.env): string {
+export async function runDoctor(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  const { openContext } = await import('../context.js');
   return buildDoctorReport(openContext(cwd, env), env);
 }
 
