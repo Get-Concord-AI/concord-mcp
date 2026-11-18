@@ -40,6 +40,7 @@ describe('installConcord', () => {
       'AGENTS.md',
       join('.codex', 'concord.md'),
       join('.cursor', 'rules', 'concord.mdc'),
+      join('.roo', 'rules', 'concord.md'),
       join('.github', 'copilot-instructions.md'),
       join('.agents', 'rules', 'concord.md'),
     ]);
@@ -54,6 +55,15 @@ describe('installConcord', () => {
     expect(readFileSync(join(root, '.cursor', 'rules', 'concord.mdc'), 'utf8')).toContain(
       'alwaysApply: true',
     );
+
+    // Roo cannot be identified from its session, so its rule must tell it to register
+    // and pass an agent_id rather than the generic "omit it" guidance.
+    const rooRule = readFileSync(join(root, '.roo', 'rules', 'concord.md'), 'utf8');
+    expect(rooRule).toContain('start_work');
+    expect(rooRule).toContain('concord inbox register');
+    expect(rooRule).toContain('--provider roo --agent');
+    expect(rooRule).not.toContain('omit it');
+
     expect(readFileSync(join(root, '.agents', 'rules', 'concord.md'), 'utf8')).toContain(
       'trigger: always_on',
     );

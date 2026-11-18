@@ -69,6 +69,7 @@ describe('installMcpConfigs', () => {
     expect(written).toEqual([
       '.mcp.json',
       join('.cursor', 'mcp.json'),
+      join('.roo', 'mcp.json'),
       join('.agents', 'mcp_config.json'),
       join('.github', 'mcp.json'),
       join('.qwen', 'settings.json'),
@@ -91,6 +92,7 @@ describe('installMcpConfigs', () => {
         })
         .parse(JSON.parse(readFileSync(join(root, relPath), 'utf8'))).mcpServers.concord.env
         .CONCORD_AGENT_KIND;
+    expect(pinnedKind(join('.roo', 'mcp.json'))).toBe('roo');
     expect(pinnedKind(join('.agents', 'mcp_config.json'))).toBe('antigravity');
     expect(pinnedKind(join('.github', 'mcp.json'))).toBe('copilot-cli');
     // Read by more than one harness, so each resolves its own session instead.
@@ -103,6 +105,41 @@ describe('installMcpConfigs', () => {
       .parse(JSON.parse(readFileSync(join(root, '.gemini', 'settings.json'), 'utf8')));
     expect(gemini.tools.shell.backgroundCompletionBehavior).toBe('inject');
     expect(gemini.experimental.modelSteering).toBe(true);
+  });
+
+  it('merges into an existing .roo/mcp.json and keeps the other servers', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-mcp-config-'));
+    mkdirSync(join(root, '.roo'), { recursive: true });
+    const existing = {
+      mcpServers: { other: { command: 'other-server', args: ['--flag'] } },
+      extra: true,
+    };
+    writeFileSync(join(root, '.roo', 'mcp.json'), `${JSON.stringify(existing, null, 2)}\n`);
+
+    installMcpConfigs(root);
+
+    const merged = z
+      .object({
+        extra: z.boolean(),
+        mcpServers: z.object({
+          other: z.object({ command: z.string(), args: z.array(z.string()) }),
+          concord: z.object({ command: z.string() }),
+        }),
+      })
+      .parse(JSON.parse(readFileSync(join(root, '.roo', 'mcp.json'), 'utf8')));
+    expect(merged.extra).toBe(true);
+    expect(merged.mcpServers.other).toEqual({ command: 'other-server', args: ['--flag'] });
+    expect(merged.mcpServers.concord.command).toBe(CONCORD_SERVER_COMMAND);
+  });
+
+  it('writes .roo/mcp.json identically when setup is re-run', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-mcp-config-'));
+
+    installMcpConfigs(root);
+    const first = readFileSync(join(root, '.roo', 'mcp.json'), 'utf8');
+    installMcpConfigs(root);
+
+    expect(readFileSync(join(root, '.roo', 'mcp.json'), 'utf8')).toBe(first);
   });
 
   it('preserves an existing custom user-owned concord server in .agents/mcp_config.json', () => {

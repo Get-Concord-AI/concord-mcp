@@ -157,6 +157,7 @@ aside once no session started before the link is running (nothing is deleted).
 | Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)         |
 | Grok Build                         | [Setup and delivery](./docs/grok-build.md)         |
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
+| Roo Code                           | [Setup and delivery](./docs/roo-code.md)           |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
