@@ -1,15 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readSync,
-  realpathSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { closeSync, existsSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { CONCORD_DIR, findCheckoutRoot, findRepoRoot } from '../config/paths.js';
 import type { Repositories } from '../db/index.js';
@@ -35,9 +26,8 @@ import {
 
 /**
  * Files an agent shares with a prompt or reply. Each file is read from the
- * sender's own worktree, stored with its message, and retrieved by a recipient
- * through `concord files get`, which checks the checksum and writes only inside
- * the recipient's worktree.
+ * sender's own worktree, checked, and stored with its message in the same
+ * transaction. Retrieval by the recipient is not implemented yet.
  */
 
 /** A file read from the sender's worktree, not yet stored with its message. */
@@ -237,96 +227,5 @@ export async function handleSendWithAttachments(
   return {
     ...result,
     outlook: `${result.outlook} Attached ${String(attached.length)} file(s): ${ids}.`,
-  };
-}
-
-export interface FetchSharedFileInput {
-  fileId: string;
-  agentId: string;
-  /** Where to save it: relative to the reader's worktree, or an absolute path inside it. */
-  destination: string;
-  /** The repository root of this workspace (openContext().repoRoot on the CLI). */
-  workspaceRoot: string;
-}
-
-export interface FetchedSharedFile {
-  fileId: string;
-  filename: string;
-  sizeBytes: number;
-  sha256: string;
-  senderAgentId: string;
-  path: string;
-}
-
-/**
- * The path a retrieved file may be written to: inside the reader's worktree,
- * with the nearest existing folder resolved past symlinks so a link cannot
- * lead the write out of it. Creating folders is allowed; overwriting is not.
- */
-function writeInside(root: string, requested: string, content: Buffer): string {
-  const target = isAbsolute(requested) ? resolve(requested) : resolve(root, requested);
-  let ancestor = dirname(target);
-  while (!existsSync(ancestor)) ancestor = dirname(ancestor);
-  const real = join(realpathSync(ancestor), relative(ancestor, target));
-  if (!isInsideDirectory(root, real)) {
-    throw new Error(`${requested} is outside your worktree; retrieved files are saved inside it.`);
-  }
-  if (isReserved(root, real)) {
-    throw new Error(`${requested} is Concord or git metadata and cannot be written to.`);
-  }
-  mkdirSync(dirname(target), { recursive: true });
-  try {
-    writeFileSync(target, content, { flag: 'wx' });
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
-      throw new Error(
-        `${requested} already exists; choose another --to path so nothing is overwritten.`,
-        { cause: error },
-      );
-    }
-    throw error;
-  }
-  return target;
-}
-
-/**
- * Save a shared file into the reader's worktree. Only the sender and recipient
- * of its message may read it, and anyone else is told it does not exist. The
- * bytes are checked against their checksum before anything is written.
- */
-export function fetchSharedFile(
-  repos: Repositories,
-  input: FetchSharedFileInput,
-  now: number = Date.now(),
-): FetchedSharedFile {
-  repos.sharedFiles.purgeExpired(new Date(now).toISOString());
-  const file = repos.sharedFiles.get(input.fileId);
-  const message = file === undefined ? undefined : repos.agentMessages.get(file.messageId);
-  const reader =
-    message !== undefined &&
-    (message.senderAgentId === input.agentId || message.recipientAgentId === input.agentId);
-  if (file === undefined || !reader) {
-    throw new Error(`No shared file ${input.fileId} is available to ${input.agentId}.`);
-  }
-  if (file.content === null) {
-    throw new Error(
-      `${file.filename} was removed on ${file.purgedAt ?? file.expiresAt}, when its retention ended. ` +
-        'Ask the sender to share it again.',
-    );
-  }
-  if (sha256Hex(file.content) !== file.sha256) {
-    throw new Error(
-      `${file.filename} failed its checksum, so nothing was saved. Ask the sender to share it again.`,
-    );
-  }
-  const root = realWorktree(repos, input.agentId, input.workspaceRoot);
-  const path = writeInside(root, input.destination, file.content);
-  return {
-    fileId: file.fileId,
-    filename: file.filename,
-    sizeBytes: file.sizeBytes,
-    sha256: file.sha256,
-    senderAgentId: file.senderAgentId,
-    path,
   };
 }

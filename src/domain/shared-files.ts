@@ -82,7 +82,7 @@ export function attachmentBlock(files: readonly AttachmentReference[]): string {
   return [
     '',
     '',
-    'Attached files (retrieve with `concord files get <file-id> --to <path>`):',
+    'Attached files (listed for reference; retrieval is not available yet):',
     ...lines,
   ].join('\n');
 }

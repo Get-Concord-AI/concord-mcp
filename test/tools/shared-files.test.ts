@@ -1,14 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -25,7 +16,6 @@ import { handleUpdateWork } from '../../src/tools/workflow.js';
 import type { AgentMessageDispatcher } from '../../src/tools/agent-messages.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 import {
-  fetchSharedFile,
   handleSendWithAttachments,
   readAtMost,
   stageAttachments,
@@ -136,57 +126,8 @@ describe('files shared with agent messages', () => {
     ]);
     expect(result.message.content).toContain('Here is the log');
     expect(result.message.content).toContain(fileIdOf(result.message.messageId));
-    expect(result.message.content).toContain('concord files get <file-id> --to <path>');
+    expect(result.message.content).toContain('Attached files');
     expect(result.outlook).toContain('Attached 1 file(s)');
-  });
-
-  it('lets the recipient save the exact bytes into its own worktree', async () => {
-    const bytes = Buffer.from([0, 1, 2, 255, 10, 13]);
-    write(join(alpha, 'run.log'), bytes);
-    const result = await send(['run.log']);
-
-    const saved = fetchSharedFile(repos, {
-      workspaceRoot,
-      fileId: fileIdOf(result.message.messageId),
-      agentId: 'agent-beta',
-      destination: 'incoming/run.log',
-    });
-
-    expect(saved.path).toBe(join(realpathSync(beta), 'incoming', 'run.log'));
-    expect(readFileSync(saved.path)).toEqual(bytes);
-    expect(saved.sha256).toBe(repos.sharedFiles.listByMessage(result.message.messageId)[0]?.sha256);
-  });
-
-  it('lets the sender retrieve its own file and refuses any other agent', async () => {
-    const gamma = join(scratch, 'gamma');
-    mkdirSync(gamma);
-    handleRegisterAgent(repos, {
-      agent_id: 'agent-gamma',
-      kind: 'cursor',
-      worktree: gamma,
-      status: 'active',
-    });
-    write(join(alpha, 'run.log'), 'data');
-    const result = await send(['run.log']);
-    const fileId = fileIdOf(result.message.messageId);
-
-    expect(
-      fetchSharedFile(repos, {
-        workspaceRoot,
-        fileId,
-        agentId: 'agent-alpha',
-        destination: 'copy.log',
-      }).filename,
-    ).toBe('run.log');
-    expect(() =>
-      fetchSharedFile(repos, {
-        workspaceRoot,
-        fileId,
-        agentId: 'agent-gamma',
-        destination: 'run.log',
-      }),
-    ).toThrow(`No shared file ${fileId} is available to agent-gamma.`);
-    expect(existsSync(join(gamma, 'run.log'))).toBe(false);
   });
 
   it('refuses files outside the sender worktree, Concord or git state, and links out', async () => {
@@ -251,98 +192,17 @@ describe('files shared with agent messages', () => {
     expect(retry.outlook).toContain(fileIdOf(first.message.messageId));
   });
 
-  it('removes the bytes once retention ends and refuses retrieval after that', async () => {
+  it('removes the bytes once retention ends', async () => {
     write(join(alpha, 'run.log'), 'data');
     const result = await send(['run.log']);
     const fileId = fileIdOf(result.message.messageId);
 
-    const afterRetention = Date.now() + RETENTION_MS + 1000;
-    expect(() =>
-      fetchSharedFile(
-        repos,
-        { workspaceRoot, fileId, agentId: 'agent-beta', destination: 'run.log' },
-        afterRetention,
-      ),
-    ).toThrow('was removed');
+    repos.sharedFiles.purgeExpired(new Date(Date.now() + RETENTION_MS + 1000).toISOString());
 
     const stored = repos.sharedFiles.get(fileId);
     expect(stored?.content).toBeNull();
     expect(stored?.purgedAt).not.toBeNull();
-    expect(existsSync(join(beta, 'run.log'))).toBe(false);
   });
-
-  it('never overwrites a file and never writes outside the reader worktree', async () => {
-    write(join(alpha, 'run.log'), 'new');
-    const result = await send(['run.log']);
-    const fileId = fileIdOf(result.message.messageId);
-    write(join(beta, 'run.log'), 'mine');
-
-    expect(() =>
-      fetchSharedFile(repos, {
-        workspaceRoot,
-        fileId,
-        agentId: 'agent-beta',
-        destination: 'run.log',
-      }),
-    ).toThrow('already exists');
-    expect(readFileSync(join(beta, 'run.log'), 'utf8')).toBe('mine');
-
-    expect(() =>
-      fetchSharedFile(repos, {
-        workspaceRoot,
-        fileId,
-        agentId: 'agent-beta',
-        destination: '../escape.log',
-      }),
-    ).toThrow('outside your worktree');
-    expect(() =>
-      fetchSharedFile(repos, {
-        workspaceRoot,
-        fileId,
-        agentId: 'agent-beta',
-        destination: join(scratch, 'escape.log'),
-      }),
-    ).toThrow('outside your worktree');
-    expect(existsSync(join(scratch, 'escape.log'))).toBe(false);
-  });
-
-  it.skipIf(process.platform === 'win32')(
-    'does not write through a symlinked folder that leads out of the worktree',
-    async () => {
-      write(join(alpha, 'run.log'), 'data');
-      const fileId = fileIdOf((await send(['run.log'])).message.messageId);
-      symlinkSync(scratch, join(beta, 'out'));
-
-      expect(() =>
-        fetchSharedFile(repos, {
-          workspaceRoot,
-          fileId,
-          agentId: 'agent-beta',
-          destination: 'out/run.log',
-        }),
-      ).toThrow('outside your worktree');
-      expect(existsSync(join(scratch, 'run.log'))).toBe(false);
-    },
-  );
-
-  it('detects stored bytes that no longer match their checksum and saves nothing', async () => {
-    write(join(alpha, 'run.log'), 'data');
-    const fileId = fileIdOf((await send(['run.log'])).message.messageId);
-    repos.db
-      .prepare('UPDATE shared_files SET content = ? WHERE file_id = ?')
-      .run(Buffer.from('tampered'), fileId);
-
-    expect(() =>
-      fetchSharedFile(repos, {
-        workspaceRoot,
-        fileId,
-        agentId: 'agent-beta',
-        destination: 'run.log',
-      }),
-    ).toThrow('failed its checksum');
-    expect(existsSync(join(beta, 'run.log'))).toBe(false);
-  });
-
   it('sends without attachments exactly as before', async () => {
     const result = await send(undefined);
 
@@ -392,15 +252,8 @@ describe('files shared with agent messages', () => {
 
     expect(retried.idempotentReplay).toBe(false);
     expect(storedCount()).toBe(1);
-    const saved = fetchSharedFile(repos, {
-      workspaceRoot,
-      fileId: fileIdOf(retried.message.messageId),
-      agentId: 'agent-late',
-      destination: 'run.log',
-    });
-    expect(readFileSync(saved.path, 'utf8')).toBe('data');
+    expect(retried.message.content).toContain(fileIdOf(retried.message.messageId));
   });
-
   it('purging a file twice removes it only once', async () => {
     write(join(alpha, 'run.log'), 'data');
     await send(['run.log']);
@@ -474,28 +327,5 @@ describe('files shared with agent messages', () => {
       stageAttachments(repos, 'agent-stray', ['id_ed25519'], 'key-stray', workspaceRoot),
     ).toThrow('is not a checkout of this repository');
     expect(storedCount()).toBe(0);
-  });
-
-  it('refuses to save a file into Concord or git folders', async () => {
-    write(join(alpha, 'run.log'), 'data');
-    const fileId = fileIdOf((await send(['run.log'])).message.messageId);
-
-    expect(() =>
-      fetchSharedFile(repos, {
-        workspaceRoot,
-        fileId,
-        agentId: 'agent-beta',
-        destination: '.concord/run.log',
-      }),
-    ).toThrow('cannot be written to');
-    expect(() =>
-      fetchSharedFile(repos, {
-        workspaceRoot,
-        fileId,
-        agentId: 'agent-beta',
-        destination: '.git/info/run.log',
-      }),
-    ).toThrow('cannot be written to');
-    expect(existsSync(join(beta, '.concord'))).toBe(false);
   });
 });

@@ -47,7 +47,7 @@ describe('shared file rules', () => {
       },
     ]);
 
-    expect(block).toContain('concord files get <file-id> --to <path>');
+    expect(block).toContain('Attached files');
     expect(block).toContain('- f_abc run.log (text/plain, 6 bytes, sha256 aaaaaaaaaaaa)');
   });
 });
