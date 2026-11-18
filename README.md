@@ -166,7 +166,8 @@ aside once no session started before the link is running (nothing is deleted).
 
 > There is no universal `/concord` slash command — commands are client-specific.
 > Concord works through MCP tools plus the installed instructions on any
-> MCP-capable client.
+> MCP-capable client. An agent that can run shell commands but cannot host an
+> MCP client uses [`concord work`](#shell-only-agents-concord-work) instead.
 
 Live delivery depends on the receiving harness and session state. Run
 `concord adapters status` to see which installed agents are reachable and how
@@ -285,6 +286,7 @@ concord check <files...>     # check exact-file overlaps with active tasks (for 
 concord watch                # print work-state whenever .concord changes (Ctrl-C to stop)
 concord doctor               # workspace checks + per-task tool adoption
 concord adapters status      # global harness delivery capability matrix
+concord work start --agent <id> ...  # run a workflow tool from the shell (see below)
 
 concord --repo ../project status        # select by repository path from anywhere
 concord --workspace ws_... status       # select an id returned by a Concord operation
@@ -299,6 +301,40 @@ and `0` when there is no overlap. Claude Code PreToolUse hooks treat exit code
 `--repo` and `--workspace` are global, mutually exclusive options. The CLI uses
 the same `CONCORD_REPO_ROOT` → `CLAUDE_PROJECT_DIR` → working-directory priority
 and the same linked-worktree canonicalization as MCP.
+
+### Shell-only agents (`concord work`)
+
+MCP stays the main path. `concord work` is a second door to the same five tools
+for agents that can run commands but cannot host an MCP client: a remote
+assistant driving a shell, a CI job, a script, or an agent reached over SSH.
+
+```bash
+concord work start    --agent ci:nightly --kind ci --task docs-fix --title "Fix docs" --files docs/a.md
+concord work inspect  --agent ci:nightly --task docs-fix
+concord work update   --agent ci:nightly --task docs-fix --type progress --content "Half done"
+concord work transfer --agent ci:nightly --task docs-fix --action release --expected-version 3
+concord work finish   --agent ci:nightly --json finish.json   # or --json - to read stdin
+```
+
+Each action runs the MCP tool of the same name in-process, so validation,
+overlaps, `expected_version` checks, artifacts in `.concord/`, and the store are
+the ones `concord-mcp` uses; an agent can mix both paths on the same task.
+`--json` takes the tool's argument object from a UTF-8 file (a byte-order mark
+is fine) or stdin, which avoids shell quoting of inline JSON, and a flag
+replaces one field of it. The tool's structured result is printed as JSON on
+stdout; on a failure the command prints `{"error": "..."}`, writes the message
+to stderr, and exits `1`. Run `concord work <action> --help` for each flag.
+
+Choosing the agent id:
+
+- An agent inside a harness Concord already knows (Claude Code, Codex, ...)
+  usually needs no `--agent`: the id is resolved from its session, as on MCP.
+  If the harness told you an id, pass that one.
+- A shell-only agent names itself with `--agent` or `CONCORD_AGENT_ID`. Use one
+  stable `kind:name` id (`grok-bot:anderson`, `ci:nightly`) and reuse it on
+  every call; a new id each time looks like a new agent and leaves claims stale.
+- Do not reuse another session's id, or a chat app connector's, for a different
+  agent. `--kind` (or `CONCORD_AGENT_KIND`) sets the agent kind on `start`.
 
 `concord dashboard` is a read-only, full-screen local TUI. It refreshes from the
 shared SQLite workspace every second while keeping agents, tasks, alerts,
