@@ -43,12 +43,20 @@ them as follows:
   endpoint.
 - `UserPromptSubmit` drains pending messages and adds them to the prompt's
   context.
-- `Stop` drains anything that arrived during the turn.
+- `Stop` drains messages that arrived during the turn and returns Kiro's
+  `{"decision":"block","reason":"..."}` payload, which continues the turn so
+  the model reads them. When nothing arrived, the hook prints nothing and the
+  turn ends normally.
 
 Kiro has no hook that wakes an idle session, so Concord reports Kiro as
 `busy` reachable only. A message sent while a Kiro session is idle waits in the
-durable inbox and arrives on the next prompt or turn end. Nothing polls, and no
+durable inbox and arrives on the next prompt or Stop. Nothing polls, and no
 background monitor is started.
+
+Kiro runs workspace and user hooks side by side. If both
+`.kiro/hooks/concord.json` and `~/.kiro/hooks/concord.json` exist, SessionStart
+prints the identity twice and the second drain is a no-op. Remove one of the
+files if you do not want the duplicate context.
 
 To read the inbox manually from the repository:
 
@@ -82,15 +90,19 @@ inbox until you drain them.
 
 Kiro's documentation covers workspace and user MCP configuration, steering with
 `inclusion: always`, and the v1 hooks format with `SessionStart`,
-`UserPromptSubmit`, and `Stop` triggers:
+`UserPromptSubmit`, and `Stop` triggers. It also documents the Stop hook's
+`{"decision":"block","reason":"..."}` payload for continuing a turn:
 
 - [MCP configuration](https://kiro.dev/docs/mcp/)
 - [Steering](https://kiro.dev/docs/steering/)
 - [Hooks](https://kiro.dev/docs/hooks/)
+- [Agent Stop](https://kiro.dev/docs/hooks/types/#agent-stop)
 
-Runtime hook invocation was verified against Kiro CLI V3 and Kiro IDE hook
-support. Older Kiro versions without hooks still get the MCP tools through the
-manual registration above, but no automatic delivery.
+The installed hooks follow Kiro's documented v1 contract: SessionStart and
+UserPromptSubmit add command stdout to context, and Agent Stop continues the
+turn when the command prints the documented block decision. Older Kiro versions
+without hooks still get the MCP tools through the manual registration above,
+but no automatic delivery.
 
 If `concord adapters status` reports Kiro as `action_required`, check that
 `.kiro/settings/mcp.json` parses and that `.kiro/hooks/concord.json` still

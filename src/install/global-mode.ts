@@ -199,7 +199,7 @@ const USER_FILES: readonly UserFile[] = [
     isDetected: isKiroDetected,
     registration: { id: 'kiro', present: hasMcpServer },
     path: kiroUserMcpPath,
-    install: (existing) => upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'kiro' }),
+    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('kiro')),
     uninstall: removeMcpServer,
   },
 ];

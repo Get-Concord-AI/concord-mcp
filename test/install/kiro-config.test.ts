@@ -61,17 +61,30 @@ describe('Kiro hooks config', () => {
       hooks: [
         {
           name: 'my-lint',
+          description: 'Lint after save',
+          enabled: false,
           trigger: 'PostFileSave',
-          action: { type: 'command', command: 'npm run lint' },
+          action: { type: 'command', command: 'npm run lint', timeout: 120 },
         },
       ],
     });
 
     const installed = upsertKiroHooks(original, '.kiro/hooks/concord.json');
     const parsed = parseHooks(installed);
+    const raw = z
+      .object({
+        theme: z.string(),
+        hooks: z.array(z.record(z.string(), z.unknown())),
+      })
+      .parse(JSON.parse(installed));
 
     expect(installed).toContain('npm run lint');
-    expect(JSON.parse(installed)).toMatchObject({ theme: 'dark' });
+    expect(raw.theme).toBe('dark');
+    expect(raw.hooks[0]).toMatchObject({
+      description: 'Lint after save',
+      enabled: false,
+      action: { timeout: 120 },
+    });
     expect(parsed.hooks.map((hook) => hook.name)).toEqual([
       'my-lint',
       'concord-session-start',

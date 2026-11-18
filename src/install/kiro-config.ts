@@ -4,7 +4,9 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 
 import { userHome } from '../config/paths.js';
+import { jsonValueSchema } from './json-value.js';
 import {
+  agentKindEnv,
   hasMcpServer,
   isConcordServerOwned,
   McpConfigParseError,
@@ -49,9 +51,11 @@ export interface KiroHookSpec {
 }
 
 /**
- * SessionStart prints the agent id into the session; UserPromptSubmit and Stop
- * drain the durable inbox into a running turn. Kiro has no idle wake-up, so a
- * message sent between turns waits until one of these events fires.
+ * SessionStart prints the agent id into the session; UserPromptSubmit drains
+ * pending messages into the prompt; Stop drains messages that arrived during
+ * the turn and returns Kiro's continue decision so the model can read them.
+ * Kiro has no idle wake-up, so a message sent between turns waits until one of
+ * these events fires.
  */
 export const KIRO_HOOKS: readonly KiroHookSpec[] = [
   {
@@ -74,20 +78,27 @@ export const KIRO_HOOKS: readonly KiroHookSpec[] = [
 const CONCORD_HOOK_PREFIX = 'concord-';
 const KIRO_HOOKS_VERSION = 'v1';
 
+const kiroHookActionSchema = z
+  .object({
+    type: z.string().optional(),
+    command: z.string().optional(),
+  })
+  .catchall(jsonValueSchema);
+
 const kiroHookSchema = z
   .object({
     name: z.string().optional(),
     trigger: z.string().optional(),
-    action: z.record(z.string(), z.unknown()).optional(),
+    action: kiroHookActionSchema.optional(),
   })
-  .loose();
+  .catchall(jsonValueSchema);
 
 const kiroHooksFileSchema = z
   .object({
     version: z.string().optional(),
     hooks: z.array(kiroHookSchema).optional(),
   })
-  .loose();
+  .catchall(jsonValueSchema);
 
 type KiroHookEntry = z.infer<typeof kiroHookSchema>;
 type KiroHooksFile = z.infer<typeof kiroHooksFileSchema>;
@@ -142,8 +153,8 @@ export function hasKiroHooks(existing: string): boolean {
         (hook) =>
           hook.name === spec.name &&
           hook.trigger === spec.trigger &&
-          hook.action?.['type'] === 'command' &&
-          hook.action['command'] === spec.command,
+          hook.action?.type === 'command' &&
+          hook.action.command === spec.command,
       ),
     );
   } catch {
@@ -185,7 +196,7 @@ export function installKiroUserConfigs(env: NodeJS.ProcessEnv): string[] {
   const existing = existsSync(mcpPath) ? readFileSync(mcpPath, 'utf8') : undefined;
   if (existing === undefined || !hasMcpServer(existing) || isConcordServerOwned(existing)) {
     mkdirSync(dirname(mcpPath), { recursive: true });
-    writeFileSync(mcpPath, upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'kiro' }));
+    writeFileSync(mcpPath, upsertMcpServer(existing, undefined, agentKindEnv('kiro')));
   }
   const hooksPath = kiroUserHooksPath(env);
   writeHooksFile(hooksPath, hooksPath);

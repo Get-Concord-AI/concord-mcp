@@ -8,7 +8,11 @@ import {
   type AgentIdentity,
 } from '../../domain/identity.js';
 import { buildRoster } from '../../domain/presence.js';
-import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
+import {
+  renderHookPayload,
+  renderInboxBody,
+  type DeliverableMessage,
+} from '../../domain/pull-inbox.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { openContext } from '../context.js';
 import { cloudRoster } from './cloud-hooks.js';
@@ -20,8 +24,10 @@ import { kiroSessionStartMessage, type RosterLine } from './session-start-messag
  * Kiro lifecycle hooks (`.kiro/hooks/concord.json`). Kiro writes the event
  * payload, including `session_id`, to stdin and adds a hook's stdout to the
  * agent context, so SessionStart prints the identity and the write conventions
- * while prompt-submit and stop print pending peer messages. In a repository
- * linked to Concord Cloud the session registers and drains there instead.
+ * while prompt-submit prints pending peer messages. Stop returns Kiro's block
+ * decision when messages arrived, which continues the turn so the model sees
+ * them. In a repository linked to Concord Cloud the session registers and
+ * drains there instead.
  */
 
 export const KIRO_HOOK_EVENTS = [
@@ -60,6 +66,10 @@ function promptSubmitOutput(messages: readonly DeliverableMessage[]): string {
   return messages.length === 0 ? NO_OUTPUT : renderInboxBody(messages);
 }
 
+function stopOutput(messages: readonly DeliverableMessage[]): string {
+  return messages.length === 0 ? NO_OUTPUT : renderHookPayload('stop', messages);
+}
+
 function sessionStartOutput(agentId: string, others: readonly RosterLine[]): string {
   return kiroSessionStartMessage(agentId, others);
 }
@@ -81,8 +91,9 @@ export function handleLocalKiroHook(
         ),
       );
     case 'kiro-user-prompt-submit':
-    case 'kiro-stop':
       return promptSubmitOutput(drainInbox(repos, identity.agentId, 'kiro'));
+    case 'kiro-stop':
+      return stopOutput(drainInbox(repos, identity.agentId, 'kiro'));
   }
 }
 
@@ -97,8 +108,9 @@ export async function handleCloudKiroHook(
       await registerInCloud(runtime, identity.agentId, 'kiro', cwd);
       return sessionStartOutput(identity.agentId, await cloudRoster(runtime, identity.agentId));
     case 'kiro-user-prompt-submit':
-    case 'kiro-stop':
       return promptSubmitOutput(await drainFromCloud(runtime, identity.agentId, 'kiro'));
+    case 'kiro-stop':
+      return stopOutput(await drainFromCloud(runtime, identity.agentId, 'kiro'));
   }
 }
 

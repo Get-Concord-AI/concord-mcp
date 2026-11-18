@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   handleLocalKiroHook,
@@ -73,7 +74,7 @@ describe('local Kiro hooks', () => {
     expect(handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-user-prompt-submit')).toBe('');
   });
 
-  it('drains a message that arrived before the turn ended', () => {
+  it('asks Kiro to continue the turn when a message arrived before stop', () => {
     handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-session-start');
     handleRegisterAgent(repos, { agent_id: 'codex:peer0001', kind: 'codex' });
     handleSendAgentMessage(repos, {
@@ -84,7 +85,10 @@ describe('local Kiro hooks', () => {
       idempotencyKey: 'k-2',
     });
 
-    expect(handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-stop')).toContain('Late update');
+    const stop = z
+      .object({ decision: z.literal('block'), reason: z.string() })
+      .parse(JSON.parse(handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-stop')));
+    expect(stop.reason).toContain('Late update');
     expect(handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-stop')).toBe('');
   });
 });
