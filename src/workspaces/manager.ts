@@ -182,6 +182,9 @@ export function routedRepositories(manager: WorkspaceManager): Repositories {
     get taskUpdates() {
       return manager.current().repos.taskUpdates;
     },
+    get search() {
+      return manager.current().repos.search;
+    },
     get events() {
       return manager.current().repos.events;
     },
