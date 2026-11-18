@@ -597,29 +597,33 @@ export function registerWorkflowTools(
       }
       onWrite?.(workspace);
       const task = result.claim.task;
-      return withSessionAdvisories({
-        content: [
-          {
-            type: 'text',
-            text: withWorkspaceText(
-              `Started ${task.taskId}; status ${task.status}, version ${String(task.version)}, ` +
-                `${String(result.claim.overlaps.length)} overlap(s).`,
-              workspace,
-            ),
+      return withSessionAdvisories(
+        {
+          content: [
+            {
+              type: 'text',
+              text: withWorkspaceText(
+                `Started ${task.taskId}; status ${task.status}, version ${String(task.version)}, ` +
+                  `${String(result.claim.overlaps.length)} overlap(s).`,
+                workspace,
+              ),
+            },
+          ],
+          structuredContent: {
+            ...workspaceStructured(workspace),
+            ...taskFields(task),
+            resumed_by: result.resumedBy,
+            overlaps: result.claim.overlaps.map((overlap) => ({
+              task_id: overlap.taskId,
+              title: overlap.title,
+              reasons: overlap.reasons,
+            })),
+            breadth_reasons: result.claim.breadthReasons,
           },
-        ],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          ...taskFields(task),
-          resumed_by: result.resumedBy,
-          overlaps: result.claim.overlaps.map((overlap) => ({
-            task_id: overlap.taskId,
-            title: overlap.title,
-            reasons: overlap.reasons,
-          })),
-          breadth_reasons: result.claim.breadthReasons,
         },
-      }, repos, requestMeta);
+        repos,
+        requestMeta,
+      );
     },
   );
 
@@ -643,11 +647,7 @@ export function registerWorkflowTools(
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
       const result = handleInspectWork(repos, args, sessionForRequest(repos, requestMeta)?.agentId);
-      return withSessionAdvisories(
-        inspectWorkResponse(result, workspace),
-        repos,
-        requestMeta,
-      );
+      return withSessionAdvisories(inspectWorkResponse(result, workspace), repos, requestMeta);
     },
   );
 
@@ -818,23 +818,27 @@ export function registerWorkflowTools(
       const result = handleTransferWork(repos, withActor(repos, args, requestMeta));
       recordTaskTransition(telemetry, result.task.taskId, args.action, result.task.status);
       onWrite?.(workspace);
-      return withSessionAdvisories({
-        content: [
-          {
-            type: 'text',
-            text: withWorkspaceText(
-              `${args.action} ${result.task.taskId}; status ${result.task.status}, ` +
-                `version ${String(result.task.version)}.`,
-              workspace,
-            ),
+      return withSessionAdvisories(
+        {
+          content: [
+            {
+              type: 'text',
+              text: withWorkspaceText(
+                `${args.action} ${result.task.taskId}; status ${result.task.status}, ` +
+                  `version ${String(result.task.version)}.`,
+                workspace,
+              ),
+            },
+          ],
+          structuredContent: {
+            ...workspaceStructured(workspace),
+            action: args.action,
+            ...transferFields(result),
           },
-        ],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          action: args.action,
-          ...transferFields(result),
         },
-      }, repos, requestMeta);
+        repos,
+        requestMeta,
+      );
     },
   );
 
@@ -873,25 +877,29 @@ export function registerWorkflowTools(
         }
       }
       onWrite?.(workspace);
-      return withSessionAdvisories({
-        content: [
-          {
-            type: 'text',
-            text: withWorkspaceText(
-              `Finished ${result.task.taskId}; status ${result.task.status}, ` +
-                `version ${String(result.task.version)}.`,
-              workspace,
-            ),
+      return withSessionAdvisories(
+        {
+          content: [
+            {
+              type: 'text',
+              text: withWorkspaceText(
+                `Finished ${result.task.taskId}; status ${result.task.status}, ` +
+                  `version ${String(result.task.version)}.`,
+                workspace,
+              ),
+            },
+          ],
+          structuredContent: {
+            ...workspaceStructured(workspace),
+            ...taskFields(result.task),
+            outcome: args.outcome,
+            handoff_id: result.evidence.handoff.id,
+            review_ready: result.evidence.reviewReady,
           },
-        ],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          ...taskFields(result.task),
-          outcome: args.outcome,
-          handoff_id: result.evidence.handoff.id,
-          review_ready: result.evidence.reviewReady,
         },
-      }, repos, requestMeta);
+        repos,
+        requestMeta,
+      );
     },
   );
 }
