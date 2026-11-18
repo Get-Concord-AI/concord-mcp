@@ -72,6 +72,7 @@ export const KIRO_HOOKS: readonly KiroHookSpec[] = [
 ];
 
 const CONCORD_HOOK_PREFIX = 'concord-';
+const KIRO_HOOKS_VERSION = 'v1';
 
 const kiroHookSchema = z
   .object({
@@ -116,12 +117,12 @@ export function upsertKiroHooks(existing: string | undefined, displayPath: strin
   } catch {
     throw new McpConfigParseError(displayPath);
   }
-  if (parsed.version !== undefined && parsed.version !== 'v1') {
+  if (parsed.version !== undefined && parsed.version !== KIRO_HOOKS_VERSION) {
     throw new McpConfigParseError(displayPath, `uses unsupported hooks version ${parsed.version}`);
   }
   const kept = (parsed.hooks ?? []).filter((hook) => !isConcordHook(hook));
   return `${JSON.stringify(
-    { ...parsed, version: 'v1', hooks: [...kept, ...KIRO_HOOKS.map(hookEntry)] },
+    { ...parsed, version: KIRO_HOOKS_VERSION, hooks: [...kept, ...KIRO_HOOKS.map(hookEntry)] },
     null,
     2,
   )}\n`;
@@ -132,6 +133,9 @@ export function hasKiroHooks(existing: string): boolean {
   try {
     const parsed = kiroHooksFileSchema.safeParse(JSON.parse(existing));
     if (!parsed.success) return false;
+    if (parsed.data.version !== undefined && parsed.data.version !== KIRO_HOOKS_VERSION) {
+      return false;
+    }
     const hooks = parsed.data.hooks ?? [];
     return KIRO_HOOKS.every((spec) =>
       hooks.some(

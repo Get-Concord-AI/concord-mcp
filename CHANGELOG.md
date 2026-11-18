@@ -25,6 +25,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Kiro's Stop hook returns Kiro's `decision: "block"` payload instead of
   writing the inbox body to stdout, so a message that arrives during a turn is
   shown to the model instead of being drained without reaching it.
+- Kiro uninstall keeps unrelated top-level settings in the hooks file and only
+  deletes it when nothing user-authored remains.
+- Global mode adopts the Kiro MCP entry that setup wrote and removes it again
+  with `concord setup --no-global`. Kiro status now requires CLI 3.0.0 or newer
+  for lifecycle hooks, while IDE-only installs stay supported.
+- Kiro status no longer treats hooks in an unsupported file version as ready,
+  so setup reports the file instead of delivery appearing healthy.
 
 ## [0.23.0] - 2026-11-16
 
