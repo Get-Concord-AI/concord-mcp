@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../../src/db/connection.js';
@@ -36,9 +37,18 @@ describe('concurrent workflow writes', () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  /** `racer`, except that its first task read lets the other agent commit first. */
-  function racedOnFirstRead(commit: () => void): { repos: Repositories; raced: () => boolean } {
-    let fired = false;
+  type RaceOutcome = 'not-raced' | 'committed' | 'refused';
+
+  /**
+   * `racer`, except that its first task read lets the other agent try to
+   * commit first. Only SQLite's busy refusal counts as losing the race; any
+   * other failure is a broken test and is rethrown.
+   */
+  function racedOnFirstRead(commit: () => void): {
+    repos: Repositories;
+    outcome: () => RaceOutcome;
+  } {
+    let outcome: RaceOutcome = 'not-raced';
     const tasks = racer.tasks;
     const repos: Repositories = {
       ...racer,
@@ -46,19 +56,25 @@ describe('concurrent workflow writes', () => {
         ...tasks,
         get: (taskId) => {
           const task = tasks.get(taskId);
-          if (!fired) {
-            fired = true;
+          if (outcome === 'not-raced') {
             try {
               commit();
-            } catch {
-              // Refused while this agent holds the write lock: the race is lost cleanly.
+              outcome = 'committed';
+            } catch (error) {
+              if (
+                !(error instanceof Database.SqliteError) ||
+                !error.code.startsWith('SQLITE_BUSY')
+              ) {
+                throw error;
+              }
+              outcome = 'refused';
             }
           }
           return task;
         },
       },
     };
-    return { repos, raced: () => fired };
+    return { repos, outcome: () => outcome };
   }
 
   it('finish_work never surfaces "database is locked" when another agent commits mid-call', () => {
@@ -70,7 +86,7 @@ describe('concurrent workflow writes', () => {
       expected_files: ['src/race.ts'],
     });
 
-    const { repos, raced } = racedOnFirstRead(() => {
+    const { repos, outcome } = racedOnFirstRead(() => {
       handleFinishWork(winner, {
         task_id: 'RACE-1',
         agent_id: 'agent-a',
@@ -93,7 +109,8 @@ describe('concurrent workflow writes', () => {
       failure = error instanceof Error ? error.message : String(error);
     }
 
-    expect(raced()).toBe(true);
+    // The other agent tried while this call held the write lock, and was refused.
+    expect(outcome()).toBe('refused');
     expect(failure).not.toMatch(/database is locked|SQLITE_BUSY/u);
     expect(racer.tasks.get('RACE-1')?.version).toBe(2);
   });
