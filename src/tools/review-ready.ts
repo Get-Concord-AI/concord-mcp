@@ -58,5 +58,5 @@ export function handleReviewReady(repos: Repositories, input: ReviewReadyInput):
     });
     return { review };
   });
-  return transact();
+  return transact.immediate();
 }
