@@ -546,7 +546,7 @@ export function registerWorkflowTools(
   const withSessionAdvisories = <T extends WorkflowToolResponse>(
     result: T,
     callRepos: Repositories = repos,
-    meta: OpenCodeRequestIdentityMetadata | undefined = undefined,
+    meta?: OpenCodeRequestIdentityMetadata,
   ): T =>
     withAdapterAdvisory(
       withUpdateAdvisory(withDriftAdvisory(withReceiverAdvisory(result, callRepos, meta))),
