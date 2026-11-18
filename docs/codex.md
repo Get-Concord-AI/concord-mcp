@@ -55,6 +55,11 @@ Codex app-server delivery is version-gated to the verified protocol baseline.
 Run `concord adapters doctor` after upgrades; `unsupported_version` deliberately
 fails closed until the adapter contract is updated.
 
+The `codex app-server proxy` transport speaks WebSocket to the daemon's control
+socket. That subcommand first shipped in Codex 0.125.0 (2026-04) already
+speaking WebSocket — no released version proxies JSON lines, so there is no
+older-protocol fallback to keep.
+
 Bare Codex CLI does support session-owned background terminals (visible through
 `/ps` and stoppable with `/stop`), but terminal completion does not start a new
 model turn. Codex's asynchronous hook contract has the same boundary: output is
