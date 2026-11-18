@@ -148,7 +148,8 @@ describe('DeepSeek native MCP configuration', () => {
 
   it('detects DSH during setup, installs project instructions and preserves a rerun', () => {
     const { env, path } = fixture();
-    const root = join(env.HOME, 'repo');
+    // runSetup keeps SQLite open until the worker exits; keep it outside home cleanup on Windows.
+    const root = mkdtempSync(join(tmpdir(), 'concord-deepseek-repo-'));
     const bin = join(env.HOME, 'bin');
     mkdirSync(join(root, '.git'), { recursive: true });
     mkdirSync(bin);

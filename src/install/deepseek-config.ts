@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { isMap, isScalar, isSeq, parseDocument, Scalar, type Document } from 'yaml';
 
 import { userHome } from '../config/paths.js';
+import { AGENT_KIND_ENV, agentKindEnv } from './mcp-config.js';
 
 const ENTRY_ID = 'concord-mcp';
 const PLUGIN = '@deepseek-ai/dsh-mcp-client';
@@ -108,7 +109,7 @@ export function upsertDeepseekConfig(existing = ''): string {
       command: 'concord-mcp',
       cwd: expression('process.cwd()'),
       env: {
-        CONCORD_AGENT_KIND: 'deepseek',
+        ...agentKindEnv('deepseek'),
         CONCORD_REPO_ROOT: expression('process.cwd()'),
       },
     },
@@ -167,7 +168,7 @@ export function hasDeepseekConfig(existing: string): boolean {
           config.get('transport') === 'stdio' &&
           config.get('command') === 'concord-mcp' &&
           isMap(env) &&
-          env.get('CONCORD_AGENT_KIND') === 'deepseek'
+          env.get(AGENT_KIND_ENV) === 'deepseek'
         );
       });
     });
