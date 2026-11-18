@@ -27,17 +27,6 @@ describe('session bindings', () => {
     expect(repos.sessionBindings.forClientPid(1234)?.agentId).toBe('claude-code:ccccdddd');
   });
 
-  it('refreshes every row an agent owns with touch', () => {
-    repos.sessionBindings.upsert(10, 'claude-code:aaaabbbb', 'claude-code', '2026-01-01T00:00:00Z');
-    repos.sessionBindings.upsert(11, 'claude-code:aaaabbbb', 'claude-code', '2026-01-01T00:00:00Z');
-    repos.sessionBindings.upsert(12, 'claude-code:ccccdddd', 'claude-code', '2026-01-01T00:00:00Z');
-
-    expect(repos.sessionBindings.touch('claude-code:aaaabbbb', '2026-06-01T00:00:00Z')).toBe(2);
-    expect(repos.sessionBindings.forClientPid(10)?.updatedAt).toBe('2026-06-01T00:00:00Z');
-    expect(repos.sessionBindings.forClientPid(12)?.updatedAt).toBe('2026-01-01T00:00:00Z');
-    expect(repos.sessionBindings.touch('claude-code:eeeeffff')).toBe(0);
-  });
-
   it('drops every row an agent owns with removeForAgent', () => {
     repos.sessionBindings.upsert(10, 'claude-code:aaaabbbb', 'claude-code');
     repos.sessionBindings.upsert(11, 'claude-code:aaaabbbb', 'claude-code');

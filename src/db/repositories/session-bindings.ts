@@ -7,9 +7,8 @@ import type { ConcordDatabase } from '../connection.js';
  * hook that recorded it, because a shell between client and hook shifts the
  * hook's own ppid away from the one the client's MCP servers see.
  *
- * Freshness is not kept here: the bound agent's own `last_seen` bounds how
- * long a binding may be trusted, so a live session keeps its rows valid and a
- * dead one lets them lapse without a sweep.
+ * Freshness is bounded by `updated_at`: a server only trusts a binding
+ * written while it lived, so a dead session's rows lapse on their own.
  */
 export interface SessionBinding {
   clientPid: number;
@@ -21,8 +20,6 @@ export interface SessionBinding {
 export interface SessionBindingRepository {
   /** Record that client `clientPid` hosts `agentId`. */
   upsert(clientPid: number, agentId: string, kind: string, at?: string): void;
-  /** Refresh `updated_at` on every binding naming `agentId`; rows touched. */
-  touch(agentId: string, at?: string): number;
   /** Drop every binding naming `agentId` — stale rows from dead hook shells. */
   removeForAgent(agentId: string): number;
   /** The binding recorded for one client pid, if any. */
@@ -42,7 +39,6 @@ export function createSessionBindingRepository(db: ConcordDatabase): SessionBind
      ON CONFLICT(client_pid) DO UPDATE SET agent_id = excluded.agent_id,
        kind = excluded.kind, updated_at = excluded.updated_at`,
   );
-  const touchStmt = db.prepare('UPDATE session_bindings SET updated_at = ? WHERE agent_id = ?');
   const removeStmt = db.prepare('DELETE FROM session_bindings WHERE agent_id = ?');
   const getStmt = db.prepare(
     'SELECT client_pid, agent_id, kind, updated_at FROM session_bindings WHERE client_pid = ?',
@@ -51,9 +47,6 @@ export function createSessionBindingRepository(db: ConcordDatabase): SessionBind
   return {
     upsert(clientPid, agentId, kind, at = new Date().toISOString()) {
       upsertStmt.run(clientPid, agentId, kind, at);
-    },
-    touch(agentId, at = new Date().toISOString()) {
-      return touchStmt.run(at, agentId).changes;
     },
     removeForAgent(agentId) {
       return removeStmt.run(agentId).changes;
