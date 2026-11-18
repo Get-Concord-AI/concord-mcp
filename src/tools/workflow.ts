@@ -9,13 +9,14 @@ import type { AvailableUpdate } from '../update-notifier.js';
 import { receiverActive } from '../domain/delivery.js';
 import { harnessConfigFor } from '../domain/harness-config.js';
 import {
-  identityForRequest,
   parseOpenCodeRequestIdentityMetadata,
   resolveActorId,
   type AgentIdentity,
   type OpenCodeRequestIdentityMetadata,
 } from '../domain/identity.js';
-import type { SemanticTelemetryEvent, TelemetryRecorder } from '../telemetry/events.js';
+import { liveSession } from './live-session.js';
+import { recordTaskTransition, taskFlowId } from '../telemetry/task-transitions.js';
+import type { TelemetryRecorder } from '../telemetry/events.js';
 import type { WorkspaceContext } from '../workspaces/manager.js';
 import { SocketAgentMessageDispatcher } from '../relay/socket-dispatcher.js';
 import {
@@ -449,8 +450,9 @@ export function registerWorkflowTools(
   const withReceiverAdvisory = <T extends WorkflowToolResponse>(
     result: T,
     callRepos: Repositories,
+    meta: OpenCodeRequestIdentityMetadata | undefined,
   ): T => {
-    const agentId = session?.agentId;
+    const agentId = sessionForRequest(callRepos, meta)?.agentId;
     if (agentId === undefined) return result;
     const endpoint = callRepos.agentEndpoints.getByAgent(agentId);
     const config = endpoint === undefined ? undefined : harnessConfigFor(endpoint.provider);
@@ -527,44 +529,36 @@ export function registerWorkflowTools(
     };
   };
 
+  const { sessionForRequest, takeDriftAdvisory } = liveSession(session, requestIdentity);
+
+  /** Once per session: env identity and the hook-bound session diverged. */
+  const withDriftAdvisory = <T extends WorkflowToolResponse>(result: T): T => {
+    const advisory = takeDriftAdvisory();
+    if (advisory === undefined) return result;
+    const drift = { env_agent_id: advisory.envAgentId, live_agent_id: advisory.liveAgentId };
+    return {
+      ...result,
+      content: [...result.content, { type: 'text', text: advisory.text }],
+      structuredContent: { ...result.structuredContent, identity_drift: drift },
+    };
+  };
+
   const withSessionAdvisories = <T extends WorkflowToolResponse>(
     result: T,
     callRepos: Repositories = repos,
-  ): T => withAdapterAdvisory(withUpdateAdvisory(withReceiverAdvisory(result, callRepos)));
+    meta?: OpenCodeRequestIdentityMetadata,
+  ): T =>
+    withAdapterAdvisory(
+      withUpdateAdvisory(withDriftAdvisory(withReceiverAdvisory(result, callRepos, meta))),
+    );
 
-  type TaskTransition = Extract<
-    SemanticTelemetryEvent,
-    { event_type: 'task_lifecycle' }
-  >['transition'];
-  const taskFlowId = (taskId: string): string | undefined =>
-    telemetry?.taskPseudonym(taskId) ?? undefined;
-  const recordTaskTransition = (
-    taskId: string,
-    transition: TaskTransition,
-    status: string,
-  ): void => {
-    const telemetryTaskFlowId = taskFlowId(taskId);
-    if (telemetryTaskFlowId === undefined) return;
-    telemetry?.recordEvent({
-      event_type: 'task_lifecycle',
-      task_flow_id: telemetryTaskFlowId,
-      transition,
-      status,
-      elapsed_ms: null,
-    });
-  };
-
-  /** Stamp the resolved actor onto a write tool's arguments. Throws with the
-   *  fix-it message when neither the session nor the caller identifies anyone. */
-  const sessionForRequest = (
-    meta: OpenCodeRequestIdentityMetadata | undefined,
-  ): AgentIdentity | undefined => identityForRequest(session, requestIdentity?.(meta));
   const withActor = <T extends { agent_id?: string | undefined }>(
+    callRepos: Repositories,
     args: T,
     meta: OpenCodeRequestIdentityMetadata | undefined,
   ): WithActor<T> => ({
     ...args,
-    agent_id: resolveActorId(sessionForRequest(meta), args.agent_id),
+    agent_id: resolveActorId(sessionForRequest(callRepos, meta), args.agent_id),
   });
 
   server.registerTool(
@@ -579,15 +573,15 @@ export function registerWorkflowTools(
     (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
-      const requestSession = sessionForRequest(requestMeta);
+      const requestSession = sessionForRequest(repos, requestMeta);
       // The session's kind wins alongside its id: the id embeds the kind, so
       // registering under a different one would describe an agent that is not
       // the one being addressed.
       const result = handleStartWork(repos, {
-        ...withActor(args, requestMeta),
+        ...withActor(repos, args, requestMeta),
         kind: requestSession?.kind ?? args.kind,
       });
-      const startedTaskFlowId = taskFlowId(result.claim.task.taskId);
+      const startedTaskFlowId = taskFlowId(telemetry, result.claim.task.taskId);
       if (startedTaskFlowId !== undefined) {
         telemetry?.recordEvent({
           event_type: 'claim_evaluated',
@@ -603,29 +597,33 @@ export function registerWorkflowTools(
       }
       onWrite?.(workspace);
       const task = result.claim.task;
-      return withSessionAdvisories({
-        content: [
-          {
-            type: 'text',
-            text: withWorkspaceText(
-              `Started ${task.taskId}; status ${task.status}, version ${String(task.version)}, ` +
-                `${String(result.claim.overlaps.length)} overlap(s).`,
-              workspace,
-            ),
+      return withSessionAdvisories(
+        {
+          content: [
+            {
+              type: 'text',
+              text: withWorkspaceText(
+                `Started ${task.taskId}; status ${task.status}, version ${String(task.version)}, ` +
+                  `${String(result.claim.overlaps.length)} overlap(s).`,
+                workspace,
+              ),
+            },
+          ],
+          structuredContent: {
+            ...workspaceStructured(workspace),
+            ...taskFields(task),
+            resumed_by: result.resumedBy,
+            overlaps: result.claim.overlaps.map((overlap) => ({
+              task_id: overlap.taskId,
+              title: overlap.title,
+              reasons: overlap.reasons,
+            })),
+            breadth_reasons: result.claim.breadthReasons,
           },
-        ],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          ...taskFields(task),
-          resumed_by: result.resumedBy,
-          overlaps: result.claim.overlaps.map((overlap) => ({
-            task_id: overlap.taskId,
-            title: overlap.title,
-            reasons: overlap.reasons,
-          })),
-          breadth_reasons: result.claim.breadthReasons,
         },
-      });
+        repos,
+        requestMeta,
+      );
     },
   );
 
@@ -648,8 +646,8 @@ export function registerWorkflowTools(
     (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
-      const result = handleInspectWork(repos, args, sessionForRequest(requestMeta)?.agentId);
-      return withSessionAdvisories(inspectWorkResponse(result, workspace));
+      const result = handleInspectWork(repos, args, sessionForRequest(repos, requestMeta)?.agentId);
+      return withSessionAdvisories(inspectWorkResponse(result, workspace), repos, requestMeta);
     },
   );
 
@@ -668,7 +666,7 @@ export function registerWorkflowTools(
       // the whole call stays with the workspace it started in.
       const callRepos = workspace?.repos ?? repos;
       const withCallAdvisories = <T extends WorkflowToolResponse>(result: T): T =>
-        withSessionAdvisories(result, callRepos);
+        withSessionAdvisories(result, callRepos, requestMeta);
       const telemetryWorkspaceRoot = workspace?.repoRoot;
       const messageTaskId =
         args.task_id ??
@@ -678,9 +676,13 @@ export function registerWorkflowTools(
       const messageTaskFlowId =
         messageTaskId === undefined || messageTaskId === null
           ? null
-          : (taskFlowId(messageTaskId) ?? null);
+          : (taskFlowId(telemetry, messageTaskId) ?? null);
       try {
-        const result = await handleUpdateWork(callRepos, withActor(args, requestMeta), dispatcher);
+        const result = await handleUpdateWork(
+          callRepos,
+          withActor(callRepos, args, requestMeta),
+          dispatcher,
+        );
         onWrite?.(workspace);
         if ('update' in result) {
           return withCallAdvisories({
@@ -813,26 +815,30 @@ export function registerWorkflowTools(
     (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
-      const result = handleTransferWork(repos, withActor(args, requestMeta));
-      recordTaskTransition(result.task.taskId, args.action, result.task.status);
+      const result = handleTransferWork(repos, withActor(repos, args, requestMeta));
+      recordTaskTransition(telemetry, result.task.taskId, args.action, result.task.status);
       onWrite?.(workspace);
-      return withSessionAdvisories({
-        content: [
-          {
-            type: 'text',
-            text: withWorkspaceText(
-              `${args.action} ${result.task.taskId}; status ${result.task.status}, ` +
-                `version ${String(result.task.version)}.`,
-              workspace,
-            ),
+      return withSessionAdvisories(
+        {
+          content: [
+            {
+              type: 'text',
+              text: withWorkspaceText(
+                `${args.action} ${result.task.taskId}; status ${result.task.status}, ` +
+                  `version ${String(result.task.version)}.`,
+                workspace,
+              ),
+            },
+          ],
+          structuredContent: {
+            ...workspaceStructured(workspace),
+            action: args.action,
+            ...transferFields(result),
           },
-        ],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          action: args.action,
-          ...transferFields(result),
         },
-      });
+        repos,
+        requestMeta,
+      );
     },
   );
 
@@ -848,8 +854,8 @@ export function registerWorkflowTools(
     (args, extra) => {
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
-      const result = handleFinishWork(repos, withActor(args, requestMeta));
-      const finishedTaskFlowId = taskFlowId(result.task.taskId);
+      const result = handleFinishWork(repos, withActor(repos, args, requestMeta));
+      const finishedTaskFlowId = taskFlowId(telemetry, result.task.taskId);
       if (finishedTaskFlowId !== undefined) {
         telemetry?.recordEvent({
           event_type: 'task_lifecycle',
@@ -871,25 +877,29 @@ export function registerWorkflowTools(
         }
       }
       onWrite?.(workspace);
-      return withSessionAdvisories({
-        content: [
-          {
-            type: 'text',
-            text: withWorkspaceText(
-              `Finished ${result.task.taskId}; status ${result.task.status}, ` +
-                `version ${String(result.task.version)}.`,
-              workspace,
-            ),
+      return withSessionAdvisories(
+        {
+          content: [
+            {
+              type: 'text',
+              text: withWorkspaceText(
+                `Finished ${result.task.taskId}; status ${result.task.status}, ` +
+                  `version ${String(result.task.version)}.`,
+                workspace,
+              ),
+            },
+          ],
+          structuredContent: {
+            ...workspaceStructured(workspace),
+            ...taskFields(result.task),
+            outcome: args.outcome,
+            handoff_id: result.evidence.handoff.id,
+            review_ready: result.evidence.reviewReady,
           },
-        ],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          ...taskFields(result.task),
-          outcome: args.outcome,
-          handoff_id: result.evidence.handoff.id,
-          review_ready: result.evidence.reviewReady,
         },
-      });
+        repos,
+        requestMeta,
+      );
     },
   );
 }

@@ -127,7 +127,7 @@ export function localCopilotBackend(repos: Repositories, repoRoot: string): Copi
       return Promise.resolve(drainInbox(repos, agentId, KIND, undefined, { session, via: 'hook' }));
     },
     observe: (agentId, rawJson) => {
-      observeHookEvent(repos, agentId, withCopilotTranscript(rawJson));
+      observeHookEvent(repos, agentId, withCopilotTranscript(rawJson), KIND);
     },
     startLiveHost: (agentId, sessionId, serverAddress) => {
       if (!hosted(agentId)) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   agentIdForSession,
+  liveSessionIdentity,
   parseOpenCodeRequestIdentityMetadata,
   resolveActorId,
   resolveIdentity,
@@ -174,5 +175,61 @@ describe('resolveActorId', () => {
   it('explains how to fix an unidentifiable caller instead of minting an id', () => {
     expect(() => resolveActorId(undefined, undefined)).toThrow(UNRESOLVED_IDENTITY_MESSAGE);
     expect(() => resolveActorId(undefined, '  ')).toThrow(UNRESOLVED_IDENTITY_MESSAGE);
+  });
+});
+
+describe('liveSessionIdentity', () => {
+  const env = {
+    agentId: 'claude-code:aaaabbbb',
+    kind: 'claude-code',
+    origin: 'session',
+  } as const;
+
+  it('corrects the env identity when a hook binding names the live session', () => {
+    const result = liveSessionIdentity(env, {
+      agentId: 'claude-code:ccccdddd',
+      kind: 'claude-code',
+    });
+    expect(result.identity?.agentId).toBe('claude-code:ccccdddd');
+    expect(result.identity?.origin).toBe('hook');
+    expect(result.drifted).toBe(true);
+  });
+
+  it('reports no drift when the binding confirms the env identity', () => {
+    const result = liveSessionIdentity(env, {
+      agentId: 'claude-code:aaaabbbb',
+      kind: 'claude-code',
+    });
+    expect(result.identity?.agentId).toBe('claude-code:aaaabbbb');
+    expect(result.drifted).toBe(false);
+  });
+
+  it('never mints an identity for a session-invisible server from a binding alone', () => {
+    const result = liveSessionIdentity(undefined, {
+      agentId: 'claude-code:ccccdddd',
+      kind: 'claude-code',
+    });
+    expect(result.identity).toBeUndefined();
+    expect(result.drifted).toBe(false);
+  });
+});
+
+describe('liveSessionIdentity binding proof', () => {
+  it('rejects a binding of another kind — a nested client keeps its own identity', () => {
+    const result = liveSessionIdentity(
+      { agentId: 'grok:11112222', kind: 'grok', origin: 'session' },
+      { agentId: 'claude-code:aaaabbbb', kind: 'claude-code' },
+    );
+    expect(result.identity?.agentId).toBe('grok:11112222');
+    expect(result.drifted).toBe(false);
+  });
+
+  it('never overrides an operator-chosen identity', () => {
+    const result = liveSessionIdentity(
+      { agentId: 'operator:chosen', kind: 'operator', origin: 'operator' },
+      { agentId: 'operator:other', kind: 'operator' },
+    );
+    expect(result.identity?.agentId).toBe('operator:chosen');
+    expect(result.drifted).toBe(false);
   });
 });
