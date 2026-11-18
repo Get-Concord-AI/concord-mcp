@@ -6,8 +6,6 @@ import { z } from 'zod';
 
 import { migrations } from '../../db/schema.js';
 import { buildAdoption } from '../../domain/adoption.js';
-import { resolveServerIdentity } from '../../domain/identity.js';
-import { ancestorPids } from '../../parent-chain.js';
 import { BLOCK_END, BLOCK_START } from '../../install/block.js';
 import {
   adapterNeedsAttention,
@@ -77,15 +75,6 @@ export function buildDoctorReport(
   const instructions = instructionStatus(ctx.repoRoot);
   const endpoints = ctx.repos.agentEndpoints.list();
   const connectedEndpoints = endpoints.filter((endpoint) => endpointPromptable(endpoint));
-  const envIdentity = resolveServerIdentity(env);
-  const binding = ancestorPids(6)
-    .map((pid) => ctx.repos.sessionBindings.forClientPid(pid))
-    .find((found) => found !== undefined);
-  const drift =
-    envIdentity !== undefined && binding !== undefined && binding.agentId !== envIdentity.agentId
-      ? `  identity     drift: env says ${envIdentity.agentId}, live session hook says ${binding.agentId} (a /resume the server was not restarted for)`
-      : undefined;
-
   const lines = [
     'Concord doctor',
     '',
@@ -97,7 +86,6 @@ export function buildDoctorReport(
     `  repo root    ${ctx.repoRoot}`,
     `  instructions ${instructions}`,
     `  endpoints    ${String(connectedEndpoints.length)} reachable / ${String(endpoints.length)} registered`,
-    ...(drift === undefined ? [] : [drift]),
     '',
     'Activity',
     `  tasks: ${String(tasks.length)}`,
