@@ -9,6 +9,11 @@ Junie CLI supports lifecycle hooks (`SessionStart`, `UserPromptSubmit`,
 hooks that automatically handle session identity, peer message delivery, and
 session cleanup — no manual polling is needed.
 
+Lifecycle hooks are a Junie Early Access feature. Concord verified this setup
+against Junie 26.11.0 and uses it as the minimum baseline; JetBrains does not
+publish a hooks-specific version floor, so older releases may work but are not
+covered.
+
 ## Configuration
 
 ### MCP Server
