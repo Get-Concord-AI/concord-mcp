@@ -8,7 +8,11 @@ import { openContext } from '../context.js';
 import { cloudRoster } from './cloud-hooks.js';
 import { cloudAccess, drainFromCloud, HOOK_TIMEOUT_MS, registerInCloud } from './cloud-inbox.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
-import { sessionStartMessage, type RosterLine } from './session-start-message.js';
+import {
+  JUNIE_SESSION_IDENTITY,
+  sessionStartMessage,
+  type RosterLine,
+} from './session-start-message.js';
 
 /**
  * Junie CLI lifecycle hooks (`~/.junie/config.json`). Junie passes its session
@@ -33,7 +37,7 @@ export function junieSessionStartOutput(agentId: string, others: readonly Roster
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
-      additionalContext: sessionStartMessage(agentId, others, true),
+      additionalContext: sessionStartMessage(agentId, others, JUNIE_SESSION_IDENTITY),
     },
   });
 }

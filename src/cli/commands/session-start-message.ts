@@ -31,23 +31,48 @@ export const CONCORD_SERVER_ONLY =
   "Make Concord calls with this machine's `concord` MCP server; a chat app's Concord " +
   "connector (such as claude.ai's) is a separate agent and must never be given this id.";
 
+/**
+ * What a hook tells its session when the MCP server cannot see the hook's
+ * session payload: the name the message uses for the harness, and the provider
+ * `concord inbox drain` expects.
+ */
+export interface ExplicitSessionIdentity {
+  readonly harnessLabel: string;
+  readonly provider: string;
+}
+
+export const DEVIN_SESSION_IDENTITY: ExplicitSessionIdentity = {
+  harnessLabel: 'Devin',
+  provider: 'devin',
+};
+
+export const JUNIE_SESSION_IDENTITY: ExplicitSessionIdentity = {
+  harnessLabel: 'Junie',
+  provider: 'junie',
+};
+
 /** What a session is told at start: who it is, and who else is here. */
 export function sessionStartMessage(
   agentId: string,
   others: readonly RosterLine[],
-  explicitAgentId = false,
+  explicit?: ExplicitSessionIdentity,
 ): string {
   return [
-    explicitAgentId
-      ? `Concord: this session is agent \`${agentId}\`. Devin's MCP server cannot see the hook session payload, so include \`agent_id: "${agentId}"\` on start_work, update_work, transfer_work, and finish_work calls. On inspect_work, \`agent_id\` selects whose inbox to read: leave it off to see the workspace, a task, or a message thread, and pass your own id only to read your inbox. Do not invent an id. ${CONCORD_SERVER_ONLY}`
-      : `Concord: this session is agent \`${agentId}\`. Concord resolves that identity from your ` +
+    explicit === undefined
+      ? `Concord: this session is agent \`${agentId}\`. Concord resolves that identity from your ` +
         'session on every tool call, so start_work, update_work, finish_work attribute your work ' +
-        `and keep your presence live without you passing an id. ${CONCORD_SERVER_ONLY}`,
-    explicitAgentId
-      ? `Other agents' messages are delivered when you send your next user prompt. ` +
-        `To check sooner, run \`concord inbox drain --agent ${agentId} --provider devin\` from this repository.`
-      : 'You can receive live messages from other agents in this workspace; they arrive on their own ' +
-        'as relayed context, so you never need to poll for them.',
+        `and keep your presence live without you passing an id. ${CONCORD_SERVER_ONLY}`
+      : `Concord: this session is agent \`${agentId}\`. ${explicit.harnessLabel}'s MCP server ` +
+        'cannot see the hook session payload, so include ' +
+        `\`agent_id: "${agentId}"\` on start_work, update_work, transfer_work, and finish_work ` +
+        'calls. On inspect_work, `agent_id` selects whose inbox to read: leave it off to see the ' +
+        'workspace, a task, or a message thread, and pass your own id only to read your inbox. ' +
+        `Do not invent an id. ${CONCORD_SERVER_ONLY}`,
+    explicit === undefined
+      ? 'You can receive live messages from other agents in this workspace; they arrive on their own ' +
+        'as relayed context, so you never need to poll for them.'
+      : `Other agents' messages are delivered when you send your next user prompt. ` +
+        `To check sooner, run \`concord inbox drain --agent ${agentId} --provider ${explicit.provider}\` from this repository.`,
     ...rosterLines(others),
   ].join('\n');
 }
