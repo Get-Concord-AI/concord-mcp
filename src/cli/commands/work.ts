@@ -218,14 +218,29 @@ function resolvedKind(
   return trimmed(env['CONCORD_AGENT_KIND']);
 }
 
-/** `--agent` names this caller the way CONCORD_AGENT_ID does for the MCP server. */
+/**
+ * `--agent` names this caller the way CONCORD_AGENT_ID does for the MCP server,
+ * but a session this process can see still wins: letting the flag override it
+ * would let one session act as another agent, the same hole `resolveInboxOwner`
+ * closes for the inbox. The flag is trusted only where no session identity is
+ * visible (a Grok or Cursor monitor, a script).
+ */
 function workIdentity(
   flags: WorkFlags,
   kind: string | undefined,
   env: NodeJS.ProcessEnv,
 ): AgentIdentity | undefined {
-  const source = flags.agent === undefined ? env : { ...env, CONCORD_AGENT_ID: flags.agent };
-  return resolveIdentity(source, kind === undefined ? {} : { kind });
+  const options = kind === undefined ? {} : { kind };
+  const own = resolveIdentity(env, options);
+  const flagged = flags.agent?.trim();
+  if (flagged === undefined || flagged === '') return own;
+  if (own !== undefined) {
+    if (own.agentId !== flagged) {
+      throw new Error(`This session is agent ${own.agentId}; it cannot act as ${flagged}.`);
+    }
+    return own;
+  }
+  return resolveIdentity({ ...env, CONCORD_AGENT_ID: flagged }, options);
 }
 
 function toolArguments(

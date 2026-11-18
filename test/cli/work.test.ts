@@ -33,7 +33,10 @@ import {
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { LINKED_MACHINE_MESSAGE } from '../../src/cloud/target.js';
 import { openRepositories, type Repositories } from '../../src/db/index.js';
-import { UNRESOLVED_IDENTITY_MESSAGE } from '../../src/domain/identity.js';
+import {
+  agentIdForSession,
+  UNRESOLVED_IDENTITY_MESSAGE,
+} from '../../src/domain/identity.js';
 import {
   CONCORD_GLOBAL_INSTRUCTIONS,
   CONCORD_INSTRUCTIONS,
@@ -344,6 +347,35 @@ describe('concord work', () => {
       z.object({ presence: z.array(z.object({ agentId: z.string() })) }),
     );
     expect(workspace.presence.map((entry) => entry.agentId)).toEqual(['alpha:1']);
+  });
+
+  it('refuses an --agent that disagrees with the visible session', async () => {
+    const sessionAgent = agentIdForSession('claude-code', 'sess-123');
+    const denied = await run(
+      'start',
+      { flags: { agent: 'mallory:9', task: 'imp', title: 'Impersonation' } },
+      { CLAUDE_CODE_SESSION_ID: 'sess-123' },
+    );
+    expect(failed(denied)).toBe(
+      `This session is agent ${sessionAgent}; it cannot act as mallory:9.`,
+    );
+
+    const started = parsed(
+      await run(
+        'start',
+        {
+          flags: {
+            agent: sessionAgent,
+            kind: 'claude-code',
+            task: 'imp',
+            title: 'Same session',
+          },
+        },
+        { CLAUDE_CODE_SESSION_ID: 'sess-123' },
+      ),
+      taskSchema,
+    );
+    expect(started.task_id).toBe('imp');
   });
 
   it('uses one kind for the start arguments and the registered agent', async () => {
