@@ -94,7 +94,7 @@ interface ProxyFixture {
 }
 
 /** Fake `codex app-server proxy` (stdio byte pipe) in front of an in-process WebSocket daemon. */
-async function proxyFixture(reply: boolean): Promise<ProxyFixture> {
+async function proxyFixture(reply: boolean, upgrade = true): Promise<ProxyFixture> {
   const methods: string[] = [];
   let upgraded = false;
   let buffer: Buffer = Buffer.alloc(0);
@@ -105,6 +105,7 @@ async function proxyFixture(reply: boolean): Promise<ProxyFixture> {
       if (!upgraded) {
         const headerEnd = buffer.indexOf('\r\n\r\n');
         if (headerEnd < 0) return;
+        if (!upgrade) return;
         const head = buffer.subarray(0, headerEnd).toString('utf8');
         const key = /sec-websocket-key:\s*(\S+)/iu.exec(head)?.[1];
         if (key === undefined) return;
@@ -299,6 +300,30 @@ describe('CodexDaemonClient', () => {
     await expect(fixture.client.request('thread/resume', { threadId: 't-1' })).rejects.toThrow(
       'Codex app-server is not connected.',
     );
+  });
+
+  it('names the handshake when the proxy never answers the upgrade', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const fixture = await proxyFixture(true, false);
+    stop.push(fixture.stop);
+    const connecting = fixture.client.connect();
+
+    const rejected = expect(connecting).rejects.toThrow(
+      /WebSocket handshake timed out after 10000ms/,
+    );
+    await waitUntil(() => {
+      try {
+        fixture.pid();
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejected;
+
+    await waitUntil(() => !running(fixture.pid()));
+    expect(fixture.upgraded()).toBe(false);
   });
 
   it('keeps the CONCORD_CODEX_APP_SERVER_URL path on the global WebSocket', async () => {

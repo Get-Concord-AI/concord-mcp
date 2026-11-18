@@ -170,6 +170,13 @@ export class CodexDaemonClient {
     );
   }
 
+  private handshakeTimeoutError(timeoutMs: number): Error {
+    const target = [this.command, ...this.args].join(' ');
+    return new Error(
+      `Codex app-server WebSocket handshake timed out after ${String(timeoutMs)}ms (${target}).`,
+    );
+  }
+
   private notify(method: string, params: Record<string, unknown>): void {
     this.send({ method, params });
   }
@@ -221,7 +228,7 @@ export class CodexDaemonClient {
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        reject(this.timeoutError(this.initializeTimeoutMs));
+        reject(this.handshakeTimeoutError(this.initializeTimeoutMs));
         this.close();
       }, this.initializeTimeoutMs);
       const socket = new WsWebSocket('ws://127.0.0.1', {
