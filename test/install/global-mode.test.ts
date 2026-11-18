@@ -86,6 +86,40 @@ describe('applyGlobalMode', () => {
     expect(existsSync(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).toBe(false);
   });
 
+  it('installs and removes Kiro user MCP config, steering, and hooks', () => {
+    const env = machine(['kiro']);
+    const hooks = join(env.HOME, '.kiro', 'hooks', 'concord.json');
+    mkdirSync(join(env.HOME, '.kiro', 'hooks'), { recursive: true });
+    writeFileSync(
+      hooks,
+      `${JSON.stringify({
+        version: 'v1',
+        hooks: [
+          {
+            name: 'my-lint',
+            trigger: 'PostFileSave',
+            action: { type: 'command', command: 'lint' },
+          },
+        ],
+      })}\n`,
+    );
+
+    const on = applyGlobalMode(env, true);
+    expect(on.registrations).toEqual(['kiro']);
+    expect(read(join(env.HOME, '.kiro', 'steering', 'concord.md'))).toContain('start_work');
+    expect(read(join(env.HOME, '.kiro', 'settings', 'mcp.json'))).toContain('"CONCORD_AGENT_KIND"');
+    const installed = read(hooks);
+    expect(installed).toContain('my-lint');
+    expect(installed).toContain('concord hook kiro-session-start');
+
+    applyGlobalMode(env, false, { registrations: on.registrations });
+    expect(existsSync(join(env.HOME, '.kiro', 'steering', 'concord.md'))).toBe(false);
+    expect(read(join(env.HOME, '.kiro', 'settings', 'mcp.json'))).not.toContain('concord-mcp');
+    const remaining = read(hooks);
+    expect(remaining).toContain('my-lint');
+    expect(remaining).not.toContain('concord hook kiro-');
+  });
+
   it('registers and instructs each installed harness, then removes only its own additions', () => {
     const env = machine();
     mkdirSync(join(env.HOME, '.claude'));
