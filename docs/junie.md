@@ -44,6 +44,11 @@ The hooks added are:
 - `SessionEnd` → `concord hook junie-session-end` — cleans up endpoints when
   the session finishes
 
+Known limitation: Junie's `SessionEnd` payload carries only `reason`, not
+`session_id`, so the hook cannot tell which session ended and the pull endpoint
+is not disconnected right away. The endpoint's presence still lapses through
+`last_seen`, and a later `SessionStart` for the same session re-registers it.
+
 The config looks like:
 
 ```json
