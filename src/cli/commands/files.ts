@@ -25,7 +25,7 @@ export function registerFilesCommand(program: Command): void {
       // Agents read this output to decide what to do next, so a refusal is one
       // plain line and a non-zero exit, not a stack trace.
       try {
-        const { repos } = openContext(process.cwd());
+        const { repos, repoRoot } = openContext(process.cwd());
         const saved = fetchSharedFile(repos, {
           fileId,
           agentId: resolveSessionBoundAgent(
@@ -35,6 +35,7 @@ export function registerFilesCommand(program: Command): void {
             'save files shared with',
           ),
           destination: options.to,
+          workspaceRoot: repoRoot,
         });
         process.stdout.write(
           `Saved ${saved.filename} (${String(saved.sizeBytes)} bytes, checksum verified) to ${saved.path}\n`,

@@ -39,6 +39,11 @@ export interface ServerOptions {
   requestIdentity?: (
     meta: OpenCodeRequestIdentityMetadata | undefined,
   ) => AgentIdentity | undefined;
+  /**
+   * The repository root this server works in, for a server with no workspace manager.
+   * File sharing needs it, and refuses to run without it.
+   */
+  workspaceRoot?: string;
 }
 
 /**
@@ -72,6 +77,7 @@ export function createServer(repos: Repositories, options: ServerOptions = {}): 
     options.telemetry,
     options.getAdapterNotice,
     options.requestIdentity,
+    options.workspaceRoot,
   );
   return server;
 }

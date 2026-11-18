@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -14,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
@@ -26,6 +28,7 @@ import {
   fetchSharedFile,
   handleSendWithAttachments,
   readAtMost,
+  stageAttachments,
 } from '../../src/tools/shared-files.js';
 
 /** No agent has a live session in these tests, so messages wait in the queue. */
@@ -33,18 +36,39 @@ const noLiveSession: AgentMessageDispatcher = {
   deliver: () => Promise.reject(new Error('no live session')),
 };
 
+function git(cwd: string, args: string[]): void {
+  execFileSync('git', args, { cwd, stdio: 'ignore' });
+}
+
 describe('files shared with agent messages', () => {
   let scratch: string;
   let repos: Repositories;
   let alpha: string;
   let beta: string;
+  let workspaceRoot: string;
 
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), 'concord-files-'));
+    // alpha is this workspace's repository; beta is a linked worktree of it, as in real use.
     alpha = join(scratch, 'alpha');
     beta = join(scratch, 'beta');
     mkdirSync(alpha);
-    mkdirSync(beta);
+    git(alpha, ['init', '-q']);
+    git(alpha, [
+      '-c',
+      'user.name=test',
+      '-c',
+      'user.email=test@example.com',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'init',
+    ]);
+    git(alpha, ['worktree', 'add', '-q', '-b', 'beta', beta]);
+    workspaceRoot = realpathSync(alpha);
     repos = createRepositories(openDatabase(':memory:'));
     handleRegisterAgent(repos, {
       agent_id: 'agent-alpha',
@@ -73,6 +97,7 @@ describe('files shared with agent messages', () => {
     return handleSendWithAttachments(
       repos,
       {
+        workspaceRoot,
         operation: 'prompt',
         agentId: 'agent-alpha',
         toAgentId: 'agent-beta',
@@ -90,8 +115,8 @@ describe('files shared with agent messages', () => {
     return file.fileId;
   }
 
-  function storedCount(): unknown {
-    return repos.db.prepare('SELECT COUNT(*) FROM shared_files').pluck().get();
+  function storedCount(): number {
+    return z.number().parse(repos.db.prepare('SELECT COUNT(*) FROM shared_files').pluck().get());
   }
 
   it('stores exact bytes with the message and references them in its content', async () => {
@@ -121,6 +146,7 @@ describe('files shared with agent messages', () => {
     const result = await send(['run.log']);
 
     const saved = fetchSharedFile(repos, {
+      workspaceRoot,
       fileId: fileIdOf(result.message.messageId),
       agentId: 'agent-beta',
       destination: 'incoming/run.log',
@@ -145,10 +171,20 @@ describe('files shared with agent messages', () => {
     const fileId = fileIdOf(result.message.messageId);
 
     expect(
-      fetchSharedFile(repos, { fileId, agentId: 'agent-alpha', destination: 'copy.log' }).filename,
+      fetchSharedFile(repos, {
+        workspaceRoot,
+        fileId,
+        agentId: 'agent-alpha',
+        destination: 'copy.log',
+      }).filename,
     ).toBe('run.log');
     expect(() =>
-      fetchSharedFile(repos, { fileId, agentId: 'agent-gamma', destination: 'run.log' }),
+      fetchSharedFile(repos, {
+        workspaceRoot,
+        fileId,
+        agentId: 'agent-gamma',
+        destination: 'run.log',
+      }),
     ).toThrow(`No shared file ${fileId} is available to agent-gamma.`);
     expect(existsSync(join(gamma, 'run.log'))).toBe(false);
   });
@@ -189,6 +225,7 @@ describe('files shared with agent messages', () => {
       handleSendWithAttachments(
         repos,
         {
+          workspaceRoot,
           operation: 'prompt',
           agentId: 'agent-alpha',
           toAgentId: 'agent-nobody',
@@ -223,7 +260,7 @@ describe('files shared with agent messages', () => {
     expect(() =>
       fetchSharedFile(
         repos,
-        { fileId, agentId: 'agent-beta', destination: 'run.log' },
+        { workspaceRoot, fileId, agentId: 'agent-beta', destination: 'run.log' },
         afterRetention,
       ),
     ).toThrow('was removed');
@@ -241,15 +278,26 @@ describe('files shared with agent messages', () => {
     write(join(beta, 'run.log'), 'mine');
 
     expect(() =>
-      fetchSharedFile(repos, { fileId, agentId: 'agent-beta', destination: 'run.log' }),
+      fetchSharedFile(repos, {
+        workspaceRoot,
+        fileId,
+        agentId: 'agent-beta',
+        destination: 'run.log',
+      }),
     ).toThrow('already exists');
     expect(readFileSync(join(beta, 'run.log'), 'utf8')).toBe('mine');
 
     expect(() =>
-      fetchSharedFile(repos, { fileId, agentId: 'agent-beta', destination: '../escape.log' }),
+      fetchSharedFile(repos, {
+        workspaceRoot,
+        fileId,
+        agentId: 'agent-beta',
+        destination: '../escape.log',
+      }),
     ).toThrow('outside your worktree');
     expect(() =>
       fetchSharedFile(repos, {
+        workspaceRoot,
         fileId,
         agentId: 'agent-beta',
         destination: join(scratch, 'escape.log'),
@@ -266,7 +314,12 @@ describe('files shared with agent messages', () => {
       symlinkSync(scratch, join(beta, 'out'));
 
       expect(() =>
-        fetchSharedFile(repos, { fileId, agentId: 'agent-beta', destination: 'out/run.log' }),
+        fetchSharedFile(repos, {
+          workspaceRoot,
+          fileId,
+          agentId: 'agent-beta',
+          destination: 'out/run.log',
+        }),
       ).toThrow('outside your worktree');
       expect(existsSync(join(scratch, 'run.log'))).toBe(false);
     },
@@ -280,7 +333,12 @@ describe('files shared with agent messages', () => {
       .run(Buffer.from('tampered'), fileId);
 
     expect(() =>
-      fetchSharedFile(repos, { fileId, agentId: 'agent-beta', destination: 'run.log' }),
+      fetchSharedFile(repos, {
+        workspaceRoot,
+        fileId,
+        agentId: 'agent-beta',
+        destination: 'run.log',
+      }),
     ).toThrow('failed its checksum');
     expect(existsSync(join(beta, 'run.log'))).toBe(false);
   });
@@ -304,12 +362,13 @@ describe('files shared with agent messages', () => {
 
   it('a failed send stores nothing, and retrying with the same key works once the recipient exists', async () => {
     const late = join(scratch, 'late');
-    mkdirSync(late);
+    git(alpha, ['worktree', 'add', '-q', '-b', 'late', late]);
     write(join(alpha, 'run.log'), 'data');
     const sendTo = (to: string) =>
       handleSendWithAttachments(
         repos,
         {
+          workspaceRoot,
           operation: 'prompt',
           agentId: 'agent-alpha',
           toAgentId: to,
@@ -334,6 +393,7 @@ describe('files shared with agent messages', () => {
     expect(retried.idempotentReplay).toBe(false);
     expect(storedCount()).toBe(1);
     const saved = fetchSharedFile(repos, {
+      workspaceRoot,
       fileId: fileIdOf(retried.message.messageId),
       agentId: 'agent-late',
       destination: 'run.log',
@@ -362,6 +422,7 @@ describe('files shared with agent messages', () => {
     write(join(scratch, 'secret.txt'), 'outside');
     const server = createServer(repos, {
       identity: { agentId: 'agent-alpha', kind: 'claude-code', origin: 'operator' },
+      workspaceRoot,
     });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: 'shared-files-test', version: '0.0.0' });
@@ -396,5 +457,45 @@ describe('files shared with agent messages', () => {
       await client.close();
       await server.close();
     }
+  });
+
+  it('refuses a registered worktree that is not a checkout of this repository', () => {
+    const stray = join(scratch, 'stray');
+    mkdirSync(stray);
+    write(join(stray, 'id_ed25519'), 'key');
+    handleRegisterAgent(repos, {
+      agent_id: 'agent-stray',
+      kind: 'claude-code',
+      worktree: stray,
+      status: 'active',
+    });
+
+    expect(() =>
+      stageAttachments(repos, 'agent-stray', ['id_ed25519'], 'key-stray', workspaceRoot),
+    ).toThrow('is not a checkout of this repository');
+    expect(storedCount()).toBe(0);
+  });
+
+  it('refuses to save a file into Concord or git folders', async () => {
+    write(join(alpha, 'run.log'), 'data');
+    const fileId = fileIdOf((await send(['run.log'])).message.messageId);
+
+    expect(() =>
+      fetchSharedFile(repos, {
+        workspaceRoot,
+        fileId,
+        agentId: 'agent-beta',
+        destination: '.concord/run.log',
+      }),
+    ).toThrow('cannot be written to');
+    expect(() =>
+      fetchSharedFile(repos, {
+        workspaceRoot,
+        fileId,
+        agentId: 'agent-beta',
+        destination: '.git/info/run.log',
+      }),
+    ).toThrow('cannot be written to');
+    expect(existsSync(join(beta, '.concord'))).toBe(false);
   });
 });

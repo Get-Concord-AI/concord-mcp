@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
-import { CONCORD_DIR } from '../config/paths.js';
+import { CONCORD_DIR, findCheckoutRoot, findRepoRoot } from '../config/paths.js';
 import type { Repositories } from '../db/index.js';
 import {
   attachmentBlock,
@@ -66,21 +66,35 @@ function fileIdFor(
 }
 
 /**
- * The worktree an agent's relative paths resolve against: the one it
- * registered, with symlinks resolved. Agents with no registered worktree
- * cannot share files, since there is nothing to bound their access.
+ * The checkout an agent's relative paths resolve against. The worktree it
+ * registered is free-form text, so it is trusted only if it sits in a checkout
+ * of this workspace's repository.
  */
-function realWorktree(repos: Repositories, agentId: string): string {
+function realWorktree(repos: Repositories, agentId: string, workspaceRoot: string): string {
   const agent = repos.agents.get(agentId);
   if (agent === undefined) throw new Error(`Agent ${agentId} is not registered.`);
-  const root = agent.worktree ?? agent.cwd;
-  if (root === null || root === '') {
+  const registered = agent.worktree ?? agent.cwd;
+  if (registered === null || registered === '') {
     throw new Error(
       `Agent ${agentId} registered no worktree; call start_work with its worktree before sharing files.`,
     );
   }
-  if (!existsSync(root)) throw new Error(`Worktree ${root} for ${agentId} does not exist.`);
-  return realpathSync(root);
+  if (!existsSync(registered))
+    throw new Error(`Worktree ${registered} for ${agentId} does not exist.`);
+  // Use the checkout the path is in, not the path itself. A registered "/Users/me",
+  // or a folder inside .git, is not a checkout of this repo, so it cannot be the boundary.
+  const checkout = findCheckoutRoot(realpathSync(registered));
+  if (findRepoRoot(checkout) !== workspaceRoot) {
+    throw new Error(
+      `Worktree ${registered} for ${agentId} is not a checkout of this repository, so files cannot be shared from it.`,
+    );
+  }
+  return checkout;
+}
+
+/** Concord's own folder and git's folder: file sharing never reads from or writes into them. */
+function isReserved(root: string, real: string): boolean {
+  return [CONCORD_DIR, '.git'].some((reserved) => isInsideDirectory(join(root, reserved), real));
 }
 
 /** A path the sender named, resolved past symlinks, if it is inside its worktree and not Concord or git state. */
@@ -91,10 +105,8 @@ function sharedSource(root: string, path: string): string {
   if (!isInsideDirectory(root, real)) {
     throw new Error(`${path} is outside your worktree; only files in your worktree can be shared.`);
   }
-  for (const reserved of [CONCORD_DIR, '.git']) {
-    if (isInsideDirectory(join(root, reserved), real)) {
-      throw new Error(`${path} is Concord or git metadata and cannot be shared.`);
-    }
+  if (isReserved(root, real)) {
+    throw new Error(`${path} is Concord or git metadata and cannot be shared.`);
   }
   return real;
 }
@@ -126,11 +138,12 @@ export function stageAttachments(
   senderAgentId: string,
   paths: readonly string[],
   idempotencyKey: string,
+  workspaceRoot: string,
 ): StagedFile[] {
   if (paths.length > MAX_FILES_PER_MESSAGE) {
     throw new Error(`A message can share at most ${String(MAX_FILES_PER_MESSAGE)} files.`);
   }
-  const root = realWorktree(repos, senderAgentId);
+  const root = realWorktree(repos, senderAgentId, workspaceRoot);
   let total = 0;
   return paths.map((path, index) => {
     const source = sharedSource(root, path);
@@ -159,6 +172,8 @@ export function stageAttachments(
 
 export interface SendWithFilesInput extends SendAgentMessageInput {
   attachments?: readonly string[] | undefined;
+  /** The repository root of this workspace. Files can be shared only when it is known. */
+  workspaceRoot?: string | undefined;
 }
 
 /**
@@ -172,12 +187,21 @@ export async function handleSendWithAttachments(
   input: SendWithFilesInput,
   dispatcher: AgentMessageDispatcher,
 ): Promise<SendAgentMessageResult> {
-  const { attachments, ...send } = input;
+  const { attachments, workspaceRoot, ...send } = input;
   if (attachments === undefined || attachments.length === 0) {
     return handleSendAgentMessageWithDelivery(repos, send, dispatcher);
   }
+  if (workspaceRoot === undefined) {
+    throw new Error('Files cannot be shared here: this server does not know its workspace root.');
+  }
   repos.sharedFiles.purgeExpired(new Date().toISOString());
-  const staged = stageAttachments(repos, send.agentId, attachments, send.idempotencyKey);
+  const staged = stageAttachments(
+    repos,
+    send.agentId,
+    attachments,
+    send.idempotencyKey,
+    workspaceRoot,
+  );
   const messageId = randomUUID();
   const expiresAt = retentionEnd(Date.now());
 
@@ -221,6 +245,8 @@ export interface FetchSharedFileInput {
   agentId: string;
   /** Where to save it: relative to the reader's worktree, or an absolute path inside it. */
   destination: string;
+  /** The repository root of this workspace (openContext().repoRoot on the CLI). */
+  workspaceRoot: string;
 }
 
 export interface FetchedSharedFile {
@@ -244,6 +270,9 @@ function writeInside(root: string, requested: string, content: Buffer): string {
   const real = join(realpathSync(ancestor), relative(ancestor, target));
   if (!isInsideDirectory(root, real)) {
     throw new Error(`${requested} is outside your worktree; retrieved files are saved inside it.`);
+  }
+  if (isReserved(root, real)) {
+    throw new Error(`${requested} is Concord or git metadata and cannot be written to.`);
   }
   mkdirSync(dirname(target), { recursive: true });
   try {
@@ -290,7 +319,7 @@ export function fetchSharedFile(
       `${file.filename} failed its checksum, so nothing was saved. Ask the sender to share it again.`,
     );
   }
-  const root = realWorktree(repos, input.agentId);
+  const root = realWorktree(repos, input.agentId, input.workspaceRoot);
   const path = writeInside(root, input.destination, file.content);
   return {
     fileId: file.fileId,

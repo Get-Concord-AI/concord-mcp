@@ -211,6 +211,7 @@ export function handleUpdateWork(
   repos: Repositories,
   input: WithActor<UpdateWorkInput>,
   dispatcher: AgentMessageDispatcher,
+  workspaceRoot?: string,
 ): UpdateWorkResult | Promise<UpdateWorkResult> {
   const operation = input.operation ?? 'record';
   if (
@@ -236,6 +237,7 @@ export function handleUpdateWork(
         content: input.content,
         idempotencyKey: updateRequired(input.idempotency_key, 'idempotency_key', operation),
         attachments: input.attachments,
+        workspaceRoot,
       },
       dispatcher,
     );
@@ -435,6 +437,8 @@ export function registerWorkflowTools(
   requestIdentity?: (
     meta: OpenCodeRequestIdentityMetadata | undefined,
   ) => AgentIdentity | undefined,
+  /** The workspace root for calls that select no workspace, such as a server with no manager. */
+  singleWorkspaceRoot?: string,
 ): void {
   interface WorkflowToolResponse {
     content: { type: 'text'; text: string }[];
@@ -776,7 +780,12 @@ export function registerWorkflowTools(
           ? null
           : (taskFlowId(messageTaskId) ?? null);
       try {
-        const result = await handleUpdateWork(callRepos, withActor(args, requestMeta), dispatcher);
+        const result = await handleUpdateWork(
+          callRepos,
+          withActor(args, requestMeta),
+          dispatcher,
+          workspace?.repoRoot ?? singleWorkspaceRoot,
+        );
         onWrite?.(workspace);
         if ('update' in result) {
           return withCallAdvisories({
