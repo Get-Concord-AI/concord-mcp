@@ -23,11 +23,16 @@ The entry added looks like:
 {
   "mcpServers": {
     "concord": {
-      "command": "concord-mcp"
+      "command": "concord-mcp",
+      "env": {
+        "CONCORD_AGENT_KIND": "junie"
+      }
     }
   }
 }
 ```
+
+If `JUNIE_HOME` is set, these files live under it instead of `~/.junie`.
 
 ### Lifecycle Hooks
 
@@ -48,6 +53,11 @@ Known limitation: Junie's `SessionEnd` payload carries only `reason`, not
 `session_id`, so the hook cannot tell which session ended and the pull endpoint
 is not disconnected right away. The endpoint's presence still lapses through
 `last_seen`, and a later `SessionStart` for the same session re-registers it.
+
+Junie fires `UserPromptSubmit` only in the interactive TUI. ACP hosts invoke
+`SessionStart`, `PreToolUse` and `SessionEnd` but never `UserPromptSubmit`, so
+non-interactive/ACP sessions get no prompt-time message drain — they still
+register on `SessionStart` and can pull with `concord inbox drain`.
 
 The config looks like:
 
