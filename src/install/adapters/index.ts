@@ -23,6 +23,9 @@ import {
   removeDevinUserHooks,
 } from '../devin-user-hooks.js';
 import { devinHooksInstalled } from '../devin-hooks.js';
+import { statusJunie } from './junie.js';
+import { installJunieHooks, removeJunieHooks } from '../junie-hooks.js';
+import { installJunieMcpConfig, uninstallJunieMcpConfig } from '../junie-config.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import { uninstallHermesMcpConfig } from '../hermes-config.js';
 import {
@@ -725,6 +728,8 @@ export function statusAdapter(
       return statusOpencode(env);
     case 'qwen':
       return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
+    case 'junie':
+      return statusJunie(env);
   }
 }
 
@@ -839,6 +844,15 @@ export function installAdapter(
       }
       return;
     }
+    case 'junie': {
+      const version = versionTuple(run(executable, ['--version'], env).output);
+      if (version === undefined || !atLeast(version, HARNESS_CONFIGS.junie.minimumVersion)) {
+        return;
+      }
+      installJunieMcpConfig(env);
+      installJunieHooks(env);
+      return;
+    }
   }
 }
 
@@ -922,6 +936,8 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   }
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
+  uninstallJunieMcpConfig(env);
+  removeJunieHooks(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

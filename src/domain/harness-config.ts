@@ -19,6 +19,7 @@ export const harnessNames = [
   'devin',
   'opencode',
   'qwen',
+  'junie',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -311,6 +312,26 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
     unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
+  },
+  junie: {
+    name: 'junie',
+    executable: 'junie',
+    // Lifecycle hooks are Early Access only; 26.11.0 is the earliest Junie
+    // release the hooks/MCP setup was verified against.
+    minimumVersion: [26, 11, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Concord MCP server and lifecycle hooks are registered with Junie (~/.junie/config.json). Idle wake-up is not verified, so messages reach it only when a turn runs.',
+    unsupportedDetail: 'Junie does not meet the verified MCP baseline (26.11.0).',
   },
 };
 

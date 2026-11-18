@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, GitHub Copilot CLI, and OpenCode talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, Junie, GitHub Copilot CLI, and OpenCode talk to each other.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -89,7 +89,8 @@ direct prompts and replies.
 for Claude, Cursor, Gemini, Grok, and Codex (`.mcp.json`, `.cursor/mcp.json`,
 `.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`).
 For [Goose](./docs/goose.md), it registers the `concord-relay` extension in
-Goose's `config.yaml` when detected. For
+Goose's `config.yaml` when detected. For [Junie](./docs/junie.md), it writes
+`~/.junie/mcp/mcp.json` when detected. For
 [Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
 `.agents/hooks.json`, and `.agents/rules/concord.md`. It also writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
@@ -161,6 +162,7 @@ aside once no session started before the link is running (nothing is deleted).
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
+| JetBrains Junie                    | [Setup and delivery](./docs/junie.md)              |
 | Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
 | Any other MCP-capable coding agent | [Manual setup](./docs/other-mcp-clients.md)        |
 

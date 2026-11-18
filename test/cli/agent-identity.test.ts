@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { resolveAgentId, sessionStartIdentity } from '../../src/cli/agent-identity.js';
-import { sessionStartMessage } from '../../src/cli/commands/session-start-message.js';
+import {
+  DEVIN_SESSION_IDENTITY,
+  JUNIE_SESSION_IDENTITY,
+  sessionStartMessage,
+} from '../../src/cli/commands/session-start-message.js';
 import {
   resolveActorId,
   resolveIdentity,
@@ -81,7 +85,7 @@ describe('sessionStartIdentity', () => {
 
 describe('Devin session instructions', () => {
   it('tells Devin to pass the hook-derived identity to MCP calls', () => {
-    const message = sessionStartMessage('devin:1234abcd', [], true);
+    const message = sessionStartMessage('devin:1234abcd', [], DEVIN_SESSION_IDENTITY);
 
     expect(message).toContain(
       'include `agent_id: "devin:1234abcd"` on start_work, update_work, transfer_work, and finish_work',
@@ -89,5 +93,15 @@ describe('Devin session instructions', () => {
     expect(message).toContain('leave it off to see the workspace');
     expect(message).not.toContain('without you passing an id');
     expect(resolveActorId(undefined, 'devin:1234abcd')).toBe('devin:1234abcd');
+  });
+});
+
+describe('Junie session instructions', () => {
+  it('names Junie, not Devin, and drains with the junie provider', () => {
+    const message = sessionStartMessage('junie:1234abcd', [], JUNIE_SESSION_IDENTITY);
+
+    expect(message).toContain("Junie's MCP server cannot see the hook session payload");
+    expect(message).not.toContain("Devin's MCP server");
+    expect(message).toContain('concord inbox drain --agent junie:1234abcd --provider junie');
   });
 });
