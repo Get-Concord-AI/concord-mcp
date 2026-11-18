@@ -1,6 +1,7 @@
 /**
  * Every harness frames a delivered message the same way —
- * `[concord from <agent> id=<message> task=<task>]` followed by the content —
+ * `[concord from <agent> id=<message> task=<task> no-reply-needed]` (task and
+ * marker optional) followed by the content —
  * whatever envelope (hook JSON, monitor line, app-server turn) carries it.
  */
 
@@ -21,7 +22,7 @@ export interface Delivered {
   via: Channel;
 }
 
-const HEADER = /\[concord from (\S+) id=([^\s\]]+)(?: task=[^\]]*)?\]/gu;
+const HEADER = /\[concord from (\S+) id=([^\s\]]+)(?: [^\]]*)?\]/gu;
 
 export function parseDelivered(text: string, via: Channel): Delivered[] {
   const headers = [...text.matchAll(HEADER)];

@@ -799,6 +799,7 @@ describe('simplified workflow MCP contract', () => {
       recipientAgentId: 'codex:target',
       replyToMessageId: null,
       content: 'Retry me',
+      expectsReply: true,
       idempotencyKey: 'pending-1',
     });
     const harness = await connect(repos);

@@ -290,7 +290,12 @@ export const migrations: readonly string[] = [
     summary_updated_at = CASE WHEN summary IS NULL THEN NULL ELSE last_seen END,
     execution_status = CASE WHEN status = 'active' THEN 'executing' ELSE 'not_executing' END;
   `,
-  // 018 — which agent a client process currently hosts. Session-start hooks
+  // 018 — whether the sender wants an answer. Replies default to no, so two
+  // agents stop acknowledging each other's acknowledgements.
+  `
+  ALTER TABLE agent_messages ADD COLUMN expects_reply INTEGER NOT NULL DEFAULT 1;
+  `,
+  // 019 — which agent a client process currently hosts. Session-start hooks
   // record it per ancestor pid so an MCP server spawned before a /resume can
   // resolve the session that is live now, not the one it was launched with.
   `

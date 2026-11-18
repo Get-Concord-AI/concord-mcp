@@ -136,7 +136,12 @@ describe('project-scoped stores', () => {
     db.exec(`INSERT INTO agents (agent_id, kind, first_seen, last_seen)
       VALUES ('codex:a', 'codex', 't', 't'), ('codex:b', 'codex', 't', 't')`);
 
-    const message = { replyToMessageId: null, content: 'hello', idempotencyKey: 'k' } as const;
+    const message = {
+      replyToMessageId: null,
+      content: 'hello',
+      expectsReply: true,
+      idempotencyKey: 'k',
+    } as const;
     general.agentMessages.create({
       ...message,
       messageId: 'm1',

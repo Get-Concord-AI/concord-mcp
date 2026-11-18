@@ -178,6 +178,7 @@ describe('Copilot CLI hooks', () => {
         taskId: null,
         content: 'Spooled by the host.',
         messageKind: 'prompt',
+        expectsReply: true,
         deliveryLatencyMs: null,
       },
     ]);
@@ -236,6 +237,7 @@ describe('fittingPrefix', () => {
     taskId: null,
     content: 'x'.repeat(size),
     messageKind: 'prompt',
+    expectsReply: true,
     deliveryLatencyMs: null,
   });
 

@@ -16,6 +16,7 @@ import {
   type OwnershipEventRepository,
 } from './repositories/ownership-events.js';
 import { createReviewRepository, type ReviewRepository } from './repositories/reviews.js';
+import { createSearchRepository, type SearchRepository } from './repositories/search.js';
 import {
   createSessionBindingRepository,
   type SessionBindingRepository,
@@ -86,6 +87,7 @@ export interface Repositories {
   agentMessages: AgentMessageRepository;
   sessionBindings: SessionBindingRepository;
   ownershipEvents: OwnershipEventRepository;
+  search: SearchRepository;
 }
 
 /** Bind all repositories to an open database; task-scoped ones see only `project`. */
@@ -106,6 +108,7 @@ export function createRepositories(
     agentMessages: createAgentMessageRepository(db, project),
     sessionBindings: createSessionBindingRepository(db),
     ownershipEvents: createOwnershipEventRepository(db, project),
+    search: createSearchRepository(db, project),
   };
 }
 
