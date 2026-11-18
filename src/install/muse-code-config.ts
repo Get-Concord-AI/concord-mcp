@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 
 import { userHome } from '../config/paths.js';
-import { agentKindEnv, CONCORD_SERVER_COMMAND, isConcordWrittenEntry } from './mcp-config.js';
+import {
+  agentKindEnv,
+  CONCORD_SERVER_COMMAND,
+  isConcordServerEntry,
+  isConcordWrittenEntry,
+} from './mcp-config.js';
 import { type JsonObject, type JsonValue, jsonObjectSchema, parseJsonObject } from './json.js';
 
 const MCP_SERVERS_KEY = 'mcpServers';
@@ -64,7 +69,7 @@ export function hasMuseCodeMcpServer(existing: string): boolean {
     const entryObj = jsonObjectSchema.safeParse(found.entry);
     if (!entryObj.success) return false;
     if (entryHasConflictingSpellings(entryObj.data)) return false;
-    return isConcordWrittenEntry(found.entry);
+    return isConcordServerEntry(found.entry);
   } catch {
     return false;
   }

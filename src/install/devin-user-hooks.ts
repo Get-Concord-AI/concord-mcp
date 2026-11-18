@@ -126,7 +126,19 @@ function formatNestedObject(value: JsonObject, comments: readonly string[] = [])
     .map((line, index) => (index === 0 ? line : `  ${line}`))
     .join('\n');
   if (comments.length === 0) return formatted;
-  return `${formatted.slice(0, -1)}\n${comments.map((comment) => `  ${comment}`).join('\n')}\n`;
+  const lines = formatted.split('\n');
+  const lastLine = lines[lines.length - 1];
+  const indent = lastLine?.match(/^\s*/u)?.[0] ?? '  ';
+  if (lastLine?.trim() === '}') {
+    lines.splice(lines.length - 1, 0, ...comments.map((comment) => `${indent}${comment}`));
+    return `${lines.join('\n')}\n`;
+  }
+  // Fallback: append comments before the final brace if possible
+  if (formatted.endsWith('}')) {
+    const base = formatted.slice(0, -1).trimEnd();
+    return `${base}\n${comments.map((comment) => `${indent}${comment}`).join('\n')}\n}\n`;
+  }
+  return `${formatted}\n${comments.map((comment) => `  ${comment}`).join('\n')}\n`;
 }
 
 function userConfigPath(env: NodeJS.ProcessEnv = process.env): string {

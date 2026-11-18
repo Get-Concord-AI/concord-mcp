@@ -315,6 +315,21 @@ export function installMcpConfigs(repoRoot: string): string[] {
 /** The published package an older install would have run through a runner. */
 const CONCORD_PACKAGE_NAME = '@concord-ai/concord-mcp';
 
+/** Whether a `concord` server entry points to Concord (usable registration). */
+export function isConcordServerEntry(entry: unknown): boolean {
+  const parsed = z
+    .object({
+      command: z.string().optional(),
+      args: z.array(z.string()).optional(),
+    })
+    .loose()
+    .safeParse(entry);
+  if (!parsed.success) return false;
+  if (parsed.data.command === CONCORD_SERVER_COMMAND) return true;
+  const args = parsed.data.args ?? [];
+  return args.some((arg) => typeof arg === 'string' && isPackageSpec(arg, CONCORD_PACKAGE_NAME));
+}
+
 /**
  * Whether a `concord` server entry is one Concord wrote and may therefore be
  * migrated away. Concord registers the bare `concord-mcp` command; older
@@ -323,6 +338,7 @@ const CONCORD_PACKAGE_NAME = '@concord-ai/concord-mcp';
  * merely contains that text is the user's own wrapper and is left alone.
  */
 export function isConcordWrittenEntry(entry: unknown): boolean {
+  if (!isConcordServerEntry(entry)) return false;
   const parsed = z
     .object({
       command: z.string().optional(),
@@ -332,20 +348,15 @@ export function isConcordWrittenEntry(entry: unknown): boolean {
     .loose()
     .safeParse(entry);
   if (!parsed.success) return false;
-  // If the user specified custom arguments, it is a custom entry unless matching the runner shape.
   if (parsed.data.args !== undefined && parsed.data.args.length > 0) {
     const isRunner = parsed.data.args.some((arg) => isPackageSpec(arg, CONCORD_PACKAGE_NAME));
     if (!isRunner) return false;
   }
-  // If the user specified custom environment variables (other than CONCORD_REPO_ROOT or CONCORD_AGENT_KIND), it is custom.
   const envKeys = Object.keys(parsed.data.env ?? {});
   if (envKeys.some((key) => key !== 'CONCORD_REPO_ROOT' && key !== AGENT_KIND_ENV)) {
     return false;
   }
-  if (parsed.data.command === CONCORD_SERVER_COMMAND) return true;
-  // A non-string argument means this is not a shape Concord writes, so the
-  // whole entry is treated as the user's own rather than parsed further.
-  return (parsed.data.args ?? []).some((arg) => isPackageSpec(arg, CONCORD_PACKAGE_NAME));
+  return true;
 }
 
 /** Whether an existing MCP config string contains a Concord server entry written by Concord. */
