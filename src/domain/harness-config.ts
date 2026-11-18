@@ -19,6 +19,7 @@ export const harnessNames = [
   'devin',
   'opencode',
   'qwen',
+  'deepseek',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -311,6 +312,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
     unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
+  },
+  deepseek: {
+    name: 'deepseek',
+    executable: 'dsh',
+    minimumVersion: [0, 2, 2],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'DeepSeek Harness has a native MCP registration. Use a unique CONCORD_AGENT_ID per host and register/drain its durable inbox; idle wake-up is not verified.',
+    unsupportedDetail: 'DeepSeek Harness MCP configuration was verified with 0.2.2-rc.1.',
   },
 };
 
