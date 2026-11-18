@@ -647,7 +647,7 @@ describe('global harness adapters', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-muse-home-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
-    writeFakeVersion(bin, 'muse', '0.1.0');
+    writeFakeVersion(bin, 'muse', '1.2.1');
 
     const env = { HOME: home, PATH: bin };
     const reportBefore = statusGlobalAdapters(env);
@@ -664,7 +664,9 @@ describe('global harness adapters', () => {
 
     const settingsPath = join(home, '.config', 'muse', 'settings.json');
     expect(existsSync(settingsPath)).toBe(true);
-    expect(readFileSync(settingsPath, 'utf8')).toContain('concord-mcp');
+    const text = readFileSync(settingsPath, 'utf8');
+    expect(text).toContain('mcpServers');
+    expect(text).toContain('concord-mcp');
 
     const uninstallReport = uninstallGlobalAdapters(env);
     expect(uninstallReport.find((entry) => entry.harness === 'muse-code')).toMatchObject({
@@ -677,7 +679,7 @@ describe('global harness adapters', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-muse-old-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
-    writeFakeVersion(bin, 'muse', '0.0.9');
+    writeFakeVersion(bin, 'muse', '1.2.0');
 
     const env = { HOME: home, PATH: bin };
     const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);

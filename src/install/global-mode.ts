@@ -15,13 +15,7 @@ import {
   upsertDevinMcpConfig,
 } from './devin-config.js';
 import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-user-hooks.js';
-import {
-  hasMuseCodeMcpServer,
-  museConfigPath,
-  museHome,
-  removeMuseCodeMcpServer,
-  upsertMuseCodeMcpServer,
-} from './muse-code-config.js';
+import { museHome } from './muse-code-config.js';
 import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
 import {
   agentKindEnv,
@@ -105,9 +99,9 @@ function instructionFile(
 }
 
 /**
- * User-level instructions, and MCP registrations edited directly (Codex,
- * Goose, and Copilot CLI adapters register themselves). Cursor's instructions come from its
- * sessionStart hook, as its user rules are not a file.
+ * User-level instruction files. MCP registrations for most harnesses are handled by
+ * `concord adapters install` (or harness-specific CLIs); this list only writes AGENTS/rule files.
+ * Cursor instructions come from its sessionStart hook, not a user rules file.
  */
 const USER_FILES: readonly UserFile[] = [
   instructionFile('claude', (env) => join(claudeConfigDir(env), 'CLAUDE.md')),
@@ -169,13 +163,6 @@ const USER_FILES: readonly UserFile[] = [
     path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('antigravity')),
     uninstall: removeMcpServer,
-  },
-  {
-    executable: 'muse',
-    registration: { id: 'muse-code', present: hasMuseCodeMcpServer },
-    path: (env) => museConfigPath(env),
-    install: (existing, path) => upsertMuseCodeMcpServer(existing, path),
-    uninstall: (existing) => removeMuseCodeMcpServer(existing),
   },
 ];
 

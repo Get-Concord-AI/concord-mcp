@@ -832,20 +832,16 @@ export function installAdapter(
       return;
     case 'goose': {
       const version = versionTuple(run(executable, ['--version'], env).output);
-      if (version !== undefined && atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
-        installGooseMcpConfig(env);
-      }
+      if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) return;
+      installGooseMcpConfig(env);
       return;
     }
     case 'copilot-cli': {
       const version = versionTuple(run(executable, ['--version'], env).output);
-      if (
-        version !== undefined &&
-        atLeast(version, HARNESS_CONFIGS['copilot-cli'].minimumVersion)
-      ) {
-        installCopilotMcpConfig(env);
-        installCopilotHooks(env);
-      }
+      if (version === undefined || !atLeast(version, HARNESS_CONFIGS['copilot-cli'].minimumVersion))
+        return;
+      installCopilotMcpConfig(env);
+      installCopilotHooks(env);
       return;
     }
     case 'devin': {

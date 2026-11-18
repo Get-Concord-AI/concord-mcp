@@ -86,19 +86,18 @@ describe('applyGlobalMode', () => {
     expect(existsSync(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).toBe(false);
   });
 
-  it('installs and removes Muse Code user MCP config and instructions', () => {
+  it('writes only Muse Code instructions via global mode (MCP owned by adapters)', () => {
     const env = machine(['muse']);
     const on = applyGlobalMode(env, true);
-    expect(on.registrations).toEqual(['muse-code']);
+    expect(on.registrations).toEqual([]);
     const settingsPath = join(env.HOME, '.config', 'muse', 'settings.json');
     const instructionsPath = join(env.HOME, '.config', 'muse', 'AGENTS.md');
-    expect(read(settingsPath)).toContain('concord-mcp');
+    expect(existsSync(settingsPath)).toBe(false);
     expect(read(instructionsPath)).toContain('start_work');
 
     const off = applyGlobalMode(env, false, { registrations: on.registrations });
     expect(off.registrations).toEqual([]);
     expect(existsSync(instructionsPath)).toBe(false);
-    expect(existsSync(settingsPath)).toBe(false);
   });
 
   it('registers and instructs each installed harness, then removes only its own additions', () => {

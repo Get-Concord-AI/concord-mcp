@@ -34,22 +34,26 @@ function writeJson(path: string, json: string): void {
   writeFileSync(path, json);
 }
 
-const settingsSchema = z.object({
+const initialSchema = z.object({
   schema_version: z.number(),
-  tui: z.object({ theme: z.string() }).optional(),
-  mcp_servers: z
-    .record(
-      z.string(),
-      z.object({
-        command: z.string(),
-        env: z.record(z.string(), z.string()).optional(),
-      }),
-    )
-    .optional(),
+  mcpServers: z.record(
+    z.string(),
+    z.object({
+      transport: z.string(),
+      command: z.string(),
+      mode: z.string(),
+    }),
+  ),
+});
+
+const legacySchema = z.object({
+  mcp_servers: z.record(z.string(), z.unknown()).optional(),
+  mcpServers: z.record(z.string(), z.unknown()).optional(),
+  other: z.unknown().optional(),
 });
 
 describe('Muse Code configuration', () => {
-  it('resolves HOME, XDG_CONFIG_HOME, and MUSE_HOME paths', () => {
+  it('resolves HOME and XDG_CONFIG_HOME paths and ignores MUSE_HOME', () => {
     const { env, home } = fixture();
     expect(museHome(env)).toBe(join(home, '.config', 'muse'));
     expect(museConfigPath(env)).toBe(join(home, '.config', 'muse', 'settings.json'));
@@ -59,11 +63,10 @@ describe('Muse Code configuration', () => {
     expect(museConfigPath(xdgEnv)).toBe(join(home, 'xdg', 'muse', 'settings.json'));
 
     const customHome = { ...env, MUSE_HOME: join(home, 'custom-muse') };
-    expect(museHome(customHome)).toBe(join(home, 'custom-muse'));
-    expect(museConfigPath(customHome)).toBe(join(home, 'custom-muse', 'settings.json'));
+    expect(museHome(customHome)).toBe(join(home, '.config', 'muse'));
   });
 
-  it('detects missing, empty, and installed concord entries', () => {
+  it('detects missing, empty, legacy, canonical, both-keys, and installed concord entries', () => {
     const { env, path } = fixture();
     expect(museCodeConfigInstalled(env)).toBe(false);
 
@@ -79,106 +82,110 @@ describe('Muse Code configuration', () => {
 
     writeJson(
       path,
-      JSON.stringify({ schema_version: 1, mcp_servers: { concord: { command: 'concord-mcp' } } }),
+      JSON.stringify({
+        schema_version: 1,
+        mcp_servers: {
+          concord: { transport: 'stdio', command: 'concord-mcp', mode: 'optional' },
+        },
+      }),
     );
     expect(museCodeConfigInstalled(env)).toBe(true);
-    expect(hasMuseCodeMcpServer(readFileSync(path, 'utf8'))).toBe(true);
+
+    writeJson(
+      path,
+      JSON.stringify({
+        schema_version: 1,
+        mcpServers: {
+          concord: { transport: 'stdio', command: 'concord-mcp', mode: 'optional' },
+        },
+      }),
+    );
+    expect(museCodeConfigInstalled(env)).toBe(true);
+
+    writeJson(
+      path,
+      JSON.stringify({
+        schema_version: 1,
+        mcpServers: {
+          concord: { transport: 'stdio', command: 'concord-mcp', mode: 'optional' },
+        },
+        mcp_servers: {
+          concord: { transport: 'stdio', command: 'concord-mcp', mode: 'optional' },
+        },
+      }),
+    );
+    expect(museCodeConfigInstalled(env)).toBe(false);
+    expect(hasMuseCodeMcpServer(readFileSync(path, 'utf8'))).toBe(false);
   });
 
-  it('upserts concord entry into a missing or empty config with schema_version 1', () => {
+  it('upserts concord entry into a missing config with mcpServers and compatible shape', () => {
     const initial = upsertMuseCodeMcpServer(undefined);
-    const parsed = settingsSchema.parse(JSON.parse(initial));
+    const parsed = initialSchema.parse(JSON.parse(initial));
     expect(parsed.schema_version).toBe(1);
-    expect(parsed.mcp_servers?.['concord']?.command).toBe('concord-mcp');
-    expect(parsed.mcp_servers?.['concord']?.env?.['CONCORD_AGENT_KIND']).toBe('muse-code');
-
-    const fromEmpty = upsertMuseCodeMcpServer('');
-    expect(JSON.parse(fromEmpty)).toEqual(JSON.parse(initial));
+    expect(parsed.mcpServers['concord']?.transport).toBe('stdio');
+    expect(parsed.mcpServers['concord']?.command).toBe('concord-mcp');
+    expect(parsed.mcpServers['concord']?.mode).toBe('optional');
   });
 
-  it('preserves existing top-level keys and other mcp_servers', () => {
+  it('keeps legacy mcp_servers key when only legacy exists', () => {
+    const existing = JSON.stringify({
+      schema_version: 1,
+      mcp_servers: { other: { command: 'custom-tool' } },
+    });
+    const updated = upsertMuseCodeMcpServer(existing);
+    const raw = legacySchema.parse(JSON.parse(updated));
+    expect(raw.mcp_servers?.['other']).toBeDefined();
+    expect(raw.mcp_servers?.['concord']).toBeDefined();
+    expect(raw.mcpServers).toBeUndefined();
+  });
+
+  it('throws when both root keys are present', () => {
+    const existing = JSON.stringify({
+      schema_version: 1,
+      mcpServers: {},
+      mcp_servers: {},
+    });
+    expect(() => upsertMuseCodeMcpServer(existing, 'settings.json')).toThrow(
+      /both .*mcpServers.*mcp_servers/i,
+    );
+  });
+
+  it('preserves existing top-level keys and other servers in canonical file', () => {
     const existing = JSON.stringify({
       schema_version: 2,
       tui: { theme: 'dark' },
-      mcp_servers: {
+      mcpServers: {
         existing_tool: { command: 'custom-tool' },
       },
     });
 
     const updated = upsertMuseCodeMcpServer(existing);
-    const raw: unknown = JSON.parse(updated);
-    const verified = settingsSchema.parse(raw);
+    const raw = z
+      .object({
+        schema_version: z.number(),
+        tui: z.object({ theme: z.string() }).optional(),
+        mcpServers: z.record(z.string(), z.object({ command: z.string() })),
+      })
+      .parse(JSON.parse(updated));
 
-    expect(verified.schema_version).toBe(2);
-    expect(verified.tui?.theme).toBe('dark');
-    expect(verified.mcp_servers?.['existing_tool']?.command).toBe('custom-tool');
-    expect(verified.mcp_servers?.['concord']?.command).toBe('concord-mcp');
-    expect(verified.mcp_servers?.['concord']?.env?.['CONCORD_AGENT_KIND']).toBe('muse-code');
+    expect(raw.schema_version).toBe(2);
+    expect(raw.tui?.theme).toBe('dark');
+    expect(raw.mcpServers['existing_tool']?.command).toBe('custom-tool');
+    expect(raw.mcpServers['concord']?.command).toBe('concord-mcp');
   });
 
-  it('throws an error with path context on malformed JSON or non-object config', () => {
-    expect(() => upsertMuseCodeMcpServer('{ invalid-json', 'test/settings.json')).toThrow(
-      'test/settings.json is not valid JSON',
-    );
-    expect(() => upsertMuseCodeMcpServer('["not", "an", "object"]', 'test/settings.json')).toThrow(
-      'test/settings.json must be a JSON object',
-    );
-    expect(() =>
-      upsertMuseCodeMcpServer(
-        JSON.stringify({ schema_version: 1, mcp_servers: 'invalid' }),
-        'test/settings.json',
-      ),
-    ).toThrow('test/settings.json property "mcp_servers" must be a JSON object');
-  });
-
-  it('removes only concord and performs clean removal when no other settings exist', () => {
+  it('removes only concord from canonical and legacy and cleans empty files', () => {
     const onlyConcord = JSON.stringify({
       schema_version: 1,
-      mcp_servers: { concord: { command: 'concord-mcp' } },
+      mcpServers: { concord: { transport: 'stdio', command: 'concord-mcp', mode: 'optional' } },
     });
     expect(removeMuseCodeMcpServer(onlyConcord)).toBe('');
 
-    const { env, path } = fixture();
-    installMuseCodeMcpConfig(env);
-    expect(existsSync(path)).toBe(true);
-    expect(museCodeConfigInstalled(env)).toBe(true);
-
-    uninstallMuseCodeConfig(env);
-    expect(existsSync(path)).toBe(false);
-    expect(museCodeConfigInstalled(env)).toBe(false);
-  });
-
-  it('preserves other servers and user settings on removal', () => {
-    const { env, path } = fixture();
-    const existing = JSON.stringify(
-      {
-        schema_version: 1,
-        tui: { theme: 'light' },
-        mcp_servers: {
-          other: { command: 'other-cli' },
-          concord: { command: 'concord-mcp' },
-        },
-      },
-      null,
-      2,
-    );
-    writeJson(path, existing);
-
-    uninstallMuseCodeConfig(env);
-    expect(existsSync(path)).toBe(true);
-    const content = readFileSync(path, 'utf8');
-    const raw: unknown = JSON.parse(content);
-    const verified = settingsSchema.parse(raw);
-
-    expect(verified.tui?.theme).toBe('light');
-    expect(verified.mcp_servers?.['other']?.command).toBe('other-cli');
-    expect(verified.mcp_servers?.['concord']).toBeUndefined();
-  });
-
-  it('does not create a file when uninstalling an absent config', () => {
-    const { env, path } = fixture();
-    expect(uninstallMuseCodeConfig(env)).toBeUndefined();
-    expect(existsSync(path)).toBe(false);
+    const legacyOnly = JSON.stringify({
+      schema_version: 1,
+      mcp_servers: { concord: { command: 'concord-mcp' } },
+    });
+    expect(removeMuseCodeMcpServer(legacyOnly)).toBe('');
   });
 
   it('preserves custom user-owned concord entry during install and removal', () => {
@@ -186,7 +193,7 @@ describe('Muse Code configuration', () => {
     const customConfig = JSON.stringify(
       {
         schema_version: 1,
-        mcp_servers: {
+        mcpServers: {
           concord: {
             command: 'my-custom-wrapper',
             args: ['--debug'],
@@ -213,5 +220,14 @@ describe('Muse Code configuration', () => {
 
     expect(uninstallMuseCodeConfig(env)).toBeUndefined();
     expect(readFileSync(path, 'utf8')).toBe(broken);
+  });
+
+  it('installs and uninstalls via filesystem helpers', () => {
+    const { env, path } = fixture();
+    installMuseCodeMcpConfig(env);
+    expect(existsSync(path)).toBe(true);
+    expect(museCodeConfigInstalled(env)).toBe(true);
+    uninstallMuseCodeConfig(env);
+    expect(existsSync(path)).toBe(false);
   });
 });

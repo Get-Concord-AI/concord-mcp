@@ -1,34 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { z } from 'zod';
-
 import { userHome } from '../config/paths.js';
 import { agentKindEnv, CONCORD_SERVER_COMMAND, isConcordWrittenEntry } from './mcp-config.js';
+import { type JsonObject, type JsonValue, jsonObjectSchema, parseJsonObject } from './json.js';
 
-const MCP_SERVERS_KEY = 'mcp_servers';
+const MCP_SERVERS_KEY = 'mcpServers';
+const MCP_SERVERS_LEGACY_KEY = 'mcp_servers';
 const CONCORD_SERVER_KEY = 'concord';
 
-type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
-interface JsonObject {
-  [key: string]: JsonValue;
-}
-
-const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.null(),
-    z.array(jsonValueSchema),
-    z.record(z.string(), jsonValueSchema),
-  ]),
-);
-const objectSchema = z.record(z.string(), jsonValueSchema);
-
 export function museHome(env: NodeJS.ProcessEnv = process.env): string {
-  const configured = env['MUSE_HOME']?.trim();
-  if (configured !== undefined && configured !== '') return configured;
   const xdg = env['XDG_CONFIG_HOME']?.trim();
   if (xdg !== undefined && xdg !== '') return join(xdg, 'muse');
   return join(userHome(env), '.config', 'muse');
@@ -39,28 +20,51 @@ export function museConfigPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 function parseConfig(text: string, configPath: string): JsonObject {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    throw new Error(
-      `${configPath} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
+  return parseJsonObject(text, configPath);
+}
+
+function hasBothRootKeys(config: JsonObject): boolean {
+  return MCP_SERVERS_KEY in config && MCP_SERVERS_LEGACY_KEY in config;
+}
+
+function entryHasConflictingSpellings(entry: JsonObject): boolean {
+  return ('transport' in entry && 'type' in entry) || ('mode' in entry && 'required' in entry);
+}
+
+function concordEntryFromConfig(config: JsonObject):
+  | {
+      key: string;
+      entry: unknown;
+    }
+  | undefined {
+  const canonical = config[MCP_SERVERS_KEY];
+  if (canonical !== undefined) {
+    const parsed = jsonObjectSchema.safeParse(canonical);
+    if (parsed.success && CONCORD_SERVER_KEY in parsed.data) {
+      return { key: MCP_SERVERS_KEY, entry: parsed.data[CONCORD_SERVER_KEY] };
+    }
   }
-  const topLevel = objectSchema.safeParse(parsed);
-  if (!topLevel.success) {
-    throw new Error(`${configPath} must be a JSON object.`);
+  const legacy = config[MCP_SERVERS_LEGACY_KEY];
+  if (legacy !== undefined) {
+    const parsed = jsonObjectSchema.safeParse(legacy);
+    if (parsed.success && CONCORD_SERVER_KEY in parsed.data) {
+      return { key: MCP_SERVERS_LEGACY_KEY, entry: parsed.data[CONCORD_SERVER_KEY] };
+    }
   }
-  return topLevel.data;
+  return undefined;
 }
 
 export function hasMuseCodeMcpServer(existing: string): boolean {
   try {
     if (existing.trim() === '') return false;
     const config = parseConfig(existing, 'settings.json');
-    const servers = objectSchema.safeParse(config[MCP_SERVERS_KEY]);
-    return servers.success && CONCORD_SERVER_KEY in servers.data;
+    if (hasBothRootKeys(config)) return false;
+    const found = concordEntryFromConfig(config);
+    if (found === undefined) return false;
+    const entryObj = jsonObjectSchema.safeParse(found.entry);
+    if (!entryObj.success) return false;
+    if (entryHasConflictingSpellings(entryObj.data)) return false;
+    return isConcordWrittenEntry(found.entry);
   } catch {
     return false;
   }
@@ -75,8 +79,10 @@ export function upsertMuseCodeMcpServer(
       schema_version: 1,
       [MCP_SERVERS_KEY]: {
         [CONCORD_SERVER_KEY]: {
+          transport: 'stdio',
           command: CONCORD_SERVER_COMMAND,
           env: agentKindEnv('muse-code'),
+          mode: 'optional',
         },
       },
     };
@@ -84,12 +90,21 @@ export function upsertMuseCodeMcpServer(
   }
 
   const config = parseConfig(existing, configPath);
-  const currentServers = config[MCP_SERVERS_KEY];
+  if (hasBothRootKeys(config)) {
+    throw new Error(
+      `${configPath} has both "${MCP_SERVERS_KEY}" and "${MCP_SERVERS_LEGACY_KEY}". Muse disables MCP when both keys are present; merge them into a single "${MCP_SERVERS_KEY}" object and re-run.`,
+    );
+  }
+
+  const hasLegacyOnly = MCP_SERVERS_LEGACY_KEY in config && !(MCP_SERVERS_KEY in config);
+  const targetKey = hasLegacyOnly ? MCP_SERVERS_LEGACY_KEY : MCP_SERVERS_KEY;
+
+  const currentServersRaw = config[targetKey];
   let nextServers: JsonObject = {};
-  if (currentServers !== undefined) {
-    const parsedServers = objectSchema.safeParse(currentServers);
+  if (currentServersRaw !== undefined) {
+    const parsedServers = jsonObjectSchema.safeParse(currentServersRaw);
     if (!parsedServers.success) {
-      throw new Error(`${configPath} property "${MCP_SERVERS_KEY}" must be a JSON object.`);
+      throw new Error(`${configPath} property "${targetKey}" must be a JSON object.`);
     }
     const entry = parsedServers.data[CONCORD_SERVER_KEY];
     if (entry !== undefined && !isConcordWrittenEntry(entry)) {
@@ -99,13 +114,15 @@ export function upsertMuseCodeMcpServer(
   }
 
   nextServers[CONCORD_SERVER_KEY] = {
+    transport: 'stdio',
     command: CONCORD_SERVER_COMMAND,
     env: agentKindEnv('muse-code'),
+    mode: 'optional',
   };
   const next: JsonObject = {
     schema_version: config['schema_version'] ?? 1,
     ...config,
-    [MCP_SERVERS_KEY]: nextServers,
+    [targetKey]: nextServers,
   };
   return `${JSON.stringify(next, null, 2)}\n`;
 }
@@ -113,25 +130,62 @@ export function upsertMuseCodeMcpServer(
 export function removeMuseCodeMcpServer(existing: string, configPath = 'settings.json'): string {
   if (existing.trim() === '') return '';
   const config = parseConfig(existing, configPath);
-  const currentServers = config[MCP_SERVERS_KEY];
-  if (currentServers === undefined) return existing;
-  const parsedServers = objectSchema.safeParse(currentServers);
-  if (!parsedServers.success) return existing;
-
-  const entry = parsedServers.data[CONCORD_SERVER_KEY];
-  if (entry === undefined || !isConcordWrittenEntry(entry)) return existing;
-
-  const nextServers: JsonObject = {};
-  for (const [key, value] of Object.entries(parsedServers.data)) {
-    if (key !== CONCORD_SERVER_KEY) nextServers[key] = value;
+  const found = concordEntryFromConfig(config);
+  if (found !== undefined && !isConcordWrittenEntry(found.entry)) {
+    return existing;
   }
 
-  const otherKeys = Object.keys(config).filter(
-    (key) => key !== MCP_SERVERS_KEY && key !== 'schema_version',
-  );
-  if (otherKeys.length === 0 && Object.keys(nextServers).length === 0) return '';
+  const removeConcordFrom = (serversRaw: JsonValue): JsonObject | undefined => {
+    const parsed = jsonObjectSchema.safeParse(serversRaw);
+    if (!parsed.success) return undefined;
+    if (!(CONCORD_SERVER_KEY in parsed.data)) return undefined;
+    const entry = parsed.data[CONCORD_SERVER_KEY];
+    if (!isConcordWrittenEntry(entry)) return undefined;
+    const out: JsonObject = {};
+    for (const [k, v] of Object.entries(parsed.data)) {
+      if (k !== CONCORD_SERVER_KEY) out[k] = v;
+    }
+    return out;
+  };
 
-  return `${JSON.stringify({ ...config, [MCP_SERVERS_KEY]: nextServers }, null, 2)}\n`;
+  let nextConfig: JsonObject = { ...config };
+  let changed = false;
+
+  if (MCP_SERVERS_KEY in config) {
+    const nextServers = removeConcordFrom(config[MCP_SERVERS_KEY]);
+    if (nextServers !== undefined) {
+      changed = true;
+      if (Object.keys(nextServers).length === 0) {
+        const rest: JsonObject = {};
+        for (const [k, v] of Object.entries(nextConfig)) {
+          if (k !== MCP_SERVERS_KEY) rest[k] = v;
+        }
+        nextConfig = rest;
+      } else {
+        nextConfig = { ...nextConfig, [MCP_SERVERS_KEY]: nextServers };
+      }
+    }
+  }
+  if (MCP_SERVERS_LEGACY_KEY in config) {
+    const nextServers = removeConcordFrom(config[MCP_SERVERS_LEGACY_KEY]);
+    if (nextServers !== undefined) {
+      changed = true;
+      if (Object.keys(nextServers).length === 0) {
+        const rest: JsonObject = {};
+        for (const [k, v] of Object.entries(nextConfig)) {
+          if (k !== MCP_SERVERS_LEGACY_KEY) rest[k] = v;
+        }
+        nextConfig = rest;
+      } else {
+        nextConfig = { ...nextConfig, [MCP_SERVERS_LEGACY_KEY]: nextServers };
+      }
+    }
+  }
+
+  if (!changed) return existing;
+  const otherKeys = Object.keys(nextConfig).filter((key) => key !== 'schema_version');
+  if (otherKeys.length === 0) return '';
+  return `${JSON.stringify(nextConfig, null, 2)}\n`;
 }
 
 export function museCodeConfigInstalled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -164,7 +218,6 @@ export function uninstallMuseCodeConfig(env: NodeJS.ProcessEnv = process.env): s
     else writeFileSync(path, next);
     return path;
   } catch {
-    // Unreadable or malformed config is left untouched.
     return undefined;
   }
 }

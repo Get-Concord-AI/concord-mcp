@@ -1,29 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { z } from 'zod';
-
 import { userHome } from '../config/paths.js';
+import { type JsonObject, type JsonValue, jsonObjectSchema } from './json.js';
 
 const SERVER = 'concord';
 const KIND_VAR = 'CONCORD_AGENT_KIND';
 const KIND = 'devin';
-type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
-interface JsonObject {
-  [key: string]: JsonValue;
-}
-
-const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.null(),
-    z.array(jsonValueSchema),
-    z.record(z.string(), jsonValueSchema),
-  ]),
-);
-const objectSchema = z.record(z.string(), jsonValueSchema);
 
 export function devinMcpConfigPath(
   env: NodeJS.ProcessEnv = process.env,
@@ -45,7 +28,7 @@ function uncomment(text: string): string {
 
 function parsed(text: string): JsonObject {
   const value: unknown = JSON.parse(uncomment(text));
-  return objectSchema.parse(value);
+  return jsonObjectSchema.parse(value);
 }
 
 function isEscaped(text: string, index: number): boolean {

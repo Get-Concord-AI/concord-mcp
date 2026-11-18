@@ -316,7 +316,7 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
   'muse-code': {
     name: 'muse-code',
     executable: 'muse',
-    minimumVersion: [0, 1, 0],
+    minimumVersion: [1, 2, 1],
     defaultCapability: busyPull,
     monitorCapability: busyPull,
     monitor: {
@@ -329,7 +329,8 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedCapabilities: ['pull', 'busy'],
     installedDetail:
       'Concord MCP server is registered with Muse Code; session-level presence and work-state are active.',
-    unsupportedDetail: 'Muse Code does not meet the verified MCP baseline (0.1.0).',
+    unsupportedDetail:
+      'Muse Code must be v1.2.1 or newer so stdio MCP servers receive MUSE_SESSION_ID.',
   },
 };
 
