@@ -9,6 +9,7 @@ import { installClaudeHook } from '../../install/claude-hooks.js';
 import { installCodexMcpConfig } from '../../install/codex-config.js';
 import { installDevinMcpConfig } from '../../install/devin-config.js';
 import { installDevinHooks } from '../../install/devin-hooks.js';
+import { installKiroWorkspaceHooks } from '../../install/kiro-config.js';
 import { applyGlobalMode, type GlobalModeReport } from '../../install/global-mode.js';
 import { readUserConfig, writeUserConfig } from '../../config/user-config.js';
 import { standaloneInstall, standaloneUpgrade } from '../../config/install-mode.js';
@@ -263,6 +264,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
       written.push(installDevinHooks(repoRoot));
       written.push(...installMcpConfigs(repoRoot));
       written.push(installAntigravityHooks(repoRoot));
+      written.push(installKiroWorkspaceHooks(repoRoot));
     }
     // Global mode owns a user-level Cursor entry; without it, one is a stale
     // registration that would shadow this repository's pinned one.
