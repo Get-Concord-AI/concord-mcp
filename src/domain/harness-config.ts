@@ -316,6 +316,8 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
   junie: {
     name: 'junie',
     executable: 'junie',
+    // Lifecycle hooks are Early Access only; 26.11.0 is the earliest Junie
+    // release the hooks/MCP setup was verified against.
     minimumVersion: [26, 11, 0],
     defaultCapability: busyPull,
     monitorCapability: busyPull,
@@ -378,9 +380,5 @@ then immediately start a fresh background monitor.
 
 In Antigravity, start exactly one background command for \`${antigravity}\`
 and end the turn without waiting on it. Its completion wakes the idle session:
-answer the peer message, then immediately start a fresh background monitor.
-
-In Junie CLI, lifecycle hooks are registered in \`~/.junie/config.json\`. Concord
-auto-registers session identity on \`SessionStart\`, drains pending peer messages
-on \`UserPromptSubmit\`, and cleans up on \`SessionEnd\`.`;
+answer the peer message, then immediately start a fresh background monitor.`;
 }
