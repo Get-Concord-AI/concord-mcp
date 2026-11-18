@@ -240,6 +240,13 @@ function workIdentity(
     }
     return own;
   }
+  // A --kind naming a harness with no session source filters the visible
+  // session out of `own`, which would hand --agent a free impersonation.
+  // Fail closed on any session identity this process can still see.
+  const visible = resolveIdentity(env);
+  if (visible !== undefined && visible.agentId !== flagged) {
+    throw new Error(`This session is agent ${visible.agentId}; it cannot act as ${flagged}.`);
+  }
   return resolveIdentity({ ...env, CONCORD_AGENT_ID: flagged }, options);
 }
 

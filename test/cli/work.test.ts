@@ -375,6 +375,25 @@ describe('concord work', () => {
     expect(started.task_id).toBe('imp');
   });
 
+  it('refuses --agent when --kind filters out the visible session', async () => {
+    const sessionAgent = agentIdForSession('claude-code', 'sess-123');
+    const denied = await run(
+      'start',
+      {
+        flags: {
+          agent: 'mallory:9',
+          kind: 'cursor',
+          task: 'imp2',
+          title: 'Kind hides session',
+        },
+      },
+      { CLAUDE_CODE_SESSION_ID: 'sess-123' },
+    );
+    expect(failed(denied)).toBe(
+      `This session is agent ${sessionAgent}; it cannot act as mallory:9.`,
+    );
+  });
+
   it('uses one kind for the start arguments and the registered agent', async () => {
     const flagged = writeInput(
       'kind-flag.json',
