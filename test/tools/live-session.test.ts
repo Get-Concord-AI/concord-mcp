@@ -89,7 +89,10 @@ describe('live session binding (issue #358)', () => {
     }
   });
 
-  it('ignores a binding whose agent has gone away, keeping the env identity', async () => {
+  it('keeps an established binding when roster expiry archives the agent', async () => {
+    // An idle resumed session outlives the roster's archive window while its
+    // monitor is stopped; the binding is still the client's live identity, so
+    // falling back to the env identity would resurrect the abandoned agent.
     repos.agents.upsert(
       { agentId: RESUMED.agentId, kind: 'claude-code' },
       new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
@@ -97,9 +100,9 @@ describe('live session binding (issue #358)', () => {
     repos.sessionBindings.upsert(process.ppid, RESUMED.agentId, 'claude-code');
     const harness = await connect(repos, ENV_IDENTITY);
     try {
-      const result = await startWork(harness.client, 'T-STALE');
-      expect(JSON.stringify(result)).not.toContain('identity_drift');
-      expect(repos.tasks.get('T-STALE')?.agentId).toBe(ENV_IDENTITY.agentId);
+      const result = await startWork(harness.client, 'T-ARCHIVED');
+      expect(JSON.stringify(result)).toContain('identity_drift');
+      expect(repos.tasks.get('T-ARCHIVED')?.agentId).toBe(RESUMED.agentId);
     } finally {
       await close(harness);
     }

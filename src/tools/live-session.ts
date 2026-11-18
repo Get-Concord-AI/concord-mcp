@@ -7,7 +7,6 @@ import {
   type LiveSessionBinding,
   type OpenCodeRequestIdentityMetadata,
 } from '../domain/identity.js';
-import { deriveLiveness } from '../domain/presence.js';
 
 /** The one-time advisory produced when env and hook identities diverge. */
 export interface DriftAdvisory {
@@ -25,8 +24,10 @@ export interface LiveSessionDeps {
 /**
  * The session a call acts as: the binding a session-start hook recorded for
  * this server's client when one exists — it reflects a `/resume` the
- * spawn-time environment never saw. A stale binding lapses with its agent;
- * with no env identity to correct, the caller keeps its unproven path.
+ * spawn-time environment never saw. Roster expiry does not lapse a binding:
+ * an idle session archives while its client still hosts it, so only a
+ * missing agent row discards one; with no env identity to correct, the
+ * caller keeps its unproven path.
  */
 export function liveSession(
   session: AgentIdentity | undefined,
@@ -76,9 +77,10 @@ export function liveSession(
     const binding = bindingFor(callRepos);
     if (binding === undefined) return base;
     const bound = callRepos.agents.get(binding.agentId);
-    if (bound === undefined || deriveLiveness(bound.lastSeen, Date.now()) === 'archived') {
-      return base;
-    }
+    // Roster expiry is not session death: an idle resumed session archives
+    // while its binding is still the client's live identity, so only a
+    // missing agent row discards the binding.
+    if (bound === undefined) return base;
     const live = liveSessionIdentity(base, binding);
     if (
       live.drifted &&
