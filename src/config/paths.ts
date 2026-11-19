@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /** Directory name that holds all Concord state within a repo. */
 export const CONCORD_DIR = '.concord';
@@ -14,6 +14,37 @@ export const WORKSPACE_ID_PREFIX = 'ws_';
 function canonicalPath(input: string): string {
   const absolute = resolve(input);
   return existsSync(absolute) ? realpathSync(absolute) : absolute;
+}
+
+/** `path` relative to `root` with `/` separators, or undefined when it is not inside it. */
+function insideRoot(root: string, path: string): string | undefined {
+  const within = relative(root, path);
+  if (within === '' || within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within)) {
+    return undefined;
+  }
+  return within.split(sep).join('/');
+}
+
+/**
+ * A declared or edited file as the repository names it, so the same file
+ * always compares equal: an absolute path inside one of `roots` becomes
+ * repo-relative, and a path through a symlink resolves to the file it points
+ * at when that file is inside a root. Relative paths are read against the
+ * first root. Anything outside every root is returned as given.
+ */
+export function repoRelativePath(roots: readonly string[], path: string): string {
+  const [first] = roots;
+  if (first === undefined) return path;
+  const absolute = isAbsolute(path) ? path : resolve(first, path);
+  const resolved = existsSync(absolute) ? realpathSync(absolute) : undefined;
+  for (const root of roots) {
+    const realRoot = existsSync(root) ? realpathSync(root) : root;
+    const within =
+      (resolved === undefined ? undefined : insideRoot(realRoot, resolved)) ??
+      insideRoot(root, absolute);
+    if (within !== undefined) return within;
+  }
+  return path;
 }
 
 function linkedWorktreePrimaryRoot(checkoutRoot: string): string | undefined {

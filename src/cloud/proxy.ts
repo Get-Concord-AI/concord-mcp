@@ -1,5 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs';
-import { isAbsolute, relative, sep } from 'node:path';
+import { isAbsolute } from 'node:path';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -17,6 +16,7 @@ import {
   type AgentIdentity,
   type OpenCodeRequestIdentityMetadata,
 } from '../domain/identity.js';
+import { repoRelativePath } from '../config/paths.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../install/instructions.js';
 import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
@@ -91,15 +91,6 @@ const WRITE_TOOLS = new Set(['start_work', 'update_work', 'transfer_work', 'fini
 const toolArguments = z.record(z.string(), z.json());
 type ToolArguments = z.infer<typeof toolArguments>;
 
-/** `path` relative to `root`, or undefined when it is not inside it. */
-function inside(root: string, path: string): string | undefined {
-  const within = relative(root, path);
-  if (within === '' || within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within)) {
-    return undefined;
-  }
-  return within.split(sep).join('/');
-}
-
 /**
  * An absolute path inside the checkout this session works in, or the primary
  * one, made relative; anything else as given. Tried as written and resolved,
@@ -110,14 +101,7 @@ export function repoRelative(
   path: string,
 ): string {
   if (!isAbsolute(path)) return path;
-  const candidates = existsSync(path) ? [path, realpathSync(path)] : [path];
-  for (const root of [session.checkoutRoot, session.repoRoot]) {
-    for (const candidate of candidates) {
-      const within = inside(root, candidate);
-      if (within !== undefined) return within;
-    }
-  }
-  return path;
+  return repoRelativePath([session.checkoutRoot, session.repoRoot], path);
 }
 
 /** A tool call's arguments as the cloud should receive them. */
