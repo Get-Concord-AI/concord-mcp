@@ -1,7 +1,9 @@
+import { join, resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import type { TaskRecord } from '../../src/db/index.js';
-import { detectOverlaps, type OverlapSurface } from '../../src/domain/overlap.js';
+import { detectOverlaps, normalizePath, type OverlapSurface } from '../../src/domain/overlap.js';
 
 function task(partial: Partial<TaskRecord> & { taskId: string }): TaskRecord {
   return {
@@ -233,6 +235,32 @@ describe('detectOverlaps', () => {
     expect(detectOverlaps(fileClaim, [rootClaim])).toEqual([
       { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
     ]);
+  });
+
+  it('scopes root claims to the repository in both directions', () => {
+    const repoRoot = resolve('workspace');
+    const rootClaim = task({ taskId: 'ROOT', expectedFiles: ['.'] });
+    const inside = join(repoRoot, 'src', 'app.ts');
+    const fileClaim = task({ taskId: 'FILE', expectedFiles: [inside] });
+    const reasons = [`directory claim covers file(s): . -> ${normalizePath(inside)}`];
+
+    expect(detectOverlaps(rootClaim, [fileClaim], 0, repoRoot)).toEqual([
+      { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(fileClaim, [rootClaim], 0, repoRoot)).toEqual([
+      { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(rootClaim, [fileClaim])).toEqual([]);
+
+    for (const outside of [
+      '..',
+      '../other-project/file.ts',
+      join(`${repoRoot}-other`, 'notes.md'),
+    ]) {
+      const otherClaim = task({ taskId: 'OTHER', expectedFiles: [outside] });
+      expect(detectOverlaps(rootClaim, [otherClaim], 0, repoRoot)).toEqual([]);
+      expect(detectOverlaps(otherClaim, [rootClaim], 0, repoRoot)).toEqual([]);
+    }
   });
 
   it.each(['', ' \t '])('ignores blank claim %j', (blank) => {

@@ -1,4 +1,4 @@
-import { posix } from 'node:path';
+import { isAbsolute, posix, relative, win32 } from 'node:path';
 
 import type { TaskRecord, TaskStatus } from '../db/index.js';
 
@@ -87,9 +87,22 @@ function normalizeClaimEntry(entry: string): string {
 /** True when `outer` is a strict ancestor directory of `inner`. Both must be
  * normalized. Matches whole path segments, so `src/app` does not contain
  * `src/application/x.ts`. */
-function containsPath(outer: string, inner: string): boolean {
+function containsPath(outer: string, inner: string, repoRoot: string | undefined): boolean {
   if (outer === '.') {
-    return inner !== '' && inner !== '.';
+    let fromRoot = inner;
+    // Recognize drive-qualified paths on POSIX too. An absolute path only
+    // belongs to a root claim when we can compare it to the workspace root.
+    if (win32.parse(inner).root !== '') {
+      if (repoRoot === undefined || !isAbsolute(inner)) return false;
+      fromRoot = relative(repoRoot, inner).replaceAll('\\', '/');
+    }
+    return (
+      fromRoot !== '' &&
+      fromRoot !== '.' &&
+      fromRoot !== '..' &&
+      !fromRoot.startsWith('../') &&
+      !isAbsolute(fromRoot)
+    );
   }
   return outer !== '' && inner.startsWith(`${outer}/`);
 }
@@ -97,15 +110,19 @@ function containsPath(outer: string, inner: string): boolean {
 /** Pairs where one declared entry is a directory containing the other, as
  * `dir -> path`. A file and a directory cannot share a path, so any entry that
  * is a strict path prefix of another is a directory claim. */
-function containedPairs(a: readonly string[], b: readonly string[]): string[] {
+function containedPairs(
+  a: readonly string[],
+  b: readonly string[],
+  repoRoot: string | undefined,
+): string[] {
   const left = [...new Set(a.map(normalizeClaimEntry).filter((file) => file !== ''))];
   const right = [...new Set(b.map(normalizeClaimEntry).filter((file) => file !== ''))];
   const pairs = new Set<string>();
   for (const x of left) {
     for (const y of right) {
-      if (containsPath(x, y)) {
+      if (containsPath(x, y, repoRoot)) {
         pairs.add(`${x} -> ${y}`);
-      } else if (containsPath(y, x)) {
+      } else if (containsPath(y, x, repoRoot)) {
         pairs.add(`${y} -> ${x}`);
       }
     }
@@ -114,12 +131,12 @@ function containedPairs(a: readonly string[], b: readonly string[]): string[] {
 }
 
 /** True when a declared entry equals the file or is a directory containing it. */
-export function entryCoversFile(entry: string, file: string): boolean {
+export function entryCoversFile(entry: string, file: string, repoRoot?: string): boolean {
   const normalizedEntry = normalizeClaimEntry(entry);
   const normalizedFile = normalizePath(file);
   return (
     normalizedEntry !== '' &&
-    (normalizedEntry === normalizedFile || containsPath(normalizedEntry, normalizedFile))
+    (normalizedEntry === normalizedFile || containsPath(normalizedEntry, normalizedFile, repoRoot))
   );
 }
 
@@ -150,6 +167,7 @@ function isParentChild(candidate: OverlapSurface, task: TaskRecord): boolean {
 function detailsFor(
   candidate: OverlapSurface,
   existing: OverlapSurface,
+  repoRoot: string | undefined,
 ): { reasons: string[]; kinds: OverlapKind[] } {
   const reasons: string[] = [];
   const kinds: OverlapKind[] = [];
@@ -162,7 +180,7 @@ function detailsFor(
     reasons.push(`same file(s): ${sameFiles.join(', ')}`);
   }
 
-  const nested = containedPairs(candidate.expectedFiles, existing.expectedFiles);
+  const nested = containedPairs(candidate.expectedFiles, existing.expectedFiles, repoRoot);
   if (nested.length > 0) {
     reasons.push(`directory claim covers file(s): ${nested.join(', ')}`);
   }
@@ -215,6 +233,7 @@ export function detectOverlaps(
   candidate: OverlapSurface,
   existing: readonly TaskRecord[],
   startIndex = 0,
+  repoRoot?: string,
 ): OverlapWarning[] {
   const warnings: OverlapWarning[] = [];
   for (let index = startIndex; index < existing.length; index += 1) {
@@ -222,7 +241,7 @@ export function detectOverlaps(
     if (task === undefined || task.taskId === candidate.taskId || isParentChild(candidate, task)) {
       continue;
     }
-    const { reasons, kinds } = detailsFor(candidate, surfaceOf(task));
+    const { reasons, kinds } = detailsFor(candidate, surfaceOf(task), repoRoot);
     if (reasons.length > 0) {
       warnings.push({ taskId: task.taskId, title: task.title, reasons, kinds });
     }

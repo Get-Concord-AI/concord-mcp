@@ -36,6 +36,6 @@ export function openContext(
     repoRoot,
     concordPath: store.concordPath,
     store,
-    repos: openRepositories(store.databasePath, store.project),
+    repos: openRepositories(store.databasePath, store.project, repoRoot),
   };
 }

@@ -121,7 +121,7 @@ export class WorkspaceManager {
         workspaceId,
         repoRoot,
         concordPath: store.concordPath,
-        repos: this.#open(store.databasePath, store.project),
+        repos: { ...this.#open(store.databasePath, store.project), repoRoot },
       };
       this.#contexts.set(workspaceId, context);
     }
@@ -169,6 +169,9 @@ export function routedRepositories(manager: WorkspaceManager): Repositories {
     },
     get project() {
       return manager.current().repos.project;
+    },
+    get repoRoot() {
+      return manager.current().repos.repoRoot;
     },
     get tasks() {
       return manager.current().repos.tasks;

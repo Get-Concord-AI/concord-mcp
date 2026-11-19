@@ -36,7 +36,8 @@ export function checkFileOverlaps(
     const shared = task.expectedFiles.map(normalizePath).filter((entry) => wanted.includes(entry));
     const covered = wanted.filter(
       (file) =>
-        !shared.includes(file) && task.expectedFiles.some((entry) => entryCoversFile(entry, file)),
+        !shared.includes(file) &&
+        task.expectedFiles.some((entry) => entryCoversFile(entry, file, repos.repoRoot)),
     );
     const reasons: string[] = [];
     if (shared.length > 0) {

@@ -82,7 +82,12 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     .list()
     .filter((task) => task.taskId !== input.task_id && CLAIMED_STATUSES.has(task.status));
 
-  const overlaps = detectOverlaps({ taskId: input.task_id, parentTaskId, ...scope }, activeOthers);
+  const overlaps = detectOverlaps(
+    { taskId: input.task_id, parentTaskId, ...scope },
+    activeOthers,
+    0,
+    repos.repoRoot,
+  );
 
   const scopeAdded = existing
     ? [

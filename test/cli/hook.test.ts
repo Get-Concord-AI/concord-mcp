@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -11,6 +15,7 @@ import {
   sessionStartIdentity,
 } from '../../src/cli/commands/hook.js';
 import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
+import { openContext } from '../../src/cli/context.js';
 import { openDatabase } from '../../src/db/connection.js';
 import { monitorCapabilityFor } from '../../src/domain/delivery.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
@@ -40,6 +45,33 @@ describe('decidePreToolUse', () => {
     const decision = decidePreToolUse(repos, preToolUse('src/app.ts'), 'MINE');
     expect(decision.block).toBe(true);
     expect(decision.message).toContain('OTHER');
+  });
+
+  it('blocks edits under the selected repository root and allows edits outside it', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'concord-hook-root-'));
+    try {
+      const context = openContext(process.cwd(), { CONCORD_REPO_ROOT: workspace });
+      try {
+        handleClaimWork(context.repos, {
+          task_id: 'ROOT',
+          title: 'Owns repo',
+          expected_files: ['.'],
+        });
+
+        const inside = join(context.repoRoot, 'src', 'app.ts');
+        expect(decidePreToolUse(context.repos, preToolUse(inside), 'MINE').result).toBe('blocked');
+
+        const outside = join(`${context.repoRoot}-other`, 'notes.md');
+        expect(decidePreToolUse(context.repos, preToolUse(outside), 'MINE').result).toBe('clear');
+        expect(decidePreToolUse(context.repos, preToolUse('../notes.md'), 'MINE').result).toBe(
+          'clear',
+        );
+      } finally {
+        context.repos.db.close();
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   it('does not block your own claimed file when CONCORD_TASK matches', () => {

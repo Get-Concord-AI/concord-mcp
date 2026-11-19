@@ -56,6 +56,8 @@ export function handleGetTaskContext(
             .filter(
               (candidate) => candidate.taskId !== task.taskId && candidate.status === 'active',
             ),
+          0,
+          repos.repoRoot,
         )
       : [];
 
