@@ -39,7 +39,7 @@ function recoveryGuidance(
     }
   }
 
-  if (!ownerInactive) return '';
+  if (!ownerInactive || task.status === 'closed' || task.status === 'complete') return '';
   if (task.owner === null && !CLAIMED_STATUSES.has(task.status)) return '';
   const authority =
     task.owner === null ? 'A registered agent' : `A registered agent for human owner ${task.owner}`;
