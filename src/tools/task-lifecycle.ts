@@ -14,6 +14,7 @@ import type {
   ReleaseTaskInput,
   ReopenTaskInput,
 } from '../domain/operations.js';
+import { deriveLiveness } from '../domain/presence.js';
 
 export interface TaskLifecycleResult {
   task: TaskRecord;
@@ -56,6 +57,29 @@ function taskAtVersion(repos: Repositories, taskId: string, expectedVersion: num
 
 function isHumanSupervisor(actor: AgentRecord, task: TaskRecord): boolean {
   return actor.owner !== null && task.owner !== null && actor.owner === task.owner;
+}
+
+function isAgentPresent(repos: Repositories, agentId: string, now: number): boolean {
+  const agent = repos.agents.get(agentId);
+  if (agent === undefined) return false;
+  const liveness = deriveLiveness(agent.lastSeen, now);
+  return liveness === 'live' || liveness === 'idle';
+}
+
+function hasPresentHolder(repos: Repositories, task: TaskRecord, now: number): boolean {
+  if (task.agentId !== null && isAgentPresent(repos, task.agentId, now)) {
+    return true;
+  }
+  const leaseExpired = task.leaseExpiresAt !== null && Date.parse(task.leaseExpiresAt) <= now;
+  if (
+    task.status === 'assigned' &&
+    !leaseExpired &&
+    task.assignedAgentId !== null &&
+    isAgentPresent(repos, task.assignedAgentId, now)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function requireOwner(task: TaskRecord, actor: AgentRecord): void {
@@ -209,11 +233,23 @@ export function handleReassignTask(
   registeredAgent(repos, input.to_agent_id);
   const task = taskAtVersion(repos, input.task_id, input.expected_version);
   if (task.agentId !== actor.agentId) {
-    if (input.force !== true || !isHumanSupervisor(actor, task)) {
+    const staleUnowned = task.owner === null && !hasPresentHolder(repos, task, now);
+    const canForce = isHumanSupervisor(actor, task) || staleUnowned;
+    if (input.force !== true || !canForce) {
+      if (task.owner === null && !staleUnowned) {
+        const holder = task.agentId ?? task.assignedAgentId ?? 'unassigned';
+        throw new Error(
+          `Only the current owner (${holder}) can reassign ${task.taskId} while its session is still active.`,
+        );
+      }
       const hint =
         input.force === true ? '' : " Use transfer_work with action: 'reassign' and force: true.";
+      const authority =
+        task.owner === null
+          ? 'a registered agent once the current owner is inactive'
+          : `a registered agent for human owner ${task.owner}`;
       throw new Error(
-        `Only the current owner or a registered agent for human owner ${task.owner ?? '(none)'} can force-reassign ${task.taskId}.${hint}`,
+        `Only the current owner or ${authority} can force-reassign ${task.taskId}.${hint}`,
       );
     }
   }

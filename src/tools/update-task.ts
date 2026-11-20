@@ -25,9 +25,13 @@ export function handleUpdateTask(repos: Repositories, input: UpdateTaskInput): U
       const owner = repos.agents.get(task.agentId);
       const liveness =
         owner === undefined ? 'unregistered' : deriveLiveness(owner.lastSeen, Date.now());
+      const authority =
+        task.owner === null
+          ? 'A registered agent'
+          : `A registered agent for human owner ${task.owner}`;
       const recovery =
         liveness === 'away' || liveness === 'archived' || liveness === 'unregistered'
-          ? ` Owner ${task.agentId} is ${liveness}. A registered agent for the same human owner can call transfer_work with action: 'reassign', task_id: '${input.task_id}', agent_id: '${input.agent_id}', expected_version: ${String(task.version)}, to_agent_id: '${input.agent_id}', force: true, and reason: 'Previous owner inactive', then accept the assignment.`
+          ? ` Owner ${task.agentId} is ${liveness}. ${authority} can call transfer_work with action: 'reassign', task_id: '${input.task_id}', agent_id: '${input.agent_id}', expected_version: ${String(task.version)}, to_agent_id: '${input.agent_id}', force: true, and reason: 'Previous owner inactive', then accept the assignment.`
           : '';
       throw new Error(
         `Agent ${input.agent_id} cannot record ${input.kind} for ${input.task_id}; current owner is ${task.agentId}.${recovery}`,

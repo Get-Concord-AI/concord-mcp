@@ -181,6 +181,106 @@ describe('versioned task lifecycle', () => {
     expect(reassigned.ownershipEvent.reason).toBe('owner requested reassignment');
   });
 
+  it('allows forced reassignment of tasks without a human owner only once the holder is inactive', () => {
+    handleRegisterAgent(repos, { agent_id: 'claude-code:stale', kind: 'claude-code' });
+    handleRegisterAgent(repos, { agent_id: 'codex:peer', kind: 'codex' });
+    handleClaimWork(repos, {
+      task_id: 'TASK-UNOWNED',
+      title: 'Default claim without owner',
+      agent_id: 'claude-code:stale',
+    });
+
+    // Rejects takeover while the holder is still live or idle.
+    expect(() =>
+      handleReassignTask(repos, {
+        task_id: 'TASK-UNOWNED',
+        to_agent_id: 'codex:peer',
+        agent_id: 'codex:peer',
+        expected_version: 1,
+        reason: 'premature takeover',
+        force: true,
+      }),
+    ).toThrow(/while its session is still active\.$/u);
+
+    const idleNow = Date.now() + 10 * 60 * 1000;
+    expect(() =>
+      handleReassignTask(
+        repos,
+        {
+          task_id: 'TASK-UNOWNED',
+          to_agent_id: 'codex:peer',
+          agent_id: 'codex:peer',
+          expected_version: 1,
+          reason: 'still only idle',
+          force: true,
+        },
+        idleNow,
+      ),
+    ).toThrow(/while its session is still active\.$/u);
+
+    // Once the holder ages into away/archived, non-forced reassign still hints force: true,
+    // and force: true succeeds with an audited force_reassign transition.
+    const archivedNow = Date.now() + 70 * 60 * 1000;
+    expect(() =>
+      handleReassignTask(
+        repos,
+        {
+          task_id: 'TASK-UNOWNED',
+          to_agent_id: 'codex:peer',
+          agent_id: 'codex:peer',
+          expected_version: 1,
+          reason: 'missing force flag',
+        },
+        archivedNow,
+      ),
+    ).toThrow(/force: true\.$/u);
+
+    // Human-owned tasks still reject unrelated actors even when their agent is archived.
+    expect(() =>
+      handleReassignTask(
+        repos,
+        {
+          task_id: 'TASK-1',
+          to_agent_id: 'codex:target',
+          agent_id: 'codex:target',
+          expected_version: 1,
+          reason: 'different human owner',
+          force: true,
+        },
+        archivedNow,
+      ),
+    ).toThrow(/human owner alex can force-reassign TASK-1\.$/u);
+
+    const recovered = handleReassignTask(
+      repos,
+      {
+        task_id: 'TASK-UNOWNED',
+        to_agent_id: 'codex:peer',
+        agent_id: 'codex:peer',
+        expected_version: 1,
+        reason: 'Previous owner inactive',
+        force: true,
+      },
+      archivedNow,
+    );
+    expect(recovered.task.status).toBe('assigned');
+    expect(recovered.task.assignedAgentId).toBe('codex:peer');
+    expect(recovered.ownershipEvent.transition).toBe('force_reassign');
+    expect(recovered.ownershipEvent.actorAgentId).toBe('codex:peer');
+
+    const accepted = handleAcceptTask(
+      repos,
+      {
+        task_id: 'TASK-UNOWNED',
+        agent_id: 'codex:peer',
+        expected_version: recovered.task.version,
+      },
+      archivedNow,
+    );
+    expect(accepted.task.status).toBe('active');
+    expect(accepted.task.agentId).toBe('codex:peer');
+  });
+
   it('lets an assignee decline without discarding the previous owner', () => {
     const assigned = handleAssignTask(repos, {
       task_id: 'TASK-1',

@@ -5,6 +5,7 @@ import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleGetTaskContext } from '../../src/tools/get-task-context.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
+import { handleAcceptTask, handleReassignTask } from '../../src/tools/task-lifecycle.js';
 import { handleUpdateTask } from '../../src/tools/update-task.js';
 
 describe('stale task owner recovery', () => {
@@ -47,5 +48,21 @@ describe('stale task owner recovery', () => {
     expect(handleGetTaskContext(repos, { task_id: 'TASK-1' }).ownerLiveness).toBe('archived');
     expect(nonOwnerProgress).toThrow(/force: true/u);
     expect(repos.taskUpdates.listByTask('TASK-1')).toHaveLength(0);
+
+    const reassigned = handleReassignTask(repos, {
+      task_id: 'TASK-1',
+      agent_id: 'agent:other',
+      expected_version: 1,
+      to_agent_id: 'agent:other',
+      force: true,
+      reason: 'Previous owner inactive',
+    });
+    handleAcceptTask(repos, {
+      task_id: 'TASK-1',
+      agent_id: 'agent:other',
+      expected_version: reassigned.task.version,
+    });
+    expect(nonOwnerProgress).not.toThrow();
+    expect(repos.taskUpdates.listByTask('TASK-1')).toHaveLength(1);
   });
 });
