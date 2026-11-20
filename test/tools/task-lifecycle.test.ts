@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
+import { handleAcceptHandoff, handleOfferHandoff } from '../../src/tools/handoff-lifecycle.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 import {
   handleAcceptTask,
@@ -179,6 +180,190 @@ describe('versioned task lifecycle', () => {
     expect(reassigned.task.status).toBe('assigned');
     expect(reassigned.ownershipEvent.transition).toBe('force_reassign');
     expect(reassigned.ownershipEvent.reason).toBe('owner requested reassignment');
+  });
+
+  it('allows forced reassignment of tasks without a human owner only once the holder is inactive', () => {
+    handleRegisterAgent(repos, { agent_id: 'claude-code:stale', kind: 'claude-code' });
+    handleRegisterAgent(repos, { agent_id: 'codex:peer', kind: 'codex' });
+    handleClaimWork(repos, {
+      task_id: 'TASK-UNOWNED',
+      title: 'Default claim without owner',
+      agent_id: 'claude-code:stale',
+    });
+
+    // Rejects takeover while the holder is still live or idle.
+    expect(() =>
+      handleReassignTask(repos, {
+        task_id: 'TASK-UNOWNED',
+        to_agent_id: 'codex:peer',
+        agent_id: 'codex:peer',
+        expected_version: 1,
+        reason: 'premature takeover',
+        force: true,
+      }),
+    ).toThrow(/while its session is still active\.$/u);
+
+    const idleNow = Date.now() + 10 * 60 * 1000;
+    expect(() =>
+      handleReassignTask(
+        repos,
+        {
+          task_id: 'TASK-UNOWNED',
+          to_agent_id: 'codex:peer',
+          agent_id: 'codex:peer',
+          expected_version: 1,
+          reason: 'still only idle',
+          force: true,
+        },
+        idleNow,
+      ),
+    ).toThrow(/while its session is still active\.$/u);
+
+    // Once the holder ages into away/archived, non-forced reassign still hints force: true,
+    // and force: true succeeds with an audited force_reassign transition.
+    const archivedNow = Date.now() + 70 * 60 * 1000;
+    expect(() =>
+      handleReassignTask(
+        repos,
+        {
+          task_id: 'TASK-UNOWNED',
+          to_agent_id: 'codex:peer',
+          agent_id: 'codex:peer',
+          expected_version: 1,
+          reason: 'missing force flag',
+        },
+        archivedNow,
+      ),
+    ).toThrow(/force: true\.$/u);
+
+    // Human-owned tasks still reject unrelated actors even when their agent is archived.
+    expect(() =>
+      handleReassignTask(
+        repos,
+        {
+          task_id: 'TASK-1',
+          to_agent_id: 'codex:target',
+          agent_id: 'codex:target',
+          expected_version: 1,
+          reason: 'different human owner',
+          force: true,
+        },
+        archivedNow,
+      ),
+    ).toThrow(/human owner alex can force-reassign TASK-1\.$/u);
+
+    const recovered = handleReassignTask(
+      repos,
+      {
+        task_id: 'TASK-UNOWNED',
+        to_agent_id: 'codex:peer',
+        agent_id: 'codex:peer',
+        expected_version: 1,
+        reason: 'Previous owner inactive',
+        force: true,
+      },
+      archivedNow,
+    );
+    expect(recovered.task.status).toBe('assigned');
+    expect(recovered.task.assignedAgentId).toBe('codex:peer');
+    expect(recovered.ownershipEvent.transition).toBe('force_reassign');
+    expect(recovered.ownershipEvent.actorAgentId).toBe('codex:peer');
+
+    const accepted = handleAcceptTask(
+      repos,
+      {
+        task_id: 'TASK-UNOWNED',
+        agent_id: 'codex:peer',
+        expected_version: recovered.task.version,
+      },
+      archivedNow,
+    );
+    expect(accepted.task.status).toBe('active');
+    expect(accepted.task.agentId).toBe('codex:peer');
+
+    // Completed/closed unowned tasks cannot be put back into assigned via stale recovery.
+    const finished = handleCloseTask(repos, {
+      task_id: 'TASK-UNOWNED',
+      agent_id: 'codex:peer',
+      expected_version: accepted.task.version,
+      reason: 'done',
+      outcome: 'complete',
+    });
+    expect(() =>
+      handleReassignTask(
+        repos,
+        {
+          task_id: 'TASK-UNOWNED',
+          to_agent_id: 'claude-code:stale',
+          agent_id: 'claude-code:stale',
+          expected_version: finished.task.version,
+          reason: 'revive finished task',
+          force: true,
+        },
+        archivedNow + 70 * 60 * 1000,
+      ),
+    ).toThrow(/reopen it before reassignment\.$/u);
+  });
+
+  it('protects live handoff recipients and expires displaced handoffs on forced recovery', () => {
+    handleRegisterAgent(repos, { agent_id: 'claude-code:sender', kind: 'claude-code' });
+    handleRegisterAgent(repos, { agent_id: 'codex:recipient', kind: 'codex' });
+    handleRegisterAgent(repos, { agent_id: 'gemini:third', kind: 'gemini' });
+    handleClaimWork(repos, {
+      task_id: 'TASK-HANDOFF',
+      title: 'Handoff in flight',
+      agent_id: 'claude-code:sender',
+    });
+
+    const offered = handleOfferHandoff(repos, {
+      task_id: 'TASK-HANDOFF',
+      agent_id: 'claude-code:sender',
+      to_agent_id: 'codex:recipient',
+      expected_version: 1,
+      what_changed: 'API wired',
+    });
+
+    // Sender goes away, but recipient stays live: third agent cannot steal the offered task.
+    const senderAway = new Date(Date.now() + 40 * 60 * 1000);
+    repos.db
+      .prepare('UPDATE agents SET last_seen = ? WHERE agent_id = ?')
+      .run(new Date(Date.now() - 40 * 60 * 1000).toISOString(), 'claude-code:sender');
+    expect(() =>
+      handleReassignTask(repos, {
+        task_id: 'TASK-HANDOFF',
+        to_agent_id: 'gemini:third',
+        agent_id: 'gemini:third',
+        expected_version: offered.task.version,
+        reason: 'take over while recipient is live',
+        force: true,
+      }),
+    ).toThrow(/Only the current owner \(codex:recipient\)/u);
+
+    // Once both sender and recipient are away, forced recovery succeeds and expires the old handoff.
+    const bothAwayNow = senderAway.getTime() + 40 * 60 * 1000;
+    const recovered = handleReassignTask(
+      repos,
+      {
+        task_id: 'TASK-HANDOFF',
+        to_agent_id: 'gemini:third',
+        agent_id: 'gemini:third',
+        expected_version: offered.task.version,
+        reason: 'Both sender and recipient inactive',
+        force: true,
+      },
+      bothAwayNow,
+    );
+    expect(recovered.task.status).toBe('assigned');
+    expect(repos.handoffs.pendingForTask('TASK-HANDOFF')).toBeUndefined();
+    expect(repos.handoffs.get(offered.handoff.id)?.deliveryStatus).toBe('expired');
+    expect(() =>
+      handleAcceptHandoff(repos, {
+        task_id: 'TASK-HANDOFF',
+        handoff_id: offered.handoff.id,
+        agent_id: 'codex:recipient',
+        expected_version: recovered.task.version,
+      }),
+    ).toThrow(/Pending handoff/u);
   });
 
   it('lets an assignee decline without discarding the previous owner', () => {

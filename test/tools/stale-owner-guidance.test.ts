@@ -5,6 +5,11 @@ import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleGetTaskContext } from '../../src/tools/get-task-context.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
+import {
+  handleAcceptTask,
+  handleAssignTask,
+  handleReassignTask,
+} from '../../src/tools/task-lifecycle.js';
 import { handleUpdateTask } from '../../src/tools/update-task.js';
 
 describe('stale task owner recovery', () => {
@@ -47,5 +52,48 @@ describe('stale task owner recovery', () => {
     expect(handleGetTaskContext(repos, { task_id: 'TASK-1' }).ownerLiveness).toBe('archived');
     expect(nonOwnerProgress).toThrow(/force: true/u);
     expect(repos.taskUpdates.listByTask('TASK-1')).toHaveLength(0);
+
+    const reassigned = handleReassignTask(repos, {
+      task_id: 'TASK-1',
+      agent_id: 'agent:other',
+      expected_version: 1,
+      to_agent_id: 'agent:other',
+      force: true,
+      reason: 'Previous owner inactive',
+    });
+    handleAcceptTask(repos, {
+      task_id: 'TASK-1',
+      agent_id: 'agent:other',
+      expected_version: reassigned.task.version,
+    });
+    expect(nonOwnerProgress).not.toThrow();
+    expect(repos.taskUpdates.listByTask('TASK-1')).toHaveLength(1);
+  });
+
+  it('directs a live assignee to accept instead of suggesting forced reassignment', () => {
+    handleRegisterAgent(repos, { agent_id: 'agent:third', kind: 'codex' });
+    const assigned = handleAssignTask(repos, {
+      task_id: 'TASK-1',
+      to_agent_id: 'agent:other',
+      agent_id: 'agent:owner',
+      expected_version: 1,
+    });
+    repos.db
+      .prepare('UPDATE agents SET last_seen = ? WHERE agent_id = ?')
+      .run(new Date(Date.now() - 40 * 60 * 1000).toISOString(), 'agent:owner');
+
+    expect(nonOwnerProgress).toThrow(
+      new RegExp(`action: 'accept'.*expected_version: ${String(assigned.task.version)}`, 'u'),
+    );
+    expect(nonOwnerProgress).not.toThrow(/force: true/u);
+
+    expect(() => {
+      handleUpdateTask(repos, {
+        task_id: 'TASK-1',
+        kind: 'progress',
+        content: 'third agent check',
+        agent_id: 'agent:third',
+      });
+    }).toThrow(/pending assignment for active agent agent:other/u);
   });
 });

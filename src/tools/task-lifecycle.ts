@@ -14,6 +14,8 @@ import type {
   ReleaseTaskInput,
   ReopenTaskInput,
 } from '../domain/operations.js';
+import { CLAIMED_STATUSES } from '../domain/overlap.js';
+import { deriveLiveness } from '../domain/presence.js';
 
 export interface TaskLifecycleResult {
   task: TaskRecord;
@@ -58,6 +60,29 @@ function isHumanSupervisor(actor: AgentRecord, task: TaskRecord): boolean {
   return actor.owner !== null && task.owner !== null && actor.owner === task.owner;
 }
 
+function isAgentPresent(repos: Repositories, agentId: string, now: number): boolean {
+  const agent = repos.agents.get(agentId);
+  if (agent === undefined) return false;
+  const liveness = deriveLiveness(agent.lastSeen, now);
+  return liveness === 'live' || liveness === 'idle';
+}
+
+export function hasPresentHolder(repos: Repositories, task: TaskRecord, now: number): boolean {
+  if (task.agentId !== null && isAgentPresent(repos, task.agentId, now)) {
+    return true;
+  }
+  const leaseExpired = task.leaseExpiresAt !== null && Date.parse(task.leaseExpiresAt) <= now;
+  if (
+    (task.status === 'assigned' || task.status === 'handoff_offered') &&
+    !leaseExpired &&
+    task.assignedAgentId !== null &&
+    isAgentPresent(repos, task.assignedAgentId, now)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function requireOwner(task: TaskRecord, actor: AgentRecord): void {
   if (task.agentId !== actor.agentId) {
     throw new Error(
@@ -84,6 +109,17 @@ function applyTransition(repos: Repositories, request: TransitionRequest): TaskL
       const current = repos.tasks.get(request.task.taskId);
       throw new Error(
         `Task ${request.task.taskId} version conflict: expected ${String(request.task.version)}, current ${String(current?.version ?? 'missing')}.`,
+      );
+    }
+    const displacedHandoff =
+      request.status === 'handoff_offered'
+        ? undefined
+        : repos.handoffs.pendingForTask(request.task.taskId);
+    if (displacedHandoff !== undefined) {
+      repos.handoffs.resolve(
+        displacedHandoff.id,
+        'expired',
+        request.reason ?? `superseded by ${request.transition}`,
       );
     }
     const ownershipEvent = repos.ownershipEvents.record({
@@ -208,12 +244,37 @@ export function handleReassignTask(
   const actor = registeredAgent(repos, input.agent_id);
   registeredAgent(repos, input.to_agent_id);
   const task = taskAtVersion(repos, input.task_id, input.expected_version);
+  if (task.status === 'closed' || task.status === 'complete') {
+    throw new Error(`Task ${task.taskId} is ${task.status}; reopen it before reassignment.`);
+  }
   if (task.agentId !== actor.agentId) {
-    if (input.force !== true || !isHumanSupervisor(actor, task)) {
+    const unfinishedClaimed = CLAIMED_STATUSES.has(task.status);
+    const staleUnowned =
+      task.owner === null && unfinishedClaimed && !hasPresentHolder(repos, task, now);
+    const canForce = isHumanSupervisor(actor, task) || staleUnowned;
+    if (input.force !== true || !canForce) {
+      if (task.owner === null && !unfinishedClaimed && task.status !== 'proposed') {
+        throw new Error(
+          `Task ${task.taskId} is ${task.status}; only unfinished claimed work can be force-reassigned without a human owner.`,
+        );
+      }
+      if (task.owner === null && unfinishedClaimed && !staleUnowned) {
+        const holder =
+          task.agentId !== null && isAgentPresent(repos, task.agentId, now)
+            ? task.agentId
+            : (task.assignedAgentId ?? task.agentId ?? 'unassigned');
+        throw new Error(
+          `Only the current owner (${holder}) can reassign ${task.taskId} while its session is still active.`,
+        );
+      }
       const hint =
         input.force === true ? '' : " Use transfer_work with action: 'reassign' and force: true.";
+      const authority =
+        task.owner === null
+          ? 'a registered agent once the current owner is inactive'
+          : `a registered agent for human owner ${task.owner}`;
       throw new Error(
-        `Only the current owner or a registered agent for human owner ${task.owner ?? '(none)'} can force-reassign ${task.taskId}.${hint}`,
+        `Only the current owner or ${authority} can force-reassign ${task.taskId}.${hint}`,
       );
     }
   }

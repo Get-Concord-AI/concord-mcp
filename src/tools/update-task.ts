@@ -1,10 +1,49 @@
+import { CLAIMED_STATUSES } from '../domain/overlap.js';
 import { deriveLiveness } from '../domain/presence.js';
 import type { Repositories, TaskRecord, TaskUpdateRecord } from '../db/index.js';
 import type { UpdateTaskInput } from '../domain/operations.js';
+import { hasPresentHolder } from './task-lifecycle.js';
 
 export interface UpdateTaskResult {
   update: TaskUpdateRecord;
   task: TaskRecord;
+}
+
+function recoveryGuidance(
+  repos: Repositories,
+  task: TaskRecord,
+  actorAgentId: string,
+  now: number,
+): string {
+  if (task.agentId === null) return '';
+  const owner = repos.agents.get(task.agentId);
+  const liveness = owner === undefined ? 'unregistered' : deriveLiveness(owner.lastSeen, now);
+  const ownerInactive =
+    liveness === 'away' || liveness === 'archived' || liveness === 'unregistered';
+
+  const leaseExpired = task.leaseExpiresAt !== null && Date.parse(task.leaseExpiresAt) <= now;
+  const pendingKind =
+    task.status === 'handoff_offered'
+      ? 'handoff'
+      : task.status === 'assigned'
+        ? 'assignment'
+        : undefined;
+  if (pendingKind !== undefined && !leaseExpired && task.assignedAgentId !== null) {
+    if (task.assignedAgentId === actorAgentId) {
+      return ` Task ${task.taskId} has a pending ${pendingKind} for ${actorAgentId}; call transfer_work with action: 'accept', task_id: '${task.taskId}', agent_id: '${actorAgentId}', and expected_version: ${String(task.version)} first.`;
+    }
+    if (hasPresentHolder(repos, task, now)) {
+      return ownerInactive
+        ? ` Owner ${task.agentId} is ${liveness}, and ${task.taskId} has a pending ${pendingKind} for active agent ${task.assignedAgentId} (accept with transfer_work action: 'accept', expected_version: ${String(task.version)}).`
+        : '';
+    }
+  }
+
+  if (!ownerInactive || task.status === 'closed' || task.status === 'complete') return '';
+  if (task.owner === null && !CLAIMED_STATUSES.has(task.status)) return '';
+  const authority =
+    task.owner === null ? 'A registered agent' : `A registered agent for human owner ${task.owner}`;
+  return ` Owner ${task.agentId} is ${liveness}. ${authority} can call transfer_work with action: 'reassign', task_id: '${task.taskId}', agent_id: '${actorAgentId}', expected_version: ${String(task.version)}, to_agent_id: '${actorAgentId}', force: true, and reason: 'Previous owner inactive', then accept the assignment.`;
 }
 
 /** Append one durable, task-scoped memory entry for other agents and sessions. */
@@ -22,13 +61,7 @@ export function handleUpdateTask(repos: Repositories, input: UpdateTaskInput): U
     }
     const collaborative = input.kind === 'question' || input.kind === 'finding';
     if (!collaborative && input.agent_id !== task.agentId) {
-      const owner = repos.agents.get(task.agentId);
-      const liveness =
-        owner === undefined ? 'unregistered' : deriveLiveness(owner.lastSeen, Date.now());
-      const recovery =
-        liveness === 'away' || liveness === 'archived' || liveness === 'unregistered'
-          ? ` Owner ${task.agentId} is ${liveness}. A registered agent for the same human owner can call transfer_work with action: 'reassign', task_id: '${input.task_id}', agent_id: '${input.agent_id}', expected_version: ${String(task.version)}, to_agent_id: '${input.agent_id}', force: true, and reason: 'Previous owner inactive', then accept the assignment.`
-          : '';
+      const recovery = recoveryGuidance(repos, task, input.agent_id, Date.now());
       throw new Error(
         `Agent ${input.agent_id} cannot record ${input.kind} for ${input.task_id}; current owner is ${task.agentId}.${recovery}`,
       );
