@@ -144,6 +144,45 @@ describe('detectOverlaps', () => {
     expect(sameDir[0]?.reasons).toContain('same directory: src/billing');
   });
 
+  it.each(['win32', 'darwin'] as const)(
+    'treats paths that differ only in case as the same file on %s',
+    (platform) => {
+      const warnings = detectOverlaps(
+        { ...candidate, taskId: 'TASK-CASE', expectedFiles: ['src/Components/Button.tsx'] },
+        [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+        0,
+        platform,
+      );
+      expect(warnings[0]?.reasons).toContain('same file(s): src/components/Button.tsx');
+    },
+  );
+
+  it('treats directories that differ only in case as the same directory on win32', () => {
+    const warnings = detectOverlaps(
+      { ...candidate, taskId: 'TASK-CASE', expectedFiles: ['src/Components/Card.tsx'] },
+      [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+      0,
+      'win32',
+    );
+    expect(warnings[0]?.reasons).toContain('same directory: src/components');
+  });
+
+  it('keeps paths case-sensitive on linux', () => {
+    const warnings = detectOverlaps(
+      {
+        taskId: 'TASK-CASE',
+        expectedFiles: ['src/Components/Button.tsx'],
+        modules: [],
+        domains: [],
+        riskTags: [],
+      },
+      [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+      0,
+      'linux',
+    );
+    expect(warnings).toEqual([]);
+  });
+
   it('returns nothing for disjoint tasks', () => {
     expect(
       detectOverlaps(candidate, [

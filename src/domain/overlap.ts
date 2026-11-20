@@ -71,17 +71,45 @@ function tokensOf(values: readonly string[]): string[] {
 
 /** Normalize a declared file path: drop a leading `./`, collapse `//`, resolve
  * `.`/`..` segments, and strip a trailing slash, so `./app/page.tsx` and
- * `app/page.tsx` compare equal. Paths stay case-sensitive. */
+ * `app/page.tsx` compare equal. Case is kept; compare paths with `pathKey`. */
 export function normalizePath(file: string): string {
   const unified = file.trim().replaceAll('\\', '/');
   const normalized = posix.normalize(unified).replace(/^\.\//, '').replace(/\/$/, '');
   return normalized === '.' ? '' : normalized;
 }
 
-function directories(files: readonly string[]): string[] {
-  return files
-    .map((file) => normalizePath(file))
-    .filter((file) => file !== '')
+/** Platforms whose default file system ignores case, so `src/App.tsx` and
+ * `src/app.tsx` name the same file there. */
+const CASE_INSENSITIVE_PLATFORMS: ReadonlySet<NodeJS.Platform> = new Set<NodeJS.Platform>([
+  'win32',
+  'darwin',
+]);
+
+/** The key two declared paths are compared by: the normalized path, lowercased
+ * on platforms whose default file system is case-insensitive. */
+export function pathKey(file: string, platform: NodeJS.Platform = process.platform): string {
+  const normalized = normalizePath(file);
+  return CASE_INSENSITIVE_PLATFORMS.has(platform) ? normalized.toLowerCase() : normalized;
+}
+
+/** Paths from `existing` that name one of the `candidate` paths, compared by
+ * `pathKey` and reported as `existing` spells them. */
+function sharedPaths(
+  candidate: readonly string[],
+  existing: readonly string[],
+  platform: NodeJS.Platform,
+): string[] {
+  const wanted = new Set(candidate.map((path) => pathKey(path, platform)));
+  const shared = new Set(existing.filter((path) => wanted.has(pathKey(path, platform))));
+  return [...shared].sort((x, y) => x.localeCompare(y));
+}
+
+function files(declared: readonly string[]): string[] {
+  return declared.map((file) => normalizePath(file)).filter((file) => file !== '');
+}
+
+function directories(declared: readonly string[]): string[] {
+  return files(declared)
     .map((file) => posix.dirname(file))
     .filter((dir) => dir !== '.' && dir !== '');
 }
@@ -105,22 +133,25 @@ function isParentChild(candidate: OverlapSurface, task: TaskRecord): boolean {
 function detailsFor(
   candidate: OverlapSurface,
   existing: OverlapSurface,
+  platform: NodeJS.Platform,
 ): { reasons: string[]; kinds: OverlapKind[] } {
   const reasons: string[] = [];
   const kinds: OverlapKind[] = [];
 
-  const sameFiles = sortedIntersection(
-    candidate.expectedFiles.map(normalizePath).filter((file) => file !== ''),
-    existing.expectedFiles.map(normalizePath).filter((file) => file !== ''),
+  const sameFiles = sharedPaths(
+    files(candidate.expectedFiles),
+    files(existing.expectedFiles),
+    platform,
   );
   if (sameFiles.length > 0) {
     reasons.push(`same file(s): ${sameFiles.join(', ')}`);
     kinds.push('same_file');
   }
 
-  const sameDirs = sortedIntersection(
+  const sameDirs = sharedPaths(
     directories(candidate.expectedFiles),
     directories(existing.expectedFiles),
+    platform,
   );
   if (sameDirs.length > 0 && sameFiles.length === 0) {
     reasons.push(`same directory: ${sameDirs.join(', ')}`);
@@ -155,13 +186,14 @@ function detailsFor(
  * Flag obvious overlaps between the candidate surface and existing tasks, based
  * on declared files, directories, modules, domains, and risk tags. Labels are
  * compared by normalized word tokens (case-, separator-, and order-insensitive)
- * and files by normalized path, so phrasing differences do not hide an overlap.
+ * and files by `pathKey`, so phrasing differences do not hide an overlap.
  * This remains deliberately naive: no stemming or semantic conflict detection.
  */
 export function detectOverlaps(
   candidate: OverlapSurface,
   existing: readonly TaskRecord[],
   startIndex = 0,
+  platform: NodeJS.Platform = process.platform,
 ): OverlapWarning[] {
   const warnings: OverlapWarning[] = [];
   for (let index = startIndex; index < existing.length; index += 1) {
@@ -169,7 +201,7 @@ export function detectOverlaps(
     if (task === undefined || task.taskId === candidate.taskId || isParentChild(candidate, task)) {
       continue;
     }
-    const { reasons, kinds } = detailsFor(candidate, surfaceOf(task));
+    const { reasons, kinds } = detailsFor(candidate, surfaceOf(task), platform);
     if (reasons.length > 0) {
       warnings.push({ taskId: task.taskId, title: task.title, reasons, kinds });
     }

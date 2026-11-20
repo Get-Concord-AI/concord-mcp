@@ -1,7 +1,12 @@
 import type { Command } from '@commander-js/extra-typings';
 
 import type { Repositories } from '../../db/index.js';
-import { CLAIMED_STATUSES, normalizePath, type OverlapWarning } from '../../domain/overlap.js';
+import {
+  CLAIMED_STATUSES,
+  normalizePath,
+  pathKey,
+  type OverlapWarning,
+} from '../../domain/overlap.js';
 import { linkedMachine } from '../../cloud/target.js';
 import { openContext } from '../context.js';
 
@@ -22,14 +27,19 @@ export function checkFileOverlaps(
   repos: Repositories,
   files: readonly string[],
   selfTaskId?: string,
+  platform: NodeJS.Platform = process.platform,
 ): OverlapWarning[] {
-  const wanted = new Set(files.map(normalizePath).filter((file) => file !== ''));
+  const wanted = new Set(
+    files.map((file) => pathKey(file, platform)).filter((file) => file !== ''),
+  );
   const warnings: OverlapWarning[] = [];
   for (const task of repos.tasks.list()) {
     if (!CLAIMED_STATUSES.has(task.status) || task.taskId === selfTaskId) {
       continue;
     }
-    const shared = task.expectedFiles.map(normalizePath).filter((file) => wanted.has(file));
+    const shared = task.expectedFiles
+      .map(normalizePath)
+      .filter((file) => wanted.has(pathKey(file, platform)));
     if (shared.length > 0) {
       const unique = [...new Set(shared)].sort((a, b) => a.localeCompare(b));
       warnings.push({

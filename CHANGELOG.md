@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows and macOS, overlap detection and `concord check` treat paths that
+  differ only in case as the same file, so a claim on
+  `src/components/Button.tsx` now collides with an edit of
+  `src/Components/Button.tsx`. Linux stays case-sensitive (#384).
+
 ## [0.23.0] - 2026-11-16
 
 ### Added
