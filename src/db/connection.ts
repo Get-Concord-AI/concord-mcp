@@ -21,11 +21,13 @@ export function openDatabase(filename: string): ConcordDatabase {
     mkdirSync(dirname(filename), { recursive: true });
   }
   const db = new Database(filename);
-  db.pragma('journal_mode = WAL');
   // Concord routinely has several short-lived hook and monitor processes
   // sharing one workspace database. Wait for brief writers instead of making
-  // a live inbox watcher exit on the first SQLITE_BUSY response.
+  // a live inbox watcher exit on the first SQLITE_BUSY response. Set before
+  // switching to WAL, which itself needs a lock when many processes open a
+  // brand-new store at once.
   db.pragma('busy_timeout = 5000');
+  db.pragma('journal_mode = WAL');
   // Enforcement stays off while migrating: rebuilding a referenced table is
   // only possible without it, and SQLite ignores the pragma inside a transaction.
   db.pragma('foreign_keys = OFF');
@@ -55,14 +57,19 @@ function runMigrations(db: ConcordDatabase): void {
     if (migration === undefined) {
       continue;
     }
+    // Take the write lock first, then re-read the version: several processes
+    // can open a new store at the same moment, and only one may apply each step.
     db.transaction(() => {
+      if (readUserVersion(db) > index) {
+        return;
+      }
       db.exec(migration);
       const violations = foreignKeyViolationsSchema.parse(db.pragma('foreign_key_check'));
       if (violations.length > 0) {
         throw new Error(`Migration ${String(index + 1)} left foreign-key violations.`);
       }
       db.pragma(`user_version = ${String(index + 1)}`);
-    })();
+    }).immediate();
   }
 }
 
