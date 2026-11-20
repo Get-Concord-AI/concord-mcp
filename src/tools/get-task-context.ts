@@ -57,7 +57,7 @@ export function handleGetTaskContext(
               (candidate) => candidate.taskId !== task.taskId && candidate.status === 'active',
             ),
           0,
-          repos.repoRoot,
+          repos.checkoutRoot,
         )
       : [];
 

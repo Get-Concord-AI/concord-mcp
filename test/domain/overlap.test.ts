@@ -256,11 +256,25 @@ describe('detectOverlaps', () => {
       '..',
       '../other-project/file.ts',
       join(`${repoRoot}-other`, 'notes.md'),
+      'X:/other-project/notes.md',
     ]) {
       const otherClaim = task({ taskId: 'OTHER', expectedFiles: [outside] });
       expect(detectOverlaps(rootClaim, [otherClaim], 0, repoRoot)).toEqual([]);
       expect(detectOverlaps(otherClaim, [rootClaim], 0, repoRoot)).toEqual([]);
     }
+  });
+
+  it.skipIf(process.platform === 'win32')('covers POSIX relative filenames with a colon', () => {
+    const rootClaim = task({ taskId: 'ROOT', expectedFiles: ['.'] });
+    const fileClaim = task({ taskId: 'FILE', expectedFiles: ['a:notes.md'] });
+    const reasons = ['directory claim covers file(s): . -> a:notes.md'];
+
+    expect(detectOverlaps(rootClaim, [fileClaim])).toEqual([
+      { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(fileClaim, [rootClaim])).toEqual([
+      { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
+    ]);
   });
 
   it.each(['', ' \t '])('ignores blank claim %j', (blank) => {

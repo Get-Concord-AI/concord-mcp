@@ -1,5 +1,5 @@
 import { LINKED_MACHINE_MESSAGE, linkedMachine } from '../cloud/target.js';
-import { resolveRepoRoot, workspaceIdForRoot } from '../config/paths.js';
+import { resolveCheckoutRoot, resolveRepoRoot, workspaceIdForRoot } from '../config/paths.js';
 import { openRepositories, type Repositories } from '../db/index.js';
 import { localStore, resolveStore, type StoreLocation } from '../workspaces/store.js';
 
@@ -36,6 +36,6 @@ export function openContext(
     repoRoot,
     concordPath: store.concordPath,
     store,
-    repos: openRepositories(store.databasePath, store.project, repoRoot),
+    repos: openRepositories(store.databasePath, store.project, resolveCheckoutRoot(cwd, env)),
   };
 }

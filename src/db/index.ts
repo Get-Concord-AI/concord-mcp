@@ -72,8 +72,8 @@ export interface Repositories {
   db: ConcordDatabase;
   /** The project task-scoped repositories see. */
   project: string;
-  /** The workspace root, when these repositories are bound to a local workspace. */
-  readonly repoRoot?: string | undefined;
+  /** The checkout used for file overlap checks, when known. */
+  readonly checkoutRoot?: string | undefined;
   tasks: TaskRepository;
   handoffs: HandoffRepository;
   reviews: ReviewRepository;
@@ -111,7 +111,7 @@ export function createRepositories(
 export function openRepositories(
   filename: string,
   project: string = LOCAL_PROJECT,
-  repoRoot?: string,
+  checkoutRoot?: string,
 ): Repositories {
-  return { ...createRepositories(openDatabase(filename), project), repoRoot };
+  return { ...createRepositories(openDatabase(filename), project), checkoutRoot };
 }

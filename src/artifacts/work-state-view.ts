@@ -114,7 +114,7 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
       },
       active,
       index + 1,
-      repos.repoRoot,
+      repos.checkoutRoot,
     )) {
       overlaps.push({ a: task.taskId, b: warning.taskId, reasons: warning.reasons });
     }
