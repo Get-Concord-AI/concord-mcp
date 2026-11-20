@@ -36,6 +36,28 @@ describe('concord check', () => {
     expect(winOverlaps[0]?.taskId).toBe('T1');
   });
 
+  it.each(['win32', 'darwin'] as const)(
+    'flags a claimed file named with different case on %s',
+    (platform) => {
+      handleClaimWork(repos, {
+        task_id: 'T1',
+        title: 'Owns button',
+        expected_files: ['src/components/Button.tsx'],
+      });
+      const overlaps = checkFileOverlaps(repos, ['src/Components/Button.tsx'], undefined, platform);
+      expect(overlaps.map((overlap) => overlap.taskId)).toEqual(['T1']);
+    },
+  );
+
+  it('keeps the edit guard case-sensitive on linux', () => {
+    handleClaimWork(repos, {
+      task_id: 'T1',
+      title: 'Owns button',
+      expected_files: ['src/components/Button.tsx'],
+    });
+    expect(checkFileOverlaps(repos, ['src/Components/Button.tsx'], undefined, 'linux')).toEqual([]);
+  });
+
   it('excludes your own task via --task', () => {
     handleClaimWork(repos, { task_id: 'MINE', title: 'Mine', expected_files: ['src/x.ts'] });
     expect(checkFileOverlaps(repos, ['src/x.ts'], 'MINE')).toEqual([]);
