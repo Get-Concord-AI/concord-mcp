@@ -58,6 +58,23 @@ export const LINKED_MACHINE_MESSAGE =
   'local Concord on this machine.';
 
 /**
+ * A process that opened SQLite before this machine was linked. It must not keep
+ * serving that file: clients started after the link are on the cloud and cannot
+ * see it. Restarting the client starts the cloud proxy.
+ */
+export const LOCAL_SESSION_LINKED_MESSAGE =
+  'This session started before this machine was linked to Concord Cloud, so it has stopped using the local store. ' +
+  'Restart this client to work through Concord Cloud. Claims made before the link stay in the local database.';
+
+/**
+ * A process that started as the cloud proxy. After unlink, new processes use
+ * SQLite; this one must not keep forwarding to the cloud.
+ */
+export const CLOUD_SESSION_UNLINKED_MESSAGE =
+  'This session started while this machine was linked to Concord Cloud, and the machine is now unlinked. ' +
+  'Restart this client to use local Concord.';
+
+/**
  * The host of the projects for repositories with no remote. Not a real host:
  * it only has to be a key the cloud accepts that no git remote ever produces.
  */

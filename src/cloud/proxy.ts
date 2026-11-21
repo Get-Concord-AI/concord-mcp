@@ -22,7 +22,7 @@ import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
 import { bearerFor, type Bearer } from './tokens.js';
 import { assertKeySafeUrl } from './client.js';
-import { cloudTargetFor, linkedMachine } from './target.js';
+import { CLOUD_SESSION_UNLINKED_MESSAGE, cloudTargetFor, linkedMachine } from './target.js';
 
 /**
  * Cloud mode for the MCP server: in a linked repository, `concord-mcp` forwards
@@ -180,6 +180,11 @@ function failure(reason: string): CallToolResult {
 export function createCloudProxyServer(
   session: CloudSession,
   connect: () => Promise<Client>,
+  /**
+   * False after `concord cloud unlink`. The default re-reads the machine link
+   * so a proxy started while linked stops forwarding once the machine is not.
+   */
+  stillLinked: () => boolean = () => linkedMachine(process.env) !== undefined,
 ): McpServer {
   const server = new McpServer(
     { name: 'concord-mcp', version: VERSION },
@@ -205,6 +210,7 @@ export function createCloudProxyServer(
   };
 
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    if (!stillLinked()) throw new Error(CLOUD_SESSION_UNLINKED_MESSAGE);
     const attempt = cloud();
     try {
       return await (await attempt).listTools();
@@ -215,6 +221,12 @@ export function createCloudProxyServer(
   });
 
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (!stillLinked()) {
+      return {
+        isError: true,
+        content: [{ type: 'text', text: CLOUD_SESSION_UNLINKED_MESSAGE }],
+      };
+    }
     const attempt = cloud();
     try {
       const { name } = request.params;
