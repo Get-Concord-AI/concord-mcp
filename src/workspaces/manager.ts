@@ -28,9 +28,10 @@ export interface WorkspaceManagerOptions {
   /** Where a root's state lives; the repository's own store unless global mode applies. */
   resolveStore?: (repoRoot: string) => StoreLocation;
   /**
-   * Why no store may be opened now, checked before each first open: a server
-   * started while its machine was unlinked keeps running after a login links
-   * it, and must not open a local store there.
+   * Why no store may be used now. Checked before every open and before every
+   * use of a store already open: a server started while its machine was
+   * unlinked keeps running after a login links it, and must not read or write
+   * a local store a cloud agent cannot reach.
    */
   refuseOpen?: () => string | undefined;
 }
@@ -98,6 +99,7 @@ export class WorkspaceManager {
 
   /** The active/default context used when an operation omits `workspace_id`. */
   current(): WorkspaceContext {
+    this.#assertStoreAllowed();
     const context = this.#contexts.get(this.#activeWorkspaceId);
     if (context === undefined) {
       throw new Error('Concord has no active workspace.');
@@ -113,9 +115,10 @@ export class WorkspaceManager {
     const workspaceId = workspaceIdForRoot(repoRoot);
     let context = this.#contexts.get(workspaceId);
     const firstOpen = context === undefined;
+    // Re-checked for a store this process already holds. Link state is read
+    // from disk on each call, so a login that happened after startup fences it.
+    this.#assertStoreAllowed();
     if (context === undefined) {
-      const refusal = this.#refuseOpen();
-      if (refusal !== undefined) throw new Error(refusal);
       const store = this.#resolveStore(repoRoot);
       context = {
         workspaceId,
@@ -140,12 +143,18 @@ export class WorkspaceManager {
     this.#selections += 1;
     const cached = this.#contexts.get(workspaceId);
     if (cached !== undefined) {
+      this.#assertStoreAllowed();
       this.#activeWorkspaceId = workspaceId;
       return cached;
     }
     const root = workspaceRootFromId(workspaceId);
     this.join(root);
     return this.current();
+  }
+
+  #assertStoreAllowed(): void {
+    const refusal = this.#refuseOpen();
+    if (refusal !== undefined) throw new Error(refusal);
   }
 
   #assertAllowed(repoRoot: string): void {
