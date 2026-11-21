@@ -89,6 +89,7 @@ export function spawnCommand(
   return spawn(target.command, target.args, {
     ...options,
     shell: false,
+    windowsHide: true,
     windowsVerbatimArguments: target.windowsVerbatimArguments,
   });
 }
