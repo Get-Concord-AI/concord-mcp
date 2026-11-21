@@ -8,6 +8,7 @@ import {
   type OverlapWarning,
 } from '../../domain/overlap.js';
 import { linkedMachine } from '../../cloud/target.js';
+import { resolvePathsFromCheckout } from '../../workspaces/overlap-paths.js';
 import { openContext } from '../context.js';
 
 /**
@@ -28,16 +29,22 @@ export function checkFileOverlaps(
   selfTaskId?: string,
 ): OverlapWarning[] {
   const wanted = [...new Set(files.map(normalizePath).filter((file) => file !== ''))];
+  const otherClaims = repos.tasks
+    .list()
+    .filter((task) => CLAIMED_STATUSES.has(task.status) && task.taskId !== selfTaskId);
+  const pathsFromCheckout = resolvePathsFromCheckout(
+    repos.checkoutRoot,
+    otherClaims.map((task) => task.expectedFiles),
+    wanted,
+  );
+
   const warnings: OverlapWarning[] = [];
-  for (const task of repos.tasks.list()) {
-    if (!CLAIMED_STATUSES.has(task.status) || task.taskId === selfTaskId) {
-      continue;
-    }
+  for (const task of otherClaims) {
     const shared = task.expectedFiles.map(normalizePath).filter((entry) => wanted.includes(entry));
     const covered = wanted.filter(
       (file) =>
         !shared.includes(file) &&
-        task.expectedFiles.some((entry) => entryCoversFile(entry, file, repos.checkoutRoot)),
+        task.expectedFiles.some((entry) => entryCoversFile(entry, file, pathsFromCheckout)),
     );
     const reasons: string[] = [];
     if (shared.length > 0) {

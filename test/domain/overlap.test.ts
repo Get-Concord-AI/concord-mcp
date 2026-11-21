@@ -240,14 +240,20 @@ describe('detectOverlaps', () => {
   it('scopes root claims to the repository in both directions', () => {
     const repoRoot = resolve('workspace');
     const rootClaim = task({ taskId: 'ROOT', expectedFiles: ['.'] });
-    const inside = join(repoRoot, 'src', 'app.ts');
+    const inside = join(`${repoRoot}-alias`, 'src', 'app.ts');
+    const sibling = join(`${repoRoot}-other`, 'notes.md');
     const fileClaim = task({ taskId: 'FILE', expectedFiles: [inside] });
     const reasons = [`directory claim covers file(s): . -> ${normalizePath(inside)}`];
+    const pathsFromCheckout = new Map([
+      [normalizePath(inside), 'src/app.ts'],
+      [normalizePath(sibling), '../workspace-other/notes.md'],
+      [normalizePath(repoRoot), ''],
+    ]);
 
-    expect(detectOverlaps(rootClaim, [fileClaim], 0, repoRoot)).toEqual([
+    expect(detectOverlaps(rootClaim, [fileClaim], 0, pathsFromCheckout)).toEqual([
       { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
     ]);
-    expect(detectOverlaps(fileClaim, [rootClaim], 0, repoRoot)).toEqual([
+    expect(detectOverlaps(fileClaim, [rootClaim], 0, pathsFromCheckout)).toEqual([
       { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
     ]);
     expect(detectOverlaps(rootClaim, [fileClaim])).toEqual([]);
@@ -255,12 +261,13 @@ describe('detectOverlaps', () => {
     for (const outside of [
       '..',
       '../other-project/file.ts',
-      join(`${repoRoot}-other`, 'notes.md'),
+      sibling,
+      repoRoot,
       'X:/other-project/notes.md',
     ]) {
       const otherClaim = task({ taskId: 'OTHER', expectedFiles: [outside] });
-      expect(detectOverlaps(rootClaim, [otherClaim], 0, repoRoot)).toEqual([]);
-      expect(detectOverlaps(otherClaim, [rootClaim], 0, repoRoot)).toEqual([]);
+      expect(detectOverlaps(rootClaim, [otherClaim], 0, pathsFromCheckout)).toEqual([]);
+      expect(detectOverlaps(otherClaim, [rootClaim], 0, pathsFromCheckout)).toEqual([]);
     }
   });
 

@@ -1,5 +1,4 @@
-import { realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, posix, relative, sep, win32 } from 'node:path';
+import { isAbsolute, posix, sep, win32 } from 'node:path';
 
 import type { TaskRecord, TaskStatus } from '../db/index.js';
 
@@ -79,49 +78,36 @@ export function normalizePath(file: string): string {
   return normalized === '.' ? '' : normalized;
 }
 
-/** Preserve explicit repo-root claims before file normalization drops them. */
-function normalizeClaimEntry(entry: string): string {
+/** Recognize explicit repo-root claims before file normalization drops them. */
+export function isRootClaim(entry: string): boolean {
   const trimmed = entry.trim();
-  return trimmed === '.' || trimmed === './' || trimmed === '/' ? '.' : normalizePath(trimmed);
+  return trimmed === '.' || trimmed === './' || trimmed === '/';
 }
 
-/** Follow symlinks in an absolute path, including for files yet to be created. */
-function resolveExistingParents(path: string): string {
-  let ancestor = path;
-  for (;;) {
-    try {
-      return join(realpathSync(ancestor), relative(ancestor, path));
-    } catch (error) {
-      const parent = dirname(ancestor);
-      if (
-        parent === ancestor ||
-        !(error instanceof Error && 'code' in error && error.code === 'ENOENT')
-      ) {
-        return path;
-      }
-      ancestor = parent;
-    }
-  }
+function normalizeClaimEntry(entry: string): string {
+  return isRootClaim(entry) ? '.' : normalizePath(entry);
 }
 
 /** True when `outer` is a strict ancestor directory of `inner`. Both must be
  * normalized. Matches whole path segments, so `src/app` does not contain
- * `src/application/x.ts`. */
-function containsPath(outer: string, inner: string, checkoutRoot: string | undefined): boolean {
+ * `src/application/x.ts`. For root claims, absolute paths must have a
+ * checkout-relative value supplied by the caller. */
+function containsPath(
+  outer: string,
+  inner: string,
+  pathsFromCheckout: ReadonlyMap<string, string> | undefined,
+): boolean {
   if (outer === '.') {
-    let fromRoot = inner;
+    let fromRoot: string | undefined = inner;
     if (isAbsolute(inner)) {
-      if (checkoutRoot === undefined) return false;
-      fromRoot = relative(
-        resolveExistingParents(checkoutRoot),
-        resolveExistingParents(inner),
-      ).replaceAll('\\', '/');
+      fromRoot = pathsFromCheckout?.get(inner);
     } else if (win32.isAbsolute(inner) || (sep === '\\' && win32.parse(inner).root !== '')) {
       // Windows absolute paths on POSIX and drive-relative paths on Windows
       // cannot be resolved within the checkout.
       return false;
     }
     return (
+      fromRoot !== undefined &&
       fromRoot !== '' &&
       fromRoot !== '.' &&
       fromRoot !== '..' &&
@@ -138,16 +124,16 @@ function containsPath(outer: string, inner: string, checkoutRoot: string | undef
 function containedPairs(
   a: readonly string[],
   b: readonly string[],
-  checkoutRoot: string | undefined,
+  pathsFromCheckout: ReadonlyMap<string, string> | undefined,
 ): string[] {
   const left = [...new Set(a.map(normalizeClaimEntry).filter((file) => file !== ''))];
   const right = [...new Set(b.map(normalizeClaimEntry).filter((file) => file !== ''))];
   const pairs = new Set<string>();
   for (const x of left) {
     for (const y of right) {
-      if (containsPath(x, y, checkoutRoot)) {
+      if (containsPath(x, y, pathsFromCheckout)) {
         pairs.add(`${x} -> ${y}`);
-      } else if (containsPath(y, x, checkoutRoot)) {
+      } else if (containsPath(y, x, pathsFromCheckout)) {
         pairs.add(`${y} -> ${x}`);
       }
     }
@@ -156,13 +142,17 @@ function containedPairs(
 }
 
 /** True when a declared entry equals the file or is a directory containing it. */
-export function entryCoversFile(entry: string, file: string, checkoutRoot?: string): boolean {
+export function entryCoversFile(
+  entry: string,
+  file: string,
+  pathsFromCheckout?: ReadonlyMap<string, string>,
+): boolean {
   const normalizedEntry = normalizeClaimEntry(entry);
   const normalizedFile = normalizePath(file);
   return (
     normalizedEntry !== '' &&
     (normalizedEntry === normalizedFile ||
-      containsPath(normalizedEntry, normalizedFile, checkoutRoot))
+      containsPath(normalizedEntry, normalizedFile, pathsFromCheckout))
   );
 }
 
@@ -193,7 +183,7 @@ function isParentChild(candidate: OverlapSurface, task: TaskRecord): boolean {
 function detailsFor(
   candidate: OverlapSurface,
   existing: OverlapSurface,
-  checkoutRoot: string | undefined,
+  pathsFromCheckout: ReadonlyMap<string, string> | undefined,
 ): { reasons: string[]; kinds: OverlapKind[] } {
   const reasons: string[] = [];
   const kinds: OverlapKind[] = [];
@@ -206,7 +196,7 @@ function detailsFor(
     reasons.push(`same file(s): ${sameFiles.join(', ')}`);
   }
 
-  const nested = containedPairs(candidate.expectedFiles, existing.expectedFiles, checkoutRoot);
+  const nested = containedPairs(candidate.expectedFiles, existing.expectedFiles, pathsFromCheckout);
   if (nested.length > 0) {
     reasons.push(`directory claim covers file(s): ${nested.join(', ')}`);
   }
@@ -259,7 +249,7 @@ export function detectOverlaps(
   candidate: OverlapSurface,
   existing: readonly TaskRecord[],
   startIndex = 0,
-  checkoutRoot?: string,
+  pathsFromCheckout?: ReadonlyMap<string, string>,
 ): OverlapWarning[] {
   const warnings: OverlapWarning[] = [];
   for (let index = startIndex; index < existing.length; index += 1) {
@@ -267,7 +257,7 @@ export function detectOverlaps(
     if (task === undefined || task.taskId === candidate.taskId || isParentChild(candidate, task)) {
       continue;
     }
-    const { reasons, kinds } = detailsFor(candidate, surfaceOf(task), checkoutRoot);
+    const { reasons, kinds } = detailsFor(candidate, surfaceOf(task), pathsFromCheckout);
     if (reasons.length > 0) {
       warnings.push({ taskId: task.taskId, title: task.title, reasons, kinds });
     }
