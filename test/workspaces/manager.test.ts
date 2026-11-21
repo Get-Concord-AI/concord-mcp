@@ -18,19 +18,23 @@ function repoDir(label: string): string {
 }
 
 describe('WorkspaceManager', () => {
-  it('opens no further store once its machine is linked, keeping the ones it has', () => {
+  it('stops using a store it already opened once its machine is linked', () => {
     const first = repoDir('first');
     const second = repoDir('second');
     let linked = false;
     const manager = new WorkspaceManager(first, {
       refuseOpen: () => (linked ? 'This machine works through Concord Cloud' : undefined),
     });
+    const routed = routedRepositories(manager);
+    const firstId = workspaceIdForRoot(first);
 
     linked = true;
     expect(() => manager.join(second)).toThrow(/works through Concord Cloud/u);
     expect(existsSync(join(second, '.concord'))).toBe(false);
-    // A store it already holds stays usable.
-    expect(manager.join(first).repoRoot).toBe(first);
+    expect(() => manager.join(first)).toThrow(/works through Concord Cloud/u);
+    expect(() => manager.current()).toThrow(/works through Concord Cloud/u);
+    expect(() => manager.select(firstId)).toThrow(/works through Concord Cloud/u);
+    expect(() => routed.tasks.list()).toThrow(/works through Concord Cloud/u);
   });
 
   it('can start outside a repository and explicitly join one later', () => {
