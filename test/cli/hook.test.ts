@@ -1,3 +1,8 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -11,6 +16,8 @@ import {
   sessionStartIdentity,
 } from '../../src/cli/commands/hook.js';
 import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
+import { openContext } from '../../src/cli/context.js';
+import { configureCliWorkspace } from '../../src/cli/workspace-options.js';
 import { openDatabase } from '../../src/db/connection.js';
 import { monitorCapabilityFor } from '../../src/domain/delivery.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
@@ -40,6 +47,110 @@ describe('decidePreToolUse', () => {
     const decision = decidePreToolUse(repos, preToolUse('src/app.ts'), 'MINE');
     expect(decision.block).toBe(true);
     expect(decision.message).toContain('OTHER');
+  });
+
+  it('blocks edits under the selected repository root and allows edits outside it', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'concord-hook-root-'));
+    try {
+      const context = openContext(process.cwd(), { CONCORD_REPO_ROOT: workspace });
+      try {
+        handleClaimWork(context.repos, {
+          task_id: 'ROOT',
+          title: 'Owns repo',
+          expected_files: ['.'],
+        });
+
+        const inside = join(context.repoRoot, 'src', 'app.ts');
+        expect(decidePreToolUse(context.repos, preToolUse(inside), 'MINE').result).toBe('blocked');
+
+        const outside = join(`${context.repoRoot}-other`, 'notes.md');
+        expect(decidePreToolUse(context.repos, preToolUse(outside), 'MINE').result).toBe('clear');
+        expect(decidePreToolUse(context.repos, preToolUse('../notes.md'), 'MINE').result).toBe(
+          'clear',
+        );
+      } finally {
+        context.repos.db.close();
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('checks edits in a linked worktree using the shared root claim', () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'concord-hook-worktree-')));
+    const primary = join(base, 'primary');
+    const worktree = join(base, 'feature');
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: primary, stdio: 'ignore', timeout: 10_000 });
+    try {
+      mkdirSync(primary);
+      git('init', '-q');
+      git(
+        '-c',
+        'user.email=test@example.test',
+        '-c',
+        'user.name=Test',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'Initial commit',
+      );
+      git('worktree', 'add', '-q', worktree);
+
+      const main = openContext(primary, {});
+      try {
+        handleClaimWork(main.repos, { task_id: 'ROOT', title: 'Owns repo', expected_files: ['.'] });
+        const selected: NodeJS.ProcessEnv = {};
+        configureCliWorkspace({ repo: worktree }, primary, selected);
+        for (const [cwd, env] of [
+          [worktree, {}],
+          [primary, selected],
+        ] as const) {
+          const linked = openContext(cwd, env);
+          try {
+            expect(linked.repoRoot).toBe(primary);
+            expect(linked.store.databasePath).toBe(main.store.databasePath);
+            const inside = preToolUse(join(worktree, 'src', 'app.ts'));
+            expect(decidePreToolUse(linked.repos, inside, 'MINE').result).toBe('blocked');
+            const outside = preToolUse(join(primary, 'src', 'app.ts'));
+            expect(decidePreToolUse(linked.repos, outside, 'MINE').result).toBe('clear');
+          } finally {
+            linked.repos.db.close();
+          }
+        }
+        expect(existsSync(join(worktree, '.concord'))).toBe(false);
+      } finally {
+        main.repos.db.close();
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('checks new files addressed through a symlink to the selected checkout', () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'concord-hook-alias-')));
+    const workspace = join(base, 'workspace');
+    const alias = join(base, 'alias');
+    try {
+      mkdirSync(join(workspace, '.git'), { recursive: true });
+      symlinkSync(workspace, alias, 'junction');
+      const context = openContext(workspace, {});
+      try {
+        expect(context.repoRoot).toBe(workspace);
+        handleClaimWork(context.repos, {
+          task_id: 'ROOT',
+          title: 'Owns repo',
+          expected_files: ['.'],
+        });
+        const inside = preToolUse(join(alias, 'new', 'app.ts'));
+        expect(decidePreToolUse(context.repos, inside, 'MINE').result).toBe('blocked');
+      } finally {
+        context.repos.db.close();
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   it('does not block your own claimed file when CONCORD_TASK matches', () => {

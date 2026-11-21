@@ -49,6 +49,35 @@ describe('concord check', () => {
     expect(checkFileOverlaps(repos, ['src/x.ts'])).toEqual([]);
   });
 
+  it('flags a file inside a directory claimed by another task', () => {
+    handleClaimWork(repos, { task_id: 'T1', title: 'Owns app', expected_files: ['src/app/'] });
+    const overlaps = checkFileOverlaps(repos, ['./src/app/page.tsx']);
+    expect(overlaps).toHaveLength(1);
+    expect(overlaps[0]?.taskId).toBe('T1');
+    expect(overlaps[0]?.reasons).toEqual(['inside claimed directory: src/app/page.tsx']);
+    // Same-prefix sibling directory is not inside the claim.
+    expect(checkFileOverlaps(repos, ['src/application/page.tsx'])).toEqual([]);
+  });
+
+  it.each(['.', './', '/'])('flags files covered by root claim %j', (root) => {
+    handleClaimWork(repos, { task_id: 'T1', title: 'Owns repo', expected_files: [root] });
+
+    expect(checkFileOverlaps(repos, ['src/app/page.tsx', 'README.md'])).toEqual([
+      {
+        taskId: 'T1',
+        title: 'Owns repo',
+        reasons: ['inside claimed directory: README.md, src/app/page.tsx'],
+        kinds: ['same_file'],
+      },
+    ]);
+  });
+
+  it.each(['', ' \t '])('ignores blank claim %j', (blank) => {
+    handleClaimWork(repos, { task_id: 'T1', title: 'Has blank entry', expected_files: [blank] });
+
+    expect(checkFileOverlaps(repos, ['src/app/page.tsx'])).toEqual([]);
+  });
+
   it('renders a usage hint when no files are given', () => {
     expect(renderCheck([], [])).toContain('Usage: concord check');
   });
