@@ -16,6 +16,7 @@ import {
   forwardedArguments,
   type CloudSession,
 } from '../../src/cloud/proxy.js';
+import { CLOUD_SESSION_UNLINKED_MESSAGE } from '../../src/cloud/target.js';
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { machineProjectKey } from '../../src/cloud/target.js';
 import { writeUserConfig } from '../../src/config/user-config.js';
@@ -168,7 +169,11 @@ describe('the cloud proxy', () => {
       checkoutRoot: '/repo',
       identity: { agentId: SESSION_AGENT.agentId, kind: 'claude-code', origin: 'session' },
     };
-    const proxy = createCloudProxyServer(session, () => connectCloud(session));
+    const proxy = createCloudProxyServer(
+      session,
+      () => connectCloud(session),
+      () => true,
+    );
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await proxy.connect(serverSide);
     client = new Client({ name: 'harness', version: '0.0.0' });
@@ -211,7 +216,11 @@ describe('the cloud proxy', () => {
       identity: undefined,
       requestIdentity: resolveOpenCodeRequestIdentity,
     };
-    const proxy = createCloudProxyServer(openCodeSession, () => connectCloud(openCodeSession));
+    const proxy = createCloudProxyServer(
+      openCodeSession,
+      () => connectCloud(openCodeSession),
+      () => true,
+    );
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await proxy.connect(serverSide);
     const harness = new Client({ name: 'opencode-harness', version: '2.2.3' });
@@ -239,13 +248,17 @@ describe('the cloud proxy', () => {
   it('connects afresh after a call through the client fails', async () => {
     let connects = 0;
     let broken = true;
-    const flaky = createCloudProxyServer(session, async () => {
-      connects += 1;
-      const real = await connectCloud(session);
-      // A client whose connection has gone: every call through it fails.
-      if (broken) await real.close();
-      return real;
-    });
+    const flaky = createCloudProxyServer(
+      session,
+      async () => {
+        connects += 1;
+        const real = await connectCloud(session);
+        // A client whose connection has gone: every call through it fails.
+        if (broken) await real.close();
+        return real;
+      },
+      () => true,
+    );
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await flaky.connect(serverSide);
     const harness = new Client({ name: 'harness', version: '0.0.0' });
@@ -261,7 +274,11 @@ describe('the cloud proxy', () => {
   it('asks for the bearer token on every request, so a refreshed one is used', async () => {
     let current = 'token-a';
     const rotating = { ...session, bearer: () => Promise.resolve(current) };
-    const proxy = createCloudProxyServer(rotating, () => connectCloud(rotating));
+    const proxy = createCloudProxyServer(
+      rotating,
+      () => connectCloud(rotating),
+      () => true,
+    );
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await proxy.connect(serverSide);
     const harness = new Client({ name: 'harness', version: '0.0.0' });
@@ -276,7 +293,11 @@ describe('the cloud proxy', () => {
   });
 
   it('answers a call with an error the model can read when the cloud is down', async () => {
-    const down = createCloudProxyServer(session, () => Promise.reject(new Error('ECONNREFUSED')));
+    const down = createCloudProxyServer(
+      session,
+      () => Promise.reject(new Error('ECONNREFUSED')),
+      () => true,
+    );
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await down.connect(serverSide);
     const harness = new Client({ name: 'harness', version: '0.0.0' });
@@ -285,6 +306,32 @@ describe('the cloud proxy', () => {
     const result = await harness.callTool({ name: 'start_work', arguments: {} });
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('Concord Cloud could not be reached');
+    await harness.close();
+  });
+
+  it('stops forwarding once the machine is unlinked, without opening another connection', async () => {
+    let linked = true;
+    let connects = 0;
+    const proxy = createCloudProxyServer(
+      session,
+      async () => {
+        connects += 1;
+        return connectCloud(session);
+      },
+      () => linked,
+    );
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await proxy.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    expect((await harness.callTool({ name: 'start_work', arguments: {} })).isError).toBeFalsy();
+    linked = false;
+    const result = await harness.callTool({ name: 'start_work', arguments: {} });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain(CLOUD_SESSION_UNLINKED_MESSAGE);
+    await expect(harness.listTools()).rejects.toThrow(/now unlinked/u);
+    expect(connects).toBe(1);
     await harness.close();
   });
 });

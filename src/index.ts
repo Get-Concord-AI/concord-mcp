@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { startBackgroundAdapterCheck } from './adapter-check.js';
 import { writeArtifacts } from './artifacts/index.js';
 import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/proxy.js';
-import { LINKED_MACHINE_MESSAGE, linkedMachine } from './cloud/target.js';
+import { LOCAL_SESSION_LINKED_MESSAGE, linkedMachine } from './cloud/target.js';
 import { startBackgroundUpdateCheck } from './update-notifier.js';
 import { resolveCheckoutRoot, resolveRepoRoot } from './config/paths.js';
 import { resolveOpenCodeRequestIdentity, resolveServerIdentity } from './domain/identity.js';
@@ -40,16 +40,20 @@ async function main(): Promise<void> {
   // Before the cloud branch: adapters are installed on this machine either way.
   const adapterCheck = startBackgroundAdapterCheck(identity, process.env);
   if (cloud !== undefined) {
-    const proxy = createCloudProxyServer(cloud, () => connectCloud(cloud));
+    const proxy = createCloudProxyServer(
+      cloud,
+      () => connectCloud(cloud),
+      () => linkedMachine(process.env) !== undefined,
+    );
     await proxy.connect(new StdioServerTransport());
     return;
   }
 
   const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, process.env, {
-    // Started unlinked, this server outlives a later `cloud login`; from then
-    // on it opens no further local store, which no cloud agent could reach.
+    // Started unlinked, this server outlives a later `cloud login`. From then
+    // on it neither opens nor uses a local store, which no cloud agent could reach.
     refuseOpen: () =>
-      linkedMachine(process.env) === undefined ? undefined : LINKED_MACHINE_MESSAGE,
+      linkedMachine(process.env) === undefined ? undefined : LOCAL_SESSION_LINKED_MESSAGE,
   });
   if (identity !== undefined) {
     ensureAgentRegistered(workspaceManager.current().repos, identity, repoRoot);
