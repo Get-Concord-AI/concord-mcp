@@ -219,10 +219,10 @@ export async function buildCloudDoctorReport(
   } else {
     for (const leftover of leftovers) lines.push(`  ${leftover.path}: ${leftover.description}`);
     lines.push(
-      '  Nothing reads these while this machine is linked. Once every Concord session ' +
-        `started before the link has ended, you can move them aside (nothing is deleted)${
-          platform === 'win32' ? ', in PowerShell' : ''
-        }:`,
+      '  Nothing reads these while this machine is linked. A session started before the link ' +
+        'stops using its local store on the next call; restart that client. The file stays open ' +
+        'until that session exits. Once every such session has ended, you can move them aside (nothing is deleted)' +
+        `${platform === 'win32' ? ', in PowerShell' : ''}:`,
       ...moveAsideCommands(leftovers, new Date(), platform).map((command) => `    ${command}`),
     );
   }
