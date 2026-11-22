@@ -129,6 +129,20 @@ export interface BeforeUserWait {
 }
 
 /**
+ * How long after a deny the next question is let through without draining.
+ * Long enough for the model to read the messages and ask again.
+ */
+export const USER_WAIT_DENY_WINDOW_MS = 2 * 60 * 1000;
+
+const NOTHING_TO_SHOW: BeforeUserWait = { held: [], claimed: [] };
+
+/** Whether a deny recorded at `deniedAt` still covers a question asked at `now`. */
+function deniedRecently(deniedAt: string, now: Date): boolean {
+  const elapsed = now.getTime() - Date.parse(deniedAt);
+  return elapsed >= 0 && elapsed < USER_WAIT_DENY_WINDOW_MS;
+}
+
+/**
  * Everything `agentId`'s session has not been shown, just before it blocks on
  * a question. Claude Code holds a monitor notification
  * until the user answers, so a message the monitor already took counts here
@@ -137,20 +151,35 @@ export interface BeforeUserWait {
  *
  * When there is anything to show, the hook denies the call and the user is
  * not asked yet, so the waiting-on-user flag is cleared.
+ *
+ * At most one deny per question: the question asked right after a deny is let
+ * through untouched, so a message the transcript does not show as read yet, or
+ * a peer that keeps sending, can never keep the user from being asked. Anything
+ * still waiting reaches the model after the answer, as it would without this hook.
  */
 export function drainBeforeUserWait(
   repos: Repositories,
   agentId: string,
   provider: string,
   session: string | null,
+  now: Date = new Date(),
 ): BeforeUserWait {
+  const deniedAt = repos.agentEndpoints.getByAgent(agentId)?.userWaitDeniedAt ?? null;
+  if (deniedAt !== null) {
+    // Spent either way: one deny earns one question let through.
+    repos.agentEndpoints.setUserWaitDenied(agentId, null);
+    if (deniedRecently(deniedAt, now)) return NOTHING_TO_SHOW;
+  }
   // Listed before claiming, so a message claimed below is not also counted as held.
   const held = repos.agentMessages.listUnreadForSession(agentId, session).map(toDeliverable);
   const claimed = drainInbox(repos, agentId, provider, capabilityFor(provider), {
     session,
     via: 'hook',
   });
-  if (held.length > 0 || claimed.length > 0) repos.agentEndpoints.setAwaitingUser(agentId, null);
+  if (held.length > 0 || claimed.length > 0) {
+    repos.agentEndpoints.setAwaitingUser(agentId, null);
+    repos.agentEndpoints.setUserWaitDenied(agentId, now.toISOString());
+  }
   return { held, claimed };
 }
 

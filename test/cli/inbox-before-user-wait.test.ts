@@ -12,6 +12,7 @@ import {
   drainBeforeUserWait,
   drainInbox,
   registerPullEndpoint,
+  USER_WAIT_DENY_WINDOW_MS,
 } from '../../src/cli/commands/inbox.js';
 import { monitorCapabilityFor } from '../../src/domain/delivery.js';
 import {
@@ -57,8 +58,12 @@ function monitorDrain(repos: Repositories, rawSession = SESSION): DeliverableMes
   });
 }
 
-function beforeWait(repos: Repositories, rawSession = SESSION) {
-  return drainBeforeUserWait(repos, 'beta', 'claude-code', sessionKey(rawSession));
+function beforeWait(repos: Repositories, rawSession = SESSION, now = new Date()) {
+  return drainBeforeUserWait(repos, 'beta', 'claude-code', sessionKey(rawSession), now);
+}
+
+function ids(result: { held: DeliverableMessage[]; claimed: DeliverableMessage[] }): string[] {
+  return [...result.held, ...result.claimed].map((entry) => entry.messageId);
 }
 
 function hook(event: Record<string, string>): string {
@@ -210,5 +215,69 @@ describe('drainBeforeUserWait', () => {
     observeHookEvent(repos, 'beta', hook({ ...ASK, transcript_path: path }));
 
     expect(repos.agentMessages.get(messageId)?.status).toBe('read');
+  });
+});
+
+describe('at most one deny per question', () => {
+  let repos: Repositories;
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'claude-code');
+  });
+
+  it('lets the question asked right after a deny open the picker', () => {
+    send(repos, 'read me first', 'k1');
+    const asked = new Date('2026-11-22T10:00:00.000Z');
+
+    expect(ids(beforeWait(repos, SESSION, asked))).toHaveLength(1);
+    // The transcript has not caught up, so the message still has no read
+    // evidence; it must not deny the same question again.
+    expect(beforeWait(repos, SESSION, new Date(asked.getTime() + 5_000))).toEqual({
+      held: [],
+      claimed: [],
+    });
+  });
+
+  it('lets the question through even when a peer keeps sending', () => {
+    const asked = new Date('2026-11-22T10:00:00.000Z');
+    send(repos, 'first', 'k1');
+    expect(ids(beforeWait(repos, SESSION, asked))).toHaveLength(1);
+
+    const fresh = send(repos, 'and another', 'k2');
+    expect(beforeWait(repos, SESSION, new Date(asked.getTime() + 5_000))).toEqual({
+      held: [],
+      claimed: [],
+    });
+    // Still waiting (sent) for the monitor or the next tool result, not lost.
+    expect(repos.agentMessages.get(fresh)?.status).toBe('sent');
+  });
+
+  it('drains again on the question after the one it let through', () => {
+    const asked = new Date('2026-11-22T10:00:00.000Z');
+    send(repos, 'first', 'k1');
+    beforeWait(repos, SESSION, asked);
+    beforeWait(repos, SESSION, new Date(asked.getTime() + 5_000));
+
+    const later = send(repos, 'a new question, a new chance', 'k2');
+    expect(ids(beforeWait(repos, SESSION, new Date(asked.getTime() + 10_000)))).toContain(later);
+  });
+
+  it('drains as usual once the deny is older than the window', () => {
+    const asked = new Date('2026-11-22T10:00:00.000Z');
+    send(repos, 'first', 'k1');
+    beforeWait(repos, SESSION, asked);
+
+    const later = send(repos, 'much later', 'k2');
+    const after = new Date(asked.getTime() + USER_WAIT_DENY_WINDOW_MS + 1);
+    expect(ids(beforeWait(repos, SESSION, after))).toContain(later);
+  });
+
+  it('records no deny when there was nothing to show', () => {
+    beforeWait(repos);
+
+    expect(repos.agentEndpoints.getByAgent('beta')?.userWaitDeniedAt).toBeNull();
   });
 });
