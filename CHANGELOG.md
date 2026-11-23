@@ -20,6 +20,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   between turns. Existing Kiro configuration is merged and left intact on
   rerun and uninstall.
 
+### Changed
+
+- The README's Quick start explains how to fix `EACCES: permission denied` from
+  `npm install -g` on Linux with a user-owned npm prefix instead of `sudo`
+  (#368).
+
 ### Fixed
 
 - Kiro's Stop hook returns Kiro's `decision: "block"` payload instead of
