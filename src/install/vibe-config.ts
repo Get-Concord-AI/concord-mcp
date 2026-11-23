@@ -67,10 +67,7 @@ export function concordTomlBlocks(
   const header = new RegExp(`^\\s*\\[\\[\\s*${seg}\\s*\\]\\]`, 'u');
   const anyHeader = /^\s*\[/u;
   const childHeader = new RegExp(`^\\s*\\[+\\s*${seg}\\s*\\.`, 'u');
-  const envHeader = new RegExp(
-    `^\\s*\\[+\\s*${seg}\\s*\\.\\s*["']?env["']?\\s*\\]+\\s*$`,
-    'u',
-  );
+  const envHeader = new RegExp(`^\\s*\\[+\\s*${seg}\\s*\\.\\s*["']?env["']?\\s*\\]+\\s*$`, 'u');
   const namePattern = /^\s*["']?name["']?\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
   const fieldPattern = /^\s*["']?([A-Za-z0-9_-]+)["']?\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
   const envDotted = /^\s*["']?env["']?\s*\.\s*(\S+?)\s*=/u;

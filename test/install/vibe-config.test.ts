@@ -65,7 +65,7 @@ describe('upsertVibeMcpConfig', () => {
     expect(twice).toBe(once);
   });
 
-  it('keeps a concord-named block that is not Concord-shaped as the user\'s own', () => {
+  it("keeps a concord-named block that is not Concord-shaped as the user's own", () => {
     // Main's policy (#361): a hand-written `concord` server is never replaced.
     const foreign = [
       [
