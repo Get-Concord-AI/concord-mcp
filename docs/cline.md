@@ -92,6 +92,19 @@ To read the inbox manually from the repository:
 concord inbox drain --agent <agent_id> --provider cline
 ```
 
+## Concord Cloud
+
+On a machine linked to Concord Cloud (`concord cloud login`), the same hooks
+register the session and drain the inbox against the cloud instead of the
+local store, and the globally registered `concord-mcp` proxies its tool calls
+to the cloud project resolved from the server's own working directory. Cline
+has no MCP roots capability, so when the extension launches that server
+outside the repository the hook context's `workspace_id` is the routing
+signal: the tools accept it and the cloud proxy forwards it with every call.
+Pass it explicitly — the session-start message already tells the agent to —
+and reads and writes land in the project the hook registered, not wherever
+the server process happened to start.
+
 ## Manual MCP registration
 
 If you manage client configuration yourself, add this to
