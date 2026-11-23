@@ -140,6 +140,17 @@ describe('upsertVibeMcpConfig', () => {
     ].join('\n');
     expect(hasVibeMcpServer(drifted)).toBe(false);
   });
+
+  it('accepts single-quoted TOML literal strings in owned blocks', () => {
+    const literal = [
+      '[[mcp_servers]]',
+      "name = 'concord'",
+      "transport = 'stdio'",
+      "command = 'concord-mcp'",
+      '',
+    ].join('\n');
+    expect(hasVibeMcpServer(literal)).toBe(true);
+  });
 });
 
 describe('vibeMcpConfigPath and install', () => {

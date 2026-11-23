@@ -52,7 +52,7 @@ export function concordTomlBlocks(
   const anyHeader = /^\s*\[/u;
   const childHeader = new RegExp(`^\\s*\\[+\\s*${table}\\s*\\.`, 'u');
   const namePattern = /^\s*name\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
-  const fieldPattern = /^\s*([A-Za-z0-9_-]+)\s*=\s*"([^"]*)"/u;
+  const fieldPattern = /^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
   const blocks: TomlBlock[] = [];
   let open: { start: number; end: number } | undefined;
   let ownedName: string | undefined;
@@ -87,7 +87,7 @@ export function concordTomlBlocks(
       if (match !== null) ownedName = match[1] ?? match[2] ?? '';
     }
     const field = fieldPattern.exec(text);
-    if (field !== null) fields[field[1] ?? ''] = field[2] ?? '';
+    if (field !== null) fields[field[1] ?? ''] = field[2] ?? field[3] ?? '';
   });
   if (open !== undefined) flush(lines.length);
   return blocks;
