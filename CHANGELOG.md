@@ -8,6 +8,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The `concord` CLI loads only the command it runs, and the hook, inbox and
+  check paths no longer import the Ink dashboard or the MCP SDK. Agent hooks,
+  which start the CLI on every tool call, start 2-4 times faster (e.g.
+  `concord check` 3.7 s to 0.9 s in a container). Help and `--version` are
+  unchanged.
 - `react-devtools-core` is no longer installed. It was a runtime dependency
   that nothing imports (Ink treats it as an optional peer, loaded only with
   `DEV=true`), and it brought in `shell-quote` 1.10.0, the only critical
