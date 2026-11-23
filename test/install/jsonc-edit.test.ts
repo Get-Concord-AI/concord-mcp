@@ -42,10 +42,10 @@ describe('propertyObject', () => {
   it('locates a "key": {…} span by index', () => {
     const text = '{\n  "mcp": {\n    // inner\n    "concord": { "command": "concord-mcp" }\n  }\n}';
     const range = propertyObject(text, 'concord');
-    expect(range).toBeDefined();
-    expect(text.slice(range?.key, range?.key + 9)).toBe('"concord"');
-    expect(text[range?.open ?? -1]).toBe('{');
-    expect(text[range?.close ?? -1]).toBe('}');
+    if (range === undefined) throw new Error('expected a range');
+    expect(text.slice(range.key, range.key + 9)).toBe('"concord"');
+    expect(text[range.open]).toBe('{');
+    expect(text[range.close]).toBe('}');
     expect(propertyObject(text, 'missing')).toBeUndefined();
   });
 });
