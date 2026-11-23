@@ -31,6 +31,7 @@ export type OriginRemote = (repoRoot: string) => string | undefined;
 export function gitOriginRemote(repoRoot: string): string | undefined {
   const result = spawnSync('git', ['-C', repoRoot, 'remote', 'get-url', 'origin'], {
     encoding: 'utf8',
+    windowsHide: true,
   });
   const url = result.status === 0 ? result.stdout.trim() : '';
   return url === '' ? undefined : url;
