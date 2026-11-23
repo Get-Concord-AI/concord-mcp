@@ -4,6 +4,7 @@ import { listCloudAgents, type CloudAgent } from '../../cloud/runtime.js';
 import { obsoleteLinkPath, readCredentials } from '../../cloud/settings.js';
 import { databasePath, resolveRepoRoot } from '../../config/paths.js';
 import { globalDatabasePath } from '../../config/user-config.js';
+import { CLAIMED_STATUSES } from '../../domain/overlap.js';
 import type { Fetch } from '../../cloud/client.js';
 import { gitOriginRemote, type OriginRemote } from '../../workspaces/store.js';
 import { apiCheckLines, folderLine, loginLine, machineLine } from './cloud.js';
@@ -31,23 +32,54 @@ export interface Leftover {
 /** SQLite pairs a store with these by appending them to its name. */
 const COMPANION_SUFFIXES = ['-wal', '-shm'] as const;
 
+/** Counts a store's tasks in `statuses` without writing beside it; undefined when it cannot. */
+export type CountTasks = (filename: string, statuses: readonly string[]) => number | undefined;
+
+const NOT_COUNTED = 'open tasks not counted (in use, or unreadable by this version)';
+
+/**
+ * The read-only task counter, loaded only when a leftover store is found. A
+ * static import would put SQLite on every linked `concord` run; a failure to
+ * load it (a missing native build, say) leaves the stores uncounted.
+ */
+export async function loadCountTasks(): Promise<CountTasks | undefined> {
+  try {
+    const { countTasksReadOnly } = await import('../../db/read-only.js');
+    return countTasksReadOnly;
+  } catch {
+    return undefined;
+  }
+}
+
+/** How many open tasks a store holds, in words, or why they were not counted. */
+function openTasksText(path: string, countTasks: CountTasks | undefined): string {
+  let open: number | undefined;
+  try {
+    open = countTasks?.(path, [...CLAIMED_STATUSES]);
+  } catch {
+    open = undefined;
+  }
+  return open === undefined ? NOT_COUNTED : `${String(open)} open task(s)`;
+}
+
 /** The leftovers for this folder and this machine, found without opening anything for writing. */
-export function findLeftovers(repoRoot: string, env: NodeJS.ProcessEnv): Leftover[] {
+export async function findLeftovers(
+  repoRoot: string,
+  env: NodeJS.ProcessEnv,
+  loadCounter: () => Promise<CountTasks | undefined> = loadCountTasks,
+): Promise<Leftover[]> {
   const stores = [
     { path: databasePath(repoRoot), label: "this repository's local store" },
     { path: globalDatabasePath(env), label: "this machine's global-mode store" },
-  ];
-  const leftovers: Leftover[] = stores
-    .filter((store) => existsSync(store.path))
-    .map((store) => {
-      return {
-        path: store.path,
-        description: `${store.label}, open tasks not counted while Concord Cloud keeps local stores closed`,
-        files: ['', ...COMPANION_SUFFIXES]
-          .map((suffix) => `${store.path}${suffix}`)
-          .filter((path) => existsSync(path)),
-      };
-    });
+  ].filter((store) => existsSync(store.path));
+  const countTasks = stores.length === 0 ? undefined : await loadCounter();
+  const leftovers: Leftover[] = stores.map((store) => ({
+    path: store.path,
+    description: `${store.label}, ${openTasksText(store.path, countTasks)}`,
+    files: ['', ...COMPANION_SUFFIXES]
+      .map((suffix) => `${store.path}${suffix}`)
+      .filter((path) => existsSync(path)),
+  }));
   const link = obsoleteLinkPath(repoRoot);
   if (existsSync(link)) {
     leftovers.push({
@@ -181,7 +213,7 @@ export async function buildCloudDoctorReport(
     'Local state (unused while this machine is linked)',
   ];
 
-  const leftovers = findLeftovers(repoRoot, env);
+  const leftovers = await findLeftovers(repoRoot, env);
   if (leftovers.length === 0) {
     lines.push('  none');
   } else {

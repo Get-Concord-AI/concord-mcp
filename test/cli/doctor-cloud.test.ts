@@ -104,9 +104,7 @@ describe('doctor on a linked machine', () => {
 
     const listed = await report();
     const resolved = realpathSync(store);
-    expect(listed.output).toContain(
-      `${resolved}: this repository's local store, open tasks not counted while Concord Cloud keeps local stores closed`,
-    );
+    expect(listed.output).toContain(`${resolved}: this repository's local store, 1 open task(s)`);
     expect(listed.output).toContain('a repository link from before Concord 0.17');
     // SQLite's pairing is kept, so a log holding committed work stays with its database.
     expect(listed.output).toMatch(
@@ -168,12 +166,45 @@ describe('doctor on a linked machine', () => {
     );
   });
 
-  it('reports a store it cannot read rather than failing', () => {
+  it('reports a store it cannot read rather than failing', async () => {
     mkdirSync(join(repo, '.concord'), { recursive: true });
     writeFileSync(join(repo, '.concord', 'concord.db'), 'not a database');
-    expect(findLeftovers(repo, env)[0]?.description).toContain(
-      'open tasks not counted while Concord Cloud keeps local stores closed',
+    expect((await findLeftovers(repo, env))[0]?.description).toContain(
+      'open tasks not counted (in use, or unreadable by this version)',
     );
+  });
+
+  it('lists stores uncounted when the store reader cannot be loaded or throws', async () => {
+    mkdirSync(join(repo, '.concord'), { recursive: true });
+    writeFileSync(join(repo, '.concord', 'concord.db'), '');
+    const notCounted = "this repository's local store, open tasks not counted";
+
+    const unloadable = await findLeftovers(repo, env, () => Promise.resolve(undefined));
+    expect(unloadable[0]?.description).toContain(notCounted);
+
+    const throwing = await findLeftovers(repo, env, () =>
+      Promise.resolve(() => {
+        throw new Error('native module missing');
+      }),
+    );
+    expect(throwing[0]?.description).toContain(notCounted);
+  });
+
+  it('loads the store reader only when there is a store to count', async () => {
+    let loads = 0;
+    const counting = () => {
+      loads += 1;
+      return Promise.resolve(() => 3);
+    };
+    expect(await findLeftovers(repo, env, counting)).toEqual([]);
+    expect(loads).toBe(0);
+
+    mkdirSync(join(repo, '.concord'), { recursive: true });
+    writeFileSync(join(repo, '.concord', 'concord.db'), '');
+    expect((await findLeftovers(repo, env, counting))[0]?.description).toBe(
+      "this repository's local store, 3 open task(s)",
+    );
+    expect(loads).toBe(1);
   });
 
   it('is what `concord doctor` runs on a linked machine', async () => {
