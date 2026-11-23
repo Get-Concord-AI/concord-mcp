@@ -135,57 +135,64 @@ const OWNED_HEADERS = new Set([
   '[[hooks.Stop.hooks]]',
 ]);
 
-const LEGACY_CONCORD_HOOKS = [
-  {
-    parent: '[[hooks.SessionStart]]',
-    child: '[[hooks.SessionStart.hooks]]',
-    command: 'command = "concord inbox register --from-hook --provider codex"',
-  },
-  {
-    parent: '[[hooks.PostToolUse]]',
-    child: '[[hooks.PostToolUse.hooks]]',
-    command: 'command = "concord inbox drain --from-hook --provider codex --format post-tool-use"',
-  },
-  {
-    parent: '[[hooks.Stop]]',
-    child: '[[hooks.Stop.hooks]]',
-    command: 'command = "concord inbox drain --from-hook --provider codex --format stop"',
-  },
-] as const;
+/** The markers and the note under the begin marker. */
+const CONCORD_COMMENTS = new Set(
+  CONCORD_HOOKS_BLOCK.split('\n').filter((line) => COMMENT_LINE.test(line)),
+);
 
-/** Remove only the exact unfenced hook tables written by older Concord builds. */
-function removeLegacyConcordHooks(source: string): string {
-  const lines = source.split('\n');
+const HOOK_EVENTS = ['SessionStart', 'PostToolUse', 'Stop'] as const;
+const COMMAND_TYPE = /^type\s*=\s*"command"$/u;
+const CONCORD_COMMAND = /^command\s*=\s*"concord inbox /u;
+
+/** The index past the Concord hook starting at `start`, if one starts there. */
+function concordHookEnd(lines: readonly TomlLine[], start: number): number | undefined {
+  const parent = lines[start];
+  if (parent === undefined || parent.inString) return undefined;
+  const event = HOOK_EVENTS.find((name) => parent.text.trim() === `[[hooks.${name}]]`);
+  if (event === undefined) return undefined;
+
+  let child = start + 1;
+  while (lines[child]?.text.trim() === '') child += 1;
+  const header = lines[child];
+  if (header === undefined || header.inString) return undefined;
+  if (header.text.trim() !== `[[hooks.${event}.hooks]]`) return undefined;
+
+  const end = tableEnd(lines, child);
+  const body = lines.slice(child + 1, end).map((line) => line.text.trim());
+  const ours =
+    body.some((line) => COMMAND_TYPE.test(line)) && body.some((line) => CONCORD_COMMAND.test(line));
+  return ours ? end : undefined;
+}
+
+/** `source` without Concord's hooks and comment lines, and where its first hook was. */
+function stripConcordHooks(source: string): { lines: string[]; spot: number | undefined } {
+  const lines = sourceLines(source);
   const kept: string[] = [];
+  let spot: number | undefined;
   let index = 0;
   while (index < lines.length) {
-    const legacy = LEGACY_CONCORD_HOOKS.find((hook) => lines[index]?.trim() === hook.parent);
-    if (legacy === undefined) {
-      kept.push(lines[index] ?? '');
-      index += 1;
+    const hookEnd = concordHookEnd(lines, index);
+    if (hookEnd !== undefined) {
+      spot ??= kept.length;
+      index = hookEnd;
       continue;
     }
-
-    let child = index + 1;
-    while (child < lines.length && lines[child]?.trim() === '') child += 1;
-    if (lines[child]?.trim() !== legacy.child) {
-      kept.push(lines[index] ?? '');
-      index += 1;
-      continue;
+    const line = lines[index];
+    if (line !== undefined && (line.inString || !CONCORD_COMMENTS.has(line.text.trim()))) {
+      kept.push(line.text);
     }
-
-    let end = child + 1;
-    while (end < lines.length && !TABLE_HEADER.test(lines[end] ?? '')) end += 1;
-    const body = lines.slice(child + 1, end).map((line) => line.trim());
-    if (!body.includes('type = "command"') || !body.includes(legacy.command)) {
-      kept.push(lines[index] ?? '');
-      index += 1;
-      continue;
-    }
-    index = end;
-    while (index < lines.length && lines[index]?.trim() === '') index += 1;
+    index += 1;
   }
-  return kept.join('\n').replace(/\n{3,}/gu, '\n\n');
+  return { lines: kept, spot };
+}
+
+/** `lines` joined, without blank lines at either end. */
+function joinTrimmed(lines: readonly string[]): string {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && lines[start]?.trim() === '') start += 1;
+  while (end > start && lines[end - 1]?.trim() === '') end -= 1;
+  return lines.slice(start, end).join('\n');
 }
 
 /**
@@ -208,24 +215,20 @@ function foreignTail(block: string): string {
 /**
  * Idempotently add Concord's lifecycle hooks to a Codex TOML config.
  *
- * The block is fenced by marker comments and appended at the end of the file.
- * Appending matters: TOML array-of-tables belong to whichever table header
- * precedes them, so splicing this into the middle would silently re-parent any
- * following keys.
+ * Hooks are found by content, since Codex moves the marker comments. The block
+ * goes where the first hook was, else at the end: a table boundary either way,
+ * so no key is re-parented.
  */
 export function upsertCodexHooks(existing: string | undefined): string {
-  const source = existing ?? '';
-  const begin = source.indexOf(HOOKS_BEGIN);
-  const end = source.indexOf(HOOKS_END);
-  if (begin !== -1 && end > begin) {
-    const head = removeLegacyConcordHooks(source.slice(0, begin));
-    const tail = removeLegacyConcordHooks(source.slice(end + HOOKS_END.length));
-    const preserved = foreignTail(source.slice(begin + HOOKS_BEGIN.length, end));
-    const body = preserved === '' ? CONCORD_HOOKS_BLOCK : `${CONCORD_HOOKS_BLOCK}\n\n${preserved}`;
-    return `${head}${body}${tail}`;
-  }
-  const base = removeLegacyConcordHooks(source).replace(/\n*$/u, '');
-  return base === '' ? `${CONCORD_HOOKS_BLOCK}\n` : `${base}\n\n${CONCORD_HOOKS_BLOCK}\n`;
+  const { lines, spot } = stripConcordHooks(existing ?? '');
+  const at = spot ?? lines.length;
+  const parts = [
+    joinTrimmed(lines.slice(0, at)),
+    CONCORD_HOOKS_BLOCK,
+    joinTrimmed(lines.slice(at)),
+  ];
+  const text = parts.filter((part) => part !== '').join('\n\n');
+  return `${text.replace(/\n{3,}/gu, '\n\n')}\n`;
 }
 
 /**
