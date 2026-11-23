@@ -1,43 +1,63 @@
 import type { Command } from '@commander-js/extra-typings';
 
 import type { Repositories } from '../../db/index.js';
-import { CLAIMED_STATUSES, normalizePath, type OverlapWarning } from '../../domain/overlap.js';
+import {
+  CLAIMED_STATUSES,
+  entryCoversFile,
+  normalizePath,
+  type OverlapWarning,
+} from '../../domain/overlap.js';
 import { linkedMachine } from '../../cloud/target.js';
+import { resolvePathsFromCheckout } from '../../workspaces/overlap-paths.js';
 import { openContext } from '../context.js';
 
 /**
- * Exact-file collisions between the given files and OTHER active tasks' declared
- * files. This is the client-agnostic primitive behind edit-time enforcement: a
+ * Collisions between the given files and OTHER active tasks' claimed paths.
+ * This is the client-agnostic primitive behind edit-time enforcement: a
  * PreToolUse hook (Claude Code), a git pre-commit hook, or CI can call it to
  * find out whether the files about to change are already claimed by someone
  * else. `selfTaskId` excludes your own claim so you are not flagged against
  * yourself.
  *
  * Unlike claim-time overlap detection (which also warns on shared
- * directories/modules/domains), this gate is intentionally precise: it fires
- * only on the *same file*, since blocking an edit on a coarse signal like a
- * shared top-level directory would be too noisy to be useful.
+ * directories/modules/domains), this gate fires only for files claimed
+ * directly or through a directory claim.
  */
 export function checkFileOverlaps(
   repos: Repositories,
   files: readonly string[],
   selfTaskId?: string,
 ): OverlapWarning[] {
-  const wanted = new Set(files.map(normalizePath).filter((file) => file !== ''));
+  const wanted = [...new Set(files.map(normalizePath).filter((file) => file !== ''))];
+  const otherClaims = repos.tasks
+    .list()
+    .filter((task) => CLAIMED_STATUSES.has(task.status) && task.taskId !== selfTaskId);
+  const pathsFromCheckout = resolvePathsFromCheckout(
+    repos.checkoutRoot,
+    otherClaims.map((task) => task.expectedFiles),
+    wanted,
+  );
+
   const warnings: OverlapWarning[] = [];
-  for (const task of repos.tasks.list()) {
-    if (!CLAIMED_STATUSES.has(task.status) || task.taskId === selfTaskId) {
-      continue;
-    }
-    const shared = task.expectedFiles.map(normalizePath).filter((file) => wanted.has(file));
+  for (const task of otherClaims) {
+    const shared = task.expectedFiles.map(normalizePath).filter((entry) => wanted.includes(entry));
+    const covered = wanted.filter(
+      (file) =>
+        !shared.includes(file) &&
+        task.expectedFiles.some((entry) => entryCoversFile(entry, file, pathsFromCheckout)),
+    );
+    const reasons: string[] = [];
     if (shared.length > 0) {
       const unique = [...new Set(shared)].sort((a, b) => a.localeCompare(b));
-      warnings.push({
-        taskId: task.taskId,
-        title: task.title,
-        reasons: [`same file(s): ${unique.join(', ')}`],
-        kinds: ['same_file'],
-      });
+      reasons.push(`same file(s): ${unique.join(', ')}`);
+    }
+    if (covered.length > 0) {
+      reasons.push(
+        `inside claimed directory: ${covered.sort((a, b) => a.localeCompare(b)).join(', ')}`,
+      );
+    }
+    if (reasons.length > 0) {
+      warnings.push({ taskId: task.taskId, title: task.title, reasons, kinds: ['same_file'] });
     }
   }
   return warnings;
