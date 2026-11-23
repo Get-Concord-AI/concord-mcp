@@ -30,13 +30,13 @@
         <mxCell id="te3" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="t2" target="t3"><mxGeometry relative="1" as="geometry" /></mxCell>
 
         <!-- Options -->
-        <mxCell id="optA" value="Opción A — waiter "guardian" (always-armed con compuerta)&#10;Cada Stop arma un waiter; este NO drena mientras receiverActive.&#10;Solo cuando el heartbeat expira empieza a drenar (toma el relevo).&#10;Cobertura total; 1 proceso extra por sesión (la opción B que se rechazó)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=8;" vertex="1" parent="1">
+        <mxCell id="optA" value="Opción A — waiter &quot;guardian&quot; (always-armed con compuerta)&#10;Cada Stop arma un waiter; este NO drena mientras receiverActive.&#10;Solo cuando el heartbeat expira empieza a drenar (toma el relevo).&#10;Cobertura total; 1 proceso extra por sesión (la opción B que se rechazó)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=8;" vertex="1" parent="1">
           <mxGeometry x="40" y="250" width="500" height="110" as="geometry" />
         </mxCell>
         <mxCell id="optB" value="Opción B — re-chequeo único diferido&#10;Si hay heartbeat fresco, el rewake duerme hasta receiverExpiresAt,&#10;re-chequea una vez: muerto→espera mensajes; vivo→sale.&#10;Barato (~10s de proceso por Stop); cubre solo muertes cercanas al Stop." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=8;" vertex="1" parent="1">
           <mxGeometry x="560" y="250" width="500" height="110" as="geometry" />
         </mxCell>
-        <mxCell id="optC" value="Opción C — aceptar el hueco residual + documentar&#10;El hueco real es estrecho: exige que el monitor muera &lt;~10s antes de un Stop&#10;y que la sesión quede idle sin más Stops. Se autocura en el próximo turno.&#10;Cero procesos extra; coherente con la decisión "selective" ya tomada." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=8;" vertex="1" parent="1">
+        <mxCell id="optC" value="Opción C — aceptar el hueco residual + documentar&#10;El hueco real es estrecho: exige que el monitor muera &lt;~10s antes de un Stop&#10;y que la sesión quede idle sin más Stops. Se autocura en el próximo turno.&#10;Cero procesos extra; coherente con la decisión &quot;selective&quot; ya tomada." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=8;" vertex="1" parent="1">
           <mxGeometry x="40" y="390" width="500" height="110" as="geometry" />
         </mxCell>
         <mxCell id="optD" value="Opción D — el monitor limpia su heartbeat al salir&#10;watch-inbox.sh trap EXIT → clearReceiver: la muerte ordenada no deja&#10;heartbeat fantasma. No cubre SIGKILL/crash (el lease expira solo en ~10s).&#10;Mitigación parcial sin cambiar la decisión de diseño." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;spacingLeft=8;" vertex="1" parent="1">
