@@ -108,8 +108,9 @@ not been shown, still queued or held by the monitor, it denies the question with
 them as the reason. The model reads them and asks again, adjusted if they change
 anything. With nothing to show, it prints nothing and the picker opens. This
 costs one extra round trip when it fires; Claude Code labels the deny a "hook
-error"; and the model sees the message again when the held notification
-arrives. Delivery is at-least-once, so a repeat is expected.
+error"; and the model sees the message twice, because the denied call ending
+also releases the monitor's held notification, before the question is asked
+again. Delivery is at-least-once, so a repeat is expected.
 
 A question is denied at most once. The next question within two minutes of a
 deny is let through untouched, so a message the transcript does not yet show as
