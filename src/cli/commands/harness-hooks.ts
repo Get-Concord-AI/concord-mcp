@@ -4,7 +4,6 @@ import { resolveIdentity, type AgentIdentity } from '../../domain/identity.js';
 import { buildRoster } from '../../domain/presence.js';
 import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
-import { openContext } from '../context.js';
 import { cloudRoster } from './cloud-hooks.js';
 import { cloudAccess, drainFromCloud, HOOK_TIMEOUT_MS, registerInCloud } from './cloud-inbox.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
@@ -154,6 +153,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
       return NO_OUTPUT;
     }
     if (access.kind === 'local') {
+      const { openContext } = await import('../context.js');
       return handleLocalHook(openContext(repoRoot, env).repos, identity, repoRoot, event);
     }
     try {

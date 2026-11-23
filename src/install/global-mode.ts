@@ -2,12 +2,18 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 
 import { userHome } from '../config/paths.js';
-import { devinCliSupportsDedicatedMcpConfig, executablePath, run } from './adapters/index.js';
+import {
+  devinCliSupportsDedicatedMcpConfig,
+  executablePath,
+  kiroExecutablePath,
+  run,
+} from './adapters/index.js';
 import { removeBlock, upsertBlock } from './block.js';
 import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
 import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
+import { deepseekHome } from './deepseek-config.js';
 import {
   devinMcpConfigPath,
   hasDevinMcpServer,
@@ -15,7 +21,18 @@ import {
   upsertDevinMcpConfig,
 } from './devin-config.js';
 import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-user-hooks.js';
-import { ANTIGRAVITY_RULE_HEADER, CONCORD_GLOBAL_INSTRUCTIONS } from './instructions.js';
+import {
+  ANTIGRAVITY_RULE_HEADER,
+  CONCORD_GLOBAL_INSTRUCTIONS,
+  KIRO_STEERING_HEADER,
+} from './instructions.js';
+import {
+  kiroHome,
+  kiroUserHooksPath,
+  kiroUserMcpPath,
+  upsertKiroHooks,
+  withoutKiroHooks,
+} from './kiro-config.js';
 import {
   agentKindEnv,
   CONCORD_SERVER_COMMAND,
@@ -76,6 +93,11 @@ function isAntigravityDetected(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
+/** Kiro's CLI, its IDE launcher, or an existing `~/.kiro` directory. */
+function isKiroDetected(env: NodeJS.ProcessEnv): boolean {
+  return kiroExecutablePath(env) !== undefined || existsSync(kiroHome(env));
+}
+
 function instructionFile(
   executable: string,
   path: (env: NodeJS.ProcessEnv) => string,
@@ -107,6 +129,7 @@ const USER_FILES: readonly UserFile[] = [
   instructionFile('codex', (env) => join(codexHome(env), 'AGENTS.md')),
   instructionFile('gemini', (env) => join(userHome(env), '.gemini', 'GEMINI.md')),
   instructionFile('goose', (env) => join(dirname(gooseConfigPath(env)), '.goosehints')),
+  instructionFile('dsh', (env) => join(deepseekHome(env), 'AGENTS.md')),
   instructionFile('copilot', (env) => join(copilotHome(env), 'copilot-instructions.md')),
   instructionFile(
     'agy',
@@ -160,6 +183,25 @@ const USER_FILES: readonly UserFile[] = [
     registration: { id: 'antigravity', present: hasMcpServer },
     path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('antigravity')),
+    uninstall: removeMcpServer,
+  },
+  instructionFile(
+    'kiro',
+    (env) => join(kiroHome(env), 'steering', 'concord.md'),
+    KIRO_STEERING_HEADER,
+    isKiroDetected,
+  ),
+  {
+    isDetected: isKiroDetected,
+    path: kiroUserHooksPath,
+    install: (existing, path) => upsertKiroHooks(existing, path),
+    uninstall: withoutKiroHooks,
+  },
+  {
+    isDetected: isKiroDetected,
+    registration: { id: 'kiro', present: hasMcpServer },
+    path: kiroUserMcpPath,
+    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('kiro')),
     uninstall: removeMcpServer,
   },
 ];

@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path';
 
 import { z } from 'zod';
 
-import { repoRelative } from '../../cloud/proxy.js';
+import { repoRelative } from '../../cloud/session.js';
 import {
   listClaims,
   listCloudAgents,

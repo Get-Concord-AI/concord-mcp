@@ -17,6 +17,7 @@ export function launchDetachedConcord(
     env,
     detached: true,
     stdio: 'ignore',
+    windowsHide: true,
   });
   child.unref();
 }

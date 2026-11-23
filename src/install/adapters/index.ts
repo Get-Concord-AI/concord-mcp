@@ -1,7 +1,10 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { installHermes, statusHermes } from './hermes.js';
+import { statusKiro } from './kiro.js';
 import { statusQwen } from './qwen.js';
+import { statusDeepseek } from './deepseek.js';
+import { installDeepseekConfig, uninstallDeepseekConfig } from '../deepseek-config.js';
 
 import {
   HARNESS_CONFIGS,
@@ -23,9 +26,9 @@ import {
   removeDevinUserHooks,
 } from '../devin-user-hooks.js';
 import { devinHooksInstalled } from '../devin-hooks.js';
-import { statusJunie } from './junie.js';
-import { installJunieHooks, removeJunieHooks } from '../junie-hooks.js';
-import { installJunieMcpConfig, uninstallJunieMcpConfig } from '../junie-config.js';
+import { installJunie, statusJunie } from './junie.js';
+import { removeJunieHooks } from '../junie-hooks.js';
+import { uninstallJunieMcpConfig } from '../junie-config.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import { uninstallHermesMcpConfig } from '../hermes-config.js';
 import {
@@ -53,6 +56,7 @@ import {
   removeMcpServer,
   upsertMcpServer,
 } from '../mcp-config.js';
+import { installKiroUserConfigs, kiroDetected, uninstallKiroUserConfigs } from '../kiro-config.js';
 import {
   cursorTarget,
   hasConcordManifest,
@@ -84,6 +88,11 @@ export interface AdapterReport {
   installedPath?: string | undefined;
   /** Present when the adapter link points somewhere other than this package. */
   link?: LinkCheck | undefined;
+}
+
+/** Kiro's CLI (`kiro-cli`), or the `kiro` launcher an IDE-only install may have. */
+export function kiroExecutablePath(env: NodeJS.ProcessEnv): string | undefined {
+  return executablePath(HARNESS_CONFIGS.kiro.executable, env) ?? executablePath('kiro', env);
 }
 
 /** Devin introduced dedicated MCP config files in v3000.3; its CLI omits the patch sometimes. */
@@ -730,6 +739,10 @@ export function statusAdapter(
       return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
     case 'junie':
       return statusJunie(env);
+    case 'kiro':
+      return statusKiro(kiroExecutablePath(env), repoRoot, env);
+    case 'deepseek':
+      return statusDeepseek(executablePath(HARNESS_CONFIGS.deepseek.executable, env), env);
   }
 }
 
@@ -779,6 +792,12 @@ export function installAdapter(
 
   if (harness === 'opencode') {
     installOpencode(env);
+    return;
+  }
+
+  if (harness === 'kiro') {
+    if (!kiroDetected(kiroExecutablePath(env), undefined, env)) return;
+    installKiroUserConfigs(env);
     return;
   }
 
@@ -844,15 +863,12 @@ export function installAdapter(
       }
       return;
     }
-    case 'junie': {
-      const version = versionTuple(run(executable, ['--version'], env).output);
-      if (version === undefined || !atLeast(version, HARNESS_CONFIGS.junie.minimumVersion)) {
-        return;
-      }
-      installJunieMcpConfig(env);
-      installJunieHooks(env);
+    case 'junie':
+      installJunie(run(executable, ['--version'], env).output, env);
       return;
-    }
+    case 'deepseek':
+      installDeepseekConfig(env);
+      return;
   }
 }
 
@@ -917,6 +933,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   } catch {
     // Preserve malformed Hermes settings and continue independent adapter cleanup.
   }
+  try {
+    uninstallDeepseekConfig(env);
+  } catch {
+    // Leave malformed or unreadable DeepSeek config untouched and continue cleanup.
+  }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
   if (existsSync(antigravityMcp)) {
@@ -938,6 +959,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   removeDevinUserHooks(env);
   uninstallJunieMcpConfig(env);
   removeJunieHooks(env);
+  uninstallKiroUserConfigs(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

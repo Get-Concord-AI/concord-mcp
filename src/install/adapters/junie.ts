@@ -1,6 +1,6 @@
 import { HARNESS_CONFIGS } from '../../domain/harness-config.js';
-import { junieHooksInstalled } from '../junie-hooks.js';
-import { junieMcpInstalled } from '../junie-config.js';
+import { installJunieHooks, junieHooksInstalled } from '../junie-hooks.js';
+import { installJunieMcpConfig, junieMcpInstalled } from '../junie-config.js';
 import type { AdapterReport } from './index.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
 
@@ -49,4 +49,13 @@ export function statusJunie(env: NodeJS.ProcessEnv): AdapterReport {
       ? config.installedDetail
       : `Junie needs repair: ${missing.join(' and ')}. Run \`concord setup\` to install both.`,
   };
+}
+
+/** Register Concord with a supported Junie; an unsupported one is left alone. */
+export function installJunie(versionOutput: string, env: NodeJS.ProcessEnv): void {
+  const version = versionTuple(versionOutput);
+  if (version !== undefined && atLeast(version, HARNESS_CONFIGS.junie.minimumVersion)) {
+    installJunieMcpConfig(env);
+    installJunieHooks(env);
+  }
 }

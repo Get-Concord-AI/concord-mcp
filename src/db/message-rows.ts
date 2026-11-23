@@ -53,6 +53,8 @@ export interface AgentMessageRecord {
   recipientAgentId: string;
   replyToMessageId: string | null;
   content: string;
+  /** Whether the sender wants an answer; a reply defaults to no. */
+  expectsReply: boolean;
   deliveryMode: 'steer';
   status: AgentMessageStatus;
   provider: string | null;
@@ -82,6 +84,7 @@ const agentMessageDbRowSchema = z.object({
   recipient_agent_id: z.string(),
   reply_to_message_id: z.string().nullable(),
   content: z.string(),
+  expects_reply: z.union([z.literal(0), z.literal(1)]),
   delivery_mode: z.literal('steer'),
   status: agentMessageStatusSchema,
   provider: z.string().nullable(),
@@ -109,6 +112,7 @@ export function parseAgentMessageRow(raw: unknown): AgentMessageRecord {
     recipientAgentId: row.recipient_agent_id,
     replyToMessageId: row.reply_to_message_id,
     content: row.content,
+    expectsReply: row.expects_reply === 1,
     deliveryMode: row.delivery_mode,
     status: row.status,
     provider: row.provider,

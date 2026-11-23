@@ -4,6 +4,7 @@ import type { Command } from '@commander-js/extra-typings';
 import { z } from 'zod';
 
 import type { Repositories } from '../../db/index.js';
+import { linkedMachine } from '../../cloud/target.js';
 import {
   agentIdForSession,
   hookSessionId,
@@ -21,8 +22,9 @@ import { buildRoster } from '../../domain/presence.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { sessionStartIdentity } from '../agent-identity.js';
-import { openContext } from '../context.js';
-import { checkFileOverlaps } from './check.js';
+import { recordClientBinding } from '../session-binding.js';
+import { checkFileOverlaps } from './overlap-check.js';
+import { copilotServerAddress } from './copilot-server.js';
 import {
   decideCloudPreToolUse,
   handleCloudAntigravityPreInvocation,
@@ -31,11 +33,7 @@ import {
   handleCloudSessionStart,
 } from './cloud-hooks.js';
 import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
-import { copilotServerAddress } from './copilot-adapter.js';
 import { fileSpool } from './copilot-spool.js';
-import { isDevinHookEvent, runDevinHook } from './devin-hooks.js';
-import { isHermesHookEvent, runHermesHook } from './hermes-hooks.js';
-import { isJunieHookEvent, runJunieHook } from './junie-hooks.js';
 import {
   cloudCopilotBackend,
   copilotWorkspace,
@@ -91,7 +89,9 @@ export function decidePreToolUse(
     return { block: false, message: '', result: 'not_applicable', conflictingTaskCount: 0 };
   }
 
-  const overlaps = checkFileOverlaps(repos, [filePath], selfTaskId);
+  const overlaps = checkFileOverlaps(repos, [filePath], selfTaskId, {
+    platform: process.platform,
+  });
   if (overlaps.length === 0) {
     return { block: false, message: '', result: 'clear', conflictingTaskCount: 0 };
   }
@@ -156,6 +156,9 @@ export function handleSessionStart(
   const agentId = identity.agentId;
 
   ensureAgentRegistered(repos, identity, payload.cwd ?? null);
+  // The hook sees the session as it is now; on a /resume the id has changed
+  // and every MCP server spawned earlier still names the abandoned one.
+  recordClientBinding(repos, identity);
 
   // Advertise the session as reachable before any tool call, so a peer that
   // messages it early gets its message queued rather than rejected.
@@ -231,7 +234,7 @@ function observeThenDrain(
   rawJson: string,
   sessionId: string,
 ): DeliverableMessage[] {
-  observeHookEvent(repos, agentId, rawJson);
+  observeHookEvent(repos, agentId, rawJson, 'antigravity');
   return drainInbox(repos, agentId, 'antigravity', undefined, {
     session: sessionKey(sessionId),
     via: 'hook',
@@ -311,21 +314,54 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     .command('hook <event>')
     .description(
       'Run a Concord hook. events: pre-tool-use (PreToolUse overlap gate), ' +
-        'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, and stop.',
+        'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, ' +
+        'stop, and kiro-session-start and kiro-user-prompt-submit.',
     )
     .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {
-      if (isDevinHookEvent(event)) {
-        process.stdout.write(`${await runDevinHook(event, readStdin())}\n`);
-        return;
+      if (event.startsWith('kiro-')) {
+        const { isKiroHookEvent, runKiroHook } = await import('./kiro-hooks.js');
+        if (isKiroHookEvent(event)) {
+          const output = await runKiroHook(event, readStdin());
+          if (output !== '') process.stdout.write(`${output}\n`);
+          return;
+        }
       }
-      if (isHermesHookEvent(event)) {
-        process.stdout.write(`${await runHermesHook(event, readStdin())}\n`);
-        return;
+      if (event.startsWith('devin-')) {
+        const { isDevinHookEvent, runDevinHook } = await import('./devin-hooks.js');
+        if (isDevinHookEvent(event)) {
+          process.stdout.write(`${await runDevinHook(event, readStdin())}\n`);
+          return;
+        }
       }
-      if (isJunieHookEvent(event)) {
-        process.stdout.write(`${await runJunieHook(event, readStdin())}\n`);
-        return;
+      if (event.startsWith('hermes-')) {
+        let hermesHooks: typeof import('./hermes-hooks.js');
+        try {
+          hermesHooks = await import('./hermes-hooks.js');
+        } catch (error) {
+          if (event !== 'hermes-pre-llm-call' || linkedMachine(process.env) === undefined) {
+            throw error;
+          }
+          // Hermes exposes the session project only through its own state
+          // database. Some machines cannot load its native SQLite binding.
+          process.stderr.write(
+            'Concord: Hermes Cloud hook could not load Hermes local state; no context was added.\n',
+          );
+          process.stdout.write('{}\n');
+          return;
+        }
+        const { isHermesHookEvent, runHermesHook } = hermesHooks;
+        if (isHermesHookEvent(event)) {
+          process.stdout.write(`${await runHermesHook(event, readStdin())}\n`);
+          return;
+        }
+      }
+      if (event.startsWith('junie-')) {
+        const { isJunieHookEvent, runJunieHook } = await import('./junie-hooks.js');
+        if (isJunieHookEvent(event)) {
+          process.stdout.write(`${await runJunieHook(event, readStdin())}\n`);
+          return;
+        }
       }
       if (options.client === 'copilot-cli') {
         await runCopilotClientHook(event);
@@ -361,6 +397,7 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
       }
 
       if (isAntigravity) {
+        const { openContext } = await import('../context.js');
         const repos = openContext(workspace).repos;
         if (event === 'session-start') {
           const result = handleAntigravitySessionStart(repos, antigravityInput, workspace);
@@ -383,6 +420,7 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
       }
 
       if (event === 'session-start') {
+        const { openContext } = await import('../context.js');
         const result = handleSessionStart(openContext(process.cwd()).repos, readStdin());
         process.stdout.write(`${result.message}\n`);
         return;
@@ -393,7 +431,7 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
         return;
       }
       const decision = decidePreToolUse(
-        openContext(process.cwd()).repos,
+        (await import('../context.js')).openContext(process.cwd()).repos,
         readStdin(),
         process.env['CONCORD_TASK'],
       );
@@ -433,7 +471,7 @@ async function runCopilotClientHook(event: string): Promise<void> {
     backend = cloudCopilotBackend(access.runtime);
     repoRoot = access.runtime.repoRoot;
   } else {
-    const context = openContext(workspace);
+    const context = (await import('../context.js')).openContext(workspace);
     backend = localCopilotBackend(context.repos, context.repoRoot);
     repoRoot = context.repoRoot;
   }

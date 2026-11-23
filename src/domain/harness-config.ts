@@ -20,6 +20,8 @@ export const harnessNames = [
   'opencode',
   'qwen',
   'junie',
+  'kiro',
+  'deepseek',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -332,6 +334,42 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Concord MCP server and lifecycle hooks are registered with Junie (~/.junie/config.json). Idle wake-up is not verified, so messages reach it only when a turn runs.',
     unsupportedDetail: 'Junie does not meet the verified MCP baseline (26.11.0).',
+  },
+  kiro: {
+    name: 'kiro',
+    executable: 'kiro-cli',
+    minimumVersion: [3, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'steer', 'busy'],
+    installedDetail:
+      'Kiro is registered with Concord; lifecycle hooks add messages on prompt submit, and anything sent after that waits in the durable inbox until the next prompt.',
+    unsupportedDetail: 'Kiro lifecycle hooks need Kiro CLI V3 or Kiro IDE 1.0 or newer.',
+  },
+  deepseek: {
+    name: 'deepseek',
+    executable: 'dsh',
+    minimumVersion: [0, 2, 2],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'DeepSeek Harness has a native MCP registration. Use a unique CONCORD_AGENT_ID per host and register/drain its durable inbox; idle wake-up is not verified.',
+    unsupportedDetail: 'DeepSeek Harness MCP configuration was verified with 0.2.2-rc.1.',
   },
 };
 

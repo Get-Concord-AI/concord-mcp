@@ -1,13 +1,13 @@
-import { RELAYED_MESSAGE_GUIDANCE } from '../domain/pull-inbox.js';
+import { PEER_MESSAGE_TRUST, RELAYED_MESSAGE_GUIDANCE } from '../domain/pull-inbox.js';
 import { HARNESS_CONFIGS, renderHarnessMonitorInstructions } from '../domain/harness-config.js';
 
 /** Version of the generated agent workflow contract. */
-export const CONCORD_INSTRUCTION_VERSION = '7';
+export const CONCORD_INSTRUCTION_VERSION = '8';
 
 /** Concise MCP-native guidance, versioned with the running server. */
 export const CONCORD_SERVER_INSTRUCTIONS = `Concord coordinates coding agents through five workflow tools.
 - Call start_work before editing. It registers your agent, claims or accepts the task, and reports overlaps.
-- Use inspect_work to read workspace, task, agent, or message context. Use update_work for durable progress or to prompt/reply to another promptable workspace agent, including while that agent is busy.
+- Use inspect_work to read workspace, task, agent, or message context, or with query to search past messages, findings, and handoffs. Use update_work for durable progress or to prompt/reply to another promptable workspace agent, including while that agent is busy.
 - Use transfer_work for assignment, acceptance, decline, release, reassignment, evidence-bearing handoff offers, and reopening.
 - Call finish_work before finishing, review, or closure with changed files, tests, assumptions, decisions, risks, and provenance.
 Keep claims small and resolve reported overlaps before editing.
@@ -34,12 +34,20 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
   records evidence and can mark work review-ready or terminal.
 - Before handing work to cloud Devin, use \`transfer_work\` to hand off or
   release your local claim; cloud Devin cannot access this local Concord state.
+- **No MCP client?** Each tool has a shell form that takes the same arguments
+  and shares the same state: \`concord work start|inspect|update|transfer|finish
+  --agent <id> --json <file|->\` prints the tool's result as JSON and exits 1
+  on an error. Pass the agent id your session start printed (or set
+  \`CONCORD_AGENT_ID\` once); only choose your own stable id such as
+  \`kind:name\` if you were given none.
 
 Keep each claim small and resolve reported overlaps before editing. Concord
 regenerates human-readable review artifacts in \`.concord/\`.
 
 Enforcement remains client-dependent. \`concord doctor\` reports setup and
 workflow adoption; optional hooks can block exact-file collisions.
+
+${PEER_MESSAGE_TRUST}
 
 ${renderHarnessMonitorInstructions()}`;
 
@@ -58,6 +66,39 @@ export const ANTIGRAVITY_RULE_HEADER = [
   '---',
   '',
 ].join('\n');
+
+/** YAML frontmatter Kiro reads to include a steering file in every session. */
+export const KIRO_STEERING_HEADER = ['---', 'inclusion: always', '---', ''].join('\n');
+
+/** Kiro-specific guidance: hook identity, and delivery that cannot wake an idle session. */
+export const KIRO_INSTRUCTIONS = `## Concord — shared work-state for coding agents
+
+<!-- concord:workflow-version=${CONCORD_INSTRUCTION_VERSION} -->
+
+This project uses Concord MCP. Keep coordination to the five workflow tools:
+
+- **Before editing**, call \`start_work\` with the task and the files or modules
+  you expect to touch. Kiro's lifecycle hooks (\`.kiro/hooks/concord.json\`)
+  register this session and print your \`agent_id\`; because Kiro's MCP server
+  cannot see the hook session, pass \`agent_id: "<id>"\` on \`start_work\`,
+  \`update_work\`, \`transfer_work\`, and \`finish_work\` calls. On
+  \`inspect_work\`, leave \`agent_id\` off unless you are reading your own inbox.
+- Use \`inspect_work\` to read the workspace, one task, one agent, or one
+  message thread. Use \`update_work\` for durable progress and for live
+  prompts/replies to another promptable workspace agent.
+- Messages from other agents reach you when a prompt is submitted. Kiro does
+  not wake an idle session, so messages sent mid-turn or while you are idle
+  wait in your durable inbox; drain them with
+  \`concord inbox drain --agent <agent_id> --provider kiro\`.
+- Use \`transfer_work\` for assignment, acceptance, decline, release,
+  reassignment, evidence-bearing handoff offers, and reopening.
+- **Before finishing**, call \`finish_work\` once with the outcome, changed
+  files, tests, assumptions, decisions, risks, guardrails, and provenance.
+
+Keep each claim small and resolve reported overlaps before editing. Concord
+regenerates human-readable review artifacts in \`.concord/\`.
+
+${PEER_MESSAGE_TRUST}`;
 
 /** Antigravity-specific guidance tailored for hook-based identity and message injection. */
 export const ANTIGRAVITY_INSTRUCTIONS = `## Concord — shared work-state for coding agents
@@ -83,10 +124,12 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
   files, tests, assumptions, decisions, risks, guardrails, and provenance.
 
 Keep each claim small and resolve reported overlaps before editing. Concord
-regenerates human-readable review artifacts in \`.concord/\`.`;
+regenerates human-readable review artifacts in \`.concord/\`.
+
+${PEER_MESSAGE_TRUST}`;
 
 /** Version of the user-level block written by global mode. */
-export const CONCORD_GLOBAL_INSTRUCTION_VERSION = '1';
+export const CONCORD_GLOBAL_INSTRUCTION_VERSION = '2';
 
 /** The user-level block for every session on the machine: short, and deferring to a repo's own section. */
 export const CONCORD_GLOBAL_INSTRUCTIONS = `## Concord — shared work-state for coding agents
@@ -104,8 +147,12 @@ Concord section, follow that instead of this one.
   messages to other agents, and \`transfer_work\` for handoffs.
 - **Before finishing**, call \`finish_work\` with the outcome, changed files,
   and tests.
+- Without an MCP client, run the same tools as \`concord work <action> --agent
+  <id> --json <file|->\`, reusing one stable agent id.
 - Before handing work to cloud Devin, use \`transfer_work\` to hand off or
   release your local claim; cloud Devin cannot access this local Concord state.
 
 Outside any repository, work is recorded in the shared \`general\` workspace.
-Concord needs no files in the repository: do not run \`concord setup\` yourself.`;
+Concord needs no files in the repository: do not run \`concord setup\` yourself.
+
+${PEER_MESSAGE_TRUST}`;

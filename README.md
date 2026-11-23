@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, Junie, GitHub Copilot CLI, and OpenCode talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, Junie, Kiro, GitHub Copilot CLI, and OpenCode talk to each other.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -83,16 +83,47 @@ Concord gives them a shared workspace and makes reachable sessions available for
 direct prompts and replies.
 
 <details>
+<summary><code>EACCES: permission denied</code> on <code>npm install -g</code> (Linux)</summary>
+
+With Node.js from a distribution package (for example `apt`), npm installs global
+packages under `/usr/local/lib/node_modules`, which your user cannot write to.
+Don't reach for `sudo`: it leaves root-owned files behind and runs the package's
+install scripts as root. Give npm a prefix you own instead:
+
+```bash
+mkdir -p ~/.npm-global
+npm config set prefix ~/.npm-global
+echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.profile
+. ~/.profile
+npm install -g @concord-ai/concord-mcp
+concord --version
+```
+
+Put the `PATH` line in `~/.profile` rather than only `~/.bashrc`: agent clients
+start the bare `concord-mcp` command, and those launched from your desktop do not
+read `~/.bashrc`. Log out and back in so they pick it up.
+
+A Node version manager such as [nvm](https://github.com/nvm-sh/nvm) avoids the
+problem as well, and makes it easy to get the Node.js 22.12 or later that Concord
+requires, which distribution packages may not ship. The standalone installer
+above needs neither.
+
+</details>
+
+<details>
 <summary>What <code>concord setup</code> changes</summary>
 
 `concord setup` creates the local `.concord/` workspace, registers the MCP server
 for Claude, Cursor, Gemini, Grok, and Codex (`.mcp.json`, `.cursor/mcp.json`,
 `.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`).
 For [Goose](./docs/goose.md), it registers the `concord-relay` extension in
-Goose's `config.yaml` when detected. For [Junie](./docs/junie.md), it writes
-`~/.junie/mcp/mcp.json` when detected. For
-[Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
-`.agents/hooks.json`, and `.agents/rules/concord.md`. It also writes
+Goose's `config.yaml` when detected. For [DeepSeek Harness](./docs/deepseek.md),
+it adds a native MCP plugin to `$DSH_HOME/cordis.patch.yml` when `dsh` is detected.
+For [Junie](./docs/junie.md), it writes `~/.junie/mcp/mcp.json` when detected.
+For [Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
+`.agents/hooks.json`, and `.agents/rules/concord.md`. For
+[Kiro](./docs/kiro.md), it writes `.kiro/settings/mcp.json`,
+`.kiro/hooks/concord.json`, and `.kiro/steering/concord.md`. It also writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
 `.codex/`, `.cursor/rules/`). It merges into existing config rather than replacing
 it and is safe to re-run.
@@ -146,6 +177,12 @@ keeping the login, and `concord cloud link` switches it back on.
 and lists local state the machine no longer uses, with the commands to move it
 aside once no session started before the link is running (nothing is deleted).
 
+The Cloud-backed CLI commands and hooks do not open the local SQLite store.
+Commands that operate only on local work state are unavailable while the machine
+is linked. Concord's Hermes `pre_llm_call` hook may return no context if its
+local state database cannot be loaded or does not contain the session's project
+path.
+
 </details>
 
 ## Supported agents
@@ -158,8 +195,10 @@ aside once no session started before the link is running (nothing is deleted).
 | Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)         |
 | Grok Build                         | [Setup and delivery](./docs/grok-build.md)         |
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
+| DeepSeek Harness                   | [Setup and delivery](./docs/deepseek.md)           |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
+| Kiro                               | [Setup and delivery](./docs/kiro.md)               |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
 | JetBrains Junie                    | [Setup and delivery](./docs/junie.md)              |
@@ -168,7 +207,8 @@ aside once no session started before the link is running (nothing is deleted).
 
 > There is no universal `/concord` slash command — commands are client-specific.
 > Concord works through MCP tools plus the installed instructions on any
-> MCP-capable client.
+> MCP-capable client. An agent that can run shell commands but cannot host an
+> MCP client uses [`concord work`](#shell-only-agents-concord-work) instead.
 
 Live delivery depends on the receiving harness and session state. Run
 `concord adapters status` to see which installed agents are reachable and how
@@ -287,6 +327,7 @@ concord check <files...>     # check exact-file overlaps with active tasks (for 
 concord watch                # print work-state whenever .concord changes (Ctrl-C to stop)
 concord doctor               # workspace checks + per-task tool adoption
 concord adapters status      # global harness delivery capability matrix
+concord work start --agent <id> ...  # run a workflow tool from the shell (see below)
 
 concord --repo ../project status        # select by repository path from anywhere
 concord --workspace ws_... status       # select an id returned by a Concord operation
@@ -301,6 +342,40 @@ and `0` when there is no overlap. Claude Code PreToolUse hooks treat exit code
 `--repo` and `--workspace` are global, mutually exclusive options. The CLI uses
 the same `CONCORD_REPO_ROOT` → `CLAUDE_PROJECT_DIR` → working-directory priority
 and the same linked-worktree canonicalization as MCP.
+
+### Shell-only agents (`concord work`)
+
+MCP stays the main path. `concord work` is a second door to the same five tools
+for agents that can run commands but cannot host an MCP client: a remote
+assistant driving a shell, a CI job, a script, or an agent reached over SSH.
+
+```bash
+concord work start    --agent ci:nightly --kind ci --task docs-fix --title "Fix docs" --files docs/a.md
+concord work inspect  --agent ci:nightly --task docs-fix
+concord work update   --agent ci:nightly --task docs-fix --type progress --content "Half done"
+concord work transfer --agent ci:nightly --task docs-fix --action release --expected-version 3
+concord work finish   --agent ci:nightly --json finish.json   # or --json - to read stdin
+```
+
+Each action runs the MCP tool of the same name in-process, so validation,
+overlaps, `expected_version` checks, artifacts in `.concord/`, and the store are
+the ones `concord-mcp` uses; an agent can mix both paths on the same task.
+`--json` takes the tool's argument object from a UTF-8 file (a byte-order mark
+is fine) or stdin, which avoids shell quoting of inline JSON, and a flag
+replaces one field of it. The tool's structured result is printed as JSON on
+stdout; on a failure the command prints `{"error": "..."}`, writes the message
+to stderr, and exits `1`. Run `concord work <action> --help` for each flag.
+
+Choosing the agent id:
+
+- An agent inside a harness Concord already knows (Claude Code, Codex, ...)
+  usually needs no `--agent`: the id is resolved from its session, as on MCP.
+  If the harness told you an id, pass that one.
+- A shell-only agent names itself with `--agent` or `CONCORD_AGENT_ID`. Use one
+  stable `kind:name` id (`grok-bot:anderson`, `ci:nightly`) and reuse it on
+  every call; a new id each time looks like a new agent and leaves claims stale.
+- Do not reuse another session's id, or a chat app connector's, for a different
+  agent. `--kind` (or `CONCORD_AGENT_KIND`) sets the agent kind on `start`.
 
 `concord dashboard` is a read-only, full-screen local TUI. It refreshes from the
 shared SQLite workspace every second while keeping agents, tasks, alerts,

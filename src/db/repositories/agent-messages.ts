@@ -23,6 +23,7 @@ export interface NewAgentMessage {
   recipientAgentId: string;
   replyToMessageId: string | null;
   content: string;
+  expectsReply: boolean;
   idempotencyKey: string;
 }
 
@@ -132,10 +133,10 @@ export function createAgentMessageRepository(
   const insertStmt = db.prepare(`
     INSERT INTO agent_messages (
       message_id, project, task_id, sender_agent_id, recipient_agent_id, reply_to_message_id,
-      content, delivery_mode, status, idempotency_key, created_at, expires_at
+      content, expects_reply, delivery_mode, status, idempotency_key, created_at, expires_at
     ) VALUES (
       @message_id, @project, @task_id, @sender_agent_id, @recipient_agent_id, @reply_to_message_id,
-      @content, 'steer', 'sent', @idempotency_key, @created_at, @expires_at
+      @content, @expects_reply, 'steer', 'sent', @idempotency_key, @created_at, @expires_at
     )
   `);
   const getStmt = db.prepare('SELECT * FROM agent_messages WHERE message_id = ?');
@@ -418,6 +419,7 @@ export function createAgentMessageRepository(
         recipient_agent_id: message.recipientAgentId,
         reply_to_message_id: message.replyToMessageId,
         content: message.content,
+        expects_reply: message.expectsReply ? 1 : 0,
         idempotency_key: message.idempotencyKey,
         created_at: now.toISOString(),
         expires_at: new Date(now.getTime() + MESSAGE_TTL_MS).toISOString(),

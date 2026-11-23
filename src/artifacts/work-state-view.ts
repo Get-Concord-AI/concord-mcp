@@ -3,15 +3,17 @@ import { dirname } from 'node:path';
 import type { Repositories, TaskRecord, TaskStatus } from '../db/index.js';
 import { effectiveEndpointCapabilities } from '../domain/delivery.js';
 import { detectOverlaps } from '../domain/overlap.js';
-import { endpointPromptable } from '../tools/agent-messages.js';
+import { endpointPromptable } from '../domain/delivery.js';
+import { renderRosterLines } from '../domain/presence-render.js';
 import {
   buildRoster,
   detectStaleClaims,
   type PresenceEntry,
   type StaleClaim,
 } from '../domain/presence.js';
+import { resolvePathsFromCheckout } from '../workspaces/overlap-paths.js';
 
-interface ActiveEntry {
+export interface ActiveEntry {
   taskId: string;
   agent: string;
   agentId: string | null;
@@ -24,25 +26,25 @@ interface ActiveEntry {
   parentTaskId: string | null;
 }
 
-interface OverlapPair {
+export interface OverlapPair {
   a: string;
   b: string;
   reasons: string[];
 }
 
-interface ReviewEntry {
+export interface ReviewEntry {
   taskId: string;
   testsCount: number;
   guardrailsCount: number;
   openQuestionCount: number;
 }
 
-interface OpenQuestionEntry {
+export interface OpenQuestionEntry {
   taskId: string;
   question: string;
 }
 
-interface CommunicationEntry {
+export interface CommunicationEntry {
   agentId: string;
   promptable: boolean;
   provider: string | null;
@@ -96,6 +98,10 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
   );
   const activeStatuses = new Set<TaskStatus>(ACTIVE_STATUSES);
   const active = tasks.filter((task) => activeStatuses.has(task.status));
+  const pathsFromCheckout = resolvePathsFromCheckout(
+    repos.checkoutRoot,
+    active.map((task) => task.expectedFiles),
+  );
 
   const overlaps: OverlapPair[] = [];
   // Overlap is symmetric. Scan only the upper triangle so every task pair is
@@ -114,6 +120,7 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
       },
       active,
       index + 1,
+      { platform: process.platform, pathsFromCheckout },
     )) {
       overlaps.push({ a: task.taskId, b: warning.taskId, reasons: warning.reasons });
     }
@@ -190,33 +197,7 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
   };
 }
 
-function formatAge(seconds: number): string {
-  if (seconds < 60) return `${String(seconds)}s`;
-  if (seconds < 3600) return `${String(Math.floor(seconds / 60))}m`;
-  return `${String(Math.floor(seconds / 3600))}h`;
-}
-
-function presenceSignals(entry: PresenceEntry): string {
-  const activity =
-    entry.activityAgeSeconds === null
-      ? 'no activity'
-      : `activity ${formatAge(entry.activityAgeSeconds)} ago`;
-  const summary =
-    entry.summaryAgeSeconds === null ? '' : `, summary ${formatAge(entry.summaryAgeSeconds)} old`;
-  return `heartbeat ${formatAge(entry.heartbeatAgeSeconds)} ago, ${activity}${summary}`;
-}
-
-/** Render the presence roster as indented lines, or a placeholder when empty. */
-export function renderRosterLines(roster: readonly PresenceEntry[]): string[] {
-  if (roster.length === 0) {
-    return ['  none'];
-  }
-  return roster.map((entry) => {
-    const state = `${entry.liveness}/${entry.status}`;
-    const doing = entry.summary ?? '-';
-    return `  ${entry.agentId.padEnd(18)} ${state.padEnd(20)} ${doing}  (${presenceSignals(entry)})`;
-  });
-}
+export { renderRosterLines } from '../domain/presence-render.js';
 
 function staleDetail(claim: StaleClaim): string {
   const seconds = String(claim.ageSeconds ?? 0);
