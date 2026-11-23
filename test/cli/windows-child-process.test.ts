@@ -77,10 +77,15 @@ it('hides the Codex stdio proxy console without changing its pipe contract', asy
   spawnMock.mockReturnValue(child);
 
   const client = new CodexDaemonClient('codex.exe', [], '');
-  const connected = client.connect();
-  stdout.write('{"id":1,"result":{}}\n');
-  await connected;
+  // Only the spawn options matter here; the fake child never completes the
+  // proxy's WebSocket handshake, so the connection is closed once it spawns.
+  const connected = client.connect().catch(() => undefined);
+  await vi.waitFor(() => {
+    expect(spawnMock).toHaveBeenCalled();
+  });
   client.close();
+  stdout.end();
+  await connected;
 
   expect(spawnMock).toHaveBeenCalledWith(
     'codex.exe',

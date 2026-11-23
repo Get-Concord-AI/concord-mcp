@@ -4,7 +4,6 @@ import { resolveIdentity, type AgentIdentity } from '../../domain/identity.js';
 import { buildRoster } from '../../domain/presence.js';
 import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
-import { openContext } from '../context.js';
 import { cloudRoster } from './cloud-hooks.js';
 import { cloudAccess, drainFromCloud, HOOK_TIMEOUT_MS, registerInCloud } from './cloud-inbox.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
@@ -126,7 +125,13 @@ export async function runDevinHook(
     return NO_OUTPUT;
   }
   if (access.kind === 'local') {
-    return handleLocalDevinHook(openContext(repoRoot, env).repos, identity, repoRoot, event);
+    const context = await import('../context.js');
+    return handleLocalDevinHook(
+      context.openContext(repoRoot, env).repos,
+      identity,
+      repoRoot,
+      event,
+    );
   }
   try {
     return await handleCloudDevinHook(access.runtime, identity, repoRoot, event);
