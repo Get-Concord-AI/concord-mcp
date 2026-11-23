@@ -141,7 +141,7 @@ export function handleOfferHandoff(
     repos.agents.recordActivity(input.agent_id);
     return { task: updated, handoff, ownershipEvent };
   });
-  return transact();
+  return transact.immediate();
 }
 
 function resolveHandoff(
@@ -188,7 +188,7 @@ function resolveHandoff(
     repos.agents.recordActivity(actorAgentId);
     return { task: updated, handoff: resolved, ownershipEvent };
   });
-  return transact();
+  return transact.immediate();
 }
 
 function expireHandoff(

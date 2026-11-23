@@ -1,6 +1,14 @@
 import { installGooseMcpConfig } from '../../src/install/goose-config.js';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -177,6 +185,52 @@ describe('global harness adapters', () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
       followup_message: '[concord from gemini:peer id=msg-1 task=TASK-1]\nhello cursor',
+    });
+  });
+
+  it('marks Cursor stop follow-ups that expect no reply with no-reply-needed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-cursor-no-reply-'));
+    mkdirSync(join(root, '.concord'));
+    writeFileSync(join(root, '.concord', 'concord.db'), '');
+    const drained = [
+      {
+        messageId: 'msg-reply',
+        senderAgentId: 'claude-code:peer',
+        taskId: 'TASK-1',
+        content: 'Yes, go ahead.',
+        expectsReply: false,
+      },
+      {
+        messageId: 'msg-prompt',
+        senderAgentId: 'claude-code:peer',
+        taskId: 'TASK-1',
+        content: 'Can you share the schema?',
+        expectsReply: true,
+      },
+    ];
+    const fakeConcord = writeFakeCommand(
+      root,
+      'fake-concord',
+      `if (process.argv[3] === 'drain') process.stdout.write(${JSON.stringify(JSON.stringify(drained))});\n`,
+    );
+
+    const hook = join(process.cwd(), 'plugin', 'cursor', 'concord-relay', 'cursor-hook.mjs');
+    const result = spawnSync(process.execPath, [hook, 'stop'], {
+      cwd: root,
+      env: {
+        ...process.env,
+        CONCORD_EXECUTABLE: fakeConcord,
+        CONCORD_CURSOR_DISABLE_HEARTBEAT: '1',
+      },
+      input: JSON.stringify({ conversation_id: 'cursor-conversation', workspace_roots: [root] }),
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      followup_message:
+        '[concord from claude-code:peer id=msg-reply task=TASK-1 no-reply-needed]\nYes, go ahead.\n\n' +
+        '[concord from claude-code:peer id=msg-prompt task=TASK-1]\nCan you share the schema?',
     });
   });
 
@@ -621,6 +675,63 @@ describe('global harness adapters', () => {
     expect(existsSync(statePath)).toBe(false);
     expect(readFileSync(hooksPath, 'utf8')).toBe(broken);
   });
+
+  it.each([
+    { problem: 'malformed', detected: false },
+    { problem: 'malformed', detected: true },
+    { problem: 'unreadable', detected: false },
+    { problem: 'unreadable', detected: true },
+  ])(
+    'uninstalls later adapters when DeepSeek config is $problem (detected: $detected)',
+    ({ problem, detected }) => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-deepseek-uninstall-'));
+      try {
+        const bin = join(home, 'bin');
+        mkdirSync(bin);
+        writeFakeVersion(bin, 'copilot', 'GitHub Copilot CLI 1.0.100.');
+        writeFakeVersion(bin, 'devin', 'Devin CLI v3000.3');
+        if (detected) writeFakeVersion(bin, 'dsh', '0.2.2');
+        const env = { HOME: home, USERPROFILE: home, PATH: bin, ANTIGRAVITY_AGENT: '1' };
+        const installed = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+        for (const harness of ['copilot-cli', 'antigravity', 'devin']) {
+          expect(installed.find((entry) => entry.harness === harness)?.status).toBe('installed');
+        }
+
+        const configPath = join(home, '.dsh', 'cordis.patch.yml');
+        mkdirSync(dirname(configPath), { recursive: true });
+        rmSync(configPath, { force: true });
+        const broken = '- insert: [invalid\n';
+        if (problem === 'malformed') writeFileSync(configPath, broken);
+        // A directory makes readFileSync fail regardless of the user's permissions.
+        else mkdirSync(configPath);
+        const statePath = join(home, '.concord', 'adapters.json');
+        expect(existsSync(statePath)).toBe(true);
+
+        const report = uninstallGlobalAdapters(env);
+
+        expect(report.find((entry) => entry.harness === 'deepseek')?.status).toBe(
+          detected ? 'action_required' : 'not_detected',
+        );
+        for (const config of [
+          join(home, '.copilot', 'mcp-config.json'),
+          join(home, '.gemini', 'config', 'mcp_config.json'),
+          join(home, '.config', 'devin', 'mcp_config.json'),
+        ]) {
+          expect(readFileSync(config, 'utf8')).not.toContain('"concord"');
+        }
+        expect(existsSync(join(home, '.copilot', 'hooks', 'concord.json'))).toBe(false);
+        expect(existsSync(join(home, '.gemini', 'config', 'hooks.json'))).toBe(false);
+        expect(readFileSync(join(home, '.config', 'devin', 'config.json'), 'utf8')).not.toContain(
+          'concord hook',
+        );
+        expect(existsSync(statePath)).toBe(false);
+        if (problem === 'malformed') expect(readFileSync(configPath, 'utf8')).toBe(broken);
+        else expect(statSync(configPath).isDirectory()).toBe(true);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('reports action_required with remaining hooks detail when hooks remain but MCP is not registered', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-ag-hooks-remaining-'));
