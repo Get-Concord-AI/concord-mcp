@@ -22,6 +22,10 @@ Concord is written to the standard Junie MCP config file:
 
 - **Path**: `~/.junie/mcp/mcp.json`
 
+`concord setup` also writes a project-scoped `.junie/mcp/mcp.json` in the
+repository, so sessions opened inside the project pick Concord up even without
+the global file.
+
 The entry added looks like:
 
 ```json
@@ -51,8 +55,8 @@ The hooks added are:
   identity and presence before work begins
 - `UserPromptSubmit` → `concord hook junie-user-prompt-submit` — drains pending
   peer messages before each user prompt
-- `SessionEnd` → `concord hook junie-session-end` — cleans up endpoints when
-  the session finishes
+- `SessionEnd` → `concord hook junie-session-end` — fires when the session
+  finishes (see the limitation below for what it can and cannot clean up)
 
 Known limitation: Junie's `SessionEnd` payload carries only `reason`, not
 `session_id`, so the hook cannot tell which session ended and the pull endpoint

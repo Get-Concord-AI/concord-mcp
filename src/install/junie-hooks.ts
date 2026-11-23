@@ -9,7 +9,7 @@ import {
   upsertHooksConfig,
 } from './hooks-config.js';
 
-function junieConfigPath(env: NodeJS.ProcessEnv = process.env): string {
+export function junieConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(junieHome(env), 'config.json');
 }
 

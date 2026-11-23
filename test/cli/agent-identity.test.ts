@@ -6,6 +6,7 @@ import {
   JUNIE_SESSION_IDENTITY,
   sessionStartMessage,
 } from '../../src/cli/commands/session-start-message.js';
+import { PEER_MESSAGE_TRUST } from '../../src/domain/pull-inbox.js';
 import {
   resolveActorId,
   resolveIdentity,
@@ -92,6 +93,7 @@ describe('Devin session instructions', () => {
     );
     expect(message).toContain('leave it off to see the workspace');
     expect(message).not.toContain('without you passing an id');
+    expect(message).toContain(PEER_MESSAGE_TRUST);
     expect(resolveActorId(undefined, 'devin:1234abcd')).toBe('devin:1234abcd');
   });
 });
@@ -103,5 +105,6 @@ describe('Junie session instructions', () => {
     expect(message).toContain("Junie's MCP server cannot see the hook session payload");
     expect(message).not.toContain("Devin's MCP server");
     expect(message).toContain('concord inbox drain --agent junie:1234abcd --provider junie');
+    expect(message).toContain(PEER_MESSAGE_TRUST);
   });
 });

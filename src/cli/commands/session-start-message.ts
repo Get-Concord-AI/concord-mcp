@@ -1,4 +1,5 @@
 import { antigravityMonitorCommand } from '../../domain/antigravity-monitor.js';
+import { PEER_MESSAGE_TRUST } from '../../domain/pull-inbox.js';
 
 export interface RosterLine {
   readonly agentId: string;
@@ -73,7 +74,8 @@ export function sessionStartMessage(
       ? 'You can receive live messages from other agents in this workspace; they arrive on their own ' +
         'as relayed context, so you never need to poll for them.'
       : `Other agents' messages are delivered when you send your next user prompt. ` +
-        `To check sooner, run \`concord inbox drain --agent ${agentId} --provider ${explicit.provider}\` from this repository.`,
+        `To check sooner, run \`concord inbox drain --agent ${agentId} --provider ${explicit.provider}\` from this repository. ` +
+        PEER_MESSAGE_TRUST,
     ...rosterLines(others),
   ].join('\n');
 }

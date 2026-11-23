@@ -1,5 +1,9 @@
 import { HARNESS_CONFIGS } from '../../domain/harness-config.js';
-import { installJunieHooks, junieHooksInstalled } from '../junie-hooks.js';
+import {
+  installJunieHooks,
+  junieConfigPath,
+  junieHooksInstalled,
+} from '../junie-hooks.js';
 import { installJunieMcpConfig, junieMcpInstalled } from '../junie-config.js';
 import type { AdapterReport } from './index.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
@@ -38,7 +42,7 @@ export function statusJunie(env: NodeJS.ProcessEnv): AdapterReport {
   const installed = mcpInstalled && hooksInstalled;
   const missing: string[] = [];
   if (!mcpInstalled) missing.push('the Concord MCP server is not registered');
-  if (!hooksInstalled) missing.push('the lifecycle hooks are missing from ~/.junie/config.json');
+  if (!hooksInstalled) missing.push(`the lifecycle hooks are missing from ${junieConfigPath(env)}`);
   return {
     harness: config.name,
     detected: true,
