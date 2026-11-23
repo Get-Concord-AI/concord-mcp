@@ -125,16 +125,6 @@ type = "command"
 command = "concord inbox drain --from-hook --provider codex --format stop"
 ${HOOKS_END}`;
 
-/** The table headers this block owns. Anything else inside it came from Codex. */
-const OWNED_HEADERS = new Set([
-  '[[hooks.SessionStart]]',
-  '[[hooks.SessionStart.hooks]]',
-  '[[hooks.PostToolUse]]',
-  '[[hooks.PostToolUse.hooks]]',
-  '[[hooks.Stop]]',
-  '[[hooks.Stop.hooks]]',
-]);
-
 /** The markers and the note under the begin marker. */
 const CONCORD_COMMENTS = new Set(
   CONCORD_HOOKS_BLOCK.split('\n').filter((line) => COMMENT_LINE.test(line)),
@@ -193,23 +183,6 @@ function joinTrimmed(lines: readonly string[]): string {
   while (start < end && lines[start]?.trim() === '') start += 1;
   while (end > start && lines[end - 1]?.trim() === '') end -= 1;
   return lines.slice(start, end).join('\n');
-}
-
-/**
- * Split a previous block into the part we wrote and any part Codex appended.
- *
- * Codex records hook trust as `[hooks.state]` tables written to the end of
- * config.toml, which lands inside our fence because our end marker is the last
- * line. Rewriting the whole block would delete that trust and silently
- * re-prompt the user — so keep everything from the first table header we do not
- * own onwards.
- */
-function foreignTail(block: string): string {
-  const lines = block.split('\n');
-  const index = lines.findIndex(
-    (line) => line.trimStart().startsWith('[') && !OWNED_HEADERS.has(line.trim()),
-  );
-  return index === -1 ? '' : lines.slice(index).join('\n').replace(/\n*$/u, '');
 }
 
 /**
@@ -280,17 +253,7 @@ export function removeCodexMcpServer(source: string): string {
 export function uninstallCodexConfig(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const fullPath = codexConfigFile(env);
   if (!existsSync(fullPath)) return undefined;
-  const source = readFileSync(fullPath, 'utf8');
-  const begin = source.indexOf(HOOKS_BEGIN);
-  const end = source.indexOf(HOOKS_END);
-  let withoutHooks = source;
-  if (begin !== -1 && end > begin) {
-    const preserved = foreignTail(source.slice(begin + HOOKS_BEGIN.length, end));
-    withoutHooks =
-      source.slice(0, begin) +
-      (preserved === '' ? '' : `${preserved}\n`) +
-      source.slice(end + HOOKS_END.length);
-  }
-  writeFileSync(fullPath, removeCodexMcpServer(withoutHooks));
+  const { lines } = stripConcordHooks(readFileSync(fullPath, 'utf8'));
+  writeFileSync(fullPath, removeCodexMcpServer(lines.join('\n')));
   return fullPath;
 }

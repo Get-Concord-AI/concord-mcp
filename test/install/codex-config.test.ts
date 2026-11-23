@@ -10,6 +10,7 @@ import {
   installCodexHooks,
   removeCodexMcpServer,
   uninstallCodexConfig,
+  upsertCodexHooks,
   upsertCodexMcpServer,
 } from '../../src/install/codex-config.js';
 import { CONCORD_SERVER_COMMAND } from '../../src/install/mcp-config.js';
@@ -174,6 +175,31 @@ approval_mode = "approve"
     expect(result).toBe(
       '[mcp_servers.other]\ncommand = "other"\n\n[mcp_servers.other.tools.run]\napproval_mode = "approve"\n',
     );
+  });
+
+  it('removes drifted hooks and every stray marker', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    const strayBegin = block.split('\n').slice(0, 3).join('\n');
+    const trust = '[hooks.state."x:stop:0:0"]\ntrusted_hash = "sha256:abc"';
+    const settings = '[tui]\nalt_screen = true';
+    const drifted = [
+      `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"`,
+      `${trust}\n# <<< concord hooks <<<`,
+      settings,
+      strayBegin,
+      block,
+    ].join('\n\n');
+    writeFileSync(codexConfigFile(env), `${drifted}\n`);
+
+    uninstallCodexConfig(env);
+
+    const result = readFileSync(codexConfigFile(env), 'utf8');
+    expect(result).not.toContain('concord inbox');
+    expect(result).not.toContain('concord hooks');
+    expect(result).not.toContain(CODEX_SECTION_HEADER);
+    expect(result).toContain(trust);
+    expect(result).toContain(settings);
   });
 });
 
