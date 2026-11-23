@@ -26,8 +26,9 @@ in them:
 
 Re-running setup is safe: Concord-owned blocks are recognised by name and
 rewritten; user hooks and other `mcp_servers` entries are left untouched.
-`concord adapters uninstall` (or disabling global mode) removes only the
-Concord blocks.
+`concord adapters uninstall` removes only the Concord blocks — global mode
+does not manage Vibe's user-level files, so disabling it leaves the adapter
+installed.
 
 ## Identity
 
