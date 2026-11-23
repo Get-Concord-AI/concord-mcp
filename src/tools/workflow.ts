@@ -194,7 +194,7 @@ export function handleStartWork(
   input: WithActor<StartWorkInput>,
 ): StartWorkResult {
   const transact = repos.db.transaction(() => startWork(repos, input));
-  return transact();
+  return transact.immediate();
 }
 
 export { handleInspectWork, type InspectWorkResult } from './inspect-work.js';
@@ -390,7 +390,7 @@ export function handleFinishWork(
     }
     return { evidence, task: evidence.task };
   });
-  return transact();
+  return transact.immediate();
 }
 
 function taskFields(task: TaskRecord): Record<string, unknown> {
