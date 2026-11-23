@@ -10,7 +10,6 @@ import { buildRoster } from '../../domain/presence.js';
 import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
 import { hermesHome } from '../../install/hermes-config.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
-import { openContext } from '../context.js';
 import { cloudRoster } from './cloud-hooks.js';
 import { cloudAccess, drainFromCloud, HOOK_TIMEOUT_MS, registerInCloud } from './cloud-inbox.js';
 import { drainInbox } from './inbox.js';
@@ -134,6 +133,7 @@ export async function runHermesHook(
     return NO_OUTPUT;
   }
   if (access.kind === 'local') {
+    const { openContext } = await import('../context.js');
     const context = openContext(cwd, projectEnv);
     try {
       return handleLocalHermesHook(context.repos, identity, context, first);

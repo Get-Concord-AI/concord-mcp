@@ -1,6 +1,7 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { installHermes, statusHermes } from './hermes.js';
+import { statusKiro } from './kiro.js';
 import { statusQwen } from './qwen.js';
 import { statusDeepseek } from './deepseek.js';
 import { installDeepseekConfig, uninstallDeepseekConfig } from '../deepseek-config.js';
@@ -52,6 +53,7 @@ import {
   removeMcpServer,
   upsertMcpServer,
 } from '../mcp-config.js';
+import { installKiroUserConfigs, kiroDetected, uninstallKiroUserConfigs } from '../kiro-config.js';
 import {
   cursorTarget,
   hasConcordManifest,
@@ -83,6 +85,11 @@ export interface AdapterReport {
   installedPath?: string | undefined;
   /** Present when the adapter link points somewhere other than this package. */
   link?: LinkCheck | undefined;
+}
+
+/** Kiro's CLI (`kiro-cli`), or the `kiro` launcher an IDE-only install may have. */
+export function kiroExecutablePath(env: NodeJS.ProcessEnv): string | undefined {
+  return executablePath(HARNESS_CONFIGS.kiro.executable, env) ?? executablePath('kiro', env);
 }
 
 /** Devin introduced dedicated MCP config files in v3000.3; its CLI omits the patch sometimes. */
@@ -727,6 +734,8 @@ export function statusAdapter(
       return statusOpencode(env);
     case 'qwen':
       return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
+    case 'kiro':
+      return statusKiro(kiroExecutablePath(env), repoRoot, env);
     case 'deepseek':
       return statusDeepseek(executablePath(HARNESS_CONFIGS.deepseek.executable, env), env);
   }
@@ -778,6 +787,12 @@ export function installAdapter(
 
   if (harness === 'opencode') {
     installOpencode(env);
+    return;
+  }
+
+  if (harness === 'kiro') {
+    if (!kiroDetected(kiroExecutablePath(env), undefined, env)) return;
+    installKiroUserConfigs(env);
     return;
   }
 
@@ -934,6 +949,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   }
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
+  uninstallKiroUserConfigs(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

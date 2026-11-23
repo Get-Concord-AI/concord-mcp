@@ -7,6 +7,8 @@ import {
   ANTIGRAVITY_RULE_HEADER,
   CONCORD_INSTRUCTIONS,
   CURSOR_MDC_HEADER,
+  KIRO_INSTRUCTIONS,
+  KIRO_STEERING_HEADER,
 } from './instructions.js';
 
 interface InstallTarget {
@@ -28,6 +30,11 @@ const TARGETS: readonly InstallTarget[] = [
     relPath: join('.agents', 'rules', 'concord.md'),
     header: ANTIGRAVITY_RULE_HEADER,
     instructions: ANTIGRAVITY_INSTRUCTIONS,
+  },
+  {
+    relPath: join('.kiro', 'steering', 'concord.md'),
+    header: KIRO_STEERING_HEADER,
+    instructions: KIRO_INSTRUCTIONS,
   },
 ];
 

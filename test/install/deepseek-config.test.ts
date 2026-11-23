@@ -146,7 +146,7 @@ describe('DeepSeek native MCP configuration', () => {
     expect(() => upsertDeepseekConfig('[1, 2]')).toThrow('mappings');
   });
 
-  it('detects DSH during setup, installs project instructions and preserves a rerun', () => {
+  it('detects DSH during setup, installs project instructions and preserves a rerun', async () => {
     const { env, path } = fixture();
     // runSetup keeps SQLite open until the worker exits; keep it outside home cleanup on Windows.
     const root = mkdtempSync(join(tmpdir(), 'concord-deepseek-repo-'));
@@ -155,13 +155,13 @@ describe('DeepSeek native MCP configuration', () => {
     mkdirSync(bin);
     writeFileSync(join(bin, process.platform === 'win32' ? 'dsh.cmd' : 'dsh'), '');
     const options = { env: { ...env, PATH: bin }, adapters: true };
-    const first = runSetup(root, options);
+    const first = await runSetup(root, options);
     expect(first.adapters.find((adapter) => adapter.harness === 'deepseek')?.status).toBe(
       'installed',
     );
     expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toContain('start_work');
     const config = readFileSync(path, 'utf8');
-    runSetup(root, options);
+    await runSetup(root, options);
     expect(readFileSync(path, 'utf8')).toBe(config);
   });
 });

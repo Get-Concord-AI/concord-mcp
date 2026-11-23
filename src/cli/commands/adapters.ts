@@ -22,7 +22,6 @@ import {
   statusGlobalAdapters,
   uninstallGlobalAdapters,
 } from '../../install/adapters/index.js';
-import { openContext } from '../context.js';
 import { availablePort } from '../local-port.js';
 import { hostCodexInCloud } from './cloud-codex.js';
 import { codexThreadHostable } from '../embedding-host.js';
@@ -33,12 +32,11 @@ import {
   launchCopilot,
 } from './copilot-adapter.js';
 import { launchGemini } from './gemini-adapter.js';
-import { launchOpencode } from './opencode-adapter.js';
 import { cloudAccess } from './cloud-inbox.js';
 import { reportMissingHarnessCli } from './missing-harness-cli.js';
 
 async function hostCodex(agentId: string, threadId: string): Promise<void> {
-  const context = openContext(process.cwd());
+  const context = await import('../context.js').then((module) => module.openContext(process.cwd()));
   ensureAgentRegistered(context.repos, { agentId, kind: 'codex' }, context.repoRoot);
   const client = new CodexDaemonClient();
   // Read receipts: the model answered, or the turn completed, with a pushed message as input.
@@ -179,6 +177,7 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
   const server = spawnCommand(selectedPath, argv.appServer, {
     ...context,
     stdio: ['ignore', 'ignore', 'inherit'],
+    windowsHide: true,
   });
   try {
     await waitForCodexServer(url, server);
@@ -272,7 +271,10 @@ export function registerAdaptersCommand(program: Command): void {
     .argument('[args...]', 'Arguments forwarded to OpenCode')
     // OpenCode's own flags (--model, --prompt, ...) are forwarded, not parsed here.
     .allowUnknownOption()
-    .action(async (args) => launchOpencode(args));
+    .action(async (args) => {
+      const { launchOpencode } = await import('./opencode-adapter.js');
+      await launchOpencode(args);
+    });
   adapters
     .command('gemini')
     .description('Launch Gemini CLI with its Concord inbox monitor started on the first turn')

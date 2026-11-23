@@ -18,6 +18,7 @@ import {
   type Reach,
   type Transport,
 } from './harness-config.js';
+import type { AgentEndpointRecord } from '../db/rows.js';
 
 export {
   deliveryCapabilities,
@@ -28,6 +29,21 @@ export {
   type Reach,
   type Transport,
 };
+
+/**
+ * Whether a registered endpoint can still take a message. An expired lease
+ * means the session is gone; queueing a message for it would strand the message.
+ */
+export function endpointPromptable(
+  endpoint: AgentEndpointRecord | undefined,
+  now = Date.now(),
+): boolean {
+  return (
+    endpoint?.status === 'connected' &&
+    transports.some((transport) => endpoint.capabilities.includes(transport)) &&
+    (endpoint.expiresAt === null || Date.parse(endpoint.expiresAt) > now)
+  );
+}
 
 /**
  * Which states an agent can be reached in.

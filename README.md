@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, GitHub Copilot CLI, and OpenCode talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, Kiro, GitHub Copilot CLI, and OpenCode talk to each other.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -121,7 +121,9 @@ Goose's `config.yaml` when detected. For [DeepSeek Harness](./docs/deepseek.md),
 it adds a native MCP plugin to `$DSH_HOME/cordis.patch.yml` when `dsh` is detected.
 For
 [Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
-`.agents/hooks.json`, and `.agents/rules/concord.md`. It also writes
+`.agents/hooks.json`, and `.agents/rules/concord.md`. For
+[Kiro](./docs/kiro.md), it writes `.kiro/settings/mcp.json`,
+`.kiro/hooks/concord.json`, and `.kiro/steering/concord.md`. It also writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
 `.codex/`, `.cursor/rules/`). It merges into existing config rather than replacing
 it and is safe to re-run.
@@ -175,6 +177,12 @@ keeping the login, and `concord cloud link` switches it back on.
 and lists local state the machine no longer uses, with the commands to move it
 aside once no session started before the link is running (nothing is deleted).
 
+The Cloud-backed CLI commands and hooks do not open the local SQLite store.
+Commands that operate only on local work state are unavailable while the machine
+is linked. Concord's Hermes `pre_llm_call` hook may return no context if its
+local state database cannot be loaded or does not contain the session's project
+path.
+
 </details>
 
 ## Supported agents
@@ -190,6 +198,7 @@ aside once no session started before the link is running (nothing is deleted).
 | DeepSeek Harness                   | [Setup and delivery](./docs/deepseek.md)           |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
+| Kiro                               | [Setup and delivery](./docs/kiro.md)               |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
 | Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
