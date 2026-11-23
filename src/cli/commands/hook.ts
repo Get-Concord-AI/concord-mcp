@@ -22,6 +22,7 @@ import { buildRoster } from '../../domain/presence.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { sessionStartIdentity } from '../agent-identity.js';
+import { recordClientBinding } from '../session-binding.js';
 import { checkFileOverlaps } from './overlap-check.js';
 import { copilotServerAddress } from './copilot-server.js';
 import {
@@ -88,7 +89,9 @@ export function decidePreToolUse(
     return { block: false, message: '', result: 'not_applicable', conflictingTaskCount: 0 };
   }
 
-  const overlaps = checkFileOverlaps(repos, [filePath], selfTaskId);
+  const overlaps = checkFileOverlaps(repos, [filePath], selfTaskId, {
+    platform: process.platform,
+  });
   if (overlaps.length === 0) {
     return { block: false, message: '', result: 'clear', conflictingTaskCount: 0 };
   }
@@ -153,6 +156,9 @@ export function handleSessionStart(
   const agentId = identity.agentId;
 
   ensureAgentRegistered(repos, identity, payload.cwd ?? null);
+  // The hook sees the session as it is now; on a /resume the id has changed
+  // and every MCP server spawned earlier still names the abandoned one.
+  recordClientBinding(repos, identity);
 
   // Advertise the session as reachable before any tool call, so a peer that
   // messages it early gets its message queued rather than rejected.
@@ -228,7 +234,7 @@ function observeThenDrain(
   rawJson: string,
   sessionId: string,
 ): DeliverableMessage[] {
-  observeHookEvent(repos, agentId, rawJson);
+  observeHookEvent(repos, agentId, rawJson, 'antigravity');
   return drainInbox(repos, agentId, 'antigravity', undefined, {
     session: sessionKey(sessionId),
     via: 'hook',

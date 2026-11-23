@@ -448,7 +448,9 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       registerPullEndpoint(context.repos, agentId, options.provider);
       // A SessionStart payload says whether this is a fresh session, which
       // takes back what an earlier session was handed but never read.
-      if (hookPayload !== undefined) observeHookEvent(context.repos, agentId, hookPayload);
+      if (hookPayload !== undefined) {
+        observeHookEvent(context.repos, agentId, hookPayload, options.provider);
+      }
       const alreadyHosted =
         existing?.transport === 'local-ipc' &&
         existing.status === 'connected' &&
@@ -540,7 +542,9 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       const isMonitor = options.format === 'monitor';
       // Read evidence first, so this invocation never marks read a message it
       // is itself about to deliver.
-      if (hookPayload !== undefined) observeHookEvent(context.repos, agentId, hookPayload);
+      if (hookPayload !== undefined) {
+        observeHookEvent(context.repos, agentId, hookPayload, options.provider);
+      }
       const messages = drainInbox(
         context.repos,
         agentId,
@@ -582,7 +586,12 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
           hookPayload: payload,
         });
         const context = await import('../context.js');
-        observeHookEvent(context.openContext(process.cwd()).repos, agentId, payload);
+        observeHookEvent(
+          context.openContext(process.cwd()).repos,
+          agentId,
+          payload,
+          options.provider,
+        );
       } catch (error) {
         // Never fail the hook: a missed observation only leaves a message unseen.
         process.stderr.write(

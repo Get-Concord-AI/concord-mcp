@@ -75,7 +75,6 @@ export async function buildDoctorReport(
   const instructions = instructionStatus(ctx.repoRoot);
   const endpoints = ctx.repos.agentEndpoints.list();
   const connectedEndpoints = endpoints.filter((endpoint) => endpointPromptable(endpoint));
-
   const lines = [
     'Concord doctor',
     '',

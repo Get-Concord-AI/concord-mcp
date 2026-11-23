@@ -6,19 +6,6 @@ import { checkFileOverlaps } from './overlap-check.js';
 
 export { checkFileOverlaps } from './overlap-check.js';
 
-/**
- * Exact-file collisions between the given files and OTHER active tasks' declared
- * files. This is the client-agnostic primitive behind edit-time enforcement: a
- * PreToolUse hook (Claude Code), a git pre-commit hook, or CI can call it to
- * find out whether the files about to change are already claimed by someone
- * else. `selfTaskId` excludes your own claim so you are not flagged against
- * yourself.
- *
- * Unlike claim-time overlap detection (which also warns on shared
- * directories/modules/domains), this gate is intentionally precise: it fires
- * only on the *same file*, since blocking an edit on a coarse signal like a
- * shared top-level directory would be too noisy to be useful.
- */
 /** Human-readable result for `concord check`. */
 export function renderCheck(files: readonly string[], overlaps: readonly OverlapWarning[]): string {
   if (files.length === 0) {
@@ -55,7 +42,9 @@ export function registerCheckCommand(program: Command): void {
         return;
       }
       const { openContext } = await import('../context.js');
-      const overlaps = checkFileOverlaps(openContext(process.cwd()).repos, files, options.task);
+      const overlaps = checkFileOverlaps(openContext(process.cwd()).repos, files, options.task, {
+        platform: process.platform,
+      });
       process.stdout.write(`${renderCheck(files, overlaps)}\n`);
       if (overlaps.length > 0) {
         // Non-zero so a hook/CI can block. Claude Code PreToolUse hooks treat
