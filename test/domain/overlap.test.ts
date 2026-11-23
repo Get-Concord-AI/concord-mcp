@@ -89,6 +89,75 @@ describe('detectOverlaps', () => {
     expect(warnings[0]?.reasons).toContain('shared domain(s): frontend, todo');
   });
 
+  it.each(['支付', 'платежи', '認証', 'café', 'भुगतान'])(
+    'flags a shared module, domain, and risk tag written as %s',
+    (label) => {
+      const surface: OverlapSurface = {
+        taskId: 'TASK-U',
+        expectedFiles: [],
+        modules: [label],
+        domains: [label],
+        riskTags: [label],
+      };
+      const warnings = detectOverlaps(surface, [
+        task({ taskId: 'TASK-V', modules: [label], domains: [label], riskTags: [label] }),
+      ]);
+      expect(warnings[0]?.kinds).toEqual(['shared_module', 'shared_domain', 'shared_risk_tag']);
+    },
+  );
+
+  it('matches non-Latin labels across case and separators', () => {
+    const surface: OverlapSurface = {
+      taskId: 'TASK-U',
+      expectedFiles: [],
+      modules: ['Платежи-Сервис'],
+      domains: [],
+      riskTags: [],
+    };
+    const warnings = detectOverlaps(surface, [
+      task({ taskId: 'TASK-V', modules: ['сервис платежи'] }),
+    ]);
+    expect(warnings[0]?.reasons).toContain('shared module(s): платежи, сервис');
+  });
+
+  it('does not flag different non-Latin labels', () => {
+    const surface: OverlapSurface = {
+      taskId: 'TASK-U',
+      expectedFiles: [],
+      modules: ['支付'],
+      domains: [],
+      riskTags: [],
+    };
+    expect(detectOverlaps(surface, [task({ taskId: 'TASK-V', modules: ['认证'] })])).toEqual([]);
+  });
+
+  // Escapes keep the source bytes stable: an editor could silently normalize the literals.
+  it.each([
+    ['composed and decomposed', 'café', 'café'],
+    ['full-width and ASCII', 'ＡＢ', 'ab'],
+  ])('matches %s spellings of the same label', (_name, left, right) => {
+    const surface: OverlapSurface = {
+      taskId: 'TASK-U',
+      expectedFiles: [],
+      modules: [left],
+      domains: [],
+      riskTags: [],
+    };
+    const warnings = detectOverlaps(surface, [task({ taskId: 'TASK-V', modules: [right] })]);
+    expect(warnings[0]?.kinds).toEqual(['shared_module']);
+  });
+
+  it('keeps an accented label distinct from its unaccented spelling', () => {
+    const surface: OverlapSurface = {
+      taskId: 'TASK-U',
+      expectedFiles: [],
+      modules: ['café'],
+      domains: [],
+      riskTags: [],
+    };
+    expect(detectOverlaps(surface, [task({ taskId: 'TASK-V', modules: ['cafe'] })])).toEqual([]);
+  });
+
   it('treats kebab, snake, and space separators as equivalent for modules', () => {
     const kebab: OverlapSurface = {
       taskId: 'TASK-K',
