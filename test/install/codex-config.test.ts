@@ -91,6 +91,26 @@ describe('upsertCodexMcpServer', () => {
     expect(out).toContain('[mcp_servers.concord.env]');
     expect(out).toContain('CONCORD_REPO_ROOT = "/tmp/repo"');
   });
+
+  it('keeps the comment lines that introduce the next table', () => {
+    // Rewriting our table used to erase the hooks begin marker below it.
+    const existing = [
+      '[mcp_servers.concord]',
+      'command = "old-binary"',
+      '',
+      '# >>> concord hooks >>>',
+      '# a note about the table below',
+      '[[hooks.SessionStart]]',
+      '',
+    ].join('\n');
+    const out = upsertCodexMcpServer(existing);
+
+    expect(out).not.toContain('old-binary');
+    expect(out).toContain(
+      '# >>> concord hooks >>>\n# a note about the table below\n[[hooks.SessionStart]]',
+    );
+    expect(upsertCodexMcpServer(out)).toBe(out);
+  });
 });
 
 describe('installCodexMcpConfig', () => {

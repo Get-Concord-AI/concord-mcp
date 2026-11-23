@@ -3,13 +3,45 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { CONCORD_SERVER_COMMAND, CONCORD_TOML_KEY } from './mcp-config.js';
-import { tomlKeyPath, tomlLines } from './toml-lines.js';
+import { tomlKeyPath, tomlLines, type TomlLine } from './toml-lines.js';
 
 /** The TOML table Codex reads Concord's server definition from. */
 export const CODEX_SECTION_HEADER = '[mcp_servers.concord]';
 
 /** Matches any TOML table header, which terminates the preceding table. */
 const TABLE_HEADER = /^\s*\[/u;
+
+const COMMENT_LINE = /^\s*#/u;
+
+/** Lines split on `\n` (keeping `\r`), flagged when inside a multi-line string. */
+function sourceLines(source: string): TomlLine[] {
+  const raw = source.split('\n');
+  return Array.from(tomlLines(source), ({ inString }, index) => ({
+    text: raw[index] ?? '',
+    inString,
+  }));
+}
+
+function isHeader(line: TomlLine): boolean {
+  return !line.inString && TABLE_HEADER.test(line.text);
+}
+
+/** Blank and comment lines belong to what follows them. */
+function isDecoration(line: TomlLine | undefined): boolean {
+  return (
+    line !== undefined &&
+    !line.inString &&
+    (line.text.trim() === '' || COMMENT_LINE.test(line.text))
+  );
+}
+
+/** Where the table at `header` ends: the next header, minus the comments above it. */
+function tableEnd(lines: readonly TomlLine[], header: number): number {
+  let end = lines.findIndex((line, index) => index > header && isHeader(line));
+  if (end === -1) end = lines.length;
+  while (end > header + 1 && isDecoration(lines[end - 1])) end -= 1;
+  return end;
+}
 
 /**
  * Absolute path to Codex's user-global config. Unlike everything else `install`
@@ -47,24 +79,23 @@ export function upsertCodexMcpServer(existing: string | undefined): string {
     return section;
   }
 
-  const lines = source.split('\n');
-  const found = lines.findIndex((line) => line.trim() === CODEX_SECTION_HEADER);
+  const lines = sourceLines(source);
+  const found = lines.findIndex(
+    (line) => !line.inString && line.text.trim() === CODEX_SECTION_HEADER,
+  );
   const start = found === -1 ? lines.length : found;
 
   // Our table runs until the next table header; a nested `[mcp_servers.concord.env]`
   // is such a header, so any subtable the user added is preserved as trailing content.
-  let end = lines.length;
-  if (found !== -1) {
-    for (let index = found + 1; index < lines.length; index += 1) {
-      if (TABLE_HEADER.test(lines[index] ?? '')) {
-        end = index;
-        break;
-      }
-    }
-  }
+  // So are the comments above it, such as the hooks begin marker.
+  let tailStart = found === -1 ? lines.length : tableEnd(lines, found);
+  while (tailStart < lines.length && lines[tailStart]?.text.trim() === '') tailStart += 1;
 
-  const head = withTrailingBlankLine(lines.slice(0, start));
-  const tail = lines.slice(end).join('\n');
+  const head = withTrailingBlankLine(lines.slice(0, start).map((line) => line.text));
+  const tail = lines
+    .slice(tailStart)
+    .map((line) => line.text)
+    .join('\n');
   return tail === '' ? `${head}${section}` : `${head}${section}\n${tail}`;
 }
 
