@@ -71,6 +71,13 @@ describe('CLI read/export commands', () => {
     dir = seededRepo();
   });
 
+  // No harness on PATH, so doctor skips every executable probe: the report
+  // stays fast and identical on machines with many agent CLIs installed.
+  function doctorEnv(): NodeJS.ProcessEnv {
+    const home = join(dir, 'home');
+    return { HOME: home, USERPROFILE: home, PATH: join(home, 'bin') };
+  }
+
   it('prints a handoff packet for a task', () => {
     expect(runHandoffPacket(dir, 'TASK-12')).toContain('# Handoff: TASK-12 — Add retry');
   });
@@ -110,7 +117,7 @@ describe('CLI read/export commands', () => {
   });
 
   it('doctor reports schema version and adoption', () => {
-    const report = runDoctor(dir);
+    const report = runDoctor(dir, doctorEnv());
     expect(report).toContain('schema v18, expected v18');
     expect(report).toContain('TASK-12');
     expect(report).toContain('start_work: yes');
@@ -125,14 +132,14 @@ describe('CLI read/export commands', () => {
       '<!-- concord:start -->\n## Concord\nOld tool instructions\n<!-- concord:end -->\n',
     );
 
-    expect(runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
+    expect(runDoctor(dir, doctorEnv())).toContain('instructions stale -> AGENTS.md');
   });
 
   it('doctor ignores generic headings and reports invalid instruction paths', () => {
     writeFileSync(join(dir, 'AGENTS.md'), '## Concord\nHuman-authored project notes\n');
     mkdirSync(join(dir, 'CLAUDE.md'));
 
-    const report = runDoctor(dir);
+    const report = runDoctor(dir, doctorEnv());
     expect(report).not.toContain('stale -> AGENTS.md');
     expect(report).toContain('instructions unreadable -> CLAUDE.md');
   });
@@ -144,7 +151,7 @@ describe('CLI read/export commands', () => {
         '<!-- concord:start -->\n## Concord\nOld generated instructions\n<!-- concord:end -->\n',
     );
 
-    expect(runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
+    expect(runDoctor(dir, doctorEnv())).toContain('instructions stale -> AGENTS.md');
   });
 
   it('doctor fails on a dangling Claude plugin link and --fix re-points it', async () => {
