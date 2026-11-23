@@ -77,7 +77,7 @@ describe('decidePreToolUse', () => {
   });
 
   it('checks edits in a linked worktree using the shared root claim', () => {
-    const base = realpathSync(mkdtempSync(join(tmpdir(), 'concord-hook-worktree-')));
+    const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'concord-hook-worktree-')));
     const primary = join(base, 'primary');
     const worktree = join(base, 'feature');
     const git = (...args: string[]) =>
@@ -129,7 +129,7 @@ describe('decidePreToolUse', () => {
   });
 
   it('checks new files addressed through a symlink to the selected checkout', () => {
-    const base = realpathSync(mkdtempSync(join(tmpdir(), 'concord-hook-alias-')));
+    const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'concord-hook-alias-')));
     const workspace = join(base, 'workspace');
     const alias = join(base, 'alias');
     try {
