@@ -31,10 +31,18 @@ function mcpState(env: NodeJS.ProcessEnv): FileState {
  */
 type HookState = 'present' | 'missing' | 'partial';
 
+/**
+ * The extension reads only `~/Documents/Cline/Hooks`; `~/.cline/hooks` is the
+ * SDK fallback. A complete fallback must not mask a canonical directory the
+ * user blocked, so 'present' requires the first directory — anything less is
+ * 'partial' when some hooks exist somewhere and 'missing' when none do.
+ */
 function hooksState(env: NodeJS.ProcessEnv): HookState {
-  const states = clineGlobalHookDirs(env).map((dir) => clineHooksPresent(dir));
-  if (states.includes('present')) return 'present';
-  return states.includes('partial') ? 'partial' : 'missing';
+  const [primaryDir, secondaryDir] = clineGlobalHookDirs(env);
+  const primary = primaryDir === undefined ? 'missing' : clineHooksPresent(primaryDir);
+  if (primary === 'present') return 'present';
+  const secondary = secondaryDir === undefined ? 'missing' : clineHooksPresent(secondaryDir);
+  return primary === 'partial' || secondary !== 'missing' ? 'partial' : 'missing';
 }
 
 function report(
@@ -89,17 +97,17 @@ export function statusCline(
   if (mcp === 'present' && hooks === 'present') {
     return report('installed', config.installedDetail, config.installedCapabilities);
   }
+  if (hooks === 'partial') {
+    return report(
+      'action_required',
+      'Some Concord Cline hooks are missing or blocked — check ~/Documents/Cline/Hooks, the only directory the extension reads. Run `concord setup` to repair them.',
+    );
+  }
   if (mcp === 'present') {
     return report(
       'action_required',
       'Cline has the Concord MCP server but not its lifecycle hooks, so messages wait in the durable inbox. Run `concord setup` to add them.',
       ['pull', 'busy'],
-    );
-  }
-  if (hooks === 'partial') {
-    return report(
-      'action_required',
-      'Some Concord Cline hooks are installed but incomplete. Run `concord setup` to repair them.',
     );
   }
   return report(

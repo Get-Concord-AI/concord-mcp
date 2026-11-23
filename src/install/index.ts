@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { upsertBlock } from './block.js';
@@ -38,10 +38,14 @@ const TARGETS: readonly InstallTarget[] = [
     instructions: KIRO_INSTRUCTIONS,
   },
   // Cline reads rules from both directories; the same managed block in each
-  // keeps working whichever layout a given Cline version prefers.
+  // keeps working whichever layout a given Cline version prefers. Older
+  // Cline versions read a single `.clinerules` file instead — installConcord
+  // retargets this entry into that file when it exists.
   { relPath: join('.clinerules', 'concord.md'), instructions: CLINE_INSTRUCTIONS },
   { relPath: join('.cline', 'rules', 'concord.md'), instructions: CLINE_INSTRUCTIONS },
 ];
+
+const CLINE_RULES_DIR_TARGET = join('.clinerules', 'concord.md');
 
 function writeTarget(repoRoot: string, target: InstallTarget): string {
   const fullPath = join(repoRoot, target.relPath);
@@ -58,5 +62,16 @@ function writeTarget(repoRoot: string, target: InstallTarget): string {
  * written.
  */
 export function installConcord(repoRoot: string): string[] {
-  return TARGETS.map((target) => writeTarget(repoRoot, target));
+  // A single-file `.clinerules` cannot also be the `.clinerules/` directory:
+  // merge the managed block into the file itself rather than failing setup.
+  const legacyRules = join(repoRoot, '.clinerules');
+  const clineRulesIsFile = existsSync(legacyRules) && !statSync(legacyRules).isDirectory();
+  return TARGETS.map((target) =>
+    writeTarget(
+      repoRoot,
+      target.relPath === CLINE_RULES_DIR_TARGET && clineRulesIsFile
+        ? { ...target, relPath: '.clinerules' }
+        : target,
+    ),
+  );
 }

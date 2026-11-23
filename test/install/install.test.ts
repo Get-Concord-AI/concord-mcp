@@ -113,4 +113,18 @@ describe('installConcord', () => {
     expect(first).toContain('start_work');
     expect(second).toBe(first);
   });
+
+  it('merges into a single-file .clinerules instead of failing setup', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-install-'));
+    writeFileSync(join(root, '.clinerules'), '# Legacy cline rules\n');
+
+    const written = installConcord(root);
+
+    expect(written).toContain('.clinerules');
+    expect(written).not.toContain(join('.clinerules', 'concord.md'));
+    const rules = readFileSync(join(root, '.clinerules'), 'utf8');
+    expect(rules).toContain('# Legacy cline rules');
+    expect(rules).toContain('start_work');
+    expect(existsSync(join(root, join('.cline', 'rules', 'concord.md')))).toBe(true);
+  });
 });

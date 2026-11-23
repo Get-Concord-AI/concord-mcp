@@ -1,13 +1,16 @@
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import type { CloudRuntime } from '../../src/cloud/runtime.js';
+import { workspaceIdForRoot } from '../../src/config/paths.js';
 import {
   clineSurface,
   clineWorkspace,
+  handleCloudClineHook,
   handleLocalClineHook,
   isClineHookEvent,
   runClineHook,
@@ -17,6 +20,7 @@ import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { agentIdForSession, type AgentIdentity } from '../../src/domain/identity.js';
 import { handleSendAgentMessage } from '../../src/tools/agent-messages.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
+import { fakeCloud, ok, type Route } from '../cloud/fake-cloud.js';
 
 const TASK_START_PAYLOAD = JSON.stringify({
   taskId: 'cline-task-1',
@@ -209,5 +213,68 @@ describe('runClineHook end to end', () => {
       env,
     );
     expect(prompt).toBe('{}');
+  });
+
+  it('returns an empty control object when the local workspace cannot be opened', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-cline-hook-bad-'));
+    const notDir = join(home, 'a-file');
+    writeFileSync(notDir, 'x');
+    const env = { HOME: home, USERPROFILE: home };
+    const payload = JSON.stringify({
+      task_id: 'task-bad',
+      hook_name: 'TaskStart',
+      workspace_roots: [notDir],
+    });
+
+    await expect(runClineHook('cline-task-start', payload, env)).resolves.toBe('{}');
+  });
+});
+
+describe('cloud Cline hooks', () => {
+  let repoRoot: string;
+  let cloud: ReturnType<typeof fakeCloud>;
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'concord-cline-cloud-'));
+  });
+
+  const registration: Route[] = [
+    ['POST /v1/machines', () => ok({ machine: { id: 'm-uuid' } })],
+    ['POST /v1/agents', () => ok({ agent: { id: 'a-uuid' } })],
+    ['PUT /v1/agents/a-uuid/endpoint', () => ok({ endpoint: {} })],
+    ['GET /v1/agents', () => ok({ agents: [] })],
+  ];
+
+  function runtimeWith(routes: Route[]): CloudRuntime {
+    cloud = fakeCloud([...registration, ...routes]);
+    return {
+      apiUrl: 'https://api.example.test',
+      bearer: () => Promise.resolve('token'),
+      machineKey: 'machine-1',
+      projectKey: 'github.com/acme/app',
+      repoRoot,
+      checkoutRoot: repoRoot,
+      fetch: cloud.fetch,
+    };
+  }
+
+  it('names the hook-resolved workspace_id so cloud calls reach the right project', async () => {
+    const runtime = runtimeWith([]);
+
+    const output = await handleCloudClineHook(
+      runtime,
+      CLINE,
+      repoRoot,
+      'cline-task-start',
+      'extension',
+    );
+
+    const control = z
+      .object({ contextModification: z.string().optional() })
+      .loose()
+      .parse(JSON.parse(output));
+    const message = control.contextModification ?? '';
+    expect(message).toContain(`agent_id: "${CLINE.agentId}"`);
+    expect(message).toContain(`workspace_id: "${workspaceIdForRoot(repoRoot)}"`);
   });
 });

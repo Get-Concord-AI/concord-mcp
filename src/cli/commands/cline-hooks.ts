@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { CloudRuntime } from '../../cloud/runtime.js';
+import { workspaceIdForRoot } from '../../config/paths.js';
 import type { Repositories } from '../../db/index.js';
 import {
   agentIdForSession,
@@ -203,10 +204,13 @@ export async function handleCloudClineHook(
     case 'cline-task-start':
     case 'cline-task-resume':
       await registerInCloud(runtime, identity.agentId, 'cline', cwd);
+      // The MCP server itself was started outside the repository, so the
+      // session-start context must name the workspace the hook resolved —
+      // the same id the local path reports — or cloud calls land elsewhere.
       return hookOutput(
         clineSessionStartMessage(
           identity.agentId,
-          undefined,
+          workspaceIdForRoot(cwd),
           await cloudRoster(runtime, identity.agentId),
         ),
       );
@@ -248,14 +252,20 @@ export async function runClineHook(
     return '{}';
   }
   if (access.kind === 'local') {
-    const context = openContext(repoRoot, projectEnv);
-    return handleLocalClineHook(
-      context.repos,
-      identity,
-      { repoRoot: context.repoRoot, workspaceId: context.workspaceId },
-      event,
-      surface,
-    );
+    try {
+      const context = openContext(repoRoot, projectEnv);
+      return handleLocalClineHook(
+        context.repos,
+        identity,
+        { repoRoot: context.repoRoot, workspaceId: context.workspaceId },
+        event,
+        surface,
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Concord could not open the local workspace: ${detail}\n`);
+      return '{}';
+    }
   }
   try {
     return await handleCloudClineHook(access.runtime, identity, repoRoot, event, surface);

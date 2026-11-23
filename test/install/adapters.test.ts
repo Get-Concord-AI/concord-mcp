@@ -857,6 +857,25 @@ describe('global harness adapters', () => {
         }
       }
     });
+
+    it('reports action_required when a user file blocks the extension hook directory', () => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-cline-blocked-'));
+      const bin = join(home, 'bin');
+      mkdirSync(bin);
+      writeFakeVersion(bin, 'cline', '3.0.75');
+      const env = { HOME: home, USERPROFILE: home, PATH: bin };
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      // The complete ~/.cline/hooks fallback must not mask the directory the
+      // VS Code extension actually reads.
+      const [taskStartName] = clineHookFileNames();
+      if (taskStartName === undefined) throw new Error('expected Cline hook names');
+      writeFileSync(join(home, 'Documents', 'Cline', 'Hooks', taskStartName), '# my own hook\n');
+
+      const entry = statusGlobalAdapters(env).find((item) => item.harness === 'cline');
+      expect(entry?.status).toBe('action_required');
+      expect(entry?.detail).toContain('Documents/Cline/Hooks');
+    });
   });
 });
 
