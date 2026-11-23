@@ -49,10 +49,7 @@ export function hostsRewake(env: NodeJS.ProcessEnv): boolean {
  * their async hooks at teardown, and `receiverAlive` is only consulted for
  * interactive sessions, so callers pass `undefined` for SDK hosts.
  */
-export function rewakeWaits(
-  env: NodeJS.ProcessEnv,
-  receiverAlive: boolean | undefined,
-): boolean {
+export function rewakeWaits(env: NodeJS.ProcessEnv, receiverAlive: boolean | undefined): boolean {
   if (env['CLAUDE_CODE_ENTRYPOINT']?.trim() === 'sdk-cli') return false;
   if (hostsRewake(env)) return true;
   return receiverAlive !== true;

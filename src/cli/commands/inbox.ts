@@ -537,10 +537,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         ...(options.fromHook === true ? { hookPayload } : {}),
       };
       // The receiver lookup runs only on a Grok Stop, never on the per-tool-call hook path.
-      const monitorNudge = (
-        agent: string,
-        receiverIsActive: () => boolean,
-      ): string | undefined =>
+      const monitorNudge = (agent: string, receiverIsActive: () => boolean): string | undefined =>
         grokStop && hookPayload !== undefined
           ? grokMonitorNudge(hookPayload, agent, receiverIsActive())
           : undefined;
@@ -694,9 +691,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         ? undefined
         : access.kind === 'cloud'
           ? watching(access.runtime, agentId)
-          : receiverActive(
-              (await localContext()).repos.agentEndpoints.getByAgent(agentId),
-            );
+          : receiverActive((await localContext()).repos.agentEndpoints.getByAgent(agentId));
       if (!rewakeWaits(process.env, receiverAlive)) return;
       const claim = claimWaiter(agentId, randomUUID());
       const cancel = standDownWhenSuperseded(claim, () => {

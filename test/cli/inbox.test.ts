@@ -392,11 +392,19 @@ describe('pull-transport inbox', () => {
     const messageId = sendTo(repos, 'beta-new', 'for the resumed session', 'key-resume');
     const delivered: string[] = [];
 
-    await watchInbox(repos, 'beta-old', 'claude-code', 250, true, (messages) => {
-      delivered.push(...messages.map((message) => message.messageId));
-    }, {
-      resolveTarget: () => ({ agentId: 'beta-new', session: null }),
-    });
+    await watchInbox(
+      repos,
+      'beta-old',
+      'claude-code',
+      250,
+      true,
+      (messages) => {
+        delivered.push(...messages.map((message) => message.messageId));
+      },
+      {
+        resolveTarget: () => ({ agentId: 'beta-new', session: null }),
+      },
+    );
 
     expect(delivered).toEqual([messageId]);
   });

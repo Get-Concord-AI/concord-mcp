@@ -96,7 +96,7 @@ Concord works around both halves of that:
 
 - **Identity.** Every SessionStart hook records which agent the client now
   hosts (`session_bindings`). The monitor consults it on each poll, so a
-  monitor that survives a `/resume` or `/clear` keeps draining the *live*
+  monitor that survives a `/resume` or `/clear` keeps draining the _live_
   session's inbox instead of the abandoned one.
 - **Reachability.** While no receiver heartbeat is live, the Stop hook's
   `asyncRewake` waiter steps in and wakes the idle session with the next
