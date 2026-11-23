@@ -61,8 +61,10 @@ describe('installConcord', () => {
     const rooRule = readFileSync(join(root, '.roo', 'rules', 'concord.md'), 'utf8');
     expect(rooRule).toContain('start_work');
     expect(rooRule).toContain('concord inbox register');
-    expect(rooRule).toContain('--provider roo --agent');
+    expect(rooRule).toContain('--provider roo --agent <your id>');
     expect(rooRule).not.toContain('omit it');
+    // A concrete example id gets copied verbatim, so two Roo sessions would merge into one agent.
+    expect(rooRule).not.toMatch(/roo:[a-z0-9]/);
 
     expect(readFileSync(join(root, '.agents', 'rules', 'concord.md'), 'utf8')).toContain(
       'trigger: always_on',

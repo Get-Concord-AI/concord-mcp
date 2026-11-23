@@ -92,10 +92,12 @@ export const ROO_INSTRUCTIONS = `## Concord: shared work-state for coding agents
 
 This project uses Concord MCP. Keep coordination to the five workflow tools:
 
-- **First**, pick an id that no other session uses, such as \`roo:alpha\`, and
-  run \`concord inbox register --provider roo --agent roo:alpha\` in a terminal.
+- **First**, make up an id that no other session uses: \`roo:\` followed by
+  six random letters and digits that you generate now (never copy an id from
+  an example or another session). Run
+  \`concord inbox register --provider roo --agent <your id>\` in a terminal.
   Concord cannot read a Roo Code session id, so pass that id as \`agent_id\` on
-  every Concord tool call. Use a different id for each Roo session.
+  every Concord tool call.
 - **Before editing**, call \`start_work\` with the task, your agent kind
   (\`roo\`), your \`agent_id\`, and expected files or modules. It registers
   presence, claims the scope, and returns overlap warnings.

@@ -36,6 +36,7 @@ const instructionTargets = [
   join('.codex', 'concord.md'),
   join('.cursor', 'rules', 'concord.mdc'),
   join('.agents', 'rules', 'concord.md'),
+  join('.roo', 'rules', 'concord.md'),
 ] as const;
 
 /** Summarize outdated or unreadable generated Concord instruction blocks. */
