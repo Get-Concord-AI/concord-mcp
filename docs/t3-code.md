@@ -113,18 +113,24 @@ launches Concord's managed host (`concord adapters host-codex`) for T3
 threads too: it resumes the thread through `codex app-server proxy` and can
 start turns in Concord's daemon. Those turns write the same rollout from a
 second process that T3's UI never shows — a competing writer, the same
-hazard Conductor is excluded for. If a T3 Codex thread misbehaves, remove
-the `# >>> concord hooks >>>` block from `config.toml` (the markers document
-this opt-out); the thread keeps MCP tool access but loses hook-driven
-identity and delivery, and no host starts.
+hazard Conductor is excluded for. To opt out, remove the
+`# >>> concord hooks >>>` block from `config.toml` (the markers document
+this) — ideally before starting T3 Codex sessions, since the `SessionStart`
+hook is what launches the host. The block only gates future launches: a host
+already running for a thread is a detached `concord adapters host-codex`
+process that keeps delivering until you end it in Task Manager or `ps`/`kill`.
+The thread keeps MCP tool access but loses hook-driven identity and
+delivery.
 
 ## Caveats
 
 - **Codex competing writer.** Concord's managed host attaches to T3 Code Codex
   threads — T3 sets no embedding-host marker, so `codexThreadHostable` treats
   them as hostable — and can start turns in its own daemon that T3's UI never
-  shows, writing the same rollout. See
-  [Message delivery](#message-delivery) for the opt-out.
+  shows, writing the same rollout. Opting out means removing the
+  `# >>> concord hooks >>>` block **and** killing any `host-codex` process
+  already running for the thread — see
+  [Message delivery](#message-delivery).
 - **Managed provider runtimes.** T3 Code's "Connect with ChatGPT" Codex
   instance and managed Antigravity use T3-managed config directories, not
   `~/.codex` or `~/.gemini/config`. Concord's registrations do not reach them.
