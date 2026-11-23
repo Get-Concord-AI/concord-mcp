@@ -36,6 +36,7 @@ import { copilotServerAddress } from './copilot-adapter.js';
 import { fileSpool } from './copilot-spool.js';
 import { isDevinHookEvent, runDevinHook } from './devin-hooks.js';
 import { isHermesHookEvent, runHermesHook } from './hermes-hooks.js';
+import { isKiroHookEvent, runKiroHook } from './kiro-hooks.js';
 import { isVibeHookEvent, runVibeHook } from './vibe-hooks.js';
 import {
   cloudCopilotBackend,
@@ -92,7 +93,9 @@ export function decidePreToolUse(
     return { block: false, message: '', result: 'not_applicable', conflictingTaskCount: 0 };
   }
 
-  const overlaps = checkFileOverlaps(repos, [filePath], selfTaskId);
+  const overlaps = checkFileOverlaps(repos, [filePath], selfTaskId, {
+    platform: process.platform,
+  });
   if (overlaps.length === 0) {
     return { block: false, message: '', result: 'clear', conflictingTaskCount: 0 };
   }
@@ -315,10 +318,16 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     .command('hook <event>')
     .description(
       'Run a Concord hook. events: pre-tool-use (PreToolUse overlap gate), ' +
-        'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, and stop.',
+        'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, ' +
+        'stop, and kiro-session-start and kiro-user-prompt-submit.',
     )
     .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {
+      if (isKiroHookEvent(event)) {
+        const output = await runKiroHook(event, readStdin());
+        if (output !== '') process.stdout.write(`${output}\n`);
+        return;
+      }
       if (isDevinHookEvent(event)) {
         process.stdout.write(`${await runDevinHook(event, readStdin())}\n`);
         return;

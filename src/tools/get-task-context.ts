@@ -50,7 +50,10 @@ export function handleGetTaskContext(
       task.expectedFiles,
       ...activeOthers.map((candidate) => candidate.expectedFiles),
     ]);
-    overlaps = detectOverlaps(task, activeOthers, 0, pathsFromCheckout);
+    overlaps = detectOverlaps(task, activeOthers, 0, {
+      platform: process.platform,
+      pathsFromCheckout,
+    });
   }
 
   return {
