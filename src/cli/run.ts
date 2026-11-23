@@ -142,11 +142,18 @@ async function registerCommands(args: readonly string[]): Promise<void> {
 /** Global options that take a value and therefore hide the following token. */
 const GLOBAL_VALUE_FLAGS = new Set(['-C', '--repo', '--workspace']);
 
-/** The first positional token, past global options placed before the command. */
-function topLevelCommand(argv: readonly string[]): string | undefined {
+/** Help flags. Placed before the command they ask for the root help, which lists every command. */
+const HELP_FLAGS = new Set(['-h', '--help']);
+
+/**
+ * The first positional token, past global options placed before the command.
+ * A help flag before any command means root help, so it reports no command.
+ */
+export function topLevelCommand(argv: readonly string[]): string | undefined {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === undefined) continue;
+    if (HELP_FLAGS.has(token)) return undefined;
     if (token === '--') return argv[index + 1];
     if (GLOBAL_VALUE_FLAGS.has(token)) {
       index += 1;

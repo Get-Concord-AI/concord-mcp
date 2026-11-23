@@ -80,3 +80,19 @@ describe('CLI startup imports', () => {
     );
   });
 });
+
+describe('command selection', () => {
+  it('loads only the command named, past global options', async () => {
+    const { topLevelCommand } = await import('../../src/cli/run.js');
+    expect(topLevelCommand(['hook', 'session-start'])).toBe('hook');
+    expect(topLevelCommand(['-C', '/repo', 'inbox', 'drain'])).toBe('inbox');
+    expect(topLevelCommand(['hook', '--help'])).toBe('hook');
+  });
+
+  it('loads every command for root help, even when a command follows the flag', async () => {
+    const { topLevelCommand } = await import('../../src/cli/run.js');
+    expect(topLevelCommand(['--help', 'hook'])).toBeUndefined();
+    expect(topLevelCommand(['-h', 'inbox'])).toBeUndefined();
+    expect(topLevelCommand(['-C', '/repo', '--help', 'hook'])).toBeUndefined();
+  });
+});

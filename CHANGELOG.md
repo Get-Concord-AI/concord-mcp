@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The `concord` CLI loads only the command it runs, and the hook, inbox and
+  check paths no longer import the Ink dashboard or the MCP SDK. Agent hooks,
+  which start the CLI on every tool call, start 2-4 times faster (e.g.
+  `concord check` 3.7 s to 0.9 s in a container). Help and `--version` are
+  unchanged.
+
 ## [0.24.0] - 2026-11-23
 
 ### Added
@@ -48,11 +56,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- The `concord` CLI loads only the command it runs, and the hook, inbox and
-  check paths no longer import the Ink dashboard or the MCP SDK. Agent hooks,
-  which start the CLI on every tool call, start 2-4 times faster (e.g.
-  `concord check` 3.7 s to 0.9 s in a container). Help and `--version` are
-  unchanged.
 - The README's Quick start explains how to fix `EACCES: permission denied` from
   `npm install -g` on Linux with a user-owned npm prefix instead of `sudo`
   (#368).
