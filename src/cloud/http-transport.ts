@@ -43,10 +43,30 @@ export class HttpClientTransport implements Transport {
   }
 
   async send(message: JSONRPCMessage, options?: TransportSendOptions): Promise<void> {
-    await this.#inner.send(message, options);
+    await this.#inner.send(message, options === undefined ? undefined : resumptionOptions(options));
   }
 
   async close(): Promise<void> {
     await this.#inner.close();
   }
+}
+
+interface ResumptionOptions {
+  resumptionToken?: string;
+  onresumptiontoken?: (token: string) => void;
+}
+
+/**
+ * The resumption fields the Streamable HTTP transport reads, with unset fields
+ * left out. Its `send` types them as `resumptionToken?: string`, which
+ * `exactOptionalPropertyTypes` will not fill from the generic options'
+ * `string | undefined`. `relatedRequestId` is dropped: this transport never reads it.
+ */
+function resumptionOptions(options: TransportSendOptions): ResumptionOptions {
+  return {
+    ...(options.resumptionToken === undefined ? {} : { resumptionToken: options.resumptionToken }),
+    ...(options.onresumptiontoken === undefined
+      ? {}
+      : { onresumptiontoken: options.onresumptiontoken }),
+  };
 }

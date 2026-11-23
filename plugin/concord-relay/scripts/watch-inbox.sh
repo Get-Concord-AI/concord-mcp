@@ -39,9 +39,42 @@ harness_alive() {
 # CONCORD_AGENT_ID overrides it when a human wants to name the agents.
 
 # Once installed, this plugin loads in every session, most of which have nothing
-# to do with Concord. Exit immediately rather than leaving a poll loop spawning
-# a subprocess every couple of seconds for the life of an unrelated project.
-if ! "${CONCORD_BIN}" inbox status >/dev/null 2>&1; then
+# to do with Concord. Exit rather than leaving a poll loop spawning a subprocess
+# every couple of seconds for the life of an unrelated project.
+#
+# A single failed check is not proof, though: a resumed session can start while
+# the previous process is still shutting down, and one transient failure here
+# used to kill the monitor for the rest of the session without a word (#180).
+# So retry a few times with a short backoff before deciding this directory is
+# not a Concord workspace. An unrelated project pays a few extra seconds once,
+# at session start.
+#
+# Both knobs are whole numbers: the backoff doubles with shell arithmetic,
+# which rejects `0.5`, and a value like `3.0` would break the attempt
+# comparison so the gate never gave up. Anything else falls back to the
+# default rather than crashing or retrying forever. Leading zeros are refused
+# too, since shell arithmetic reads `08` as a bad octal number.
+whole_number_or() {
+  case "$1" in
+    0) [ "${3:-}" = "allow-zero" ] && printf '%s' "$1" || printf '%s' "$2" ;;
+    '' | *[!0-9]* | 0*) printf '%s' "$2" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+CONCORD_INBOX_STARTUP_ATTEMPTS="$(whole_number_or "${CONCORD_INBOX_STARTUP_ATTEMPTS:-}" 3)"
+CONCORD_INBOX_STARTUP_BACKOFF_SECONDS="$(whole_number_or "${CONCORD_INBOX_STARTUP_BACKOFF_SECONDS:-}" 1 allow-zero)"
+workspace_ready() {
+  local attempt=1 delay="${CONCORD_INBOX_STARTUP_BACKOFF_SECONDS}"
+  while true; do
+    "${CONCORD_BIN}" inbox status >/dev/null 2>&1 && return 0
+    [ "${attempt}" -ge "${CONCORD_INBOX_STARTUP_ATTEMPTS}" ] && return 1
+    harness_alive || return 1
+    sleep "${delay}"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
+if ! workspace_ready; then
   exit 0
 fi
 
