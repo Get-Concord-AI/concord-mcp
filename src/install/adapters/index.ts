@@ -3,7 +3,9 @@ import { dirname, join } from 'node:path';
 import { installHermes, statusHermes } from './hermes.js';
 import { statusQwen } from './qwen.js';
 import { statusDeepseek } from './deepseek.js';
+import { installKilo, statusKilo } from './kilo.js';
 import { installDeepseekConfig, uninstallDeepseekConfig } from '../deepseek-config.js';
+import { uninstallKiloMcpConfig } from '../kilo-config.js';
 
 import {
   HARNESS_CONFIGS,
@@ -729,6 +731,8 @@ export function statusAdapter(
       return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
     case 'deepseek':
       return statusDeepseek(executablePath(HARNESS_CONFIGS.deepseek.executable, env), env);
+    case 'kilo':
+      return statusKilo(executablePath(HARNESS_CONFIGS.kilo.executable, env), env);
   }
 }
 
@@ -778,6 +782,11 @@ export function installAdapter(
 
   if (harness === 'opencode') {
     installOpencode(env);
+    return;
+  }
+
+  if (harness === 'kilo') {
+    installKilo(env);
     return;
   }
 
@@ -914,6 +923,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
     uninstallDeepseekConfig(env);
   } catch {
     // Leave malformed or unreadable DeepSeek config untouched and continue cleanup.
+  }
+  try {
+    uninstallKiloMcpConfig(env);
+  } catch {
+    // Leave malformed or unreadable Kilo config untouched and continue cleanup.
   }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');

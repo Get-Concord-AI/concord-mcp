@@ -188,6 +188,7 @@ aside once no session started before the link is running (nothing is deleted).
 | Grok Build                         | [Setup and delivery](./docs/grok-build.md)         |
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
 | DeepSeek Harness                   | [Setup and delivery](./docs/deepseek.md)           |
+| Kilo Code                          | [Setup and delivery](./docs/kilo.md)               |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |

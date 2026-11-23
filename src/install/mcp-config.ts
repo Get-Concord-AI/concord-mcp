@@ -386,7 +386,7 @@ export function installMcpConfigs(repoRoot: string): string[] {
 }
 
 /** The published package an older install would have run through a runner. */
-const CONCORD_PACKAGE_NAME = '@concord-ai/concord-mcp';
+export const CONCORD_PACKAGE_NAME = '@concord-ai/concord-mcp';
 
 /**
  * Whether a `concord` server entry is one Concord wrote and may therefore be
@@ -434,7 +434,7 @@ export function isConcordServerOwned(existing: string): boolean {
 }
 
 /** Whether `arg` is exactly `name`, or `name@version` — not a path containing it. */
-function isPackageSpec(arg: string, name: string): boolean {
+export function isPackageSpec(arg: string, name: string): boolean {
   if (arg === name) return true;
   if (!arg.startsWith(`${name}@`)) return false;
   const version = arg.slice(name.length + 1);

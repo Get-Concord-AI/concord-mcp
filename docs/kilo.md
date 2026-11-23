@@ -1,0 +1,108 @@
+# Kilo Code
+
+Concord integrates with the `kilo` CLI from
+[Kilo Code](https://kilo.ai), an OpenCode-derived coding agent. Run
+`concord setup` (or `concord adapters install`) and, when `kilo` is found,
+Concord registers its MCP server through Kilo's own command:
+
+```bash
+kilo mcp add concord --env CONCORD_AGENT_KIND=kilo -- concord-mcp
+```
+
+Kilo writes its own config — `kilo.jsonc` under its config directory — so
+comments, trailing commas, other servers, and every other setting are left
+exactly as they were, and re-running is safe. Restart running Kilo sessions
+afterwards so they load the server.
+
+Concord finds Kilo's config at `$XDG_CONFIG_HOME/kilo` when set, else
+`~/.config/kilo`, and checks `kilo.json`, `kilo.jsonc`, and `config.json` —
+the filenames Kilo's documentation accepts. `kilo mcp add` always writes
+`kilo.jsonc`.
+
+## Supported surfaces
+
+The adapter covers the **Kilo CLI** (`kilo` on `PATH`, verified with 7.8.x on
+Windows; any 7.x release that still ships the `kilo mcp` subcommand). The VS
+Code and JetBrains extensions are separate surfaces: they share Kilo's config
+format, but Concord has not verified how they spawn MCP servers or whether
+they honor a global `kilo.jsonc` registration, so no live-delivery claim is
+made for them. If your extension picks up the same global config, the five
+workflow tools work there too — treat that as unverified.
+
+## Identity
+
+Kilo starts MCP servers itself and passes **no session identity** to them —
+not in MCP request metadata and not in the child environment (verified on
+7.8.27: requests carry only a progress token, and the server environment has
+`KILO`, `KILO_RUN_ID`, and `OPENCODE` but no session id). The server entry
+therefore pins only `CONCORD_AGENT_KIND=kilo`, and each Kilo session resolves
+its identity the way other session-less harnesses do: set `CONCORD_AGENT_ID`
+before launching Kilo:
+
+```bash
+cd /path/to/repository
+export CONCORD_AGENT_ID="kilo:$(node -e 'console.log(require("node:crypto").randomUUID())')"
+kilo
+```
+
+The variable is inherited by the MCP server process. Use a different ID for
+each independent Kilo session, and keep one coordinating agent per session —
+there is no per-request identity to distinguish chats inside one Kilo
+process. `kilo run`, `kilo serve`, `--continue`/`--session`, and `--fork`
+all share this limitation: a resumed or forked session keeps whatever
+`CONCORD_AGENT_ID` its environment carries, so export a fresh ID when you
+want a distinct agent. Without `CONCORD_AGENT_ID`, Concord cannot invent a
+stable Kilo identity and registration fails visibly rather than guessing.
+
+## Workflow and messages
+
+Kilo exposes the Concord tools as `concord_start_work`, `concord_inspect_work`,
+`concord_update_work`, `concord_transfer_work`, and `concord_finish_work`.
+Check the `repo_root` returned by the first call before claiming work.
+Presence and dashboard output use the `kilo` agent kind.
+
+Delivery is **pull-only**. Kilo's `serve` HTTP API lists sessions, but
+Concord has not verified a route from an agent identity to a live Kilo
+session it can steer or wake, so `concord adapters status` reports
+`pull, busy` — never idle reachability. Register the durable inbox from the
+same repository, using the same identity as the MCP server:
+
+```bash
+concord inbox register --provider kilo --agent "$CONCORD_AGENT_ID"
+concord inbox drain --provider kilo --agent "$CONCORD_AGENT_ID"
+```
+
+Register before peers send prompts. During a running turn, drain between
+work steps and while expecting a reply; draining refreshes the inbox's
+90-second lease. An explicitly identified MCP client can also read its own
+inbox with `inspect_work` and reply through `update_work` using the message
+ID. `concord inbox watch --provider kilo` is **not** advertised as an idle
+wake-up path. Ask the agent to check its inbox when starting a new turn.
+
+## Status and removal
+
+`concord adapters status` and `concord doctor` report Kilo detection, its
+version floor (7.0.0, with a runtime probe for the `kilo mcp` subcommand),
+and its registration. An installed registration reports `pull, busy`. An
+unreadable config file under the Kilo config directory is reported as
+`action_required` rather than treated as absent.
+
+`concord adapters install` re-runs `kilo mcp add`, which refreshes the entry.
+`concord adapters uninstall` removes the `mcp.concord` entry from every
+global Kilo config that has one **Concord owns** — an entry is owned when it
+launches `concord-mcp` (or the published package spec) and carries only
+`CONCORD_*` environment variables. A `concord` server somebody else wrote,
+and every unrelated server or setting, is preserved. Removing the entry
+rewrites that file as plain JSON, which drops comments and formatting; the
+file stays valid Kilo config.
+
+## Verification
+
+Verified on Windows with Kilo CLI 7.8.27: `kilo mcp add` writes the expected
+`kilo.jsonc` entry, `kilo mcp list` connects, and a `kilo run` turn called
+all five Concord workflow tools. macOS/Linux, the VS Code and JetBrains
+extensions, `kilo serve`/ACP steering, and idle wake-up were not tested.
+
+Configuration references: [Kilo configuration docs](https://kilo.ai/docs)
+(`kilo.json`/`kilo.jsonc`, the `mcp` table with `type`, `command`,
+`environment`, and `enabled`), and `kilo mcp --help`.
