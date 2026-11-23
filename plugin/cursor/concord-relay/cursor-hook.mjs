@@ -104,7 +104,8 @@ function renderMessages(messages) {
   return messages
     .map((message) => {
       const task = typeof message.taskId === 'string' ? ` task=${message.taskId}` : '';
-      return `[concord from ${String(message.senderAgentId)} id=${String(message.messageId)}${task}]\n${String(message.content)}`;
+      const ask = message.expectsReply === false ? ' no-reply-needed' : '';
+      return `[concord from ${String(message.senderAgentId)} id=${String(message.messageId)}${task}${ask}]\n${String(message.content)}`;
     })
     .join('\n\n');
 }

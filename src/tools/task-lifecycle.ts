@@ -110,7 +110,7 @@ function applyTransition(repos: Repositories, request: TransitionRequest): TaskL
     repos.agents.recordActivity(request.actorAgentId);
     return { task: updated, ownershipEvent };
   });
-  return transact();
+  return transact.immediate();
 }
 
 export function handleAssignTask(

@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The README's Quick start explains how to fix `EACCES: permission denied` from
+  `npm install -g` on Linux with a user-owned npm prefix instead of `sudo`
+  (#368).
+
 ### Fixed
 
 - Background child processes no longer flash a console window on Windows: the
