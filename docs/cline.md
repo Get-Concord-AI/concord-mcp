@@ -100,10 +100,12 @@ local store, and the globally registered `concord-mcp` proxies its tool calls
 to the cloud project resolved from the server's own working directory. Cline
 has no MCP roots capability, so when the extension launches that server
 outside the repository the hook context's `workspace_id` is the routing
-signal: the tools accept it and the cloud proxy forwards it with every call.
-Pass it explicitly — the session-start message already tells the agent to —
-and reads and writes land in the project the hook registered, not wherever
-the server process happened to start.
+signal: the cloud proxy decodes it to the checkout it names and connects to
+that checkout's project for the call, while calls without one keep the
+project the server started for. Pass it explicitly — the session-start
+message already tells the agent to — and reads and writes land in the
+project the hook registered, not wherever the server process happened to
+start.
 
 ## Manual MCP registration
 

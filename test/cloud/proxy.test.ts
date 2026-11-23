@@ -19,6 +19,7 @@ import {
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { machineProjectKey } from '../../src/cloud/target.js';
 import { writeUserConfig } from '../../src/config/user-config.js';
+import { workspaceIdForRoot } from '../../src/config/paths.js';
 import {
   agentIdForSession,
   parseOpenCodeRequestIdentityMetadata,
@@ -233,6 +234,36 @@ describe('the cloud proxy', () => {
     } finally {
       await harness.close();
       await proxy.close();
+    }
+  });
+
+  it('routes a call to the project its workspace_id names', async () => {
+    const other = mkdtempSync(join(tmpdir(), 'concord-other-repo-'));
+    mkdirSync(join(other, '.git'));
+    const routed = createCloudProxyServer(session, (target) => connectCloud(target));
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await routed.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    try {
+      const result = await harness.callTool({
+        name: 'inspect_work',
+        arguments: { workspace_id: workspaceIdForRoot(other) },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(cloud.requests.at(-1)).toMatchObject({
+        'x-concord-project': machineProjectKey('machine-1', other),
+      });
+
+      // A call without workspace_id stays with the project the server started for.
+      await harness.callTool({ name: 'inspect_work', arguments: {} });
+      expect(cloud.requests.at(-1)).toMatchObject({
+        'x-concord-project': 'github.com/acme/app',
+      });
+    } finally {
+      await harness.close();
+      await routed.close();
     }
   });
 

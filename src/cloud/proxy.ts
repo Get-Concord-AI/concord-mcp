@@ -8,6 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
+import { workspaceRootFromId } from '../config/paths.js';
 import {
   identityForRequest,
   parseOpenCodeRequestIdentityMetadata,
@@ -17,6 +18,7 @@ import { CONCORD_SERVER_INSTRUCTIONS } from '../install/instructions.js';
 import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
 import { repoRelative, type CloudSession } from './session.js';
+import { cloudProjectKeyForRoot } from './target.js';
 
 export { cloudSessionFor, repoRelative, type CloudSession } from './session.js';
 
@@ -93,61 +95,89 @@ function failure(reason: string): CallToolResult {
 }
 
 /**
+ * The cloud project a tool call belongs to. A call that names `workspace_id`
+ * — the id Concord's hooks and rules hand the agent — is routed by it: the id
+ * decodes to a local checkout, whose project is computed exactly as the
+ * server's own root would be. Anything else, including an id this machine
+ * cannot resolve, stays with the project the server was started for. This is
+ * what lets a globally registered server (Cline has no per-project MCP
+ * config) reach the project its hook registered rather than wherever the
+ * client happened to launch the process.
+ */
+function projectKeyForArgs(session: CloudSession, args: ToolArguments): string {
+  const workspaceId = args['workspace_id'];
+  if (typeof workspaceId !== 'string') return session.projectKey;
+  try {
+    return cloudProjectKeyForRoot(workspaceRootFromId(workspaceId), session.machineKey);
+  } catch {
+    return session.projectKey;
+  }
+}
+
+/**
  * The stdio-facing server for cloud mode. It connects lazily, on the first
  * request, and again after a failure, so a cold or briefly unreachable API
- * costs one failed call rather than the whole session.
+ * costs one failed call rather than the whole session. One client per cloud
+ * project: a `workspace_id` argument can move a call to another project, and
+ * each project's `x-concord-project` header is fixed when its client connects.
  */
 export function createCloudProxyServer(
   session: CloudSession,
-  connect: () => Promise<Client>,
+  connect: (session: CloudSession) => Promise<Client>,
 ): McpServer {
   const server = new McpServer(
     { name: 'concord-mcp', version: VERSION },
     { instructions: CONCORD_SERVER_INSTRUCTIONS, capabilities: { tools: {} } },
   );
 
-  // One client, shared; dropped whenever a connection or a call through it
-  // fails, so the next call connects afresh instead of reusing a broken one.
-  // A tool's own error comes back as a result, never as a failure here.
-  let pending: Promise<Client> | undefined;
-  const forget = (attempt: Promise<Client>): void => {
-    if (pending === attempt) pending = undefined;
+  // One client per project, shared; dropped whenever a connection or a call
+  // through it fails, so the next call connects afresh instead of reusing a
+  // broken one. A tool's own error comes back as a result, never as a failure
+  // here.
+  const clients = new Map<string, Promise<Client>>();
+  const forget = (projectKey: string, attempt: Promise<Client>): void => {
+    if (clients.get(projectKey) === attempt) clients.delete(projectKey);
   };
-  const cloud = (): Promise<Client> => {
-    if (pending === undefined) {
-      const attempt = connect();
-      pending = attempt;
-      attempt.catch(() => {
-        forget(attempt);
-      });
-    }
-    return pending;
+  const clientFor = (projectKey: string): Promise<Client> => {
+    const existing = clients.get(projectKey);
+    if (existing !== undefined) return existing;
+    const attempt = connect({ ...session, projectKey });
+    clients.set(projectKey, attempt);
+    attempt.catch(() => {
+      forget(projectKey, attempt);
+    });
+    return attempt;
   };
 
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const attempt = cloud();
+    const attempt = clientFor(session.projectKey);
     try {
       return await (await attempt).listTools();
     } catch (error) {
-      forget(attempt);
+      forget(session.projectKey, attempt);
       throw error;
     }
   });
 
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const attempt = cloud();
     try {
       const { name } = request.params;
       const args = toolArguments.parse(request.params.arguments ?? {});
-      const requestMeta = parseOpenCodeRequestIdentityMetadata(request.params._meta);
-      return await (
-        await attempt
-      ).callTool({
-        name,
-        arguments: forwardedArguments(name, args, session, requestMeta),
-      });
+      const projectKey = projectKeyForArgs(session, args);
+      const attempt = clientFor(projectKey);
+      try {
+        const requestMeta = parseOpenCodeRequestIdentityMetadata(request.params._meta);
+        return await (
+          await attempt
+        ).callTool({
+          name,
+          arguments: forwardedArguments(name, args, session, requestMeta),
+        });
+      } catch (error) {
+        forget(projectKey, attempt);
+        throw error;
+      }
     } catch (error) {
-      forget(attempt);
       return failure(error instanceof Error ? error.message : String(error));
     }
   });
