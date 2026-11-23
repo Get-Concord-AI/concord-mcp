@@ -2,6 +2,8 @@ import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { dirname, join } from 'node:path';
 import { installHermes, statusHermes } from './hermes.js';
 import { statusQwen } from './qwen.js';
+import { statusDeepseek } from './deepseek.js';
+import { installDeepseekConfig, uninstallDeepseekConfig } from '../deepseek-config.js';
 
 import {
   HARNESS_CONFIGS,
@@ -725,6 +727,8 @@ export function statusAdapter(
       return statusOpencode(env);
     case 'qwen':
       return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
+    case 'deepseek':
+      return statusDeepseek(executablePath(HARNESS_CONFIGS.deepseek.executable, env), env);
   }
 }
 
@@ -839,6 +843,9 @@ export function installAdapter(
       }
       return;
     }
+    case 'deepseek':
+      installDeepseekConfig(env);
+      return;
   }
 }
 
@@ -902,6 +909,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
     uninstallHermesMcpConfig(env);
   } catch {
     // Preserve malformed Hermes settings and continue independent adapter cleanup.
+  }
+  try {
+    uninstallDeepseekConfig(env);
+  } catch {
+    // Leave malformed or unreadable DeepSeek config untouched and continue cleanup.
   }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
