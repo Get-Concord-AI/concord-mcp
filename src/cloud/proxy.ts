@@ -1,6 +1,3 @@
-import { existsSync, realpathSync } from 'node:fs';
-import { isAbsolute, relative, sep } from 'node:path';
-
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
@@ -14,15 +11,14 @@ import { z } from 'zod';
 import {
   identityForRequest,
   parseOpenCodeRequestIdentityMetadata,
-  type AgentIdentity,
   type OpenCodeRequestIdentityMetadata,
 } from '../domain/identity.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../install/instructions.js';
 import { VERSION } from '../version.js';
 import { HttpClientTransport } from './http-transport.js';
-import { bearerFor, type Bearer } from './tokens.js';
-import { assertKeySafeUrl } from './client.js';
-import { cloudTargetFor, linkedMachine } from './target.js';
+import { repoRelative, type CloudSession } from './session.js';
+
+export { cloudSessionFor, repoRelative, type CloudSession } from './session.js';
 
 /**
  * Cloud mode for the MCP server: in a linked repository, `concord-mcp` forwards
@@ -38,87 +34,11 @@ import { cloudTargetFor, linkedMachine } from './target.js';
  * local operations, and Concord Cloud records its own usage.
  */
 
-export interface CloudSession {
-  readonly apiUrl: string;
-  /** A current bearer token, refreshed as needed; see `cloud/tokens.ts`. */
-  readonly bearer: Bearer;
-  readonly machineKey: string;
-  readonly projectKey: string;
-  /** The primary checkout, which holds the link. */
-  readonly repoRoot: string;
-  /** The checkout this session works in: a linked worktree's own root. */
-  readonly checkoutRoot: string;
-  readonly identity: AgentIdentity | undefined;
-  /** Resolves harness session identity supplied only on MCP requests. */
-  readonly requestIdentity?: (
-    meta: OpenCodeRequestIdentityMetadata | undefined,
-  ) => AgentIdentity | undefined;
-}
-
-/**
- * The cloud session for a workspace: undefined on a machine that is not
- * linked, which works locally (see `cloudTargetFor`).
- */
-export function cloudSessionFor(
-  repoRoot: string,
-  env: NodeJS.ProcessEnv,
-  identity: AgentIdentity | undefined,
-  checkoutRoot: string = repoRoot,
-  requestIdentity?: (
-    meta: OpenCodeRequestIdentityMetadata | undefined,
-  ) => AgentIdentity | undefined,
-): CloudSession | undefined {
-  const machine = linkedMachine(env);
-  const target = cloudTargetFor(repoRoot, env);
-  if (machine === undefined || target === undefined) return undefined;
-
-  assertKeySafeUrl(target.apiUrl);
-  return {
-    apiUrl: target.apiUrl,
-    bearer: bearerFor(env, target.apiUrl, fetch),
-    machineKey: machine.machineKey,
-    projectKey: target.projectKey,
-    repoRoot,
-    checkoutRoot,
-    identity,
-    ...(requestIdentity === undefined ? {} : { requestIdentity }),
-  };
-}
-
 /** The tools that act as an agent, and so act as this session's. */
 const WRITE_TOOLS = new Set(['start_work', 'update_work', 'transfer_work', 'finish_work']);
 
 const toolArguments = z.record(z.string(), z.json());
 type ToolArguments = z.infer<typeof toolArguments>;
-
-/** `path` relative to `root`, or undefined when it is not inside it. */
-function inside(root: string, path: string): string | undefined {
-  const within = relative(root, path);
-  if (within === '' || within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within)) {
-    return undefined;
-  }
-  return within.split(sep).join('/');
-}
-
-/**
- * An absolute path inside the checkout this session works in, or the primary
- * one, made relative; anything else as given. Tried as written and resolved,
- * so a path through a symlink (`/tmp` on macOS) still matches.
- */
-export function repoRelative(
-  session: Pick<CloudSession, 'repoRoot' | 'checkoutRoot'>,
-  path: string,
-): string {
-  if (!isAbsolute(path)) return path;
-  const candidates = existsSync(path) ? [path, realpathSync(path)] : [path];
-  for (const root of [session.checkoutRoot, session.repoRoot]) {
-    for (const candidate of candidates) {
-      const within = inside(root, candidate);
-      if (within !== undefined) return within;
-    }
-  }
-  return path;
-}
 
 /** A tool call's arguments as the cloud should receive them. */
 export function forwardedArguments(
