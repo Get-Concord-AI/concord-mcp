@@ -1,9 +1,5 @@
 import { HARNESS_CONFIGS } from '../../domain/harness-config.js';
-import {
-  installJunieHooks,
-  junieConfigPath,
-  junieHooksInstalled,
-} from '../junie-hooks.js';
+import { installJunieHooks, junieConfigPath, junieHooksInstalled } from '../junie-hooks.js';
 import { installJunieMcpConfig, junieMcpInstalled } from '../junie-config.js';
 import type { AdapterReport } from './index.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
