@@ -6,9 +6,11 @@ import {
   ListToolsRequestSchema,
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js';
+import { delimiter } from 'node:path';
+
 import { z } from 'zod';
 
-import { workspaceRootFromId } from '../config/paths.js';
+import { resolveExplicitRepoRoot, workspaceRootFromId } from '../config/paths.js';
 import {
   identityForRequest,
   parseOpenCodeRequestIdentityMetadata,
@@ -94,24 +96,71 @@ function failure(reason: string): CallToolResult {
   };
 }
 
+/** Where one tool call goes: its cloud project and the roots its paths resolve against. */
+interface CallRoute {
+  readonly projectKey: string;
+  readonly repoRoot: string;
+  readonly checkoutRoot: string;
+}
+
 /**
- * The cloud project a tool call belongs to. A call that names `workspace_id`
- * — the id Concord's hooks and rules hand the agent — is routed by it: the id
- * decodes to a local checkout, whose project is computed exactly as the
- * server's own root would be. Anything else, including an id this machine
- * cannot resolve, stays with the project the server was started for. This is
- * what lets a globally registered server (Cline has no per-project MCP
- * config) reach the project its hook registered rather than wherever the
- * client happened to launch the process.
+ * The workspace roots `CONCORD_ALLOWED_ROOTS` permits, resolved the way
+ * `WorkspaceManager` resolves them. Undefined means unrestricted; an empty
+ * set denies every routed workspace, as it does locally.
  */
-function projectKeyForArgs(session: CloudSession, args: ToolArguments): string {
+function computeAllowedRoots(env: NodeJS.ProcessEnv): Set<string> | undefined {
+  const raw = env['CONCORD_ALLOWED_ROOTS'];
+  if (raw === undefined || raw.trim() === '') return undefined;
+  return new Set(
+    raw
+      .split(delimiter)
+      .map((root) => root.trim())
+      .filter((root) => root !== '')
+      .map(resolveExplicitRepoRoot),
+  );
+}
+
+/**
+ * The cloud project and path roots a tool call belongs to. A call that names
+ * `workspace_id` — the id Concord's hooks and rules hand the agent — is
+ * routed by it: the id decodes to a local checkout, whose project is computed
+ * exactly as the server's own root would be, and whose root its file paths
+ * are made relative to. The same `CONCORD_ALLOWED_ROOTS` restriction the
+ * local workspace manager enforces applies before a root may be selected.
+ * Anything else, including an id this machine cannot resolve, stays with the
+ * project the server was started for. This is what lets a globally
+ * registered server (Cline has no per-project MCP config) reach the project
+ * its hook registered rather than wherever the client happened to launch the
+ * process.
+ */
+function routeForArgs(
+  session: CloudSession,
+  args: ToolArguments,
+  allowedRoots: Set<string> | undefined,
+): CallRoute | { readonly denied: string } {
+  const unrouted: CallRoute = {
+    projectKey: session.projectKey,
+    repoRoot: session.repoRoot,
+    checkoutRoot: session.checkoutRoot,
+  };
   const workspaceId = args['workspace_id'];
-  if (typeof workspaceId !== 'string') return session.projectKey;
+  if (typeof workspaceId !== 'string') return unrouted;
+  let root: string;
   try {
-    return cloudProjectKeyForRoot(workspaceRootFromId(workspaceId), session.machineKey);
+    root = workspaceRootFromId(workspaceId);
   } catch {
-    return session.projectKey;
+    return unrouted;
   }
+  if (allowedRoots !== undefined && !allowedRoots.has(root)) {
+    return {
+      denied: `Workspace root is not allowed: ${root}. Add it to CONCORD_ALLOWED_ROOTS.`,
+    };
+  }
+  return {
+    projectKey: cloudProjectKeyForRoot(root, session.machineKey),
+    repoRoot: root,
+    checkoutRoot: root,
+  };
 }
 
 /**
@@ -124,11 +173,13 @@ function projectKeyForArgs(session: CloudSession, args: ToolArguments): string {
 export function createCloudProxyServer(
   session: CloudSession,
   connect: (session: CloudSession) => Promise<Client>,
+  env: NodeJS.ProcessEnv = process.env,
 ): McpServer {
   const server = new McpServer(
     { name: 'concord-mcp', version: VERSION },
     { instructions: CONCORD_SERVER_INSTRUCTIONS, capabilities: { tools: {} } },
   );
+  const allowedRoots = computeAllowedRoots(env);
 
   // One client per project, shared; dropped whenever a connection or a call
   // through it fails, so the next call connects afresh instead of reusing a
@@ -163,18 +214,29 @@ export function createCloudProxyServer(
     try {
       const { name } = request.params;
       const args = toolArguments.parse(request.params.arguments ?? {});
-      const projectKey = projectKeyForArgs(session, args);
-      const attempt = clientFor(projectKey);
+      const route = routeForArgs(session, args, allowedRoots);
+      if ('denied' in route) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: route.denied }],
+        };
+      }
+      const attempt = clientFor(route.projectKey);
       try {
         const requestMeta = parseOpenCodeRequestIdentityMetadata(request.params._meta);
         return await (
           await attempt
         ).callTool({
           name,
-          arguments: forwardedArguments(name, args, session, requestMeta),
+          arguments: forwardedArguments(
+            name,
+            args,
+            { ...session, repoRoot: route.repoRoot, checkoutRoot: route.checkoutRoot },
+            requestMeta,
+          ),
         });
       } catch (error) {
-        forget(projectKey, attempt);
+        forget(route.projectKey, attempt);
         throw error;
       }
     } catch (error) {

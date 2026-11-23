@@ -249,14 +249,53 @@ describe('the cloud proxy', () => {
     try {
       const result = await harness.callTool({
         name: 'inspect_work',
-        arguments: { workspace_id: workspaceIdForRoot(other) },
+        arguments: {
+          workspace_id: workspaceIdForRoot(other),
+          expected_files: [join(other, 'src', 'a.ts')],
+        },
       });
       expect(result.isError).toBeFalsy();
       expect(cloud.requests.at(-1)).toMatchObject({
         'x-concord-project': machineProjectKey('machine-1', other),
       });
+      // Paths are made relative to the routed workspace, not the server's root.
+      expect(cloud.calls.at(-1)).toMatchObject({ expected_files: ['src/a.ts'] });
 
       // A call without workspace_id stays with the project the server started for.
+      await harness.callTool({ name: 'inspect_work', arguments: {} });
+      expect(cloud.requests.at(-1)).toMatchObject({
+        'x-concord-project': 'github.com/acme/app',
+      });
+    } finally {
+      await harness.close();
+      await routed.close();
+    }
+  });
+
+  it('refuses a workspace_id outside CONCORD_ALLOWED_ROOTS', async () => {
+    const allowed = mkdtempSync(join(tmpdir(), 'concord-allowed-'));
+    const other = mkdtempSync(join(tmpdir(), 'concord-denied-repo-'));
+    mkdirSync(join(other, '.git'));
+    const routed = createCloudProxyServer(session, (target) => connectCloud(target), {
+      CONCORD_ALLOWED_ROOTS: allowed,
+    });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await routed.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    try {
+      const before = cloud.requests.length;
+      const result = await harness.callTool({
+        name: 'inspect_work',
+        arguments: { workspace_id: workspaceIdForRoot(other) },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain('not allowed');
+      // The denied call never reached the cloud.
+      expect(cloud.requests.length).toBe(before);
+
+      // Calls without workspace_id are unaffected.
       await harness.callTool({ name: 'inspect_work', arguments: {} });
       expect(cloud.requests.at(-1)).toMatchObject({
         'x-concord-project': 'github.com/acme/app',
