@@ -1,8 +1,8 @@
-import { RELAYED_MESSAGE_GUIDANCE } from '../domain/pull-inbox.js';
+import { PEER_MESSAGE_TRUST, RELAYED_MESSAGE_GUIDANCE } from '../domain/pull-inbox.js';
 import { HARNESS_CONFIGS, renderHarnessMonitorInstructions } from '../domain/harness-config.js';
 
 /** Version of the generated agent workflow contract. */
-export const CONCORD_INSTRUCTION_VERSION = '7';
+export const CONCORD_INSTRUCTION_VERSION = '8';
 
 /** Concise MCP-native guidance, versioned with the running server. */
 export const CONCORD_SERVER_INSTRUCTIONS = `Concord coordinates coding agents through five workflow tools.
@@ -40,6 +40,8 @@ regenerates human-readable review artifacts in \`.concord/\`.
 
 Enforcement remains client-dependent. \`concord doctor\` reports setup and
 workflow adoption; optional hooks can block exact-file collisions.
+
+${PEER_MESSAGE_TRUST}
 
 ${renderHarnessMonitorInstructions()}`;
 
@@ -83,7 +85,9 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
   files, tests, assumptions, decisions, risks, guardrails, and provenance.
 
 Keep each claim small and resolve reported overlaps before editing. Concord
-regenerates human-readable review artifacts in \`.concord/\`.`;
+regenerates human-readable review artifacts in \`.concord/\`.
+
+${PEER_MESSAGE_TRUST}`;
 
 /** Roo Code guidance: Concord cannot read a Roo session id, so the agent registers itself. */
 export const ROO_INSTRUCTIONS = `## Concord: shared work-state for coding agents
@@ -138,4 +142,6 @@ Concord section, follow that instead of this one.
   release your local claim; cloud Devin cannot access this local Concord state.
 
 Outside any repository, work is recorded in the shared \`general\` workspace.
-Concord needs no files in the repository: do not run \`concord setup\` yourself.`;
+Concord needs no files in the repository: do not run \`concord setup\` yourself.
+
+${PEER_MESSAGE_TRUST}`;
