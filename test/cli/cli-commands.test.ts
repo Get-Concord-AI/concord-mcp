@@ -21,6 +21,7 @@ import { buildAdoption } from '../../src/domain/adoption.js';
 import { openRepositories } from '../../src/db/index.js';
 import { packagedPath } from '../../src/install/adapters/links.js';
 import { claudeSkillsPluginPath } from '../../src/install/claude-plugin.js';
+import { installConcord } from '../../src/install/index.js';
 import { CONCORD_INSTRUCTION_VERSION } from '../../src/install/instructions.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
 import { handleHandoff } from '../../src/tools/handoff.js';
@@ -126,6 +127,20 @@ describe('CLI read/export commands', () => {
     );
 
     expect(runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
+  });
+
+  it('doctor reports a stale Roo Code rule', () => {
+    installConcord(dir);
+    expect(runDoctor(dir)).not.toContain('stale ->');
+
+    writeFileSync(
+      join(dir, '.roo', 'rules', 'concord.md'),
+      '<!-- concord:start -->\n## Concord\nOld tool instructions\n<!-- concord:end -->\n',
+    );
+
+    expect(runDoctor(dir)).toContain(
+      `instructions stale -> ${join('.roo', 'rules', 'concord.md')}`,
+    );
   });
 
   it('doctor ignores generic headings and reports invalid instruction paths', () => {
