@@ -115,9 +115,10 @@ that changes nothing, use `concord messages --agent aider:fix-login-bug
 
 Aider cannot call Concord itself, but it can run shell commands you approve.
 `concord setup` writes Concord's instructions into the repo's `AGENTS.md`,
-including how to treat messages from other agents; Aider does not load it on
-its own, so start Aider with `aider --read AGENTS.md` and keep the commands
-above at hand. Approve the `concord work …` lines it proposes. Treat the printed JSON as the source of truth; never let the
+including how to treat messages from other agents. With global mode on, setup
+skips repository files, so run `concord setup --repo-files` in that case.
+Aider does not load `AGENTS.md` on its own, so start Aider with
+`aider --read AGENTS.md` and keep the commands above at hand. Approve the `concord work …` lines it proposes. Treat the printed JSON as the source of truth; never let the
 model invent agent ids.
 
 ## Limits
