@@ -6,9 +6,10 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import {
+  kiloConfigDir,
   kiloConfigHome,
-  kiloGlobalConfigPaths,
-  kiloMcpInstalled,
+  kiloConfigPaths,
+  kiloMcpState,
   uninstallKiloMcpConfig,
 } from '../../src/install/kilo-config.js';
 
@@ -25,11 +26,24 @@ function writeGlobalConfig(home: string, name: string, content: string): string 
   return path;
 }
 
+function writeConfigDirConfig(dir: string, name: string, content: string): string {
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, name);
+  writeFileSync(path, content);
+  return path;
+}
+
 const CONCORD_ENTRY = {
   type: 'local',
   command: ['concord-mcp'],
   environment: { CONCORD_AGENT_KIND: 'kilo' },
 };
+
+const serversSchema = z.object({
+  mcp: z.record(z.string(), z.unknown()).optional(),
+  agent: z.record(z.string(), z.unknown()).optional(),
+  $schema: z.string().optional(),
+});
 
 describe('kiloConfigHome', () => {
   it('uses ~/.config/kilo by default', () => {
@@ -44,21 +58,49 @@ describe('kiloConfigHome', () => {
   });
 });
 
-describe('kiloGlobalConfigPaths', () => {
-  it('lists the three filenames Kilo accepts, in docs order', () => {
+describe('kiloConfigDir', () => {
+  it('is undefined without KILO_CONFIG_DIR', () => {
+    const { env } = kiloEnv();
+    expect(kiloConfigDir(env)).toBeUndefined();
+  });
+
+  it('expands a leading ~ against the user home', () => {
     const { home, env } = kiloEnv();
-    expect(kiloGlobalConfigPaths(env)).toEqual([
+    expect(kiloConfigDir({ ...env, KILO_CONFIG_DIR: '~/kilo-work' })).toBe(
+      join(home, 'kilo-work'),
+    );
+  });
+});
+
+describe('kiloConfigPaths', () => {
+  it('lists the global files in Kilo merge order, lowest to highest', () => {
+    const { home, env } = kiloEnv();
+    expect(kiloConfigPaths(env)).toEqual([
+      join(home, '.config', 'kilo', 'config.json'),
       join(home, '.config', 'kilo', 'kilo.json'),
       join(home, '.config', 'kilo', 'kilo.jsonc'),
-      join(home, '.config', 'kilo', 'config.json'),
+      join(home, '.config', 'kilo', 'opencode.json'),
+      join(home, '.config', 'kilo', 'opencode.jsonc'),
+    ]);
+  });
+
+  it('appends KILO_CONFIG_DIR files after the global ones', () => {
+    const { home, env } = kiloEnv();
+    const dir = join(home, 'kilo-work');
+    expect(kiloConfigPaths({ ...env, KILO_CONFIG_DIR: dir })).toEqual([
+      ...kiloConfigPaths(env),
+      join(dir, 'kilo.jsonc'),
+      join(dir, 'kilo.json'),
+      join(dir, 'opencode.jsonc'),
+      join(dir, 'opencode.json'),
     ]);
   });
 });
 
-describe('kiloMcpInstalled', () => {
-  it('is false when no config exists', () => {
+describe('kiloMcpState', () => {
+  it('is none when no config exists', () => {
     const { env } = kiloEnv();
-    expect(kiloMcpInstalled(env)).toBe(false);
+    expect(kiloMcpState(env)).toEqual({ state: 'none' });
   });
 
   it('finds a Concord entry in kilo.jsonc', () => {
@@ -68,7 +110,7 @@ describe('kiloMcpInstalled', () => {
       'kilo.jsonc',
       `${JSON.stringify({ mcp: { concord: CONCORD_ENTRY, other: { type: 'remote', url: 'https://x' } } }, null, 2)}\n`,
     );
-    expect(kiloMcpInstalled(env)).toBe(true);
+    expect(kiloMcpState(env)).toEqual({ state: 'installed' });
   });
 
   it('reads JSONC comments and trailing commas', () => {
@@ -85,34 +127,63 @@ describe('kiloMcpInstalled', () => {
       /* trailing comment */
       `,
     );
-    expect(kiloMcpInstalled(env)).toBe(true);
+    expect(kiloMcpState(env)).toEqual({ state: 'installed' });
   });
 
-  it('does not count a disabled Concord entry', () => {
+  it('reports disabled when the winning entry has enabled: false', () => {
     const { home, env } = kiloEnv();
-    writeGlobalConfig(
+    const path = writeGlobalConfig(
       home,
       'kilo.json',
       JSON.stringify({ mcp: { concord: { ...CONCORD_ENTRY, enabled: false } } }),
     );
-    expect(kiloMcpInstalled(env)).toBe(false);
+    expect(kiloMcpState(env)).toEqual({ state: 'disabled', path });
   });
 
-  it('does not count an entry somebody else wrote', () => {
+  it('lets a later file disable an earlier enabled entry', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+    const later = writeGlobalConfig(
+      home,
+      'opencode.jsonc',
+      JSON.stringify({ mcp: { concord: { enabled: false } } }),
+    );
+    // Kilo deep-merges: the later file only flips `enabled`.
+    expect(kiloMcpState(env)).toEqual({ state: 'disabled', path: later });
+  });
+
+  it('lets a later file re-enable an earlier disabled entry', () => {
     const { home, env } = kiloEnv();
     writeGlobalConfig(
       home,
-      'kilo.json',
-      JSON.stringify({
-        mcp: {
-          concord: { type: 'local', command: ['my-own-server'], environment: { FOO: 'bar' } },
-        },
-      }),
+      'kilo.jsonc',
+      JSON.stringify({ mcp: { concord: { ...CONCORD_ENTRY, enabled: false } } }),
     );
-    expect(kiloMcpInstalled(env)).toBe(false);
+    writeGlobalConfig(home, 'opencode.json', JSON.stringify({ mcp: { concord: { enabled: true } } }));
+    expect(kiloMcpState(env)).toEqual({ state: 'installed' });
   });
 
-  it('does not count a Concord command carrying foreign environment', () => {
+  it('prefers KILO_CONFIG_DIR entries over the global directory', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+    const dir = join(home, 'kilo-work');
+    writeConfigDirConfig(dir, 'kilo.jsonc', JSON.stringify({ mcp: { concord: { enabled: false } } }));
+    expect(kiloMcpState({ ...env, KILO_CONFIG_DIR: dir }).state).toBe('disabled');
+  });
+
+  it('reports conflict when the winning entry is not Concord-written', () => {
+    const { home, env } = kiloEnv();
+    const path = writeGlobalConfig(
+      home,
+      'kilo.json',
+      JSON.stringify({
+        mcp: { concord: { type: 'local', command: ['my-own-server'], environment: { FOO: 'bar' } } },
+      }),
+    );
+    expect(kiloMcpState(env)).toEqual({ state: 'conflict', path });
+  });
+
+  it('reports conflict when Concord env carries a foreign key', () => {
     const { home, env } = kiloEnv();
     writeGlobalConfig(
       home,
@@ -127,7 +198,45 @@ describe('kiloMcpInstalled', () => {
         },
       }),
     );
-    expect(kiloMcpInstalled(env)).toBe(false);
+    expect(kiloMcpState(env).state).toBe('conflict');
+  });
+
+  it('reports conflict for a concord-mcp argument inside a user wrapper', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(
+      home,
+      'kilo.json',
+      JSON.stringify({
+        mcp: { concord: { type: 'local', command: ['node', 'proxy.js', 'concord-mcp'] } },
+      }),
+    );
+    expect(kiloMcpState(env).state).toBe('conflict');
+  });
+
+  it('still owns an entry that uses the env alias with only Concord keys', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(
+      home,
+      'kilo.json',
+      JSON.stringify({
+        mcp: { concord: { type: 'local', command: ['concord-mcp'], env: { CONCORD_AGENT_KIND: 'kilo' } } },
+      }),
+    );
+    expect(kiloMcpState(env)).toEqual({ state: 'installed' });
+  });
+
+  it('reports conflict when the env alias carries a foreign key', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(
+      home,
+      'kilo.json',
+      JSON.stringify({
+        mcp: {
+          concord: { type: 'local', command: ['concord-mcp'], env: { MY_TOKEN: 'x' } },
+        },
+      }),
+    );
+    expect(kiloMcpState(env).state).toBe('conflict');
   });
 
   it('accepts the published package spec as the command', () => {
@@ -141,27 +250,36 @@ describe('kiloMcpInstalled', () => {
         },
       }),
     );
-    expect(kiloMcpInstalled(env)).toBe(true);
+    expect(kiloMcpState(env)).toEqual({ state: 'installed' });
+  });
+
+  it('ignores a malformed sibling server instead of failing the file', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(
+      home,
+      'kilo.json',
+      JSON.stringify({
+        mcp: {
+          concord: CONCORD_ENTRY,
+          broken: { command: 'not-an-array', environment: { PORT: 8080 } },
+        },
+      }),
+    );
+    expect(kiloMcpState(env)).toEqual({ state: 'installed' });
   });
 
   it('reports unreadable when a config file cannot be parsed', () => {
     const { home, env } = kiloEnv();
     writeGlobalConfig(home, 'kilo.json', '{ not json');
-    expect(kiloMcpInstalled(env)).toBe('unreadable');
+    expect(kiloMcpState(env)).toEqual({ state: 'unreadable' });
   });
 
   it('reports unreadable even when another file has a working entry', () => {
     const { home, env } = kiloEnv();
     writeGlobalConfig(home, 'kilo.json', '{ not json');
     writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
-    expect(kiloMcpInstalled(env)).toBe('unreadable');
+    expect(kiloMcpState(env)).toEqual({ state: 'unreadable' });
   });
-});
-
-const serversSchema = z.object({
-  mcp: z.record(z.string(), z.unknown()).optional(),
-  agent: z.record(z.string(), z.unknown()).optional(),
-  $schema: z.string().optional(),
 });
 
 describe('uninstallKiloMcpConfig', () => {
@@ -193,17 +311,48 @@ describe('uninstallKiloMcpConfig', () => {
     expect(next.$schema).toBe('https://app.kilo.ai/config.json');
   });
 
-  it('removes Concord from every global file that has it', () => {
+  it('preserves comments and formatting while removing the entry', () => {
     const { home, env } = kiloEnv();
-    writeGlobalConfig(home, 'kilo.json', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
-    writeGlobalConfig(home, 'config.json', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+    const path = writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      `{
+  // servers the user relies on
+  "mcp": {
+    "concord": { "type": "local", "command": ["concord-mcp"] },
+    // keep this probe around
+    "probe": { "type": "local", "command": ["node", "probe.mjs"] },
+  },
+  "agent": { "code": { "model": "vercel/x" } },
+}
+`,
+    );
 
     uninstallKiloMcpConfig(env);
 
-    for (const name of ['kilo.json', 'config.json']) {
-      const config = serversSchema.parse(
-        JSON.parse(readFileSync(join(home, '.config', 'kilo', name), 'utf8')),
-      );
+    const next = readFileSync(path, 'utf8');
+    expect(next).toContain('// servers the user relies on');
+    expect(next).toContain('// keep this probe around');
+    expect(next).toContain('"probe"');
+    expect(next).not.toContain('"concord"');
+    expect(next).toContain('"agent"');
+  });
+
+  it('removes Concord from every config file that has it', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(home, 'kilo.json', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+    writeGlobalConfig(home, 'config.json', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+    const dir = join(home, 'kilo-work');
+    writeConfigDirConfig(dir, 'opencode.json', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+
+    uninstallKiloMcpConfig({ ...env, KILO_CONFIG_DIR: dir });
+
+    for (const file of [
+      join(home, '.config', 'kilo', 'kilo.json'),
+      join(home, '.config', 'kilo', 'config.json'),
+      join(dir, 'opencode.json'),
+    ]) {
+      const config = serversSchema.parse(JSON.parse(readFileSync(file, 'utf8')));
       expect(config.mcp?.['concord']).toBeUndefined();
     }
   });
@@ -228,13 +377,15 @@ describe('uninstallKiloMcpConfig', () => {
     const good = writeGlobalConfig(
       home,
       'kilo.jsonc',
-      JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }),
+      `${JSON.stringify({ mcp: { concord: CONCORD_ENTRY, keep: { command: ['x'] } } }, null, 2)}\n// tail comment`,
     );
 
     uninstallKiloMcpConfig(env);
 
     expect(readFileSync(broken, 'utf8')).toBe('{ not json');
-    const next = serversSchema.parse(JSON.parse(readFileSync(good, 'utf8')));
-    expect(next.mcp?.['concord']).toBeUndefined();
+    const next = readFileSync(good, 'utf8');
+    expect(next).not.toContain('"concord"');
+    expect(next).toContain('"keep"');
+    expect(next).toContain('// tail comment');
   });
 });

@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
 import { writeFakeKilo } from '../helpers/fake-kilo.js';
 import { recordedInvocations, writeFakeOpencode } from '../helpers/fake-opencode.js';
+import type { JsonObject } from '../../src/install/json-value.js';
 
 import {
   devinSupportsDedicatedMcpConfig,
@@ -388,7 +389,7 @@ describe('global harness adapters', () => {
       statusGlobalAdapters(env, undefined, undefined, LASTING).find(
         (entry) => entry.harness === 'kilo',
       );
-    const writeKiloConfig = (home: string, mcp: Record<string, unknown>) => {
+    const writeKiloConfig = (home: string, mcp: JsonObject) => {
       const dir = join(home, '.config', 'kilo');
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'kilo.jsonc'), `${JSON.stringify({ mcp }, null, 2)}\n`);
@@ -446,6 +447,54 @@ describe('global harness adapters', () => {
 
       writeKiloConfig(home, { concord: { type: 'local', command: ['not-concord'] } });
       expect(kiloReport(env)).toMatchObject({ status: 'action_required' });
+    });
+
+    it('names the conflicting config file when a foreign concord entry wins', () => {
+      const { home, env } = kiloEnv();
+      writeKiloConfig(home, { concord: { type: 'local', command: ['mine'] } });
+
+      expect(kiloReport(env)).toMatchObject({ status: 'action_required' });
+      expect(kiloReport(env)?.detail ?? '').toContain('did not write');
+    });
+
+    it('rejects a Kilo whose mcp add lacks the non-interactive --env form', () => {
+      const { env } = kiloEnv();
+
+      expect(kiloReport({ ...env, FAKE_KILO_NO_ADD_ENV: '1' })).toMatchObject({
+        detected: true,
+        status: 'unsupported_version',
+        capabilities: [],
+      });
+    });
+
+    it('does not run `kilo mcp add` when a concord entry already exists', () => {
+      const { home, env, log } = kiloEnv();
+      writeKiloConfig(home, {
+        concord: {
+          type: 'local',
+          command: ['concord-mcp'],
+          environment: { CONCORD_AGENT_KIND: 'kilo' },
+        },
+      });
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      const adds = recordedInvocations(log).filter(
+        (call) => call[0] === 'mcp' && call[1] === 'add' && call[2] !== '--help',
+      );
+      expect(adds).toEqual([]);
+    });
+
+    it('does not run `kilo mcp add` over a foreign concord entry', () => {
+      const { home, env, log } = kiloEnv();
+      writeKiloConfig(home, { concord: { type: 'local', command: ['mine'] } });
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      const adds = recordedInvocations(log).filter(
+        (call) => call[0] === 'mcp' && call[1] === 'add' && call[2] !== '--help',
+      );
+      expect(adds).toEqual([]);
     });
 
     it('registers Concord through `kilo mcp add` when adapters are installed', () => {

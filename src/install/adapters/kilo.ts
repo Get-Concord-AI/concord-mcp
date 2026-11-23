@@ -1,7 +1,25 @@
 import { HARNESS_CONFIGS } from '../../domain/harness-config.js';
-import { kiloMcpInstalled, installKiloMcpConfig } from '../kilo-config.js';
+import { kiloConfigDir, kiloConfigHome, kiloMcpState, installKiloMcpConfig } from '../kilo-config.js';
 import type { AdapterReport } from './index.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
+
+/**
+ * Whether this Kilo's `kilo mcp add` supports the non-interactive
+ * `--env … -- command` form setup relies on. Kilo 7.2.x ships the subcommand
+ * but an interactive `add`, so the help text is the feature probe.
+ */
+function supportsKiloMcpAdd(executable: string, env: NodeJS.ProcessEnv): boolean {
+  const help = run(executable, ['mcp', 'add', '--help'], env);
+  return help.ok && help.output.includes('--env');
+}
+
+/** Where Kilo keeps its config, for messages that would otherwise guess `~/.config/kilo`. */
+function kiloConfigDescription(env: NodeJS.ProcessEnv): string {
+  const dir = kiloConfigDir(env);
+  return dir === undefined
+    ? kiloConfigHome(env)
+    : `${kiloConfigHome(env)} and ${dir} (KILO_CONFIG_DIR)`;
+}
 
 /**
  * Kilo CLI's adapter status. Delivery is busy-only pull through the durable
@@ -41,17 +59,45 @@ export function statusKilo(executable: string | undefined, env: NodeJS.ProcessEn
       detail: 'This Kilo CLI has no `kilo mcp` subcommand for MCP registration.',
     };
   }
-  const installed = kiloMcpInstalled(env);
-  if (installed === 'unreadable') {
+  if (!supportsKiloMcpAdd(executable, env)) {
+    return {
+      ...base,
+      detected: true,
+      status: 'unsupported_version',
+      capabilities: [],
+      detail:
+        'This Kilo CLI cannot register MCP servers non-interactively (`kilo mcp add` lacks `--env`). Upgrade Kilo and re-run concord setup.',
+    };
+  }
+  const mcp = kiloMcpState(env);
+  if (mcp.state === 'unreadable') {
     return {
       ...base,
       detected: true,
       status: 'action_required',
       capabilities: [],
-      detail:
-        'A Kilo config file under ~/.config/kilo exists but could not be read. Check the file and its permissions.',
+      detail: `A Kilo config file under ${kiloConfigDescription(env)} exists but could not be read. Check the file and its permissions.`,
     };
   }
+  if (mcp.state === 'conflict') {
+    return {
+      ...base,
+      detected: true,
+      status: 'action_required',
+      capabilities: [],
+      detail: `A "concord" MCP entry Concord did not write exists in ${mcp.path ?? 'a Kilo config file'}; remove or rename it, then re-run concord setup.`,
+    };
+  }
+  if (mcp.state === 'disabled') {
+    return {
+      ...base,
+      detected: true,
+      status: 'action_required',
+      capabilities: [],
+      detail: `Concord's Kilo MCP entry is disabled (enabled: false) in ${mcp.path ?? 'a Kilo config file'}; re-enable it for Concord to receive messages.`,
+    };
+  }
+  const installed = mcp.state === 'installed';
   return {
     ...base,
     detected: true,
@@ -70,5 +116,6 @@ export function installKilo(env: NodeJS.ProcessEnv): void {
   const version = versionTuple(run(executable, ['--version'], env).output);
   if (version === undefined || !atLeast(version, HARNESS_CONFIGS.kilo.minimumVersion)) return;
   if (!run(executable, ['mcp', '--help'], env).ok) return;
+  if (!supportsKiloMcpAdd(executable, env)) return;
   installKiloMcpConfig(executable, env);
 }

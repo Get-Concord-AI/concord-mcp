@@ -1,9 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { z } from 'zod';
 
 import { userHome } from '../config/paths.js';
+import { isEscaped, isJsonObject, parseJsoncObject, propertyObject, removeProperty, uncomment } from './jsonc-edit.js';
+import { jsonValueSchema, type JsonObject, type JsonValue } from './json-value.js';
 import {
   AGENT_KIND_ENV,
   CONCORD_PACKAGE_NAME,
@@ -16,12 +18,15 @@ import { spawnCommandSync } from './spawn-command.js';
 /**
  * Kilo CLI's MCP registration.
  *
- * Kilo is an OpenCode fork: it owns `~/.config/kilo/kilo.jsonc` (JSONC, with
- * comments and trailing commas a user may add) plus the `kilo.json` /
- * `config.json` siblings the docs also accept. Registration therefore goes
- * through the harness's own writer — `kilo mcp add` is idempotent and leaves
- * every unrelated server and setting untouched — while status and removal
- * read and edit the files directly because `kilo mcp` has no remove command.
+ * Kilo is an OpenCode fork: it merges several JSONC files — the global
+ * `$XDG_CONFIG_HOME/kilo`/`~/.config/kilo` directory (`config.json`,
+ * `kilo.json`, `kilo.jsonc`, `opencode.json`, `opencode.jsonc`, lowest to
+ * highest precedence) plus every file `KILO_CONFIG_DIR` points at
+ * (`kilo.jsonc`, `kilo.json`, `opencode.jsonc`, `opencode.json`), which
+ * outranks the global directory. `kilo mcp add` writes its own file, so
+ * registration goes through the harness; status and removal read the same
+ * file set and let the highest-precedence `mcp.concord` win, mirroring Kilo's
+ * deep merge, because `kilo mcp` has no remove command.
  *
  * The entry pins only the harness kind. Kilo passes no session id to MCP
  * servers — not in request metadata and not in the child environment — so a
@@ -32,6 +37,9 @@ import { spawnCommandSync } from './spawn-command.js';
 
 const COMMAND_TIMEOUT_MS = 30_000;
 
+/** Environment keys Concord itself writes; anything else makes the entry the user's. */
+const CONCORD_ENV_KEYS = new Set(['CONCORD_REPO_ROOT', AGENT_KIND_ENV]);
+
 const kiloServerSchema = z
   .object({
     type: z.string().optional(),
@@ -39,12 +47,18 @@ const kiloServerSchema = z
     url: z.string().optional(),
     enabled: z.boolean().optional(),
     environment: z.record(z.string(), z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
   })
   .loose();
 
+/**
+ * `mcp` stays a loose record of JSON values: a sibling server in a shape
+ * Kilo tolerates but this schema does not must not make the whole file
+ * unreadable. Only the `concord` entry is validated strictly.
+ */
 const kiloConfigSchema = z
   .object({
-    mcp: z.record(z.string(), kiloServerSchema).optional(),
+    mcp: z.record(z.string(), jsonValueSchema).optional(),
   })
   .loose();
 
@@ -59,82 +73,77 @@ export function kiloConfigHome(env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * Global config files Kilo reads under its config home. `kilo mcp add` writes
- * `kilo.jsonc`; the docs also accept `kilo.json` and `config.json`, so status
- * and removal check all three.
+ * Kilo's `KILO_CONFIG_DIR` override — an additional config directory whose
+ * files outrank the global directory, including the `~` prefixes Kilo accepts.
  */
-const GLOBAL_CONFIG_NAMES = ['kilo.json', 'kilo.jsonc', 'config.json'] as const;
-
-export function kiloGlobalConfigPaths(env: NodeJS.ProcessEnv): string[] {
-  const home = kiloConfigHome(env);
-  return GLOBAL_CONFIG_NAMES.map((name) => join(home, name));
+export function kiloConfigDir(env: NodeJS.ProcessEnv): string | undefined {
+  const configured = env['KILO_CONFIG_DIR']?.trim();
+  if (configured === undefined || configured === '') return undefined;
+  if (configured === '~') return userHome(env);
+  if (configured.startsWith('~/') || configured.startsWith('~\\')) {
+    return resolve(userHome(env), configured.slice(2));
+  }
+  return resolve(configured);
 }
 
 /**
- * JSONC → JSON: drop `//` and `/* ... *\/` comments and trailing commas while
- * leaving string contents — including `//` inside a URL — untouched. Kilo
- * accepts comments in `kilo.jsonc`; Concord only needs to read the file and
- * remove its own entry.
+ * Global config files Kilo reads, in its own read-merge order (lowest to
+ * highest precedence): `config.json`, `kilo.json`, `kilo.jsonc`,
+ * `opencode.json`, `opencode.jsonc`.
+ */
+const GLOBAL_CONFIG_FILES = [
+  'config.json',
+  'kilo.json',
+  'kilo.jsonc',
+  'opencode.json',
+  'opencode.jsonc',
+] as const;
+
+/** Files a `KILO_CONFIG_DIR` directory contributes, again lowest to highest. */
+const CONFIG_DIR_FILES = ['kilo.jsonc', 'kilo.json', 'opencode.jsonc', 'opencode.json'] as const;
+
+/**
+ * Every config file that can carry `mcp.concord`, ordered the way Kilo merges
+ * them: the whole global directory first, then the whole `KILO_CONFIG_DIR`
+ * directory. The last file defining the entry decides the effective one.
+ */
+export function kiloConfigPaths(env: NodeJS.ProcessEnv): string[] {
+  const paths = GLOBAL_CONFIG_FILES.map((name) => join(kiloConfigHome(env), name));
+  const dir = kiloConfigDir(env);
+  if (dir !== undefined) {
+    for (const name of CONFIG_DIR_FILES) paths.push(join(dir, name));
+  }
+  return paths;
+}
+
+/**
+ * JSONC → JSON on top of the shared comment stripper: `uncomment` blanks
+ * comments in place (strings and escapes untouched), then commas whose next
+ * real token closes an object or array are dropped for trailing commas.
  */
 function jsoncToJson(source: string): string {
-  const skipNoise = (from: number): number => {
-    let cursor = from;
-    for (;;) {
-      while (/\s/u.test(source.charAt(cursor))) cursor += 1;
-      if (source.charAt(cursor) === '/' && source.charAt(cursor + 1) === '/') {
-        while (cursor < source.length && source.charAt(cursor) !== '\n') cursor += 1;
-        continue;
-      }
-      if (source.charAt(cursor) === '/' && source.charAt(cursor + 1) === '*') {
-        const end = source.indexOf('*/', cursor + 2);
-        cursor = end === -1 ? source.length : end + 2;
-        continue;
-      }
-      return cursor;
-    }
-  };
-
+  const clean = uncomment(source);
   let out = '';
-  let index = 0;
-  let quoted = false;
-  while (index < source.length) {
-    const char = source.charAt(index);
-    if (quoted) {
+  let inString = false;
+  for (let index = 0; index < clean.length; index += 1) {
+    const char = clean.charAt(index);
+    if (inString) {
       out += char;
-      if (char === '\\') {
-        out += source.charAt(index + 1);
-        index += 2;
-        continue;
-      }
-      if (char === '"') quoted = false;
-      index += 1;
+      if (char === '"' && !isEscaped(clean, index)) inString = false;
       continue;
     }
     if (char === '"') {
-      quoted = true;
+      inString = true;
       out += char;
-      index += 1;
-      continue;
-    }
-    if (char === '/' && source.charAt(index + 1) === '/') {
-      while (index < source.length && source.charAt(index) !== '\n') index += 1;
-      continue;
-    }
-    if (char === '/' && source.charAt(index + 1) === '*') {
-      const end = source.indexOf('*/', index + 2);
-      index = end === -1 ? source.length : end + 2;
       continue;
     }
     if (char === ',') {
-      const next = skipNoise(index + 1);
-      const following = source.charAt(next);
-      if (following === '}' || following === ']') {
-        index = next;
-        continue;
-      }
+      let next = index + 1;
+      while (next < clean.length && /\s/u.test(clean.charAt(next))) next += 1;
+      const following = clean.charAt(next);
+      if (following === '}' || following === ']') continue;
     }
     out += char;
-    index += 1;
   }
   return out;
 }
@@ -150,29 +159,112 @@ function parseKiloConfig(text: string): KiloConfig {
   return kiloConfigSchema.parse(source);
 }
 
-/** Whether a `mcp.concord` entry is one Concord wrote and may therefore manage. */
+/**
+ * Whether a `mcp.concord` entry is one Concord wrote and may therefore manage.
+ * The shape must be the one `kilo mcp add` produces: `concord-mcp` alone as the
+ * command, or a runner invocation carrying the published package spec — a
+ * `concord-mcp` argument buried in a user's own wrapper does not count — and
+ * only Concord's own environment keys under either `environment` or Kilo's
+ * `env` alias.
+ */
 function isKiloConcordEntry(entry: KiloServer): boolean {
-  const launchesConcord = (entry.command ?? []).some(
-    (arg) => arg === CONCORD_SERVER_COMMAND || isPackageSpec(arg, CONCORD_PACKAGE_NAME),
-  );
+  const command = entry.command ?? [];
+  const launchesConcord =
+    (command.length === 1 && command[0] === CONCORD_SERVER_COMMAND) ||
+    command.some((arg) => isPackageSpec(arg, CONCORD_PACKAGE_NAME));
   if (!launchesConcord) return false;
-  // Environment the user added for their own purposes makes the entry theirs.
-  return Object.keys(entry.environment ?? {}).every((key) => key.startsWith('CONCORD_'));
+  const envKeys = [...Object.keys(entry.environment ?? {}), ...Object.keys(entry.env ?? {})];
+  return envKeys.every((key) => CONCORD_ENV_KEYS.has(key));
 }
 
-/** The `mcp.concord` entry of one config text when Concord owns it, else undefined. */
-function ownedEntry(configText: string | undefined): KiloServer | undefined {
-  if (configText === undefined || configText.trim() === '') return undefined;
-  const entry = parseKiloConfig(configText).mcp?.[CONCORD_SERVER_KEY];
-  return entry !== undefined && isKiloConcordEntry(entry) ? entry : undefined;
+/** The `mcp.concord` value of one parsed config when present, whatever its shape. */
+function concordValue(config: KiloConfig): JsonValue | undefined {
+  return config.mcp?.[CONCORD_SERVER_KEY];
+}
+
+/** Strictly parse a `mcp.concord` value into the server shape, if it is one. */
+function parseKiloServer(value: JsonValue): KiloServer | undefined {
+  if (!isJsonObject(value)) return undefined;
+  const parsed = kiloServerSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** Deep-merge JSON values the way Kilo's config merge does: later keys win. */
+function mergeJsonValue(base: JsonValue, overlay: JsonValue): JsonValue {
+  if (isJsonObject(base) && isJsonObject(overlay)) {
+    const merged: JsonObject = { ...base };
+    for (const [key, value] of Object.entries(overlay)) {
+      const existing = merged[key];
+      merged[key] = existing === undefined ? value : mergeJsonValue(existing, value);
+    }
+    return merged;
+  }
+  return overlay;
+}
+
+export type KiloMcpState = 'none' | 'installed' | 'disabled' | 'conflict' | 'unreadable';
+
+export interface KiloMcpStatus {
+  state: KiloMcpState;
+  /** Config file that last defined `mcp.concord`, for diagnostics. */
+  path?: string;
+}
+
+/**
+ * The effective `mcp.concord` across every config file Kilo merges, folded in
+ * precedence order so the last definition — including a later `enabled:
+ * false` — decides, mirroring Kilo's deep merge. 'unreadable' means a config
+ * file exists but cannot be parsed: it is reported even when another file has
+ * a working entry, since Kilo loads all of them. 'conflict' means the winning
+ * entry is not one Concord wrote, so setup must not overwrite it.
+ */
+export function kiloMcpState(env: NodeJS.ProcessEnv): KiloMcpStatus {
+  let effective: JsonValue | undefined;
+  let lastPath: string | undefined;
+  let unreadable = false;
+  for (const path of kiloConfigPaths(env)) {
+    if (!existsSync(path)) continue;
+    let text: string;
+    try {
+      text = readFileSync(path, 'utf8');
+    } catch {
+      unreadable = true;
+      continue;
+    }
+    let config: KiloConfig;
+    try {
+      config = parseKiloConfig(text);
+    } catch {
+      unreadable = true;
+      continue;
+    }
+    const entry = concordValue(config);
+    if (entry === undefined) continue;
+    effective = effective === undefined ? entry : mergeJsonValue(effective, entry);
+    lastPath = path;
+  }
+  if (unreadable) return { state: 'unreadable' };
+  if (effective === undefined) return { state: 'none' };
+  const server = parseKiloServer(effective);
+  if (server === undefined || !isKiloConcordEntry(server)) {
+    return lastPath === undefined ? { state: 'conflict' } : { state: 'conflict', path: lastPath };
+  }
+  if (server.enabled === false) {
+    return lastPath === undefined ? { state: 'disabled' } : { state: 'disabled', path: lastPath };
+  }
+  return { state: 'installed' };
 }
 
 /**
  * Register (or refresh) Concord's MCP server through `kilo mcp add`, which
- * writes the global `kilo.jsonc` itself. The kind is pinned so a Kilo started
- * from another harness's shell cannot inherit that harness's session source.
+ * writes the global `kilo.jsonc` itself. `kilo mcp add` replaces the whole
+ * named entry, so it only runs when no `mcp.concord` exists at all — an owned
+ * entry already pins the kind, and a foreign or disabled one belongs to the
+ * user. The kind is pinned so a Kilo started from another harness's shell
+ * cannot inherit that harness's session source.
  */
 export function installKiloMcpConfig(executable: string, env: NodeJS.ProcessEnv): void {
+  if (kiloMcpState(env).state !== 'none') return;
   const result = spawnCommandSync(
     executable,
     [
@@ -193,66 +285,57 @@ export function installKiloMcpConfig(executable: string, env: NodeJS.ProcessEnv)
 }
 
 /**
- * Whether a global Kilo config registers an enabled Concord server Concord
- * owns. 'unreadable' means a config file exists but cannot be parsed — it
- * takes priority over a working entry in a sibling file, since Kilo loads
- * all of them. A disabled (`enabled: false`) entry does not count as
- * installed.
+ * Remove Concord's `mcp.concord` entry from every Kilo config file that has
+ * one Concord owns, editing the text in place so comments, formatting and key
+ * order survive. User servers — including a `concord` entry somebody else
+ * wrote — and every unrelated key are preserved, and a malformed file is left
+ * untouched while the remaining files are still checked.
  */
-export function kiloMcpInstalled(env: NodeJS.ProcessEnv): boolean | 'unreadable' {
-  let found = false;
-  let unreadable = false;
-  for (const path of kiloGlobalConfigPaths(env)) {
-    if (!existsSync(path)) continue;
+export function uninstallKiloMcpConfig(env: NodeJS.ProcessEnv): void {
+  for (const path of kiloConfigPaths(env)) {
     let text: string;
     try {
+      if (!existsSync(path)) continue;
       text = readFileSync(path, 'utf8');
     } catch {
-      unreadable = true;
       continue;
     }
-    let config: KiloConfig;
+    let owned: boolean;
     try {
-      config = parseKiloConfig(text);
+      const entry = parseKiloServer(concordValue(parseKiloConfig(text)) ?? null);
+      owned = entry !== undefined && isKiloConcordEntry(entry);
     } catch {
-      unreadable = true;
       continue;
     }
-    const entry = config.mcp?.[CONCORD_SERVER_KEY];
-    if (entry !== undefined && isKiloConcordEntry(entry) && entry.enabled !== false) {
-      found = true;
-    }
+    if (!owned) continue;
+    const next = removeConcordEntry(text);
+    if (next !== undefined && next !== text) writeFileSync(path, next);
   }
-  // A config Kilo cannot read is reported even when another file still has a
-  // working entry: the broken file is a problem the user has to fix.
-  if (unreadable) return 'unreadable';
-  return found;
 }
 
 /**
- * Remove Concord's `mcp.concord` entry from every global Kilo config that has
- * one Concord owns. User servers — including a `concord` entry somebody else
- * wrote — and every unrelated key are preserved. Rewriting a `kilo.jsonc`
- * normalizes it to plain JSON, which drops comments; the file stays valid
- * Kilo config either way.
+ * Splice `"concord": {…}` out of the `"mcp"` object without reformatting the
+ * file. Returns undefined when the text layout does not match what the parse
+ * saw — duplicate keys or unusual formatting — so the file is left alone
+ * rather than rewritten blindly.
  */
-export function uninstallKiloMcpConfig(env: NodeJS.ProcessEnv): void {
-  for (const path of kiloGlobalConfigPaths(env)) {
-    let existing: string;
-    try {
-      if (!existsSync(path)) continue;
-      existing = readFileSync(path, 'utf8');
-      if (ownedEntry(existing) === undefined) continue;
-    } catch {
-      // An unreadable or malformed file is left untouched; the remaining
-      // config files are still checked.
-      continue;
-    }
-    const config = parseKiloConfig(existing);
-    const servers = Object.fromEntries(
-      Object.entries(config.mcp ?? {}).filter(([name]) => name !== CONCORD_SERVER_KEY),
+function removeConcordEntry(text: string): string | undefined {
+  const mcp = propertyObject(text, 'mcp');
+  if (mcp === undefined) return undefined;
+  const inner = text.slice(mcp.open, mcp.close + 1);
+  const concord = propertyObject(inner, CONCORD_SERVER_KEY);
+  if (concord === undefined) return undefined;
+  // Confirm the located entry is the owned one before touching anything.
+  try {
+    const located = parseKiloServer(
+      parseJsoncObject(inner.slice(concord.open, concord.close + 1)),
     );
-    const next = `${JSON.stringify({ ...config, mcp: servers }, null, 2)}\n`;
-    if (next !== existing) writeFileSync(path, next);
+    if (located === undefined || !isKiloConcordEntry(located)) return undefined;
+  } catch {
+    return undefined;
   }
+  return removeProperty(text, mcp, {
+    key: mcp.open + concord.key,
+    close: mcp.open + concord.close,
+  });
 }
