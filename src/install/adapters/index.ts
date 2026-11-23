@@ -2,6 +2,7 @@ import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { dirname, join } from 'node:path';
 import { installHermes, statusHermes } from './hermes.js';
 import { statusKiro } from './kiro.js';
+import { installCline, statusCline } from './cline.js';
 import { statusQwen } from './qwen.js';
 import { statusDeepseek } from './deepseek.js';
 import { installDeepseekConfig, uninstallDeepseekConfig } from '../deepseek-config.js';
@@ -54,6 +55,7 @@ import {
   upsertMcpServer,
 } from '../mcp-config.js';
 import { installKiroUserConfigs, kiroDetected, uninstallKiroUserConfigs } from '../kiro-config.js';
+import { uninstallClineUserConfigs } from '../cline-config.js';
 import {
   cursorTarget,
   hasConcordManifest,
@@ -738,6 +740,8 @@ export function statusAdapter(
       return statusKiro(kiroExecutablePath(env), repoRoot, env);
     case 'deepseek':
       return statusDeepseek(executablePath(HARNESS_CONFIGS.deepseek.executable, env), env);
+    case 'cline':
+      return statusCline(executablePath(HARNESS_CONFIGS.cline.executable, env), env);
   }
 }
 
@@ -793,6 +797,11 @@ export function installAdapter(
   if (harness === 'kiro') {
     if (!kiroDetected(kiroExecutablePath(env), undefined, env)) return;
     installKiroUserConfigs(env);
+    return;
+  }
+
+  if (harness === 'cline') {
+    installCline(env);
     return;
   }
 
@@ -950,6 +959,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
   uninstallKiroUserConfigs(env);
+  try {
+    uninstallClineUserConfigs(env);
+  } catch {
+    // Preserve malformed or unreadable Cline config and continue cleanup.
+  }
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

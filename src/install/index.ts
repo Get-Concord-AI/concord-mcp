@@ -5,6 +5,7 @@ import { upsertBlock } from './block.js';
 import {
   ANTIGRAVITY_INSTRUCTIONS,
   ANTIGRAVITY_RULE_HEADER,
+  CLINE_INSTRUCTIONS,
   CONCORD_INSTRUCTIONS,
   CURSOR_MDC_HEADER,
   KIRO_INSTRUCTIONS,
@@ -36,6 +37,10 @@ const TARGETS: readonly InstallTarget[] = [
     header: KIRO_STEERING_HEADER,
     instructions: KIRO_INSTRUCTIONS,
   },
+  // Cline reads rules from both directories; the same managed block in each
+  // keeps working whichever layout a given Cline version prefers.
+  { relPath: join('.clinerules', 'concord.md'), instructions: CLINE_INSTRUCTIONS },
+  { relPath: join('.cline', 'rules', 'concord.md'), instructions: CLINE_INSTRUCTIONS },
 ];
 
 function writeTarget(repoRoot: string, target: InstallTarget): string {

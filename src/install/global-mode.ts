@@ -15,6 +15,11 @@ import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
 import { deepseekHome } from './deepseek-config.js';
 import {
+  clineDetected,
+  clineGlobalRulesDir,
+  clineMcpSettingsPath,
+} from './cline-config.js';
+import {
   devinMcpConfigPath,
   hasDevinMcpServer,
   removeDevinMcpConfig,
@@ -23,6 +28,7 @@ import {
 import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-user-hooks.js';
 import {
   ANTIGRAVITY_RULE_HEADER,
+  CLINE_GLOBAL_INSTRUCTIONS,
   CONCORD_GLOBAL_INSTRUCTIONS,
   KIRO_STEERING_HEADER,
 } from './instructions.js';
@@ -202,6 +208,22 @@ const USER_FILES: readonly UserFile[] = [
     registration: { id: 'kiro', present: hasMcpServer },
     path: kiroUserMcpPath,
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('kiro')),
+    uninstall: removeMcpServer,
+  },
+  {
+    isDetected: clineDetected,
+    path: (env) => join(clineGlobalRulesDir(env), 'concord.md'),
+    install: (existing) => upsertBlock(existing ?? '', CLINE_GLOBAL_INSTRUCTIONS),
+    uninstall: (existing) => {
+      const rest = removeBlock(existing);
+      return rest.trim() === '' ? '' : rest;
+    },
+  },
+  {
+    isDetected: clineDetected,
+    registration: { id: 'cline', present: hasMcpServer },
+    path: clineMcpSettingsPath,
+    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('cline')),
     uninstall: removeMcpServer,
   },
 ];
