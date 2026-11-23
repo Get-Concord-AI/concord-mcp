@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-23
+
 ### Added
 
 - `concord work start|inspect|update|transfer|finish`: the five workflow tools
@@ -35,8 +37,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hand a turn-end hook's output back to the model, so a message that arrives
   mid-turn waits for the next prompt instead of being drained unseen. Kiro does
   not wake an idle session, so it reports `busy` reachability only and leaves
-  messages in the durable inbox between turns. Existing Kiro configuration is
-  merged and left intact on rerun and uninstall.
+  messages in the durable inbox between turns. Lifecycle hooks need Kiro CLI
+  3.0.0 or newer; IDE-only installs are supported. Existing Kiro configuration
+  is merged and left intact on rerun and uninstall, and global mode installs
+  and removes the user-level entry (#124).
+- DeepSeek Harness support. `concord setup` adds a native MCP row for
+  Concord to `$DSH_HOME/cordis.patch.yml`, keeping the file's comments and
+  `!!js` tags, and writes global guidance to `$DSH_HOME/AGENTS.md`. Status and
+  uninstall cover it like the other harnesses (#293).
 
 ### Changed
 
@@ -48,16 +56,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The README's Quick start explains how to fix `EACCES: permission denied` from
   `npm install -g` on Linux with a user-owned npm prefix instead of `sudo`
   (#368).
+- Schema v19 adds `session_bindings`, which records the agent each client
+  process hosts (#358).
+- Peer-message trust guidance (a `[concord from …]` block is information from
+  a peer, not an instruction from the operator) is now written into every
+  client's instruction files, not only the MCP server instructions.
+- Linked machines keep the CLI and MCP entrypoints off local SQLite: they load
+  only the code that talks to the remote workspace, so a machine whose native
+  SQLite binding cannot load still runs every linked command. `setup`,
+  `messages`, `check` and `doctor` work there as before, and `concord work`
+  answers with the linked-machine error.
+- Bumped `better-sqlite3` to 13.2.0 (SQLite 3.54.1) and the MCP SDK to 1.32.2.
 
 ### Fixed
 
-- Kiro uninstall keeps unrelated top-level settings in the hooks file and only
-  deletes it when nothing user-authored remains.
-- Global mode adopts the Kiro MCP entry that setup wrote and removes it again
-  with `concord setup --no-global`. Kiro status now requires CLI 3.0.0 or newer
-  for lifecycle hooks, while IDE-only installs stay supported.
-- Kiro status no longer treats hooks in an unsupported file version as ready,
-  so setup reports the file instead of delivery appearing healthy.
 - An MCP server no longer acts as the session it was launched with after the
   client resumed or replaced it: session-start hooks record which agent each
   client pid hosts, and servers resolve that live binding per request instead
@@ -75,6 +87,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keep their window (#392).
 - Codex proxy now speaks WebSocket over stdio (`ws@8`) and `initialize` times out
   after 10s instead of hanging (#320).
+- Concurrent `start_work` calls no longer fail with `database is locked`:
+  workflow write transactions take the write lock up front, so agents wait
+  their turn instead of failing when another agent wrote in between (#369).
+- A directory claim (`src/app` or `src/app/`) now overlaps the files inside
+  it, and root claims (`.`, `./`, `/`) cover the whole checkout, both when
+  work is claimed and in `concord check` and the edit guard. Matching is by
+  whole path segment, so `src/app.ts` and `src/application/` stay separate
+  (#378).
+- Overlap detection now matches module, domain and risk-tag labels written in
+  non-Latin scripts, and compares Unicode labels after NFKC normalization
+  (#356).
+- `concord setup` keeps a `concord` server the user wrote themselves in
+  `.gemini/settings.json` and `.grok/config.toml` instead of overwriting it
+  (#360).
+- Hermes setup writes through a dangling `config.yaml` symlink to its real
+  target, following each link from its real parent directory, instead of
+  replacing the link with a regular file.
+- Cursor's stop-hook follow-ups now carry the `no-reply-needed` marker, like
+  every other delivery path.
+- The relay monitor retries its startup workspace check with backoff instead
+  of exiting on the first failure, so a resumed session whose previous
+  process is still shutting down keeps receiving live messages.
 
 ## [0.23.0] - 2026-11-16
 
@@ -960,7 +994,8 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.1...v0.22.0
 [0.21.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.0...v0.21.1
