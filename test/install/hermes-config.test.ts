@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -143,6 +144,37 @@ describe('Hermes MCP config', () => {
     expect(existsSync(target)).toBe(true);
     expect(readFileSync(target, 'utf8')).toContain('@concord-ai/concord-mcp');
     expect(readFileSync(path, 'utf8')).toBe(readFileSync(target, 'utf8'));
+  });
+
+  it.skipIf(!canSymlinkFile())(
+    'resolves a relative config link against a symlinked Hermes home',
+    () => {
+      const { env, path } = fixture();
+      const realHome = join(env.HOME, 'dotfiles', 'hermes');
+      const shared = join(env.HOME, 'dotfiles', 'shared.yaml');
+      mkdirSync(realHome, { recursive: true });
+      seed(shared, 'model: original\n');
+      symlinkSync(realHome, dirname(path), 'dir');
+      symlinkSync(join('..', 'shared.yaml'), path);
+      installHermesMcpConfig(env);
+      expect(readFileSync(shared, 'utf8')).toContain('@concord-ai/concord-mcp');
+      expect(readFileSync(shared, 'utf8')).toContain('model: original');
+      expect(existsSync(join(env.HOME, 'shared.yaml'))).toBe(false);
+      expect(lstatSync(path).isSymbolicLink()).toBe(true);
+    },
+  );
+
+  it.skipIf(!canSymlinkFile())('follows a dangling two-link chain to its final target', () => {
+    const { env, path } = fixture();
+    const shared = join(env.HOME, 'shared.yaml');
+    const missing = join(env.HOME, 'missing.yaml');
+    mkdirSync(dirname(path), { recursive: true });
+    symlinkSync(missing, shared);
+    symlinkSync(shared, path);
+    installHermesMcpConfig(env);
+    expect(lstatSync(path).isSymbolicLink()).toBe(true);
+    expect(lstatSync(shared).isSymbolicLink()).toBe(true);
+    expect(readFileSync(missing, 'utf8')).toContain('@concord-ai/concord-mcp');
   });
 
   it('installs, detects, and uninstalls without removing other servers or settings', () => {

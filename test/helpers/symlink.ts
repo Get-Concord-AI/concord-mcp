@@ -1,4 +1,4 @@
-import { rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,18 +8,16 @@ import { join } from 'node:path';
  */
 export function canSymlinkFile(): boolean {
   if (process.platform !== 'win32') return true;
+  // A private directory per probe keeps parallel test workers from colliding.
+  const dir = mkdtempSync(join(tmpdir(), 'concord-probe-'));
   try {
-    const probeTarget = join(tmpdir(), `concord-probe-target-${String(Date.now())}`);
-    const probeLink = join(tmpdir(), `concord-probe-link-${String(Date.now())}`);
+    const probeTarget = join(dir, 'target');
     writeFileSync(probeTarget, '');
-    try {
-      symlinkSync(probeTarget, probeLink);
-      rmSync(probeLink);
-      return true;
-    } finally {
-      rmSync(probeTarget);
-    }
+    symlinkSync(probeTarget, join(dir, 'link'));
+    return true;
   } catch {
     return false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }

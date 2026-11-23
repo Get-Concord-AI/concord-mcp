@@ -88,15 +88,16 @@ function readConfig(path: string): Mapping {
 }
 
 function resolveConfigTarget(path: string): string {
-  try {
-    const stat = lstatSync(path, { throwIfNoEntry: false });
-    if (stat?.isSymbolicLink()) {
-      const target = resolve(dirname(path), readlinkSync(path));
-      return existsSync(target) ? realpathSync(target) : target;
-    }
-    return existsSync(path) ? realpathSync(path) : path;
-  } catch {
-    return path;
+  if (existsSync(path)) return realpathSync(path);
+  // A dangling link (or chain): follow it to the final missing destination.
+  // Each hop resolves against its real parent, so `..` works under a symlinked directory.
+  let current = path;
+  const seen = new Set<string>();
+  for (;;) {
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (stat?.isSymbolicLink() !== true || seen.has(current)) return current;
+    seen.add(current);
+    current = resolve(realpathSync(dirname(current)), readlinkSync(current));
   }
 }
 
