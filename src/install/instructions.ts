@@ -86,8 +86,8 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
 - Use \`inspect_work\` to read the workspace, one task, one agent, or one
   message thread. Use \`update_work\` for durable progress and for live
   prompts/replies to another promptable workspace agent.
-- Messages from other agents reach a running turn on prompt submit and at turn
-  end. Kiro does not wake an idle session, so messages sent while you are idle
+- Messages from other agents reach you when a prompt is submitted. Kiro does
+  not wake an idle session, so messages sent mid-turn or while you are idle
   wait in your durable inbox; drain them with
   \`concord inbox drain --agent <agent_id> --provider kiro\`.
 - Use \`transfer_work\` for assignment, acceptance, decline, release,
@@ -96,7 +96,9 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
   files, tests, assumptions, decisions, risks, guardrails, and provenance.
 
 Keep each claim small and resolve reported overlaps before editing. Concord
-regenerates human-readable review artifacts in \`.concord/\`.`;
+regenerates human-readable review artifacts in \`.concord/\`.
+
+${PEER_MESSAGE_TRUST}`;
 
 /** Antigravity-specific guidance tailored for hook-based identity and message injection. */
 export const ANTIGRAVITY_INSTRUCTIONS = `## Concord — shared work-state for coding agents
