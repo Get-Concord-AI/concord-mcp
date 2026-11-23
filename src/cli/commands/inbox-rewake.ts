@@ -41,6 +41,24 @@ export function hostsRewake(env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
+ * Whether an `inbox rewake` invocation should keep waiting for a message once
+ * it has proven it runs inside a real hook. SDK hosts have no plugin monitor,
+ * so they always wait; interactive sessions wait only when no receiver is
+ * beating — the monitor that should do it failed to (re)arm, the gap #180
+ * tracks after a `/resume`. `-p` one-shot runs never wait: Claude Code kills
+ * their async hooks at teardown, and `receiverAlive` is only consulted for
+ * interactive sessions, so callers pass `undefined` for SDK hosts.
+ */
+export function rewakeWaits(
+  env: NodeJS.ProcessEnv,
+  receiverAlive: boolean | undefined,
+): boolean {
+  if (env['CLAUDE_CODE_ENTRYPOINT']?.trim() === 'sdk-cli') return false;
+  if (hostsRewake(env)) return true;
+  return receiverAlive !== true;
+}
+
+/**
  * Claude Code shows a rewake as "Stop hook blocking error from command …", so
  * the first line says what actually happened before the framed messages.
  */

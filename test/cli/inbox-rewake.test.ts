@@ -10,6 +10,7 @@ import {
   hostsRewake,
   renderRewake,
   REWAKE_HEADER,
+  rewakeWaits,
   standDownWhenSuperseded,
 } from '../../src/cli/commands/inbox-rewake.js';
 import { codexThreadHostable, embeddingHost } from '../../src/cli/embedding-host.js';
@@ -40,6 +41,29 @@ describe('asyncRewake waiter for SDK-hosted Claude Code', () => {
     // -p runs are one-shot and their async hooks are killed at teardown.
     expect(hostsRewake({ CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' })).toBe(false);
     expect(hostsRewake({})).toBe(false);
+  });
+
+  it('waits for SDK hosts, which have no plugin monitor to cover them', () => {
+    expect(rewakeWaits({ CLAUDE_CODE_ENTRYPOINT: 'sdk-ts' }, undefined)).toBe(true);
+    // Even a stray receiver beat must not silence an SDK session's only path.
+    expect(rewakeWaits({ CLAUDE_CODE_ENTRYPOINT: 'sdk-py' }, true)).toBe(true);
+  });
+
+  it('never waits for -p one-shot runs', () => {
+    expect(rewakeWaits({ CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, false)).toBe(false);
+    expect(rewakeWaits({ CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, undefined)).toBe(false);
+  });
+
+  it('waits for an interactive session only while no receiver beats', () => {
+    const cli = { CLAUDE_CODE_ENTRYPOINT: 'cli' };
+    // The plugin monitor is alive: a waiter would only duplicate it.
+    expect(rewakeWaits(cli, true)).toBe(false);
+    // The monitor failed to (re)arm — the gap #180 tracks after /resume.
+    expect(rewakeWaits(cli, false)).toBe(true);
+    // An unknown receiver state still waits: a duplicate waiter is superseded
+    // harmlessly, a missing one loses the message.
+    expect(rewakeWaits(cli, undefined)).toBe(true);
+    expect(rewakeWaits({}, false)).toBe(true);
   });
 
   it('frames each message the way the monitor does, so the agent knows who and which id', () => {

@@ -65,7 +65,8 @@ Apps that drive Claude Code through the Claude Agent SDK, such as
 (`CLAUDE_CODE_ENTRYPOINT` is `sdk-ts` or `sdk-py`), the plugin's Stop hook arms
 `concord inbox rewake`, an `asyncRewake` hook. It waits for the next message
 and exits with code 2, which wakes the idle session with it. In interactive
-sessions it exits at once and leaves delivery to the monitor.
+sessions the same hook stays quiet while the plugin monitor is alive; it only
+waits when no monitor is beating, covering the gap below.
 
 Claude Code holds a monitor notification while the agent is blocked on its user
 (an `AskUserQuestion` picker or a permission prompt), so a message the monitor
@@ -83,3 +84,23 @@ and `inspect_work` show it, and a sender's outlook warns that the message will
 not be read until the user responds. Dismissing a prompt with Esc or Deny fires
 no hook, so the flag clears at the session's next prompt, tool call, or turn
 end; it is advisory and never holds delivery.
+
+## Troubleshooting: messages stop arriving after `claude --resume`
+
+Claude Code can fail to re-arm a plugin monitor within the same process —
+upstream bug [anthropics/claude-code#111286](https://github.com/anthropics/claude-code/issues/111286).
+The monitor that was running keeps its old session identity, and no replacement
+starts, so an idle resumed session used to hear nothing.
+
+Concord works around both halves of that:
+
+- **Identity.** Every SessionStart hook records which agent the client now
+  hosts (`session_bindings`). The monitor consults it on each poll, so a
+  monitor that survives a `/resume` or `/clear` keeps draining the *live*
+  session's inbox instead of the abandoned one.
+- **Reachability.** While no receiver heartbeat is live, the Stop hook's
+  `asyncRewake` waiter steps in and wakes the idle session with the next
+  message, then stands down once a monitor is back.
+
+If messages still do not arrive, check `concord inbox status` from the repo:
+a workspace that is not Concord-enabled exits the monitor silently by design.

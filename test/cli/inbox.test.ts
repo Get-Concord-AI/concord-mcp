@@ -36,10 +36,14 @@ function registerAgent(repos: Repositories, agentId: string): void {
 }
 
 function send(repos: Repositories, content: string, key: string): string {
+  return sendTo(repos, 'beta', content, key);
+}
+
+function sendTo(repos: Repositories, toAgentId: string, content: string, key: string): string {
   const result = handleSendAgentMessage(repos, {
     operation: 'prompt',
     agentId: 'alpha',
-    toAgentId: 'beta',
+    toAgentId,
     content,
     idempotencyKey: key,
   });
@@ -377,6 +381,59 @@ describe('pull-transport inbox', () => {
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(0);
     expect(repos.agentMessages.listEvents(first[0]?.messageId ?? '')).toHaveLength(2);
+  });
+
+  it('drains for the agent resolveTarget names, not the spawn-time one', async () => {
+    // A monitor that survives a /resume keeps its spawn-time agent id; the
+    // per-poll target is what lets it follow the live session (#180).
+    registerAgent(repos, 'beta-old');
+    registerAgent(repos, 'beta-new');
+    registerPullEndpoint(repos, 'beta-new', 'claude-code');
+    const messageId = sendTo(repos, 'beta-new', 'for the resumed session', 'key-resume');
+    const delivered: string[] = [];
+
+    await watchInbox(repos, 'beta-old', 'claude-code', 250, true, (messages) => {
+      delivered.push(...messages.map((message) => message.messageId));
+    }, {
+      resolveTarget: () => ({ agentId: 'beta-new', session: null }),
+    });
+
+    expect(delivered).toEqual([messageId]);
+  });
+
+  it('beats the receiver heartbeat on every poll by default', async () => {
+    registerPullEndpoint(repos, 'beta', 'gemini');
+    send(repos, 'wake up', 'key-beat');
+    let beatDuringEmit: string | null | undefined;
+
+    await watchInbox(repos, 'beta', 'gemini', 250, true, () => {
+      beatDuringEmit = repos.agentEndpoints.getByAgent('beta')?.receiverExpiresAt ?? null;
+    });
+
+    expect(beatDuringEmit).not.toBeNull();
+  });
+
+  it('leaves the receiver un-beaten when receiverHeartbeat is false', async () => {
+    // A rewake waiter that only covers a missing monitor must not fake one:
+    // its own heartbeat would make the next Stop see a live receiver and
+    // stand down into a delivery gap.
+    registerPullEndpoint(repos, 'beta', 'gemini');
+    send(repos, 'wake up', 'key-no-beat');
+    let beatDuringEmit: string | null | undefined;
+
+    await watchInbox(
+      repos,
+      'beta',
+      'gemini',
+      250,
+      true,
+      () => {
+        beatDuringEmit = repos.agentEndpoints.getByAgent('beta')?.receiverExpiresAt ?? null;
+      },
+      { receiverHeartbeat: false },
+    );
+
+    expect(beatDuringEmit).toBeNull();
   });
 });
 

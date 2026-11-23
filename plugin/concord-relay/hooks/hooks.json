@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "concord inbox register"
+            "command": "concord inbox register --from-hook"
           },
           {
             "type": "command",
