@@ -37,6 +37,21 @@ function machine(harnesses: readonly string[] = HARNESSES): NodeJS.ProcessEnv & 
 const read = (path: string): string => readFileSync(path, 'utf8');
 
 describe('applyGlobalMode', () => {
+  it('preserves DeepSeek user instructions under DSH_HOME when global mode changes', () => {
+    const env = machine(['dsh']);
+    env['DSH_HOME'] = join(env.HOME, 'custom-dsh');
+    const path = join(env['DSH_HOME'], 'AGENTS.md');
+    mkdirSync(env['DSH_HOME']);
+    writeFileSync(path, '# My DeepSeek instructions\n');
+    applyGlobalMode(env, true);
+    const installed = read(path);
+    expect(installed).toContain('# My DeepSeek instructions');
+    expect(installed).toContain('start_work');
+    applyGlobalMode(env, true);
+    expect(read(path)).toBe(installed);
+    applyGlobalMode(env, false);
+    expect(read(path)).toBe('# My DeepSeek instructions\n');
+  });
   it('installs and removes Devin user MCP config and instructions', () => {
     const env = machine(['devin']);
     const on = applyGlobalMode(env, true);

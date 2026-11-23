@@ -49,12 +49,14 @@ function sortedIntersection(a: readonly string[], b: readonly string[]): string[
  * phrasing differences do not hide a real overlap: case, surrounding
  * whitespace, and word separators (`-`, `_`, `/`, spaces) are all ignored.
  * e.g. "Todo Frontend", "todo-frontend", and ["frontend", "todo"] all share the
- * tokens {frontend, todo}.
+ * tokens {frontend, todo}. Letters, combining marks, and digits of any script
+ * count as word characters, so a label such as "支付" is a token of its own.
  */
 function tokenize(value: string): string[] {
   return value
+    .normalize('NFKC')
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
+    .split(/[^\p{L}\p{M}\p{N}]+/u)
     .filter((token) => token.length > 0);
 }
 

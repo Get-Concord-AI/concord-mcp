@@ -116,5 +116,5 @@ export function handleHandoff(repos: Repositories, input: HandoffInput): Handoff
     }
     return { handoff, reviewReady, task };
   });
-  return transact();
+  return transact.immediate();
 }
