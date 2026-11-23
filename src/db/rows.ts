@@ -543,10 +543,6 @@ export interface AgentEndpointRecord {
   receiverExpiresAt: string | null;
   /** When the session last stopped to wait on its user; null once it moved on. */
   awaitingUserSince: string | null;
-  /** When a hook last denied a session's question to show it messages first. */
-  userWaitDeniedAt: string | null;
-  /** The session that deny was for: only its next question is let through. */
-  userWaitDeniedSession: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -564,8 +560,6 @@ const agentEndpointDbRowSchema = z.object({
   expires_at: z.string().nullable(),
   receiver_expires_at: z.string().nullable(),
   awaiting_user_since: z.string().nullable(),
-  user_wait_denied_at: z.string().nullable(),
-  user_wait_denied_session: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -585,8 +579,6 @@ export function parseAgentEndpointRow(raw: unknown): AgentEndpointRecord {
     expiresAt: row.expires_at,
     receiverExpiresAt: row.receiver_expires_at,
     awaitingUserSince: row.awaiting_user_since,
-    userWaitDeniedAt: row.user_wait_denied_at,
-    userWaitDeniedSession: row.user_wait_denied_session,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -171,13 +171,9 @@ export function drainBeforeUserWait(
   now: Date = new Date(),
 ): BeforeUserWait {
   const drain = repos.db.transaction((): BeforeUserWait => {
-    const endpoint = repos.agentEndpoints.getByAgent(agentId);
-    const deniedAt = endpoint?.userWaitDeniedAt ?? null;
-    if (deniedAt !== null && endpoint?.userWaitDeniedSession === session) {
-      // Spent either way: one deny earns one question let through.
-      repos.agentEndpoints.setUserWaitDenied(agentId, null);
-      if (deniedRecently(deniedAt, now)) return NOTHING_TO_SHOW;
-    }
+    // Spent either way: one deny earns this session one question let through.
+    const grantedAt = repos.agentEndpoints.takeUserWaitAllowance(agentId, session);
+    if (grantedAt !== undefined && deniedRecently(grantedAt, now)) return NOTHING_TO_SHOW;
     // Listed before claiming, so a message claimed below is not also counted as held.
     const held = repos.agentMessages.listUnreadForSession(agentId, session).map(toDeliverable);
     const claimed = drainInbox(repos, agentId, provider, capabilityFor(provider), {
@@ -186,7 +182,12 @@ export function drainBeforeUserWait(
     });
     if (held.length > 0 || claimed.length > 0) {
       repos.agentEndpoints.setAwaitingUser(agentId, null);
-      repos.agentEndpoints.setUserWaitDenied(agentId, { at: now.toISOString(), session });
+      repos.agentEndpoints.grantUserWaitAllowance(
+        agentId,
+        session,
+        now.toISOString(),
+        new Date(now.getTime() - USER_WAIT_DENY_WINDOW_MS).toISOString(),
+      );
     }
     return { held, claimed };
   });

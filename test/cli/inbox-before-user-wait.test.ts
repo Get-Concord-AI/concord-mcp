@@ -278,7 +278,7 @@ describe('at most one deny per question', () => {
   it('records no deny when there was nothing to show', () => {
     beforeWait(repos);
 
-    expect(repos.agentEndpoints.getByAgent('beta')?.userWaitDeniedAt).toBeNull();
+    expect(repos.agentEndpoints.takeUserWaitAllowance('beta', sessionKey(SESSION))).toBeUndefined();
   });
 });
 
@@ -314,13 +314,52 @@ describe('the allowance belongs to the session that was denied', () => {
     expect(beforeWait(repos, SESSION, soon)).toEqual({ held: [], claimed: [] });
   });
 
-  it('records which session the deny was for', () => {
+  it('records the allowance for the session that was denied, and only that one', () => {
     send(repos, 'first', 'k1');
     beforeWait(repos, SESSION, asked);
 
-    const endpoint = repos.agentEndpoints.getByAgent('beta');
-    expect(endpoint?.userWaitDeniedAt).toBe(asked.toISOString());
-    expect(endpoint?.userWaitDeniedSession).toBe(sessionKey(SESSION));
+    expect(repos.agentEndpoints.takeUserWaitAllowance('beta', sessionKey('session-2'))).toBe(
+      undefined,
+    );
+    expect(repos.agentEndpoints.takeUserWaitAllowance('beta', sessionKey(SESSION))).toBe(
+      asked.toISOString(),
+    );
+  });
+
+  it("never lets one session's deny replace another's allowance", () => {
+    send(repos, 'for session 1', 'k1');
+    expect(ids(beforeWait(repos, SESSION, asked))).toHaveLength(1);
+    send(repos, 'for session 2', 'k2');
+    expect(ids(beforeWait(repos, 'session-2', asked))).toHaveLength(1);
+
+    // Another message arrives before session 1 asks again: its question is
+    // still let through, not denied a second time.
+    send(repos, 'and another', 'k3');
+    expect(beforeWait(repos, SESSION, soon)).toEqual({ held: [], claimed: [] });
+    expect(beforeWait(repos, 'session-2', soon)).toEqual({ held: [], claimed: [] });
+  });
+
+  it('keeps one allowance for a session the hook cannot name', () => {
+    send(repos, 'first', 'k1');
+    drainBeforeUserWait(repos, 'beta', 'claude-code', null, asked);
+
+    send(repos, 'and another', 'k2');
+    expect(drainBeforeUserWait(repos, 'beta', 'claude-code', null, soon)).toEqual({
+      held: [],
+      claimed: [],
+    });
+  });
+
+  it('drops allowances no question spent in time when a new one is granted', () => {
+    send(repos, 'first', 'k1');
+    beforeWait(repos, SESSION, asked);
+
+    // Session 1 never asks again. Much later, session 2 is denied.
+    const later = new Date(asked.getTime() + USER_WAIT_DENY_WINDOW_MS + 1);
+    send(repos, 'much later', 'k2');
+    beforeWait(repos, 'session-2', later);
+
+    expect(repos.agentEndpoints.takeUserWaitAllowance('beta', sessionKey(SESSION))).toBe(undefined);
   });
 });
 

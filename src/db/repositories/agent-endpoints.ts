@@ -20,12 +20,6 @@ export interface NewAgentEndpoint {
   expiresAt?: string | null;
 }
 
-/** A hook denied `session`'s question at `at` to show it messages first. */
-export interface UserWaitDenial {
-  at: string;
-  session: string | null;
-}
-
 export interface AgentEndpointRepository {
   upsert(endpoint: NewAgentEndpoint): AgentEndpointRecord;
   get(endpointId: string): AgentEndpointRecord | undefined;
@@ -40,14 +34,28 @@ export interface AgentEndpointRepository {
    */
   setAwaitingUser(agentId: string, since: string | null): void;
   /**
-   * Record that a hook denied a question from `agentId`'s session to show it
-   * messages first, or that the session's next question was let through (`null`).
+   * A hook denied `session`'s question at `grantedAt` to show it messages
+   * first, so its next question is let through. Drops this agent's allowances
+   * granted before `expiredBefore`, which no question will spend in time.
    */
-  setUserWaitDenied(agentId: string, denial: UserWaitDenial | null): void;
+  grantUserWaitAllowance(
+    agentId: string,
+    session: string | null,
+    grantedAt: string,
+    expiredBefore: string,
+  ): void;
+  /** Spend `session`'s allowance: when it was granted, or undefined if it has none. */
+  takeUserWaitAllowance(agentId: string, session: string | null): string | undefined;
   disconnect(endpointId: string): AgentEndpointRecord | undefined;
 }
 
 const rawListSchema = z.array(z.unknown());
+const allowanceRowSchema = z.object({ granted_at: z.string() });
+
+/** SQLite never treats two NULLs in a primary key as equal, so no session is ''. */
+function sessionColumn(session: string | null): string {
+  return session ?? '';
+}
 
 export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpointRepository {
   const upsertStmt = db.prepare(`
@@ -96,11 +104,32 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
     END
     WHERE agent_id = @agent_id
   `);
-  const setUserWaitDeniedStmt = db.prepare(`
-    UPDATE agent_endpoints
-    SET user_wait_denied_at = @at, user_wait_denied_session = @session
-    WHERE agent_id = @agent_id
+  const grantAllowanceStmt = db.prepare(`
+    INSERT INTO user_wait_allowances (agent_id, session, granted_at)
+    VALUES (@agent_id, @session, @granted_at)
+    ON CONFLICT(agent_id, session) DO UPDATE SET granted_at = excluded.granted_at
   `);
+  const pruneAllowancesStmt = db.prepare(`
+    DELETE FROM user_wait_allowances WHERE agent_id = @agent_id AND granted_at < @before
+  `);
+  const getAllowanceStmt = db.prepare(`
+    SELECT granted_at FROM user_wait_allowances WHERE agent_id = @agent_id AND session = @session
+  `);
+  const deleteAllowanceStmt = db.prepare(`
+    DELETE FROM user_wait_allowances WHERE agent_id = @agent_id AND session = @session
+  `);
+  const grantAllowance = db.transaction(
+    (agentId: string, session: string, grantedAt: string, expiredBefore: string) => {
+      pruneAllowancesStmt.run({ agent_id: agentId, before: expiredBefore });
+      grantAllowanceStmt.run({ agent_id: agentId, session, granted_at: grantedAt });
+    },
+  );
+  const takeAllowance = db.transaction((agentId: string, session: string) => {
+    const raw: unknown = getAllowanceStmt.get({ agent_id: agentId, session });
+    if (raw === undefined) return undefined;
+    deleteAllowanceStmt.run({ agent_id: agentId, session });
+    return allowanceRowSchema.parse(raw).granted_at;
+  });
   const clearReceiverStmt = db.prepare(`
     UPDATE agent_endpoints
     SET receiver_expires_at = NULL, updated_at = @now
@@ -167,12 +196,11 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
     setAwaitingUser(agentId, since) {
       setAwaitingUserStmt.run({ agent_id: agentId, since });
     },
-    setUserWaitDenied(agentId, denial) {
-      setUserWaitDeniedStmt.run({
-        agent_id: agentId,
-        at: denial?.at ?? null,
-        session: denial?.session ?? null,
-      });
+    grantUserWaitAllowance(agentId, session, grantedAt, expiredBefore) {
+      grantAllowance(agentId, sessionColumn(session), grantedAt, expiredBefore);
+    },
+    takeUserWaitAllowance(agentId, session) {
+      return takeAllowance(agentId, sessionColumn(session));
     },
     disconnect(endpointId) {
       disconnectStmt.run({ endpoint_id: endpointId, now: new Date().toISOString() });
