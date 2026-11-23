@@ -210,7 +210,10 @@ export class CodexDaemonClient {
   }
 
   private connectProxy(): Promise<void> {
-    const child = spawn(this.command, [...this.args], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(this.command, [...this.args], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
     this.child = child;
     child.stderr.resume();
     child.once('error', (error) => {
