@@ -48,6 +48,15 @@ function send(repos: Repositories, content: string, key: string): string {
   }).message.messageId;
 }
 
+/** A store where alpha can message beta, which has a pull endpoint. */
+function freshRepos(): Repositories {
+  const repos = createRepositories(openDatabase(':memory:'));
+  registerAgent(repos, 'alpha');
+  registerAgent(repos, 'beta');
+  registerPullEndpoint(repos, 'beta', 'claude-code');
+  return repos;
+}
+
 const SESSION = 'session-1';
 
 /** What the relay plugin's monitor does: deliver to its session, never read. */
@@ -127,10 +136,7 @@ describe('drainBeforeUserWait', () => {
   let repos: Repositories;
 
   beforeEach(() => {
-    repos = createRepositories(openDatabase(':memory:'));
-    registerAgent(repos, 'alpha');
-    registerAgent(repos, 'beta');
-    registerPullEndpoint(repos, 'beta', 'claude-code');
+    repos = freshRepos();
   });
 
   it('claims a queued message for this session as hook-delivered, not read', () => {
@@ -222,10 +228,7 @@ describe('at most one deny per question', () => {
   let repos: Repositories;
 
   beforeEach(() => {
-    repos = createRepositories(openDatabase(':memory:'));
-    registerAgent(repos, 'alpha');
-    registerAgent(repos, 'beta');
-    registerPullEndpoint(repos, 'beta', 'claude-code');
+    repos = freshRepos();
   });
 
   it('lets the question asked right after a deny open the picker', () => {
@@ -288,10 +291,7 @@ describe('the allowance belongs to the session that was denied', () => {
   const soon = new Date(asked.getTime() + 5_000);
 
   beforeEach(() => {
-    repos = createRepositories(openDatabase(':memory:'));
-    registerAgent(repos, 'alpha');
-    registerAgent(repos, 'beta');
-    registerPullEndpoint(repos, 'beta', 'claude-code');
+    repos = freshRepos();
   });
 
   it("does not let another session's question skip the drain", () => {

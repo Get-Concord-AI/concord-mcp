@@ -96,8 +96,7 @@ Concord or from Claude Code itself. Tested with Claude Code v2.1.308:
 | MCP tool permission prompt | held until approved | held until approved             |
 
 As soon as the user responds, Claude Code shows the held notification before the
-model's next call, so no extra hook is needed after the wait. The sender is told
-the recipient is waiting on its user.
+model's next call, so no extra hook is needed after the wait.
 
 **Just before a question.** Claude Code delivers a monitor notification only
 between tool calls, so a message that arrives while the agent is writing its
@@ -112,8 +111,8 @@ error"; and the model sees the message twice, because the denied call ending
 also releases the monitor's held notification, before the question is asked
 again. Delivery is at-least-once, so a repeat is expected.
 
-A question is denied at most once. The next question within two minutes of a
-deny is let through untouched, so a message the transcript does not yet show as
+A question is denied at most once. The session's next question within two
+minutes of a deny is let through untouched, so a message the transcript does not yet show as
 read, or a peer that keeps sending, can never keep the user from being asked.
 Anything still waiting arrives after the answer.
 

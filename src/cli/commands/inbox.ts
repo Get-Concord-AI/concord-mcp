@@ -144,10 +144,10 @@ function deniedRecently(deniedAt: string, now: Date): boolean {
 
 /**
  * Everything `agentId`'s session has not been shown, just before it blocks on
- * a question. Claude Code holds a monitor notification
- * until the user answers, so a message the monitor already took counts here
- * too: delivered to this session, with no read evidence yet. Run read
- * observation first, so a message the model has already seen is left out.
+ * a question. Claude Code holds a monitor notification until the user answers,
+ * so a message the monitor already took counts here too: delivered to this
+ * session, with no read evidence yet. Run read observation first, so a message
+ * the model has already seen is left out.
  *
  * When there is anything to show, the hook denies the call and the user is
  * not asked yet, so the waiting-on-user flag is cleared.
@@ -405,9 +405,6 @@ const DRAIN_FORMATS: readonly string[] = [
   'pre-tool-use',
 ];
 
-/** Formats that run just before the session blocks on its user. */
-const BEFORE_USER_WAIT_FORMATS: readonly string[] = ['pre-tool-use'];
-
 /** Writes drained messages in a hook's or a monitor's format. */
 function writeMessages(format: string, messages: readonly DeliverableMessage[]): void {
   if (format === 'json') {
@@ -624,7 +621,8 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       if (hookPayload !== undefined) {
         observeHookEvent(context.repos, agentId, hookPayload, options.provider);
       }
-      if (BEFORE_USER_WAIT_FORMATS.includes(options.format)) {
+      // Runs just before the session blocks on its user's question.
+      if (options.format === 'pre-tool-use') {
         const { held, claimed } = drainBeforeUserWait(
           context.repos,
           agentId,
