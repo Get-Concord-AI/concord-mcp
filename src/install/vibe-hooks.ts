@@ -3,7 +3,9 @@ import { dirname } from 'node:path';
 
 import {
   appendTomlBlock,
+  bareTomlTableValue,
   concordTomlBlocks,
+  dropTomlLine,
   removeTomlBlocks,
   vibeHooksPath,
 } from './vibe-config.js';
@@ -50,15 +52,27 @@ function hookBlock(spec: VibeHookSpec): string {
 
 export function upsertVibeHooksConfig(source: string | undefined): string {
   const current = source ?? '';
-  const stripped = removeTomlBlocks(current, HOOKS_TABLE, OWNED);
+  const bare = bareTomlTableValue(current, HOOKS_TABLE);
+  if (bare !== undefined && !bare.empty) return current;
+  const base = bare === undefined ? current : dropTomlLine(current, bare.index);
+  const stripped = removeTomlBlocks(base, HOOKS_TABLE, OWNED);
   return VIBE_HOOKS.reduce((text, spec) => appendTomlBlock(text, hookBlock(spec)), stripped);
 }
 
+/**
+ * Every managed hook must be present with its event type and command intact:
+ * a name alone would call a user-edited or truncated entry healthy.
+ */
 export function vibeHooksInstalled(source: string): boolean {
-  const owned = new Set(
-    concordTomlBlocks(source, HOOKS_TABLE, OWNED).map((block) => block.name ?? ''),
+  const blocks = concordTomlBlocks(source, HOOKS_TABLE, OWNED);
+  return VIBE_HOOKS.every((spec) =>
+    blocks.some(
+      (block) =>
+        block.name === spec.name &&
+        block.fields['type'] === spec.type &&
+        block.fields['command'] === spec.command,
+    ),
   );
-  return VIBE_HOOKS.every((spec) => owned.has(spec.name));
 }
 
 export function installVibeHooks(env: NodeJS.ProcessEnv = process.env): string {

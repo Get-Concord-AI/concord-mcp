@@ -72,6 +72,22 @@ describe('upsertVibeHooksConfig', () => {
     expect(fixed.match(/name = "concord-session-end"/gu)).toHaveLength(1);
     expect(fixed).not.toContain('old-event');
   });
+
+  it('converts an empty hooks array and leaves other values untouched', () => {
+    const next = upsertVibeHooksConfig('hooks = []\n');
+    expect(next).not.toContain('hooks = []');
+    expect(vibeHooksInstalled(next)).toBe(true);
+    const source = 'hooks = [{ name = "mine" }]\n';
+    expect(upsertVibeHooksConfig(source)).toBe(source);
+  });
+
+  it('does not count hooks with drifted type or command as installed', () => {
+    const drifted = upsertVibeHooksConfig(undefined).replace(
+      'concord inbox observe --provider vibe',
+      'echo hi',
+    );
+    expect(vibeHooksInstalled(drifted)).toBe(false);
+  });
 });
 
 describe('vibe hooks install', () => {

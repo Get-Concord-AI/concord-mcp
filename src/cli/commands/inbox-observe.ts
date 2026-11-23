@@ -191,7 +191,8 @@ function vibeChunkTexts(dir: string): (string | undefined)[] {
     .flatMap((name) => {
       try {
         const path = join(dir, name);
-        return [{ path, mtime: statSync(path).mtimeMs }];
+        const stat = statSync(path);
+        return [{ path, mtime: stat.mtimeMs, size: stat.size }];
       } catch {
         return [];
       }
@@ -201,6 +202,9 @@ function vibeChunkTexts(dir: string): (string | undefined)[] {
   let budget = TRANSCRIPT_TAIL_BYTES;
   for (const file of files) {
     if (budget <= 0) break;
+    // The budget bounds raw snapshot bytes, including fields conversion
+    // drops: a chunk larger than what remains is skipped, never loaded whole.
+    if (file.size > budget) continue;
     let text: string | undefined;
     try {
       const raw: unknown = JSON.parse(readFileSync(file.path, 'utf8'));
@@ -215,7 +219,7 @@ function vibeChunkTexts(dir: string): (string | undefined)[] {
       text = undefined;
     }
     texts.push(text === '' ? undefined : text);
-    if (text !== undefined) budget -= Buffer.byteLength(text, 'utf8');
+    budget -= file.size;
   }
   return texts;
 }

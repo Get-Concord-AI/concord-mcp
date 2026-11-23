@@ -76,6 +76,70 @@ describe('upsertVibeMcpConfig', () => {
     expect(next).toContain('name = "concord-tools"');
     expect(next).toContain('name = "concord"');
   });
+
+  it('keeps lookalike tables inside multi-line strings untouched', () => {
+    const source = [
+      'notes = """',
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      '"""',
+      '',
+    ].join('\n');
+    const next = upsertVibeMcpConfig(source);
+    expect(next).toContain('notes = """\n[[mcp_servers]]\nname = "concord"');
+    // One real managed block is appended; the string's copy is not ours.
+    expect(next.match(/\[\[mcp_servers\]\]/gu)).toHaveLength(2);
+    expect(hasVibeMcpServer(next)).toBe(true);
+  });
+
+  it('removes child tables together with their parent block', () => {
+    const source = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      '',
+      '[mcp_servers.env]',
+      'CONCORD_AGENT_KIND = "vibe"',
+      '',
+      '[[mcp_servers]]',
+      'name = "other"',
+      'command = "x"',
+      '',
+    ].join('\n');
+    const next = upsertVibeMcpConfig(source);
+    // The child table left with its parent; only the new block's inline env remains.
+    expect(next).not.toContain('[mcp_servers.env]');
+    expect(next).not.toMatch(/^CONCORD_AGENT_KIND = "vibe"$/mu);
+    expect(next).toContain('name = "other"');
+    expect(next.match(/\[\[mcp_servers\]\]/gu)).toHaveLength(2);
+    expect(hasVibeMcpServer(next)).toBe(true);
+  });
+
+  it('converts an empty mcp_servers array instead of breaking the file', () => {
+    const next = upsertVibeMcpConfig('mcp_servers = []\n');
+    expect(next).not.toContain('mcp_servers = []');
+    expect(next).toContain('[[mcp_servers]]');
+    expect(hasVibeMcpServer(next)).toBe(true);
+  });
+
+  it('leaves a non-empty mcp_servers value untouched', () => {
+    const source = 'mcp_servers = [{ name = "x" }]\n';
+    expect(upsertVibeMcpConfig(source)).toBe(source);
+  });
+
+  it('does not count a concord block with drifted fields as installed', () => {
+    const drifted = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "something-else"',
+      '',
+    ].join('\n');
+    expect(hasVibeMcpServer(drifted)).toBe(false);
+  });
 });
 
 describe('vibeMcpConfigPath and install', () => {

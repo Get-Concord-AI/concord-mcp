@@ -11,6 +11,7 @@ import {
   runVibeHook,
   vibeSessionStartOutput,
 } from '../../src/cli/commands/vibe-hooks.js';
+import { openContext } from '../../src/cli/context.js';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { agentIdForSession, type AgentIdentity } from '../../src/domain/identity.js';
@@ -128,5 +129,21 @@ describe('runVibeHook', () => {
     );
 
     expect(context(output)).toContain(VIBE.agentId);
+  });
+
+  it('gives subagent payloads no context and registers no agent', async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'concord-vibe-sub-'));
+    const env = { HOME: process.env['HOME'] };
+    const child = payload('session_start', repoRoot, {
+      session_id: 'child-session',
+      parent_session_id: SESSION,
+      source: 'startup',
+    });
+
+    expect(await runVibeHook('vibe-session-start', child, env)).toBe('{}');
+    expect(await runVibeHook('vibe-session-end', child, env)).toBe('{}');
+
+    const agents = openContext(repoRoot, env).repos.agents.list();
+    expect(agents.filter((agent) => agent.kind === 'vibe')).toHaveLength(0);
   });
 });

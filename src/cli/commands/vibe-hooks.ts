@@ -8,7 +8,7 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { openContext } from '../context.js';
 import { cloudRoster } from './cloud-hooks.js';
 import { cloudAccess, registerInCloud, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
-import { observeHookEvent } from './inbox-observe.js';
+import { isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
 import { registerPullEndpoint } from './inbox.js';
 import {
   sessionStartMessage,
@@ -126,6 +126,11 @@ export async function runVibeHook(
   rawJson: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
+  // A spawned subagent's hooks carry parent_session_id. Registering one would
+  // advertise a peer whose own delivery hooks Concord ignores, so messages
+  // sent to it could never arrive; its payloads get no Concord context.
+  const hook = parseObservedHook(rawJson);
+  if (hook !== undefined && isSubagentHook(hook)) return NO_OUTPUT;
   const identity = resolveIdentity(env, { kind: 'vibe', hookPayload: rawJson });
   if (identity === undefined) return NO_OUTPUT;
   const repoRoot = vibeRepoRoot(rawJson);

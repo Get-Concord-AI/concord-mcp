@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,7 +11,7 @@ import {
 } from '../../src/install/adapters/index.js';
 import { statusVibe } from '../../src/install/adapters/vibe.js';
 import { vibeMcpConfigPath, vibeMcpInstalled } from '../../src/install/vibe-config.js';
-import { vibeHooksPresent } from '../../src/install/vibe-hooks.js';
+import { vibeHooksPresent, upsertVibeHooksConfig } from '../../src/install/vibe-hooks.js';
 import { vibeHooksPath } from '../../src/install/vibe-config.js';
 import { writeFakeVersion } from '../helpers/fake-command.js';
 
@@ -43,6 +43,37 @@ describe('statusVibe', () => {
     mkdirSync(bin);
     writeFakeVersion(bin, 'vibe', 'vibe 3.1.3');
     const env = { HOME: home, PATH: bin };
+    const report = statusVibe(executablePath('vibe', env), env);
+    expect(report.status).toBe('action_required');
+    expect(report.capabilities).toEqual([]);
+  });
+
+  it('reports action_required when an installed hook command drifted', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-vibe-status-'));
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    writeFakeVersion(bin, 'vibe', 'vibe 3.1.3');
+    const vibeHome = join(home, '.vibe');
+    mkdirSync(vibeHome, { recursive: true });
+    writeFileSync(
+      vibeMcpConfigPath({ VIBE_HOME: vibeHome }),
+      [
+        '[[mcp_servers]]',
+        'name = "concord"',
+        'transport = "stdio"',
+        'command = "concord-mcp"',
+        'env = { CONCORD_AGENT_KIND = "vibe" }',
+        '',
+      ].join('\n'),
+    );
+    // All six hooks present, but one command was edited: names alone would
+    // still look installed, the field check must catch the drift.
+    const drifted = upsertVibeHooksConfig(undefined).replace(
+      'concord hook vibe-session-end',
+      'echo drifted',
+    );
+    writeFileSync(vibeHooksPath({ VIBE_HOME: vibeHome }), drifted);
+    const env = { HOME: home, PATH: bin, VIBE_HOME: vibeHome };
     const report = statusVibe(executablePath('vibe', env), env);
     expect(report.status).toBe('action_required');
     expect(report.capabilities).toEqual([]);
