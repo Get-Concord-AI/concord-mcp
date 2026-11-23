@@ -251,12 +251,7 @@ export function browserCommand(platform: NodeJS.Platform, url: string): [string,
 function openUrl(url: string): void {
   const [command, args] = browserCommand(process.platform, url);
   // Fire and forget: the link is printed too, for when no browser opens.
-  spawn(command, args, {
-    stdio: 'ignore',
-    detached: true,
-    shell: false,
-    windowsHide: true,
-  })
+  spawn(command, args, { stdio: 'ignore', detached: true, shell: false })
     .on('error', () => undefined)
     .unref();
 }

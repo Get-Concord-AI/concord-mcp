@@ -20,15 +20,24 @@ beforeEach(() => {
   spawnSyncMock.mockReset();
 });
 
-it('hides the console for non-interactive command shims', () => {
+it('hides the console only for command shims that opt in as background children', () => {
   const child = {};
   spawnMock.mockReturnValue(child);
 
-  expect(spawnCommand(process.execPath, ['--version'], { env: process.env })).toBe(child);
-  expect(spawnMock).toHaveBeenCalledWith(
+  expect(
+    spawnCommand(process.execPath, ['--version'], { env: process.env, windowsHide: true }),
+  ).toBe(child);
+  expect(spawnMock).toHaveBeenLastCalledWith(
     process.execPath,
     ['--version'],
     expect.objectContaining({ windowsHide: true, shell: false }),
+  );
+
+  spawnCommand(process.execPath, ['--version'], { env: process.env, stdio: 'inherit' });
+  expect(spawnMock).toHaveBeenLastCalledWith(
+    process.execPath,
+    ['--version'],
+    expect.not.objectContaining({ windowsHide: true }),
   );
 });
 

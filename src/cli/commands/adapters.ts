@@ -179,6 +179,7 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
   const server = spawnCommand(selectedPath, argv.appServer, {
     ...context,
     stdio: ['ignore', 'ignore', 'inherit'],
+    windowsHide: true,
   });
   try {
     await waitForCodexServer(url, server);
