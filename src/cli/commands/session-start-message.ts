@@ -28,8 +28,9 @@ export function rosterLines(others: readonly RosterLine[]): string[] {
  * second agent under it, after which no message to the id could be delivered.
  */
 export const CONCORD_SERVER_ONLY =
-  "Make Concord calls with this machine's `concord` MCP server; a chat app's Concord " +
-  "connector (such as claude.ai's) is a separate agent and must never be given this id.";
+  "Make Concord calls with this machine's `concord` MCP server, or from a shell with " +
+  "`concord work <action> --agent <id>`; a chat app's Concord connector (such as " +
+  "claude.ai's) is a separate agent and must never be given this id.";
 
 /**
  * What a hook tells its session when the MCP server cannot see the hook's

@@ -15,6 +15,7 @@ import { z } from 'zod';
 import type { Repositories } from '../../db/index.js';
 import { hookSessionId } from '../../domain/identity.js';
 import { idsInPrompt, scanTranscript, sessionKey } from '../../domain/receipts.js';
+import { recordClientBinding } from '../session-binding.js';
 
 /**
  * What a session's own hooks reveal about the messages it was handed.
@@ -371,6 +372,7 @@ export function observeHookEvent(
   repos: Repositories,
   agentId: string,
   rawJson: string,
+  kind?: string,
 ): Observation {
   const hook = parseObservedHook(rawJson);
   if (hook === undefined || isSubagentHook(hook)) return { read: [], requeued: [] };
@@ -397,6 +399,10 @@ export function observeHookEvent(
       }
       break;
     case 'SessionStart':
+      // A session-start hook sees the session as it is now; binding it here
+      // covers every command that observes hooks — including the bundled
+      // plugin, which never reaches `concord hook session-start`.
+      if (kind !== undefined) recordClientBinding(repos, { agentId, kind });
       repos.agentEndpoints.setAwaitingUser(agentId, null);
       if (hook.source === 'startup') {
         requeued = repos.agentMessages
