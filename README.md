@@ -83,13 +83,43 @@ Concord gives them a shared workspace and makes reachable sessions available for
 direct prompts and replies.
 
 <details>
+<summary><code>EACCES: permission denied</code> on <code>npm install -g</code> (Linux)</summary>
+
+With Node.js from a distribution package (for example `apt`), npm installs global
+packages under `/usr/local/lib/node_modules`, which your user cannot write to.
+Don't reach for `sudo`: it leaves root-owned files behind and runs the package's
+install scripts as root. Give npm a prefix you own instead:
+
+```bash
+mkdir -p ~/.npm-global
+npm config set prefix ~/.npm-global
+echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.profile
+. ~/.profile
+npm install -g @concord-ai/concord-mcp
+concord --version
+```
+
+Put the `PATH` line in `~/.profile` rather than only `~/.bashrc`: agent clients
+start the bare `concord-mcp` command, and those launched from your desktop do not
+read `~/.bashrc`. Log out and back in so they pick it up.
+
+A Node version manager such as [nvm](https://github.com/nvm-sh/nvm) avoids the
+problem as well, and makes it easy to get the Node.js 22.12 or later that Concord
+requires, which distribution packages may not ship. The standalone installer
+above needs neither.
+
+</details>
+
+<details>
 <summary>What <code>concord setup</code> changes</summary>
 
 `concord setup` creates the local `.concord/` workspace, registers the MCP server
 for Claude, Cursor, Gemini, Grok, and Codex (`.mcp.json`, `.cursor/mcp.json`,
 `.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`).
 For [Goose](./docs/goose.md), it registers the `concord-relay` extension in
-Goose's `config.yaml` when detected. For
+Goose's `config.yaml` when detected. For [DeepSeek Harness](./docs/deepseek.md),
+it adds a native MCP plugin to `$DSH_HOME/cordis.patch.yml` when `dsh` is detected.
+For
 [Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
 `.agents/hooks.json`, and `.agents/rules/concord.md`. It also writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
@@ -157,6 +187,7 @@ aside once no session started before the link is running (nothing is deleted).
 | Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)         |
 | Grok Build                         | [Setup and delivery](./docs/grok-build.md)         |
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
+| DeepSeek Harness                   | [Setup and delivery](./docs/deepseek.md)           |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |

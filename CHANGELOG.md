@@ -28,6 +28,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   command fails, matching the inbox rule, instead of letting one session act
   as another.
 
+### Changed
+
+- The README's Quick start explains how to fix `EACCES: permission denied` from
+  `npm install -g` on Linux with a user-owned npm prefix instead of `sudo`
+  (#368).
+
 ## [0.23.0] - 2026-11-16
 
 ### Added
