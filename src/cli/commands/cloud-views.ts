@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-import { renderRosterLines } from '../../artifacts/work-state-view.js';
 import { cloudSessionFor, connectCloud } from '../../cloud/proxy.js';
 import {
   listCloudAgents,
@@ -10,6 +9,7 @@ import {
 } from '../../cloud/runtime.js';
 import { agentStatusValues } from '../../db/rows.js';
 import { presenceEntryOf, type PresenceEntry } from '../../domain/presence.js';
+import { renderRosterLines } from '../../domain/presence-render.js';
 import { cloudAccess } from './cloud-inbox.js';
 
 /**

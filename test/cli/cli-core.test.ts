@@ -49,7 +49,7 @@ describe('runSetup', () => {
     expect(program.commands.map((command) => command.name())).toEqual(['setup']);
   });
 
-  it('on a linked machine, installs instructions but creates no local state', () => {
+  it('on a linked machine, installs instructions but creates no local state', async () => {
     // The 0.16 bug: setup created .concord/concord.db, which then kept the
     // repository local on a linked machine, out of reach of its cloud peers.
     const dir = repoDir();
@@ -58,7 +58,7 @@ describe('runSetup', () => {
     writeCredentials(env, { apiUrl: 'https://api.concord.test', apiKey: 'ck_test' });
     ensureMachineKey(env, () => 'machine-1');
 
-    const result = runSetup(dir, { env });
+    const result = await runSetup(dir, { env });
 
     expect(result.state).toMatchObject({ kind: 'cloud', apiUrl: 'https://api.concord.test' });
     expect(existsSync(join(dir, '.concord'))).toBe(false);
@@ -68,10 +68,10 @@ describe('runSetup', () => {
     expect(() => openContext(dir, env)).toThrow(/works through Concord Cloud/u);
   });
 
-  it('creates state, instructions, and repository-pinned MCP configs', () => {
+  it('creates state, instructions, and repository-pinned MCP configs', async () => {
     const dir = repoDir();
     const codexHome = mkdtempSync(join(tmpdir(), 'concord-codex-'));
-    const result = runSetup(dir, { env: { CODEX_HOME: codexHome } });
+    const result = await runSetup(dir, { env: { CODEX_HOME: codexHome } });
 
     expect(result.state).toEqual({ kind: 'local', concordPath: join(dir, '.concord') });
     expect(existsSync(join(dir, '.concord', 'concord.db'))).toBe(true);
@@ -84,7 +84,7 @@ describe('runSetup', () => {
     );
   });
 
-  it('leaves the repository gitignore and a customized Concord gitignore untouched', () => {
+  it('leaves the repository gitignore and a customized Concord gitignore untouched', async () => {
     const dir = repoDir();
     const gitignorePath = join(dir, '.gitignore');
     writeFileSync(gitignorePath, 'node_modules/');
@@ -92,20 +92,20 @@ describe('runSetup', () => {
     mkdirSync(join(dir, '.concord'));
     writeFileSync(concordIgnorePath, '*\n!HANDOFF.md\n');
 
-    runSetup(dir, { mcp: false });
-    runSetup(dir, { mcp: false });
+    await runSetup(dir, { mcp: false });
+    await runSetup(dir, { mcp: false });
 
     expect(readFileSync(gitignorePath, 'utf8')).toBe('node_modules/');
     expect(readFileSync(concordIgnorePath, 'utf8')).toBe('*\n!HANDOFF.md\n');
   });
 
-  it('prepends the catch-all to an existing Concord gitignore that lacks one', () => {
+  it('prepends the catch-all to an existing Concord gitignore that lacks one', async () => {
     const dir = repoDir();
     const concordIgnorePath = join(dir, '.concord', '.gitignore');
     mkdirSync(join(dir, '.concord'));
     writeFileSync(concordIgnorePath, '!HANDOFF.md\n');
 
-    runSetup(dir, { mcp: false });
+    await runSetup(dir, { mcp: false });
 
     const rules = readFileSync(concordIgnorePath, 'utf8').split('\n');
     expect(rules.indexOf('*')).toBeGreaterThanOrEqual(0);
@@ -114,38 +114,38 @@ describe('runSetup', () => {
 
   it.skipIf(!canSymlinkFile())(
     'replaces a symlinked Concord gitignore instead of writing through it',
-    () => {
+    async () => {
       const dir = repoDir();
       const rootIgnorePath = join(dir, '.gitignore');
       writeFileSync(rootIgnorePath, 'node_modules/\n');
       mkdirSync(join(dir, '.concord'));
       symlinkSync(rootIgnorePath, join(dir, '.concord', '.gitignore'));
 
-      runSetup(dir, { mcp: false });
+      await runSetup(dir, { mcp: false });
 
       expect(readFileSync(rootIgnorePath, 'utf8')).toBe('node_modules/\n');
       expect(lstatSync(join(dir, '.concord', '.gitignore')).isFile()).toBe(true);
     },
   );
 
-  it('strips a byte-order mark before prepending the catch-all', () => {
+  it('strips a byte-order mark before prepending the catch-all', async () => {
     const dir = repoDir();
     const concordIgnorePath = join(dir, '.concord', '.gitignore');
     mkdirSync(join(dir, '.concord'));
     writeFileSync(concordIgnorePath, '\uFEFF!HANDOFF.md\n');
 
-    runSetup(dir, { mcp: false });
+    await runSetup(dir, { mcp: false });
 
     const contents = readFileSync(concordIgnorePath, 'utf8');
     expect(contents).not.toContain('\uFEFF');
     expect(contents.split('\n')).toContain('!HANDOFF.md');
   });
 
-  it('keeps the generated workspace untracked in a real git repository', () => {
+  it('keeps the generated workspace untracked in a real git repository', async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'concord-git-')));
     execFileSync('git', ['init', '-q'], { cwd: dir });
 
-    runSetup(dir, { mcp: false });
+    await runSetup(dir, { mcp: false });
 
     const untracked = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], {
       cwd: dir,
@@ -381,9 +381,9 @@ describe('buildStatus / renderStatusText', () => {
 });
 
 describe('runWho', () => {
-  it('lists agents registered in the workspace', () => {
+  it('lists agents registered in the workspace', async () => {
     const dir = repoDir();
-    runSetup(dir, { mcp: false });
+    await runSetup(dir, { mcp: false });
     handleRegisterAgent(openContext(dir).repos, {
       agent_id: 'claude-code:7p8v',
       kind: 'claude-code',
@@ -395,9 +395,9 @@ describe('runWho', () => {
     expect(out).toContain('building frontend');
   });
 
-  it('shows none when nobody has registered', () => {
+  it('shows none when nobody has registered', async () => {
     const dir = repoDir();
-    runSetup(dir, { mcp: false });
+    await runSetup(dir, { mcp: false });
     expect(runWho(dir)).toContain('none');
   });
 });

@@ -1,82 +1,10 @@
 import type { Command } from '@commander-js/extra-typings';
 
-import type { Repositories } from '../../db/index.js';
-import {
-  CLAIMED_STATUSES,
-  entryCoversFile,
-  normalizePath,
-  pathKey,
-  type OverlapPathOptions,
-  type OverlapWarning,
-} from '../../domain/overlap.js';
 import { linkedMachine } from '../../cloud/target.js';
-import { resolvePathsFromCheckout } from '../../workspaces/overlap-paths.js';
-import { openContext } from '../context.js';
+import type { OverlapWarning } from '../../domain/overlap.js';
+import { checkFileOverlaps } from './overlap-check.js';
 
-/**
- * Collisions between the given files and OTHER active tasks' claimed paths.
- * This is the client-agnostic primitive behind edit-time enforcement: a
- * PreToolUse hook (Claude Code), a git pre-commit hook, or CI can call it to
- * find out whether the files about to change are already claimed by someone
- * else. `selfTaskId` excludes your own claim so you are not flagged against
- * yourself.
- *
- * Unlike claim-time overlap detection (which also warns on shared
- * directories/modules/domains), this gate fires only for files claimed
- * directly or through a directory claim. Paths compare case-insensitively when
- * `options.platform` is win32 or darwin; callers pass `process.platform`.
- */
-export function checkFileOverlaps(
-  repos: Repositories,
-  files: readonly string[],
-  selfTaskId?: string,
-  options: Pick<OverlapPathOptions, 'platform'> = {},
-): OverlapWarning[] {
-  const { platform } = options;
-  const byKey = new Map<string, string>();
-  for (const file of files.map(normalizePath)) {
-    const key = pathKey(file, platform);
-    if (file !== '' && !byKey.has(key)) byKey.set(key, file);
-  }
-  const wanted = [...byKey.values()];
-  const otherClaims = repos.tasks
-    .list()
-    .filter((task) => CLAIMED_STATUSES.has(task.status) && task.taskId !== selfTaskId);
-  const pathsFromCheckout = resolvePathsFromCheckout(
-    repos.checkoutRoot,
-    otherClaims.map((task) => task.expectedFiles),
-    wanted,
-  );
-
-  const warnings: OverlapWarning[] = [];
-  for (const task of otherClaims) {
-    const shared = task.expectedFiles
-      .map(normalizePath)
-      .filter((entry) => entry !== '' && byKey.has(pathKey(entry, platform)));
-    const sharedKeys = new Set(shared.map((entry) => pathKey(entry, platform)));
-    const covered = wanted.filter(
-      (file) =>
-        !sharedKeys.has(pathKey(file, platform)) &&
-        task.expectedFiles.some((entry) =>
-          entryCoversFile(entry, file, { platform, pathsFromCheckout }),
-        ),
-    );
-    const reasons: string[] = [];
-    if (shared.length > 0) {
-      const unique = [...new Set(shared)].sort((a, b) => a.localeCompare(b));
-      reasons.push(`same file(s): ${unique.join(', ')}`);
-    }
-    if (covered.length > 0) {
-      reasons.push(
-        `inside claimed directory: ${covered.sort((a, b) => a.localeCompare(b)).join(', ')}`,
-      );
-    }
-    if (reasons.length > 0) {
-      warnings.push({ taskId: task.taskId, title: task.title, reasons, kinds: ['same_file'] });
-    }
-  }
-  return warnings;
-}
+export { checkFileOverlaps } from './overlap-check.js';
 
 /** Human-readable result for `concord check`. */
 export function renderCheck(files: readonly string[], overlaps: readonly OverlapWarning[]): string {
@@ -102,7 +30,7 @@ export function registerCheckCommand(program: Command): void {
       'Check whether files you are about to edit overlap another active task (for hooks/CI)',
     )
     .option('-t, --task <id>', "your own task id, so its own claim isn't flagged as an overlap")
-    .action((files, options) => {
+    .action(async (files, options) => {
       // Never a failure: hooks wrap this as `concord check … || exit 2`, and a
       // linked machine must not have every edit denied. The cloud reports
       // overlaps from start_work instead.
@@ -113,6 +41,7 @@ export function registerCheckCommand(program: Command): void {
         );
         return;
       }
+      const { openContext } = await import('../context.js');
       const overlaps = checkFileOverlaps(openContext(process.cwd()).repos, files, options.task, {
         platform: process.platform,
       });
