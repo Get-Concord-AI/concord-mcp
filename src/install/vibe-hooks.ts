@@ -8,6 +8,7 @@ import {
   dropTomlLine,
   removeTomlBlocks,
   vibeHooksPath,
+  type TomlBlock,
 } from './vibe-config.js';
 
 /**
@@ -39,7 +40,11 @@ export const VIBE_HOOKS: readonly VibeHookSpec[] = [
 ];
 
 const HOOKS_TABLE = 'hooks';
-const OWNED = (name: string): boolean => name.startsWith('concord-');
+// Only the exact hook names Concord writes are ours: a user entry like
+// `concord-lint` must survive setup and uninstall untouched.
+const OWNED_NAMES: ReadonlySet<string> = new Set(VIBE_HOOKS.map((hook) => hook.name));
+const OWNED = (block: TomlBlock): boolean =>
+  block.name !== undefined && OWNED_NAMES.has(block.name);
 
 function hookBlock(spec: VibeHookSpec): string {
   return [
@@ -89,7 +94,13 @@ export function installVibeHooks(env: NodeJS.ProcessEnv = process.env): string {
 export function removeVibeHooks(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const path = vibeHooksPath(env);
   if (!existsSync(path)) return undefined;
-  const current = readFileSync(path, 'utf8');
+  let current: string;
+  try {
+    current = readFileSync(path, 'utf8');
+  } catch {
+    // An unreadable config is left untouched so the rest of uninstall proceeds.
+    return undefined;
+  }
   const next = removeTomlBlocks(current, HOOKS_TABLE, OWNED);
   if (next === current) return undefined;
   writeFileSync(path, next);

@@ -1,6 +1,6 @@
 import { HARNESS_CONFIGS } from '../../domain/harness-config.js';
-import { vibeMcpInstalled } from '../vibe-config.js';
-import { vibeHooksPresent } from '../vibe-hooks.js';
+import { installVibeMcpConfig, vibeMcpInstalled } from '../vibe-config.js';
+import { installVibeHooks, vibeHooksPresent } from '../vibe-hooks.js';
 import type { AdapterReport } from './index.js';
 import { atLeast, run, versionTuple } from './probe.js';
 
@@ -25,6 +25,15 @@ export function statusVibe(executable: string | undefined, env: NodeJS.ProcessEn
       : 'Mistral Vibe needs the Concord MCP server and lifecycle hooks installed.',
     installed ? config.installedCapabilities : [],
   );
+}
+
+/** Register Concord with a supported Vibe; an unsupported one is left alone. */
+export function installVibe(executable: string | undefined, env: NodeJS.ProcessEnv): void {
+  if (executable === undefined) return;
+  const version = versionTuple(run(executable, ['--version'], env).output);
+  if (version === undefined || !atLeast(version, HARNESS_CONFIGS.vibe.minimumVersion)) return;
+  installVibeMcpConfig(env);
+  installVibeHooks(env);
 }
 
 function report(

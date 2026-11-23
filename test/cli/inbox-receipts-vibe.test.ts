@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -121,6 +121,46 @@ describe('Vibe hook payloads', () => {
         },
       ]),
     );
+
+    observeHookEvent(
+      repos,
+      'beta',
+      vibeHook({ hook_event_name: 'post_tool', transcript_path: dir }),
+    );
+    expect(status(repos, messageId)).toBe('read');
+  });
+
+  it('reads read-evidence that spans two history chunks', () => {
+    const messageId = send(repos, 'split note', 'k1');
+    drainInbox(repos, 'beta', 'vibe', undefined, {
+      session: sessionKey(SESSION),
+      via: 'hook',
+    });
+    // The delivered message is the last entry of the older chunk and the
+    // model's reply the first entry of the newer one: only the joined stream
+    // shows "message, then the model's turn".
+    const dir = mkdtempSync(join(tmpdir(), 'concord-vibe-split-'));
+    const chunks = join(dir, 'chunks');
+    mkdirSync(chunks, { recursive: true });
+    writeFileSync(
+      join(chunks, 'older.json'),
+      JSON.stringify([
+        {
+          message: {
+            role: 'user',
+            content: `[concord from alpha id=${messageId}]\nsplit note`,
+          },
+        },
+      ]),
+    );
+    writeFileSync(
+      join(chunks, 'newer.json'),
+      JSON.stringify([{ message: { role: 'assistant', content: 'got it' } }]),
+    );
+    const older = new Date('2024-01-01T00:00:00Z');
+    const newer = new Date('2024-01-02T00:00:00Z');
+    utimesSync(join(chunks, 'older.json'), older, older);
+    utimesSync(join(chunks, 'newer.json'), newer, newer);
 
     observeHookEvent(
       repos,

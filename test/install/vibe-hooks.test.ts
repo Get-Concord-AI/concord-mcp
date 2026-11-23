@@ -65,6 +65,19 @@ describe('upsertVibeHooksConfig', () => {
     expect(upsertVibeHooksConfig(once)).toBe(once);
   });
 
+  it('keeps a user hook that merely starts with concord-', () => {
+    const userHook = [
+      '[[hooks]]',
+      'name = "concord-lint"',
+      'type = "post_tool"',
+      'command = "npm run lint"',
+      '',
+    ].join('\n');
+    const once = upsertVibeHooksConfig(userHook);
+    expect(once).toContain('name = "concord-lint"');
+    expect(once).toContain('command = "npm run lint"');
+  });
+
   it('replaces a stale concord hook block instead of duplicating it', () => {
     const once = upsertVibeHooksConfig(undefined);
     const stale = once.replace('concord hook vibe-session-end', 'concord hook old-event');
@@ -112,5 +125,27 @@ describe('vibe hooks install', () => {
     expect(next).toContain('name = "mine"');
     expect(next).not.toContain('concord-');
     expect(vibeHooksPresent(env)).toBe(false);
+  });
+
+  it('uninstall keeps a user hook that merely starts with concord-', () => {
+    const env = tempEnv();
+    const path = vibeHooksPath(env);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      [
+        '[[hooks]]',
+        'name = "concord-lint"',
+        'type = "post_tool"',
+        'command = "npm run lint"',
+        '',
+      ].join('\n'),
+    );
+    installVibeHooks(env);
+    removeVibeHooks(env);
+    const next = readFileSync(path, 'utf8');
+    expect(next).toContain('name = "concord-lint"');
+    expect(next).toContain('command = "npm run lint"');
+    expect(next).not.toContain('concord-session-start');
   });
 });

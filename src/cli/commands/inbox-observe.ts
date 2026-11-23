@@ -44,6 +44,8 @@ const observedHookSchema = z
     notification_type: z.string().optional(),
     /** The session's conversation so far, where the harness exposes one. */
     transcript_path: z.string().nullable().optional(),
+    /** The session's project directory, where the harness reports one (Vibe). */
+    cwd: z.string().optional(),
     /**
      * Set when the hook fired inside a subagent or a background agent forked
      * from the session, rather than in the session's own conversation.
@@ -84,12 +86,6 @@ function eventName(hook: ObservedHook): string | undefined {
 }
 
 /**
- * The file holding what the model was actually sent. Grok's hooks point at
- * `updates.jsonl`, its UI event stream; the conversation itself (hook context
- * as `user` entries, the model's turns as `assistant`) is `chat_history.jsonl`
- * beside it.
- */
-/**
  * The conversation texts a hook's `transcript_path` resolves to, re-read on
  * every call so retries see late writes. Each text is scanned independently:
  * entries are only meaningful in the order their own file wrote them.
@@ -100,6 +96,9 @@ function conversationTexts(hook: ObservedHook): TranscriptTexts | undefined {
   const path = hook.transcript_path ?? hook.transcriptPath ?? undefined;
   if (path === undefined || path === '') return undefined;
   if (basename(path) === 'updates.jsonl') {
+    // Grok's hooks point at `updates.jsonl`, its UI event stream; the
+    // conversation itself (hook context as `user` entries, the model's turns
+    // as `assistant`) is `chat_history.jsonl` beside it.
     const history = join(dirname(path), 'chat_history.jsonl');
     if (existsSync(history)) return () => [readTail(history)];
   }
@@ -177,9 +176,11 @@ function vibeChunkLine(raw: unknown): string | undefined {
 }
 
 /**
- * Vibe's `chunks/*.json` snapshots, newest first by mtime within the byte
- * budget. Each file becomes one JSONL text: hash-named and unordered across
- * files, but conversation-ordered inside, which is all read evidence needs.
+ * Vibe's `chunks/*.json` snapshots make up one ordered conversation, so they
+ * are joined oldest→newest (by mtime) into a single text within the byte
+ * budget: read evidence that spans two chunks — the delivered message ending
+ * one file and the model's reply starting the next — only matches in the
+ * joined stream.
  */
 function vibeChunkTexts(dir: string): (string | undefined)[] {
   let names: string[];
@@ -199,7 +200,7 @@ function vibeChunkTexts(dir: string): (string | undefined)[] {
       }
     })
     .sort((a, b) => b.mtime - a.mtime);
-  const texts: (string | undefined)[] = [];
+  const parts: string[] = [];
   let budget = TRANSCRIPT_TAIL_BYTES;
   for (const file of files) {
     if (budget <= 0) break;
@@ -219,10 +220,12 @@ function vibeChunkTexts(dir: string): (string | undefined)[] {
     } catch {
       text = undefined;
     }
-    texts.push(text === '' ? undefined : text);
+    if (text !== undefined && text !== '') parts.push(text);
     budget -= file.size;
   }
-  return texts;
+  // Files were visited newest→oldest for the budget; emit oldest→newest.
+  const joined = parts.reverse().join('\n');
+  return joined === '' ? [] : [joined];
 }
 
 /**

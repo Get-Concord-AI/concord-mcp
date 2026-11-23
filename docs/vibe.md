@@ -24,11 +24,13 @@ in them:
 | `session_end`   | `concord hook vibe-session-end`                                 | Requeue unread deliveries, disconnect         |
 | `notification`  | `concord inbox observe --provider vibe`                         | Approval/question notifications mark the wait |
 
-Re-running setup is safe: Concord-owned blocks are recognised by name and
-rewritten; user hooks and other `mcp_servers` entries are left untouched.
-`concord adapters uninstall` removes only the Concord blocks — global mode
-does not manage Vibe's user-level files, so disabling it leaves the adapter
-installed.
+Re-running setup is safe: only entries matching the shape Concord writes are
+recognised and rewritten; user hooks, a hand-written `concord` MCP server, and
+other `mcp_servers` entries are left untouched. `concord adapters uninstall`
+removes only the Concord blocks. In global mode Concord also manages the
+instruction block in `$VIBE_HOME/AGENTS.md` (`~/.vibe/AGENTS.md` by default),
+which carries the peer-message trust guidance; disabling global mode removes
+that block but leaves the adapter installed.
 
 ## Identity
 

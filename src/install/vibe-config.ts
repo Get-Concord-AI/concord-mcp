@@ -15,7 +15,14 @@ import { tomlLines } from './toml-lines.js';
 
 export function vibeHome(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env['VIBE_HOME']?.trim();
-  return configured === undefined || configured === '' ? join(userHome(env), '.vibe') : configured;
+  if (configured === undefined || configured === '') return join(userHome(env), '.vibe');
+  // Vibe expands a leading `~` itself; a quoted `~/…` in a dotfile reaches us
+  // unexpanded, so match that here rather than writing to a literal `./~`.
+  if (configured === '~') return userHome(env);
+  if (configured.startsWith('~/') || configured.startsWith('~\\')) {
+    return join(userHome(env), configured.slice(2));
+  }
+  return configured;
 }
 
 export function vibeMcpConfigPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -34,51 +41,99 @@ export interface TomlBlock {
   readonly name: string | undefined;
   /** `key = "value"` pairs in the block's own table, before any child table. */
   readonly fields: Readonly<Record<string, string>>;
+  /** Env var names the block assigns (`env = {…}`, `env.KEY`, `[table.env]`). */
+  readonly envKeys: readonly string[];
+  /** An `env` assignment exists that `envKeys` cannot fully account for. */
+  readonly envOpaque: boolean;
 }
 
 /**
  * Ranges of `[[table]]` blocks whose `name = …` line satisfies `owned`. Header
- * and key detection skips lines inside multi-line strings; `[table.child]`
- * subtables belong to the preceding array element, so they stay inside its
- * block, while any other header ends it.
+ * and key detection skips lines inside multi-line strings and accepts quoted
+ * keys (`"mcp_servers"`, `['hooks'.env]`); `[table.child]` subtables belong to
+ * the preceding array element, so they stay inside its block, while any other
+ * header ends it. Env assignments are collected so callers can prove a block
+ * is Concord-shaped before treating it as ours.
  */
 export function concordTomlBlocks(
   source: string,
   table: string,
-  owned: (name: string) => boolean,
+  owned: (block: TomlBlock) => boolean,
 ): TomlBlock[] {
   const lines = [...tomlLines(source)];
-  const header = new RegExp(`^\\s*\\[\\[\\s*${table}\\s*\\]\\]`, 'u');
+  // A table segment may be bare or quoted: `mcp_servers`, `"mcp_servers"`,
+  // `'mcp_servers'` all name the same TOML key.
+  const seg = `(?:"${table}"|'${table}'|${table})`;
+  const header = new RegExp(`^\\s*\\[\\[\\s*${seg}\\s*\\]\\]`, 'u');
   const anyHeader = /^\s*\[/u;
-  const childHeader = new RegExp(`^\\s*\\[+\\s*${table}\\s*\\.`, 'u');
-  const namePattern = /^\s*name\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
-  const fieldPattern = /^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
+  const childHeader = new RegExp(`^\\s*\\[+\\s*${seg}\\s*\\.`, 'u');
+  const envHeader = new RegExp(
+    `^\\s*\\[+\\s*${seg}\\s*\\.\\s*["']?env["']?\\s*\\]+\\s*$`,
+    'u',
+  );
+  const namePattern = /^\s*["']?name["']?\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
+  const fieldPattern = /^\s*["']?([A-Za-z0-9_-]+)["']?\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
+  const envDotted = /^\s*["']?env["']?\s*\.\s*(\S+?)\s*=/u;
+  const envInline = /^\s*["']?env["']?\s*=\s*\{(.*)\}/u;
+  const envInlineOpen = /^\s*["']?env["']?\s*=\s*\{/u;
+  const envAssign = /^\s*["']?env["']?\s*=/u;
+  const envChildKey = /^\s*["']?([A-Za-z0-9_-]+)["']?\s*=/u;
+  const envInnerKey = /(?:^|,)\s*["']?([A-Za-z0-9_-]+)["']?\s*=/gu;
+  const envChildWeird = /^\s*[^=\s#"'][^=]*=|^\s*["'][^"']*["']\s*=/u;
   const blocks: TomlBlock[] = [];
   let open: { start: number; end: number } | undefined;
   let ownedName: string | undefined;
   let inChildTable = false;
+  let inEnvChild = false;
+  let envOpaque = false;
+  const envKeys: string[] = [];
   let fields: Record<string, string> = {};
-  const flush = (end: number): void => {
-    if (open !== undefined && ownedName !== undefined && owned(ownedName)) {
-      blocks.push({ start: open.start, end, name: ownedName, fields });
-    }
+  const reset = (): void => {
     open = undefined;
     ownedName = undefined;
     inChildTable = false;
+    inEnvChild = false;
+    envOpaque = false;
+    envKeys.length = 0;
     fields = {};
+  };
+  const flush = (end: number): void => {
+    if (open !== undefined && ownedName !== undefined) {
+      const block: TomlBlock = {
+        start: open.start,
+        end,
+        name: ownedName,
+        fields,
+        envKeys: [...envKeys],
+        envOpaque,
+      };
+      if (owned(block)) blocks.push(block);
+    }
+    reset();
   };
   lines.forEach((line, index) => {
     const { text, inString } = line;
     if (inString) return;
     const isHeader = anyHeader.test(text);
-    if (open !== undefined && isHeader && !childHeader.test(text)) flush(index);
-    if (open === undefined && header.test(text)) {
-      open = { start: index, end: lines.length };
+    if (open !== undefined && isHeader) {
+      if (!childHeader.test(text)) {
+        flush(index);
+      } else {
+        inChildTable = true;
+        inEnvChild = envHeader.test(text);
+        return;
+      }
+    }
+    if (open === undefined) {
+      if (header.test(text)) {
+        open = { start: index, end: lines.length };
+      }
       return;
     }
-    if (open === undefined) return;
-    if (childHeader.test(text)) {
-      inChildTable = true;
+    if (inEnvChild) {
+      const key = envChildKey.exec(text);
+      if (key !== null) envKeys.push(key[1] ?? '');
+      else if (envChildWeird.test(text)) envOpaque = true;
       return;
     }
     if (inChildTable) return;
@@ -88,6 +143,26 @@ export function concordTomlBlocks(
     }
     const field = fieldPattern.exec(text);
     if (field !== null) fields[field[1] ?? ''] = field[2] ?? field[3] ?? '';
+    const dotted = envDotted.exec(text);
+    if (dotted !== null) {
+      const key = dotted[1]?.replace(/^['"]|['"]$/gu, '') ?? '';
+      if (/^[A-Za-z0-9_-]+$/u.test(key)) envKeys.push(key);
+      else envOpaque = true;
+      return;
+    }
+    // `env."quoted.key" = …` and friends: an env assignment we cannot name.
+    if (/^\s*["']?env["']?\s*\./u.test(text)) {
+      envOpaque = true;
+      return;
+    }
+    const inline = envInline.exec(text);
+    if (inline !== null) {
+      for (const match of inline[1]?.matchAll(envInnerKey) ?? []) {
+        envKeys.push(match[1] ?? '');
+      }
+      return;
+    }
+    if (envInlineOpen.test(text) || envAssign.test(text)) envOpaque = true;
   });
   if (open !== undefined) flush(lines.length);
   return blocks;
@@ -97,7 +172,7 @@ export function concordTomlBlocks(
 export function removeTomlBlocks(
   source: string,
   table: string,
-  owned: (name: string) => boolean,
+  owned: (block: TomlBlock) => boolean,
 ): string {
   const blocks = concordTomlBlocks(source, table, owned);
   if (blocks.length === 0) return source;
@@ -142,13 +217,24 @@ export function bareTomlTableValue(
   source: string,
   table: string,
 ): { index: number; empty: boolean } | undefined {
-  const assignment = new RegExp(`^\\s*${table}\\s*=`, 'u');
-  const emptyArray = new RegExp(`^\\s*${table}\\s*=\\s*\\[\\s*\\]\\s*(?:#.*)?$`, 'u');
+  const seg = `(?:"${table}"|'${table}'|${table})`;
+  const assignment = new RegExp(`^\\s*${seg}\\s*=`, 'u');
+  const dotted = new RegExp(`^\\s*${seg}\\s*\\.`, 'u');
+  const emptyArray = new RegExp(`^\\s*${seg}\\s*=\\s*\\[\\s*\\]\\s*(?:#.*)?$`, 'u');
+  // A single-bracket `[table]`/`[table.child]` header (quoted segments
+  // included) makes `table` a TOML table, which `[[table]]` entries cannot
+  // coexist with — the file must be left alone.
+  const tableHeader = new RegExp(`^\\s*\\[\\s*${seg}\\s*(?:\\.|\\])`, 'u');
   let index = 0;
   for (const { text, inString } of tomlLines(source)) {
-    if (!inString && /^\s*\[/u.test(text)) return undefined;
-    if (!inString && assignment.test(text)) {
-      return { index, empty: emptyArray.test(text) };
+    if (!inString) {
+      if (/^\s*\[/u.test(text)) {
+        return tableHeader.test(text) ? { index, empty: false } : undefined;
+      }
+      if (assignment.test(text)) {
+        return { index, empty: emptyArray.test(text) };
+      }
+      if (dotted.test(text)) return { index, empty: false };
     }
     index += 1;
   }
@@ -167,17 +253,39 @@ const MCP_BLOCK = [
   'env = { CONCORD_AGENT_KIND = "vibe" }',
 ].join('\n');
 
+const namedConcord = (block: TomlBlock): boolean => block.name === MCP_NAME;
+
+/**
+ * The `[[mcp_servers]]` shape Concord writes: a stdio `concord-mcp` command
+ * and only `CONCORD_*` env keys. A `concord` entry in any other shape is the
+ * user's own — main keeps a hand-written `concord` server (#361), so neither
+ * setup nor uninstall may replace or remove it.
+ */
+function vibeMcpOwned(block: TomlBlock): boolean {
+  return (
+    block.name === MCP_NAME &&
+    block.fields['transport'] === 'stdio' &&
+    block.fields['command'] === 'concord-mcp' &&
+    !block.envOpaque &&
+    block.envKeys.every((key) => key.startsWith('CONCORD_'))
+  );
+}
+
 export function upsertVibeMcpConfig(source: string | undefined): string {
   const current = source ?? '';
   const bare = bareTomlTableValue(current, MCP_TABLE);
   if (bare !== undefined && !bare.empty) return current;
   const base = bare === undefined ? current : dropTomlLine(current, bare.index);
-  const stripped = removeTomlBlocks(base, MCP_TABLE, (name) => name === MCP_NAME);
+  // A hand-written `concord` server wins over ours, as on main.
+  if (concordTomlBlocks(base, MCP_TABLE, namedConcord).some((block) => !vibeMcpOwned(block))) {
+    return current;
+  }
+  const stripped = removeTomlBlocks(base, MCP_TABLE, vibeMcpOwned);
   return appendTomlBlock(stripped, MCP_BLOCK);
 }
 
 export function hasVibeMcpServer(source: string): boolean {
-  return concordTomlBlocks(source, MCP_TABLE, (name) => name === MCP_NAME).some(
+  return concordTomlBlocks(source, MCP_TABLE, namedConcord).some(
     (block) => block.fields['transport'] === 'stdio' && block.fields['command'] === 'concord-mcp',
   );
 }
@@ -206,8 +314,14 @@ export function vibeMcpInstalled(env: NodeJS.ProcessEnv = process.env): boolean 
 export function uninstallVibeMcpConfig(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const path = vibeMcpConfigPath(env);
   if (!existsSync(path)) return undefined;
-  const current = readFileSync(path, 'utf8');
-  const next = removeTomlBlocks(current, MCP_TABLE, (name) => name === MCP_NAME);
+  let current: string;
+  try {
+    current = readFileSync(path, 'utf8');
+  } catch {
+    // An unreadable config is left untouched so the rest of uninstall proceeds.
+    return undefined;
+  }
+  const next = removeTomlBlocks(current, MCP_TABLE, vibeMcpOwned);
   if (next === current) return undefined;
   writeFileSync(path, next);
   return path;

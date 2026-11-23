@@ -46,6 +46,7 @@ import {
   upsertGrokMcpServer,
   upsertMcpServer,
 } from './mcp-config.js';
+import { vibeHome } from './vibe-config.js';
 
 /** What turning global mode on or off changed, and what it could not. */
 export interface GlobalModeReport {
@@ -96,6 +97,11 @@ function isAntigravityDetected(env: NodeJS.ProcessEnv): boolean {
 /** Kiro's CLI, its IDE launcher, or an existing `~/.kiro` directory. */
 function isKiroDetected(env: NodeJS.ProcessEnv): boolean {
   return kiroExecutablePath(env) !== undefined || existsSync(kiroHome(env));
+}
+
+/** Vibe's CLI on PATH, or an existing `~/.vibe` directory. */
+function isVibeDetected(env: NodeJS.ProcessEnv): boolean {
+  return executablePath('vibe', env) !== undefined || existsSync(vibeHome(env));
 }
 
 function instructionFile(
@@ -191,6 +197,10 @@ const USER_FILES: readonly UserFile[] = [
     KIRO_STEERING_HEADER,
     isKiroDetected,
   ),
+  // Vibe loads `$VIBE_HOME/AGENTS.md` as its global instructions; the Concord
+  // block there is the only channel carrying the peer-message trust guidance
+  // when no project instruction file exists.
+  instructionFile('vibe', (env) => join(vibeHome(env), 'AGENTS.md'), undefined, isVibeDetected),
   {
     isDetected: isKiroDetected,
     path: kiroUserHooksPath,

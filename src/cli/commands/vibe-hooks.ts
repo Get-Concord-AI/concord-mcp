@@ -5,7 +5,6 @@ import type { Repositories } from '../../db/index.js';
 import { resolveIdentity, type AgentIdentity } from '../../domain/identity.js';
 import { buildRoster } from '../../domain/presence.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
-import { openContext } from '../context.js';
 import { cloudRoster } from './cloud-hooks.js';
 import { cloudAccess, registerInCloud, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
 import { isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
@@ -134,14 +133,19 @@ export async function runVibeHook(
   const identity = resolveIdentity(env, { kind: 'vibe', hookPayload: rawJson });
   if (identity === undefined) return NO_OUTPUT;
   const repoRoot = vibeRepoRoot(rawJson);
-  const access = cloudAccess(repoRoot, { timeoutMs: HOOK_TIMEOUT_MS }, env);
+  // Vibe inherits its launcher's environment, which can carry a stale
+  // CLAUDE_PROJECT_DIR or CONCORD_REPO_ROOT pointing at another checkout;
+  // pin the payload's cwd the way Kiro and Hermes do.
+  const projectEnv = { ...env, CONCORD_REPO_ROOT: repoRoot };
+  const access = cloudAccess(repoRoot, { timeoutMs: HOOK_TIMEOUT_MS }, projectEnv);
   if (access.kind === 'unusable') {
     process.stderr.write(`Concord Cloud could not be reached: ${access.reason}\n`);
     return NO_OUTPUT;
   }
   if (access.kind === 'local') {
+    const { openContext } = await import('../context.js');
     return handleLocalVibeHook(
-      openContext(repoRoot, env).repos,
+      openContext(repoRoot, projectEnv).repos,
       identity,
       repoRoot,
       event,

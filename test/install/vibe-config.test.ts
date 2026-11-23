@@ -59,15 +59,41 @@ describe('upsertVibeMcpConfig', () => {
     expect(next).toContain('name = "concord"');
   });
 
-  it('is idempotent and replaces a stale concord block in place of duplicating it', () => {
+  it('is idempotent', () => {
     const once = upsertVibeMcpConfig('theme = "auto"\n');
     const twice = upsertVibeMcpConfig(once);
     expect(twice).toBe(once);
-    const stale = once.replace('command = "concord-mcp"', 'command = "old-command"');
-    const fixed = upsertVibeMcpConfig(stale);
-    expect(fixed.match(/\[\[mcp_servers\]\]/gu)).toHaveLength(1);
-    expect(fixed).toContain('command = "concord-mcp"');
-    expect(fixed).not.toContain('old-command');
+  });
+
+  it('keeps a concord-named block that is not Concord-shaped as the user\'s own', () => {
+    // Main's policy (#361): a hand-written `concord` server is never replaced.
+    const foreign = [
+      [
+        '[[mcp_servers]]',
+        'name = "concord"',
+        'transport = "stdio"',
+        'command = "old-command"',
+        '',
+      ].join('\n'),
+      [
+        '[[mcp_servers]]',
+        'name = "concord"',
+        'transport = "stdio"',
+        'command = "concord-mcp"',
+        'env = { CONCORD_AGENT_KIND = "vibe", API_KEY = "x" }',
+        '',
+      ].join('\n'),
+      [
+        '[[mcp_servers]]',
+        'name = "concord"',
+        'transport = "stdio"',
+        'command = "./scripts/concord-wrapper.sh"',
+        '',
+      ].join('\n'),
+    ];
+    for (const source of foreign) {
+      expect(upsertVibeMcpConfig(source)).toBe(source);
+    }
   });
 
   it('does not treat a different server named concord-ish as ours', () => {
@@ -125,6 +151,41 @@ describe('upsertVibeMcpConfig', () => {
     expect(hasVibeMcpServer(next)).toBe(true);
   });
 
+  it('converts quoted empty mcp_servers keys instead of breaking the file', () => {
+    for (const source of ['"mcp_servers" = []\n', "'mcp_servers' = []\n"]) {
+      const next = upsertVibeMcpConfig(source);
+      expect(next).not.toContain('= []');
+      expect(next).toContain('[[mcp_servers]]');
+      expect(hasVibeMcpServer(next)).toBe(true);
+    }
+  });
+
+  it('leaves quoted non-empty mcp_servers keys untouched', () => {
+    const source = '"mcp_servers" = [{ name = "x" }]\n';
+    expect(upsertVibeMcpConfig(source)).toBe(source);
+  });
+
+  it('treats quoted child headers as part of their parent block', () => {
+    const source = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      '',
+      '["mcp_servers".env]',
+      'CONCORD_AGENT_KIND = "vibe"',
+      '',
+      '[[mcp_servers]]',
+      'name = "other"',
+      'command = "x"',
+      '',
+    ].join('\n');
+    const next = upsertVibeMcpConfig(source);
+    expect(next).not.toContain('"mcp_servers".env');
+    expect(next).toContain('name = "other"');
+    expect(next.match(/\[\[mcp_servers\]\]/gu)).toHaveLength(2);
+  });
+
   it('leaves a non-empty mcp_servers value untouched', () => {
     const source = 'mcp_servers = [{ name = "x" }]\n';
     expect(upsertVibeMcpConfig(source)).toBe(source);
@@ -154,6 +215,13 @@ describe('upsertVibeMcpConfig', () => {
 });
 
 describe('vibeMcpConfigPath and install', () => {
+  it('expands a leading ~ in VIBE_HOME against the user home', () => {
+    const home = mkdtempSync(join(tmpdir(), 'vibe-home-'));
+    dirs.push(home);
+    const env = { VIBE_HOME: '~/vibe-alt', HOME: home };
+    expect(vibeMcpConfigPath(env)).toBe(join(home, 'vibe-alt', 'config.toml'));
+  });
+
   it('honours VIBE_HOME and installs once', () => {
     const { env, home } = tempEnv();
     const path = vibeMcpConfigPath(env);
@@ -193,5 +261,40 @@ describe('vibeMcpConfigPath and install', () => {
     expect(next).toContain('name = "other"');
     expect(next).toContain('theme = "auto"');
     expect(vibeMcpInstalled(env)).toBe(false);
+  });
+
+  it('uninstall keeps a hand-written concord server and removes ours', () => {
+    const { env } = tempEnv();
+    const path = vibeMcpConfigPath(env);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      [
+        '[[mcp_servers]]',
+        'name = "concord"',
+        'transport = "stdio"',
+        'command = "concord-mcp"',
+        'env = { CONCORD_AGENT_KIND = "vibe" }',
+        '',
+        '[[mcp_servers]]',
+        'name = "concord"',
+        'transport = "stdio"',
+        'command = "./my-wrapper.sh"',
+        '',
+      ].join('\n'),
+    );
+    uninstallVibeMcpConfig(env);
+    const next = readFileSync(path, 'utf8');
+    expect(next).not.toContain('concord-mcp');
+    expect(next).toContain('my-wrapper.sh');
+    expect(next.match(/name = "concord"/gu)).toHaveLength(1);
+  });
+
+  it('uninstall leaves an unreadable config.toml untouched without throwing', () => {
+    const { env } = tempEnv();
+    const path = vibeMcpConfigPath(env);
+    // A directory where the file should be makes readFileSync throw.
+    mkdirSync(path, { recursive: true });
+    expect(uninstallVibeMcpConfig(env)).toBeUndefined();
   });
 });

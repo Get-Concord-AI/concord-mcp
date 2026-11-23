@@ -240,6 +240,19 @@ export function readHookPayload(): string | undefined {
   }
 }
 
+/**
+ * Env pinned to the hook payload's project dir. A harness inherits its
+ * launcher's environment, which can carry a stale `CLAUDE_PROJECT_DIR` or
+ * `CONCORD_REPO_ROOT` pointing at another checkout; the payload's `cwd` is
+ * the session's real project, so it wins for repo-root resolution.
+ */
+function payloadPinnedEnv(hookPayload: string | undefined): NodeJS.ProcessEnv {
+  if (hookPayload === undefined) return process.env;
+  const cwd = parseObservedHook(hookPayload)?.cwd;
+  if (cwd === undefined || cwd.trim() === '') return process.env;
+  return { ...process.env, CONCORD_REPO_ROOT: cwd };
+}
+
 export function registeredLine(agentId: string, provider: string): string {
   // A harness monitor may not inherit the session's environment (Grok's does
   // not), so hand the agent the exact command with its id already filled in.
@@ -493,8 +506,20 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       'json',
     )
     .action(async (options) => {
-      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
-      if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
+      const grokStop = options.provider === 'grok' && options.format === 'stop';
+      // Hook formats only ever run as hooks, whose stdin always ends, so the
+      // payload (read evidence, subagent marker, project dir) is safe to read
+      // even without --from-hook. Identity still comes from it only with
+      // --from-hook.
+      const hookPayload =
+        options.fromHook === true ||
+        options.payloadStdin === true ||
+        HOOK_FORMATS.includes(options.format)
+          ? (readHookPayload() ?? '')
+          : undefined;
+      const pinnedEnv = payloadPinnedEnv(hookPayload);
+      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS }, pinnedEnv);
+      if (access.kind === 'local' && !workspaceExists(process.cwd(), pinnedEnv)) return;
       // Checked before anything is taken: a format typo must not cost a batch.
       if (!DRAIN_FORMATS.includes(options.format)) {
         throw new Error(`Unknown --format: ${options.format}`);
@@ -503,16 +528,6 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         reportCloudFailure(access.reason);
         return;
       }
-      const grokStop = options.provider === 'grok' && options.format === 'stop';
-      // Hook formats only ever run as hooks, whose stdin always ends, so the
-      // payload (read evidence, subagent marker) is safe to read even without
-      // --from-hook. Identity still comes from it only with --from-hook.
-      const hookPayload =
-        options.fromHook === true ||
-        options.payloadStdin === true ||
-        HOOK_FORMATS.includes(options.format)
-          ? (readHookPayload() ?? '')
-          : undefined;
       const agentId = resolveInboxOwner(options.agent, process.env, {
         kind: options.provider,
         ...(options.fromHook === true ? { hookPayload } : {}),
@@ -545,7 +560,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         return;
       }
       const context = await import('../context.js').then((module) =>
-        module.openContext(process.cwd()),
+        module.openContext(process.cwd(), pinnedEnv),
       );
       const isMonitor = options.format === 'monitor';
       // Read evidence first, so this invocation never marks read a message it
@@ -585,17 +600,18 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     .action(async (options) => {
       // Seen-tracking lives in the local store; Concord Cloud keeps its own
       // delivery record. Prints nothing: UserPromptSubmit output becomes context.
-      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
-      if (access.kind !== 'local' || !workspaceExists(process.cwd())) return;
       try {
         const payload = readHookPayload() ?? '';
+        const pinnedEnv = payloadPinnedEnv(payload);
+        const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS }, pinnedEnv);
+        if (access.kind !== 'local' || !workspaceExists(process.cwd(), pinnedEnv)) return;
         const agentId = resolveAgentId(options.agent, process.env, {
           kind: options.provider,
           hookPayload: payload,
         });
         const context = await import('../context.js');
         observeHookEvent(
-          context.openContext(process.cwd()).repos,
+          context.openContext(process.cwd(), pinnedEnv).repos,
           agentId,
           payload,
           options.provider,

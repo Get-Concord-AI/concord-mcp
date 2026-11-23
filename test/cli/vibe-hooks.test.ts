@@ -131,6 +131,26 @@ describe('runVibeHook', () => {
     expect(context(output)).toContain(VIBE.agentId);
   });
 
+  it('pins the workspace to the payload cwd over a stale inherited project dir', async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'concord-vibe-pin-'));
+    const staleRoot = mkdtempSync(join(tmpdir(), 'concord-vibe-stale-'));
+    const env = {
+      HOME: process.env['HOME'],
+      CLAUDE_PROJECT_DIR: staleRoot,
+      CONCORD_REPO_ROOT: staleRoot,
+    };
+
+    const output = await runVibeHook(
+      'vibe-session-start',
+      payload('session_start', repoRoot, { source: 'startup' }),
+      env,
+    );
+
+    expect(context(output)).toContain(VIBE.agentId);
+    const agents = openContext(repoRoot, { HOME: process.env['HOME'] }).repos.agents.list();
+    expect(agents.some((agent) => agent.kind === 'vibe')).toBe(true);
+  });
+
   it('gives subagent payloads no context and registers no agent', async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'concord-vibe-sub-'));
     const env = { HOME: process.env['HOME'] };

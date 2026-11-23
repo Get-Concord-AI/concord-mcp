@@ -14,10 +14,10 @@ import {
 } from '../../domain/harness-config.js';
 import { userHome } from '../../config/paths.js';
 import { installOpencode, statusOpencode } from './opencode.js';
-import { statusVibe } from './vibe.js';
+import { installVibe, statusVibe } from './vibe.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
-import { installVibeMcpConfig, uninstallVibeMcpConfig } from '../vibe-config.js';
-import { installVibeHooks, removeVibeHooks } from '../vibe-hooks.js';
+import { uninstallVibeMcpConfig } from '../vibe-config.js';
+import { removeVibeHooks } from '../vibe-hooks.js';
 import {
   devinMcpInstalled,
   installDevinMcpConfig,
@@ -866,15 +866,9 @@ export function installAdapter(
     case 'deepseek':
       installDeepseekConfig(env);
       return;
-    case 'vibe': {
-      const version = versionTuple(run(executable, ['--version'], env).output);
-      if (version === undefined || !atLeast(version, HARNESS_CONFIGS.vibe.minimumVersion)) {
-        return;
-      }
-      installVibeMcpConfig(env);
-      installVibeHooks(env);
+    case 'vibe':
+      installVibe(executable, env);
       return;
-    }
   }
 }
 
