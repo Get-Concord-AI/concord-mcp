@@ -86,6 +86,16 @@ describe('removeProperty', () => {
     expect(() => parseJsoncObject(result)).not.toThrow();
   });
 
+  it('keeps a comment sitting between the closing brace and the comma', () => {
+    const text = '{\n  "a": 1,\n  "b": {} /* keep me */,\n  "c": 3\n}';
+    const result = removeProperty(text, { open: 0, close: objectEnd(text, 0) }, span(text, 'b'));
+    expect(result).toContain('"a": 1');
+    expect(result).toContain('"c": 3');
+    expect(result).not.toContain('"b"');
+    expect(result).toContain('/* keep me */');
+    expect(() => parseJsoncObject(result)).not.toThrow();
+  });
+
   it('removes the last property via the previous comma', () => {
     const text = '{\n  "a": 1,\n  "b": { "x": 1 }\n}';
     const result = removeProperty(text, { open: 0, close: objectEnd(text, 0) }, span(text, 'b'));
