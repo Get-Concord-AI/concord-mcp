@@ -188,6 +188,52 @@ describe('global harness adapters', () => {
     });
   });
 
+  it('marks Cursor stop follow-ups that expect no reply with no-reply-needed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-cursor-no-reply-'));
+    mkdirSync(join(root, '.concord'));
+    writeFileSync(join(root, '.concord', 'concord.db'), '');
+    const drained = [
+      {
+        messageId: 'msg-reply',
+        senderAgentId: 'claude-code:peer',
+        taskId: 'TASK-1',
+        content: 'Yes, go ahead.',
+        expectsReply: false,
+      },
+      {
+        messageId: 'msg-prompt',
+        senderAgentId: 'claude-code:peer',
+        taskId: 'TASK-1',
+        content: 'Can you share the schema?',
+        expectsReply: true,
+      },
+    ];
+    const fakeConcord = writeFakeCommand(
+      root,
+      'fake-concord',
+      `if (process.argv[3] === 'drain') process.stdout.write(${JSON.stringify(JSON.stringify(drained))});\n`,
+    );
+
+    const hook = join(process.cwd(), 'plugin', 'cursor', 'concord-relay', 'cursor-hook.mjs');
+    const result = spawnSync(process.execPath, [hook, 'stop'], {
+      cwd: root,
+      env: {
+        ...process.env,
+        CONCORD_EXECUTABLE: fakeConcord,
+        CONCORD_CURSOR_DISABLE_HEARTBEAT: '1',
+      },
+      input: JSON.stringify({ conversation_id: 'cursor-conversation', workspace_roots: [root] }),
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      followup_message:
+        '[concord from claude-code:peer id=msg-reply task=TASK-1 no-reply-needed]\nYes, go ahead.\n\n' +
+        '[concord from claude-code:peer id=msg-prompt task=TASK-1]\nCan you share the schema?',
+    });
+  });
+
   it('reports monitor/controller quality separately from installation', () => {
     const report = statusGlobalAdapters({ HOME: mkdtempSync(join(tmpdir(), 'concord-empty-')) });
 
