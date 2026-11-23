@@ -113,13 +113,17 @@ export async function runKiroHook(
     return event === 'kiro-session-start' ? `Concord: ${UNRESOLVED_IDENTITY_MESSAGE}` : NO_OUTPUT;
   }
   const repoRoot = kiroWorkspace(rawJson);
-  const access = cloudAccess(repoRoot, { timeoutMs: HOOK_TIMEOUT_MS }, env);
+  // The payload's workspace is the project, whatever this process inherited:
+  // a CLAUDE_PROJECT_DIR or DEVIN_PROJECT_DIR from the shell that launched
+  // Kiro names another repository.
+  const projectEnv = { ...env, CONCORD_REPO_ROOT: repoRoot };
+  const access = cloudAccess(repoRoot, { timeoutMs: HOOK_TIMEOUT_MS }, projectEnv);
   if (access.kind === 'unusable') {
     process.stderr.write(`Concord Cloud could not be reached: ${access.reason}\n`);
     return NO_OUTPUT;
   }
   if (access.kind === 'local') {
-    return handleLocalKiroHook(openContext(repoRoot, env).repos, identity, repoRoot, event);
+    return handleLocalKiroHook(openContext(repoRoot, projectEnv).repos, identity, repoRoot, event);
   }
   try {
     return await handleCloudKiroHook(access.runtime, identity, repoRoot, event);

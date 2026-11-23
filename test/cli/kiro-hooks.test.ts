@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,7 @@ import {
   kiroWorkspace,
   runKiroHook,
 } from '../../src/cli/commands/kiro-hooks.js';
+import { openContext } from '../../src/cli/context.js';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { agentIdForSession, type AgentIdentity } from '../../src/domain/identity.js';
@@ -103,6 +104,31 @@ describe('runKiroHook', () => {
     );
 
     expect(output).toContain(`agent_id: "${KIRO.agentId}"`);
+  });
+
+  it("uses the payload's workspace over an inherited CLAUDE_PROJECT_DIR", async () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-kiro-home-'));
+    const kiroRepo = mkdtempSync(join(tmpdir(), 'concord-kiro-repo-'));
+    const parentRepo = mkdtempSync(join(tmpdir(), 'concord-kiro-parent-'));
+    mkdirSync(join(kiroRepo, '.git'));
+    mkdirSync(join(parentRepo, '.git'));
+    const env = { HOME: home, PATH: '', USERPROFILE: home };
+
+    await runKiroHook(
+      'kiro-session-start',
+      JSON.stringify({ session_id: 'kiro-session-1', cwd: kiroRepo }),
+      { ...env, CLAUDE_PROJECT_DIR: parentRepo, DEVIN_PROJECT_DIR: parentRepo },
+    );
+
+    const kiroStore = openContext(kiroRepo, env).repos;
+    const parentStore = openContext(parentRepo, env).repos;
+    try {
+      expect(kiroStore.agents.get(KIRO.agentId)).toBeDefined();
+      expect(parentStore.agents.get(KIRO.agentId)).toBeUndefined();
+    } finally {
+      kiroStore.db.close();
+      parentStore.db.close();
+    }
   });
 
   it('explains how to identify itself when the payload has no session id', async () => {
