@@ -88,13 +88,15 @@ export function findCheckoutRoot(startDir: string): string {
   }
 }
 
-/** The checkout the MCP server works in, chosen as `resolveRepoRoot` chooses. */
+function configuredRepoRoot(env: NodeJS.ProcessEnv): string | undefined {
+  return [env['CONCORD_REPO_ROOT'], env['DEVIN_PROJECT_DIR'], env['CLAUDE_PROJECT_DIR']].find(
+    (value) => value !== undefined && value.trim() !== '',
+  );
+}
+
+/** The active checkout, using the same workspace selection as `resolveRepoRoot`. */
 export function resolveCheckoutRoot(cwd: string, env: NodeJS.ProcessEnv): string {
-  for (const name of ['CONCORD_REPO_ROOT', 'CLAUDE_PROJECT_DIR', 'DEVIN_PROJECT_DIR']) {
-    const configured = env[name]?.trim();
-    if (configured !== undefined && configured !== '') return findCheckoutRoot(configured);
-  }
-  return findCheckoutRoot(cwd);
+  return findCheckoutRoot(configuredRepoRoot(env) ?? cwd);
 }
 
 /**
@@ -102,25 +104,14 @@ export function resolveCheckoutRoot(cwd: string, env: NodeJS.ProcessEnv): string
  * unreliable: when the server is registered at user scope it is launched from
  * wherever the client started, not the repo the agent is editing — so a claim
  * lands in one store while reads hit an empty repo-local `.concord/`. Prefer, in
- * order, explicit `CONCORD_REPO_ROOT`, Claude Code's `CLAUDE_PROJECT_DIR`, Devin CLI's `DEVIN_PROJECT_DIR`
+ * order, explicit `CONCORD_REPO_ROOT`, Devin CLI's `DEVIN_PROJECT_DIR`, Claude Code's `CLAUDE_PROJECT_DIR`
  * (set in the server's env to the project root regardless of scope), then the
  * cwd. Each candidate is normalized through `findRepoRoot`, so the store always
  * lands at the `.concord/` in the root of the repo.
  */
 export function resolveRepoRoot(cwd: string, env: NodeJS.ProcessEnv): string {
-  const override = env['CONCORD_REPO_ROOT'];
-  if (override !== undefined && override.trim() !== '') {
-    return resolveExplicitRepoRoot(override);
-  }
-  const devinProjectDir = env['DEVIN_PROJECT_DIR'];
-  if (devinProjectDir !== undefined && devinProjectDir.trim() !== '') {
-    return resolveExplicitRepoRoot(devinProjectDir);
-  }
-  const projectDir = env['CLAUDE_PROJECT_DIR'];
-  if (projectDir !== undefined && projectDir.trim() !== '') {
-    return resolveExplicitRepoRoot(projectDir);
-  }
-  return findRepoRoot(cwd);
+  const configured = configuredRepoRoot(env);
+  return configured === undefined ? findRepoRoot(cwd) : resolveExplicitRepoRoot(configured);
 }
 
 /**

@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 
 import {
+  findCheckoutRoot,
   resolveExplicitRepoRoot,
   workspaceIdForRoot,
   workspaceRootFromId,
@@ -39,12 +40,14 @@ export function configureCliWorkspace(
 
   let repoRoot: string;
   if (options.repo !== undefined) {
-    repoRoot = resolveExplicitRepoRoot(resolve(cwd, options.repo));
+    const path = resolve(cwd, options.repo);
+    repoRoot = resolveExplicitRepoRoot(path);
+    env['CONCORD_REPO_ROOT'] = findCheckoutRoot(path);
   } else if (options.workspace !== undefined) {
     repoRoot = workspaceRootFromId(options.workspace);
+    env['CONCORD_REPO_ROOT'] = repoRoot;
   } else {
     throw new Error('Concord workspace selection is missing.');
   }
-  env['CONCORD_REPO_ROOT'] = repoRoot;
   return { workspaceId: workspaceIdForRoot(repoRoot), repoRoot };
 }
