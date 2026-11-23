@@ -7,7 +7,6 @@ import { userHome } from '../config/paths.js';
 import {
   isEscaped,
   isJsonObject,
-  parseJsoncObject,
   propertyObject,
   removeProperty,
   uncomment,
@@ -332,9 +331,14 @@ function removeConcordEntry(text: string): string | undefined {
   const inner = text.slice(mcp.open, mcp.close + 1);
   const concord = propertyObject(inner, CONCORD_SERVER_KEY);
   if (concord === undefined) return undefined;
-  // Confirm the located entry is the owned one before touching anything.
+  // Confirm the located entry is the owned one before touching anything. The
+  // slice gets the same JSONC tolerance as the file parse — comments and
+  // trailing commas — so an owned entry is never skipped over formatting.
   try {
-    const located = parseKiloServer(parseJsoncObject(inner.slice(concord.open, concord.close + 1)));
+    const locatedRaw: unknown = JSON.parse(
+      jsoncToJson(inner.slice(concord.open, concord.close + 1)),
+    );
+    const located = parseKiloServer(jsonValueSchema.parse(locatedRaw));
     if (located === undefined || !isKiloConcordEntry(located)) return undefined;
   } catch {
     return undefined;

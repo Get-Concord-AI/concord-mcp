@@ -367,6 +367,27 @@ describe('uninstallKiloMcpConfig', () => {
     }
   });
 
+  it('removes an owned entry that carries a trailing comma', () => {
+    const { home, env } = kiloEnv();
+    const path = writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      `{
+  "mcp": {
+    "concord": { "type": "local", "command": ["concord-mcp"], },
+    "keep": { "command": ["x"] }
+  }
+}
+`,
+    );
+
+    uninstallKiloMcpConfig(env);
+
+    const next = readFileSync(path, 'utf8');
+    expect(next).not.toContain('"concord"');
+    expect(next).toContain('"keep"');
+  });
+
   it('leaves a concord entry somebody else wrote untouched', () => {
     const { home, env } = kiloEnv();
     const path = writeGlobalConfig(
