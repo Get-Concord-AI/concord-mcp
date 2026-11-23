@@ -85,8 +85,8 @@ describe('installGlobalAdapters with Vibe', () => {
 
     expect(existsSync(vibeMcpConfigPath(env))).toBe(false);
     expect(existsSync(vibeHooksPath(env))).toBe(false);
-    expect(
-      statusGlobalAdapters(env).find((entry) => entry.harness === 'vibe')?.status,
-    ).toBe('unsupported_version');
+    expect(statusGlobalAdapters(env).find((entry) => entry.harness === 'vibe')?.status).toBe(
+      'unsupported_version',
+    );
   });
 });

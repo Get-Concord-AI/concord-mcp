@@ -601,11 +601,7 @@ describe('Vibe hook payloads', () => {
     expect(status(repos, messageId)).toBe('delivered');
 
     // The session's own hook with the same evidence does count.
-    observeHookEvent(
-      repos,
-      'beta',
-      vibeHook({ hook_event_name: 'pre_agent', prompt: line ?? '' }),
-    );
+    observeHookEvent(repos, 'beta', vibeHook({ hook_event_name: 'pre_agent', prompt: line ?? '' }));
     expect(status(repos, messageId)).toBe('read');
   });
 

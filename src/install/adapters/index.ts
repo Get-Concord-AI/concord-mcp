@@ -15,14 +15,8 @@ import { userHome } from '../../config/paths.js';
 import { installOpencode, statusOpencode } from './opencode.js';
 import { statusVibe } from './vibe.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
-import {
-  installVibeMcpConfig,
-  uninstallVibeMcpConfig,
-} from '../vibe-config.js';
-import {
-  installVibeHooks,
-  removeVibeHooks,
-} from '../vibe-hooks.js';
+import { installVibeMcpConfig, uninstallVibeMcpConfig } from '../vibe-config.js';
+import { installVibeHooks, removeVibeHooks } from '../vibe-hooks.js';
 import {
   devinMcpInstalled,
   installDevinMcpConfig,

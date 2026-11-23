@@ -15,14 +15,14 @@ in them:
   foreign session id.
 - `hooks.toml` gains six `[[hooks]]` entries, one per lifecycle event:
 
-| Vibe event      | Concord command                                              | Purpose                                        |
-| --------------- | ------------------------------------------------------------ | ---------------------------------------------- |
-| `session_start` | `concord hook vibe-session-start`                            | Register the session, print the `agent_id`     |
-| `pre_agent`     | `concord inbox drain --from-hook --provider vibe --format vibe` | Deliver queued messages at turn start       |
-| `post_tool`     | `concord inbox drain --from-hook --provider vibe --format vibe` | Deliver queued messages during the turn     |
-| `post_agent`    | `concord inbox observe --provider vibe`                      | Read receipts, clear the wait-on-user flag     |
-| `session_end`   | `concord hook vibe-session-end`                              | Requeue unread deliveries, disconnect         |
-| `notification`  | `concord inbox observe --provider vibe`                      | Approval/question notifications mark the wait |
+| Vibe event      | Concord command                                                 | Purpose                                       |
+| --------------- | --------------------------------------------------------------- | --------------------------------------------- |
+| `session_start` | `concord hook vibe-session-start`                               | Register the session, print the `agent_id`    |
+| `pre_agent`     | `concord inbox drain --from-hook --provider vibe --format vibe` | Deliver queued messages at turn start         |
+| `post_tool`     | `concord inbox drain --from-hook --provider vibe --format vibe` | Deliver queued messages during the turn       |
+| `post_agent`    | `concord inbox observe --provider vibe`                         | Read receipts, clear the wait-on-user flag    |
+| `session_end`   | `concord hook vibe-session-end`                                 | Requeue unread deliveries, disconnect         |
+| `notification`  | `concord inbox observe --provider vibe`                         | Approval/question notifications mark the wait |
 
 Re-running setup is safe: Concord-owned blocks are recognised by name and
 rewritten; user hooks and other `mcp_servers` entries are left untouched.

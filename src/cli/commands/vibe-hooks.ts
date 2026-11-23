@@ -135,7 +135,13 @@ export async function runVibeHook(
     return NO_OUTPUT;
   }
   if (access.kind === 'local') {
-    return handleLocalVibeHook(openContext(repoRoot, env).repos, identity, repoRoot, event, rawJson);
+    return handleLocalVibeHook(
+      openContext(repoRoot, env).repos,
+      identity,
+      repoRoot,
+      event,
+      rawJson,
+    );
   }
   try {
     return await handleCloudVibeHook(access.runtime, identity, repoRoot, event);

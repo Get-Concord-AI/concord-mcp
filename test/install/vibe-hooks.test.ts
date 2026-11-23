@@ -52,7 +52,13 @@ describe('upsertVibeHooksConfig', () => {
   });
 
   it('preserves user hooks and is idempotent', () => {
-    const userHook = ['[[hooks]]', 'name = "mine"', 'type = "session_start"', 'command = "echo hi"', ''].join('\n');
+    const userHook = [
+      '[[hooks]]',
+      'name = "mine"',
+      'type = "session_start"',
+      'command = "echo hi"',
+      '',
+    ].join('\n');
     const once = upsertVibeHooksConfig(userHook);
     expect(once).toContain('name = "mine"');
     expect(once).toContain('command = "echo hi"');
@@ -75,7 +81,9 @@ describe('vibe hooks install', () => {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(
       path,
-      ['[[hooks]]', 'name = "mine"', 'type = "session_start"', 'command = "echo hi"', ''].join('\n'),
+      ['[[hooks]]', 'name = "mine"', 'type = "session_start"', 'command = "echo hi"', ''].join(
+        '\n',
+      ),
     );
     installVibeHooks(env);
     const written = readFileSync(path, 'utf8');

@@ -58,9 +58,7 @@ describe('Vibe hook events', () => {
       'vibe:1234abcd',
     );
     expect(output).not.toContain('hookSpecificOutput');
-    expect(context(output)).toContain(
-      'concord inbox drain --agent vibe:1234abcd --provider vibe',
-    );
+    expect(context(output)).toContain('concord inbox drain --agent vibe:1234abcd --provider vibe');
   });
 });
 

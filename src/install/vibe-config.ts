@@ -15,9 +15,7 @@ import { tomlLines } from './toml-lines.js';
 
 export function vibeHome(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env['VIBE_HOME']?.trim();
-  return configured === undefined || configured === ''
-    ? join(userHome(env), '.vibe')
-    : configured;
+  return configured === undefined || configured === '' ? join(userHome(env), '.vibe') : configured;
 }
 
 export function vibeMcpConfigPath(env: NodeJS.ProcessEnv = process.env): string {

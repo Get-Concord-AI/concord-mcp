@@ -40,7 +40,12 @@ const HOOKS_TABLE = 'hooks';
 const OWNED = (name: string): boolean => name.startsWith('concord-');
 
 function hookBlock(spec: VibeHookSpec): string {
-  return [`[[hooks]]`, `name = "${spec.name}"`, `type = "${spec.type}"`, `command = "${spec.command}"`].join('\n');
+  return [
+    `[[hooks]]`,
+    `name = "${spec.name}"`,
+    `type = "${spec.type}"`,
+    `command = "${spec.command}"`,
+  ].join('\n');
 }
 
 export function upsertVibeHooksConfig(source: string | undefined): string {

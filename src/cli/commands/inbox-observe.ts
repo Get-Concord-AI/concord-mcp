@@ -241,10 +241,7 @@ function pause(ms: number): void {
 }
 
 /** Ids the transcript proves were read, waiting briefly for a late write. */
-function readFromTranscript(
-  texts: TranscriptTexts,
-  candidates: readonly string[],
-): string[] {
+function readFromTranscript(texts: TranscriptTexts, candidates: readonly string[]): string[] {
   const found = new Set<string>();
   let remaining = [...candidates];
   for (let attempt = 0; attempt <= TRANSCRIPT_RETRIES && remaining.length > 0; attempt += 1) {
