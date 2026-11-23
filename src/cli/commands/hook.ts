@@ -91,7 +91,9 @@ export function decidePreToolUse(
     return { block: false, message: '', result: 'not_applicable', conflictingTaskCount: 0 };
   }
 
-  const overlaps = checkFileOverlaps(repos, [filePath], selfTaskId);
+  const overlaps = checkFileOverlaps(repos, [filePath], selfTaskId, {
+    platform: process.platform,
+  });
   if (overlaps.length === 0) {
     return { block: false, message: '', result: 'clear', conflictingTaskCount: 0 };
   }

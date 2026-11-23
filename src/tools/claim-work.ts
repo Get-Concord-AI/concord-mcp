@@ -91,7 +91,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
     { taskId: input.task_id, parentTaskId, ...scope },
     activeOthers,
     0,
-    pathsFromCheckout,
+    { platform: process.platform, pathsFromCheckout },
   );
 
   const scopeAdded = existing

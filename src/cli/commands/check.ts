@@ -5,6 +5,8 @@ import {
   CLAIMED_STATUSES,
   entryCoversFile,
   normalizePath,
+  pathKey,
+  type OverlapPathOptions,
   type OverlapWarning,
 } from '../../domain/overlap.js';
 import { linkedMachine } from '../../cloud/target.js';
@@ -21,14 +23,22 @@ import { openContext } from '../context.js';
  *
  * Unlike claim-time overlap detection (which also warns on shared
  * directories/modules/domains), this gate fires only for files claimed
- * directly or through a directory claim.
+ * directly or through a directory claim. Paths compare case-insensitively when
+ * `options.platform` is win32 or darwin; callers pass `process.platform`.
  */
 export function checkFileOverlaps(
   repos: Repositories,
   files: readonly string[],
   selfTaskId?: string,
+  options: Pick<OverlapPathOptions, 'platform'> = {},
 ): OverlapWarning[] {
-  const wanted = [...new Set(files.map(normalizePath).filter((file) => file !== ''))];
+  const { platform } = options;
+  const byKey = new Map<string, string>();
+  for (const file of files.map(normalizePath)) {
+    const key = pathKey(file, platform);
+    if (file !== '' && !byKey.has(key)) byKey.set(key, file);
+  }
+  const wanted = [...byKey.values()];
   const otherClaims = repos.tasks
     .list()
     .filter((task) => CLAIMED_STATUSES.has(task.status) && task.taskId !== selfTaskId);
@@ -40,11 +50,16 @@ export function checkFileOverlaps(
 
   const warnings: OverlapWarning[] = [];
   for (const task of otherClaims) {
-    const shared = task.expectedFiles.map(normalizePath).filter((entry) => wanted.includes(entry));
+    const shared = task.expectedFiles
+      .map(normalizePath)
+      .filter((entry) => entry !== '' && byKey.has(pathKey(entry, platform)));
+    const sharedKeys = new Set(shared.map((entry) => pathKey(entry, platform)));
     const covered = wanted.filter(
       (file) =>
-        !shared.includes(file) &&
-        task.expectedFiles.some((entry) => entryCoversFile(entry, file, pathsFromCheckout)),
+        !sharedKeys.has(pathKey(file, platform)) &&
+        task.expectedFiles.some((entry) =>
+          entryCoversFile(entry, file, { platform, pathsFromCheckout }),
+        ),
     );
     const reasons: string[] = [];
     if (shared.length > 0) {
@@ -98,7 +113,9 @@ export function registerCheckCommand(program: Command): void {
         );
         return;
       }
-      const overlaps = checkFileOverlaps(openContext(process.cwd()).repos, files, options.task);
+      const overlaps = checkFileOverlaps(openContext(process.cwd()).repos, files, options.task, {
+        platform: process.platform,
+      });
       process.stdout.write(`${renderCheck(files, overlaps)}\n`);
       if (overlaps.length > 0) {
         // Non-zero so a hook/CI can block. Claude Code PreToolUse hooks treat
