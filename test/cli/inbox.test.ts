@@ -7,6 +7,7 @@ import {
   renderGeminiAfterTool,
   renderHookPayload,
   renderMonitorLines,
+  renderVibeHookPayload,
   type DeliverableMessage,
 } from '../../src/domain/pull-inbox.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../../src/install/instructions.js';
@@ -354,6 +355,27 @@ describe('pull-transport inbox', () => {
     expect(JSON.stringify(afterTool)).toContain('New constraint');
     expect(afterAgent).toMatchObject({ decision: 'deny' });
     expect(JSON.stringify(afterAgent)).toContain('New constraint');
+  });
+
+  it('uses Vibe snake_case hook contract for drained messages', () => {
+    const messages: DeliverableMessage[] = [
+      {
+        messageId: 'm1',
+        senderAgentId: 'alpha',
+        taskId: null,
+        content: 'New constraint',
+        messageKind: 'prompt',
+        expectsReply: true,
+        deliveryLatencyMs: 10,
+      },
+    ];
+    const vibe: unknown = JSON.parse(renderVibeHookPayload(messages));
+    expect(vibe).toMatchObject({
+      hook_specific_output: {
+        additional_context: '[concord from alpha id=m1]\nNew constraint',
+      },
+    });
+    expect(JSON.stringify(vibe)).not.toContain('hookSpecificOutput');
   });
 
   it('gives two sessions started in the same minute different identities', () => {

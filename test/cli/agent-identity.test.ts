@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { resolveAgentId, sessionStartIdentity } from '../../src/cli/agent-identity.js';
-import { sessionStartMessage } from '../../src/cli/commands/session-start-message.js';
+import {
+  DEVIN_SESSION_IDENTITY,
+  sessionStartMessage,
+} from '../../src/cli/commands/session-start-message.js';
 import {
   resolveActorId,
   resolveIdentity,
@@ -81,7 +84,7 @@ describe('sessionStartIdentity', () => {
 
 describe('Devin session instructions', () => {
   it('tells Devin to pass the hook-derived identity to MCP calls', () => {
-    const message = sessionStartMessage('devin:1234abcd', [], true);
+    const message = sessionStartMessage('devin:1234abcd', [], DEVIN_SESSION_IDENTITY);
 
     expect(message).toContain(
       'include `agent_id: "devin:1234abcd"` on start_work, update_work, transfer_work, and finish_work',

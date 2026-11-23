@@ -161,6 +161,7 @@ aside once no session started before the link is running (nothing is deleted).
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
+| Mistral Vibe                       | [Setup and delivery](./docs/vibe.md)               |
 | Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
 | Any other MCP-capable coding agent | [Manual setup](./docs/other-mcp-clients.md)        |
 

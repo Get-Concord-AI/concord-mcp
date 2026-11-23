@@ -35,6 +35,7 @@ import { copilotServerAddress } from './copilot-adapter.js';
 import { fileSpool } from './copilot-spool.js';
 import { isDevinHookEvent, runDevinHook } from './devin-hooks.js';
 import { isHermesHookEvent, runHermesHook } from './hermes-hooks.js';
+import { isVibeHookEvent, runVibeHook } from './vibe-hooks.js';
 import {
   cloudCopilotBackend,
   copilotWorkspace,
@@ -320,6 +321,10 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
       }
       if (isHermesHookEvent(event)) {
         process.stdout.write(`${await runHermesHook(event, readStdin())}\n`);
+        return;
+      }
+      if (isVibeHookEvent(event)) {
+        process.stdout.write(`${await runVibeHook(event, readStdin())}\n`);
         return;
       }
       if (options.client === 'copilot-cli') {

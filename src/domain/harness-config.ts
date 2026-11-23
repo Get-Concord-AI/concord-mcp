@@ -19,6 +19,7 @@ export const harnessNames = [
   'devin',
   'opencode',
   'qwen',
+  'vibe',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -311,6 +312,26 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
     unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
+  },
+  vibe: {
+    name: 'vibe',
+    executable: 'vibe',
+    // Hooks with a session_id payload and `[[mcp_servers]]` config are the
+    // verified baseline; confirmed against Vibe 3.1.3.
+    minimumVersion: [3, 1, 3],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Mistral Vibe is registered with Concord MCP and lifecycle hooks. Idle wake-up is not verified, so messages reach it only while a turn runs.',
+    unsupportedDetail: 'Mistral Vibe must be v3.1.3 or newer.',
   },
 };
 

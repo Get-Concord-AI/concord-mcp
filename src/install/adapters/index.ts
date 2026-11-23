@@ -11,7 +11,16 @@ import {
 } from '../../domain/harness-config.js';
 import { userHome } from '../../config/paths.js';
 import { installOpencode, statusOpencode } from './opencode.js';
+import { statusVibe } from './vibe.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
+import {
+  installVibeMcpConfig,
+  uninstallVibeMcpConfig,
+} from '../vibe-config.js';
+import {
+  installVibeHooks,
+  removeVibeHooks,
+} from '../vibe-hooks.js';
 import {
   devinMcpInstalled,
   installDevinMcpConfig,
@@ -725,6 +734,8 @@ export function statusAdapter(
       return statusOpencode(env);
     case 'qwen':
       return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
+    case 'vibe':
+      return statusVibe(executablePath(HARNESS_CONFIGS.vibe.executable, env), env);
   }
 }
 
@@ -839,6 +850,15 @@ export function installAdapter(
       }
       return;
     }
+    case 'vibe': {
+      const version = versionTuple(run(executable, ['--version'], env).output);
+      if (version === undefined || !atLeast(version, HARNESS_CONFIGS.vibe.minimumVersion)) {
+        return;
+      }
+      installVibeMcpConfig(env);
+      installVibeHooks(env);
+      return;
+    }
   }
 }
 
@@ -922,6 +942,8 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   }
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
+  uninstallVibeMcpConfig(env);
+  removeVibeHooks(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

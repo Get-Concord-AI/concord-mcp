@@ -102,6 +102,16 @@ export function renderGeminiAfterAgent(messages: readonly DeliverableMessage[]):
 }
 
 /**
+ * Vibe hooks answer with snake_case `hook_specific_output.additional_context`
+ * on stdout; plain stdout never reaches the model (verified on Vibe 3.1.3).
+ */
+export function renderVibeHookPayload(messages: readonly DeliverableMessage[]): string {
+  return JSON.stringify({
+    hook_specific_output: { additional_context: renderInboxBody(messages) },
+  });
+}
+
+/**
  * The JSON a command hook prints on stdout. `Stop` must block, otherwise the
  * turn ends before the recipient can read the message; the tool-result hooks
  * only need to append context.

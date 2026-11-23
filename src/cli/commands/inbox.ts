@@ -23,6 +23,7 @@ import {
   renderGeminiAfterTool,
   renderHookPayload,
   renderMonitorLines,
+  renderVibeHookPayload,
   toDeliverable,
   type DeliverableMessage,
 } from '../../domain/pull-inbox.js';
@@ -319,6 +320,7 @@ const HOOK_FORMATS: readonly string[] = [
   'stop',
   'gemini-after-tool',
   'gemini-after-agent',
+  'vibe',
 ];
 
 const DRAIN_FORMATS: readonly string[] = [
@@ -328,6 +330,7 @@ const DRAIN_FORMATS: readonly string[] = [
   'gemini-after-agent',
   'post-tool-use',
   'stop',
+  'vibe',
 ];
 
 /** Writes drained messages in a hook's or a monitor's format. */
@@ -346,6 +349,10 @@ function writeMessages(format: string, messages: readonly DeliverableMessage[]):
   }
   if (format === 'gemini-after-agent') {
     process.stdout.write(renderGeminiAfterAgent(messages));
+    return;
+  }
+  if (format === 'vibe') {
+    process.stdout.write(renderVibeHookPayload(messages));
     return;
   }
   if (format === 'post-tool-use' || format === 'stop') {

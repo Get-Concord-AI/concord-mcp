@@ -562,6 +562,117 @@ describe('Copilot CLI read evidence', () => {
   });
 });
 
+describe('Vibe hook payloads', () => {
+  let repos: Repositories;
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'vibe');
+  });
+
+  function vibeHook(event: Record<string, string>): string {
+    return JSON.stringify({
+      session_id: SESSION,
+      parent_session_id: null,
+      cwd: '/repo',
+      ...event,
+    });
+  }
+
+  it('ignores hooks fired inside a spawned subagent (parent_session_id)', () => {
+    const messageId = send(repos, 'for the main agent', 'k1');
+    const delivered = drainInbox(repos, 'beta', 'vibe', undefined, {
+      session: sessionKey(SESSION),
+      via: 'hook',
+    });
+    const [line] = renderMonitorLines(delivered);
+
+    observeHookEvent(
+      repos,
+      'beta',
+      vibeHook({
+        hook_event_name: 'pre_agent',
+        parent_session_id: 'parent-session-1',
+        prompt: line ?? '',
+      }),
+    );
+    expect(status(repos, messageId)).toBe('delivered');
+
+    // The session's own hook with the same evidence does count.
+    observeHookEvent(
+      repos,
+      'beta',
+      vibeHook({ hook_event_name: 'pre_agent', prompt: line ?? '' }),
+    );
+    expect(status(repos, messageId)).toBe('read');
+  });
+
+  it("reads read-evidence from Vibe's history chunks under transcript_path", () => {
+    const messageId = send(repos, 'chunk note', 'k1');
+    drainInbox(repos, 'beta', 'vibe', undefined, {
+      session: sessionKey(SESSION),
+      via: 'hook',
+    });
+    // Vibe's transcript_path is the session directory; the conversation lives
+    // in hash-named chunks/*.json snapshots as {message: {role, content}}.
+    const dir = mkdtempSync(join(tmpdir(), 'concord-vibe-session-'));
+    const chunks = join(dir, 'chunks');
+    mkdirSync(chunks, { recursive: true });
+    writeFileSync(
+      join(chunks, 'aaa.json'),
+      JSON.stringify([
+        {
+          message: {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'hi' },
+              {
+                type: 'text',
+                text: `[concord from alpha id=${messageId}]\nchunk note`,
+              },
+            ],
+          },
+          source: 'history',
+          turn_index: 0,
+        },
+        {
+          message: { role: 'assistant', content: [{ type: 'text', text: 'noted' }] },
+          source: 'history',
+          turn_index: 0,
+        },
+      ]),
+    );
+
+    observeHookEvent(
+      repos,
+      'beta',
+      vibeHook({ hook_event_name: 'post_tool', transcript_path: dir }),
+    );
+    expect(status(repos, messageId)).toBe('read');
+  });
+
+  it('marks the session waiting on its user for approval and question notifications', () => {
+    const awaitingSince = (): string | null | undefined =>
+      repos.agentEndpoints.getByAgent('beta')?.awaitingUserSince;
+
+    observeHookEvent(
+      repos,
+      'beta',
+      vibeHook({ hook_event_name: 'notification', notification_type: 'turn_completed' }),
+    );
+    expect(awaitingSince()).toBeNull();
+
+    observeHookEvent(
+      repos,
+      'beta',
+      vibeHook({ hook_event_name: 'notification', notification_type: 'approval_requested' }),
+    );
+    expect(awaitingSince()).not.toBeNull();
+  });
+});
+
 describe('review follow-ups', () => {
   let repos: Repositories;
 
