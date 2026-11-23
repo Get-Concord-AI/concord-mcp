@@ -516,6 +516,12 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         kind: options.provider,
         ...(options.fromHook === true ? { hookPayload } : {}),
       });
+      // A subagent shares its parent's session id, so its hooks resolve the
+      // parent's agent. Draining there would hand the parent's messages to
+      // whichever subagent ran a tool, and its activity proves nothing about
+      // what the parent's model saw (#216). The cloud drain registers and
+      // advertises the agent it is given, so the check must precede it too.
+      if (hookPayload !== undefined && isSubagentHook(parseObservedHook(hookPayload))) return;
       // The receiver lookup runs only on a Grok Stop, never on the per-tool-call hook path.
       const monitorNudge = (receiverIsActive: () => boolean): string | undefined =>
         grokStop && hookPayload !== undefined
@@ -537,11 +543,6 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         }
         return;
       }
-      // A subagent shares its parent's session id, so its hooks resolve the
-      // parent's agent. Draining there would hand the parent's messages to
-      // whichever subagent ran a tool, and its activity proves nothing about
-      // what the parent's model saw (#216).
-      if (hookPayload !== undefined && isSubagentHook(parseObservedHook(hookPayload))) return;
       const context = openContext(process.cwd());
       const isMonitor = options.format === 'monitor';
       // Read evidence first, so this invocation never marks read a message it
