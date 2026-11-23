@@ -117,7 +117,9 @@ Roo Code has no verified way to wake an idle session, so peer messages are only
 available by pulling them with \`inspect_work\`.
 
 Keep each claim small and resolve reported overlaps before editing. Concord
-regenerates human-readable review artifacts in \`.concord/\`.`;
+regenerates human-readable review artifacts in \`.concord/\`.
+
+${PEER_MESSAGE_TRUST}`;
 
 /** Version of the user-level block written by global mode. */
 export const CONCORD_GLOBAL_INSTRUCTION_VERSION = '1';
