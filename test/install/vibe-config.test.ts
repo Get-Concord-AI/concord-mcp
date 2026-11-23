@@ -144,6 +144,62 @@ describe('upsertVibeMcpConfig', () => {
     expect(hasVibeMcpServer(next)).toBe(true);
   });
 
+  it('reads env keys from a child table that carries a trailing comment', () => {
+    const source = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      '',
+      '[mcp_servers.env] # credentials',
+      'API_KEY = "user-secret"',
+      'CONCORD_AGENT_KIND = "vibe"',
+      '',
+    ].join('\n');
+    // The foreign API_KEY makes the entry user-owned: setup must not replace it.
+    expect(upsertVibeMcpConfig(source)).toBe(source);
+  });
+
+  it('counts quoted env keys inside an inline env table', () => {
+    const source = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      'env = { "API.KEY" = "x", CONCORD_AGENT_KIND = "vibe" }',
+      '',
+    ].join('\n');
+    expect(upsertVibeMcpConfig(source)).toBe(source);
+  });
+
+  it('treats env content it cannot name as user-owned', () => {
+    for (const envLine of ['env = { A.B = "x" }', 'env = { NESTED = { INNER = "x" } }']) {
+      const source = [
+        '[[mcp_servers]]',
+        'name = "concord"',
+        'transport = "stdio"',
+        'command = "concord-mcp"',
+        envLine,
+        '',
+      ].join('\n');
+      expect(upsertVibeMcpConfig(source)).toBe(source);
+    }
+  });
+
+  it('treats nested env subtables as user-owned', () => {
+    const source = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      '',
+      '[mcp_servers.env.credentials]',
+      'TOKEN = "user-secret"',
+      '',
+    ].join('\n');
+    expect(upsertVibeMcpConfig(source)).toBe(source);
+  });
+
   it('converts an empty mcp_servers array instead of breaking the file', () => {
     const next = upsertVibeMcpConfig('mcp_servers = []\n');
     expect(next).not.toContain('mcp_servers = []');

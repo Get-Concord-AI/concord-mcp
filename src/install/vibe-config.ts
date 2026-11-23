@@ -67,7 +67,12 @@ export function concordTomlBlocks(
   const header = new RegExp(`^\\s*\\[\\[\\s*${seg}\\s*\\]\\]`, 'u');
   const anyHeader = /^\s*\[/u;
   const childHeader = new RegExp(`^\\s*\\[+\\s*${seg}\\s*\\.`, 'u');
-  const envHeader = new RegExp(`^\\s*\\[+\\s*${seg}\\s*\\.\\s*["']?env["']?\\s*\\]+\\s*$`, 'u');
+  const envHeader = new RegExp(
+    `^\\s*\\[+\\s*${seg}\\s*\\.\\s*["']?env["']?\\s*\\]+\\s*(?:#.*)?$`,
+    'u',
+  );
+  // `[mcp_servers.env.<sub>]` nests env content the key reader cannot name.
+  const envSubHeader = new RegExp(`^\\s*\\[+\\s*${seg}\\s*\\.\\s*["']?env["']?\\s*\\.`, 'u');
   const namePattern = /^\s*["']?name["']?\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
   const fieldPattern = /^\s*["']?([A-Za-z0-9_-]+)["']?\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
   const envDotted = /^\s*["']?env["']?\s*\.\s*(\S+?)\s*=/u;
@@ -75,7 +80,7 @@ export function concordTomlBlocks(
   const envInlineOpen = /^\s*["']?env["']?\s*=\s*\{/u;
   const envAssign = /^\s*["']?env["']?\s*=/u;
   const envChildKey = /^\s*["']?([A-Za-z0-9_-]+)["']?\s*=/u;
-  const envInnerKey = /(?:^|,)\s*["']?([A-Za-z0-9_-]+)["']?\s*=/gu;
+  const envInnerKey = /(?:^|,)\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*=/gu;
   const envChildWeird = /^\s*[^=\s#"'][^=]*=|^\s*["'][^"']*["']\s*=/u;
   const blocks: TomlBlock[] = [];
   let open: { start: number; end: number } | undefined;
@@ -118,6 +123,7 @@ export function concordTomlBlocks(
       } else {
         inChildTable = true;
         inEnvChild = envHeader.test(text);
+        if (!inEnvChild && envSubHeader.test(text)) envOpaque = true;
         return;
       }
     }
@@ -154,9 +160,14 @@ export function concordTomlBlocks(
     }
     const inline = envInline.exec(text);
     if (inline !== null) {
-      for (const match of inline[1]?.matchAll(envInnerKey) ?? []) {
-        envKeys.push(match[1] ?? '');
+      const inner = inline[1] ?? '';
+      for (const match of inner.matchAll(envInnerKey)) {
+        envKeys.push(match[1] ?? match[2] ?? match[3] ?? '');
       }
+      // Bare dotted keys (`A.B = …`), nested inline tables/arrays, or key
+      // shapes the reader cannot name all mean env content we cannot fully
+      // account for — the entry stays the user's.
+      if (/[A-Za-z0-9_-]+\.[A-Za-z0-9_.]+\s*=|[[\]{}]/u.test(inner)) envOpaque = true;
       return;
     }
     if (envInlineOpen.test(text) || envAssign.test(text)) envOpaque = true;
