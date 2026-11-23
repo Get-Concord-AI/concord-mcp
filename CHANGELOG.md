@@ -45,6 +45,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `src/components/Button.tsx` now collides with an edit of
   `src/Components/Button.tsx`, and a `Src/App` directory claim covers
   `src/app/x.ts`. Linux stays case-sensitive (#384).
+- Background child processes no longer flash a console window on Windows: the
+  detached Concord host, the Codex app-server and stdio proxy, the `git remote`
+  lookup, and the plugin hooks' Concord calls now start hidden. Interactive
+  children such as the Codex TUI, and the browser opened by `concord login`,
+  keep their window (#392).
 
 ## [0.23.0] - 2026-11-16
 

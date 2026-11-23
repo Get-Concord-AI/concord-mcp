@@ -79,11 +79,15 @@ export function spawnCommandSync(
   });
 }
 
-/** Start a resolved executable, routing Windows batch shims through cmd.exe. */
+/**
+ * Start a resolved executable, routing Windows batch shims through cmd.exe.
+ * Pass `windowsHide: true` only for background children: an interactive child
+ * that inherits this terminal must keep its console visible.
+ */
 export function spawnCommand(
   file: string,
   args: readonly string[],
-  options: { env: NodeJS.ProcessEnv; cwd?: string; stdio?: StdioOptions },
+  options: { env: NodeJS.ProcessEnv; cwd?: string; stdio?: StdioOptions; windowsHide?: boolean },
 ): ChildProcess {
   const target = invocation(file, args, options.env);
   return spawn(target.command, target.args, {

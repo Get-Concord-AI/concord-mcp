@@ -54,7 +54,10 @@ export class CodexDaemonClient {
     if (this.remoteUrl !== undefined && this.remoteUrl !== '') {
       await this.connectSocket(this.remoteUrl);
     } else {
-      const child = spawn(this.command, [...this.args], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(this.command, [...this.args], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
       this.child = child;
       child.stdout.on('data', (chunk: unknown) => {
         this.onData(chunkText(chunk));

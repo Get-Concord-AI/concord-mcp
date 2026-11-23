@@ -79,6 +79,8 @@ describe('managed Codex executable (#326)', () => {
         shell: false,
         windowsVerbatimArguments: batch,
       });
+      // The background app-server hides its console; the interactive TUI keeps it.
+      expect(call?.[2]?.windowsHide).toBe(index === 0 ? true : undefined);
     }
     if (platform === 'win32') {
       expect(stop).toHaveBeenCalledWith(
