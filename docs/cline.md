@@ -17,14 +17,14 @@ Cline has **one global MCP settings file** shared by every project — there is
 no project-scoped MCP config and no `${workspaceFolder}` expansion — so the
 registration is user-level:
 
-| File                                             | Purpose                                                                     |
-| ------------------------------------------------ | --------------------------------------------------------------------------- |
-| `~/.cline/data/settings/cline_mcp_settings.json` | Registers the `concord-mcp` stdio server with `CONCORD_AGENT_KIND=cline`    |
-| `~/Documents/Cline/Hooks/<Hook>`                 | Lifecycle hooks, read by the extension and the SDK                          |
-| `~/.cline/hooks/<Hook>`                          | The same hooks for SDK/CLI layouts (`CLINE_DIR`-aware)                      |
-| `.clinerules/concord.md`                         | Concord workflow rules (repository, written by `concord setup`)             |
-| `.cline/rules/concord.md`                        | The same rules for the newer rules directory (repository)                   |
-| `~/.cline/rules/concord.md`                      | User-level rules when global mode is on                                     |
+| File                                             | Purpose                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------ |
+| `~/.cline/data/settings/cline_mcp_settings.json` | Registers the `concord-mcp` stdio server with `CONCORD_AGENT_KIND=cline` |
+| `~/Documents/Cline/Hooks/<Hook>`                 | Lifecycle hooks, read by the extension and the SDK                       |
+| `~/.cline/hooks/<Hook>`                          | The same hooks for SDK/CLI layouts (`CLINE_DIR`-aware)                   |
+| `.clinerules/concord.md`                         | Concord workflow rules (repository, written by `concord setup`)          |
+| `.cline/rules/concord.md`                        | The same rules for the newer rules directory (repository)                |
+| `~/.cline/rules/concord.md`                      | User-level rules when global mode is on                                  |
 
 The settings path honors `CLINE_MCP_SETTINGS_PATH`, `CLINE_DATA_DIR`, and
 `CLINE_DIR`, matching Cline's own resolution order.

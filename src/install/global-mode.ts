@@ -14,11 +14,7 @@ import { codexHome } from './codex-config.js';
 import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
 import { deepseekHome } from './deepseek-config.js';
-import {
-  clineDetected,
-  clineGlobalRulesDir,
-  clineMcpSettingsPath,
-} from './cline-config.js';
+import { clineDetected, clineGlobalRulesDir, clineMcpSettingsPath } from './cline-config.js';
 import {
   devinMcpConfigPath,
   hasDevinMcpServer,

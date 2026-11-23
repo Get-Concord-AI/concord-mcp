@@ -68,13 +68,7 @@ describe('local Cline hooks', () => {
   it('registers the task identity and names agent_id and workspace_id on task start', () => {
     handleRegisterAgent(repos, { agent_id: 'codex:peer0001', kind: 'codex' });
 
-    const output = handleLocalClineHook(
-      repos,
-      CLINE,
-      CONTEXT,
-      'cline-task-start',
-      'extension',
-    );
+    const output = handleLocalClineHook(repos, CLINE, CONTEXT, 'cline-task-start', 'extension');
 
     const control = z
       .object({ contextModification: z.string().optional() })
@@ -109,7 +103,9 @@ describe('local Cline hooks', () => {
       'extension',
     );
     expect(first).toContain('PINEAPPLE-42');
-    expect(z.object({ contextModification: z.string() }).loose().parse(JSON.parse(first))).toHaveProperty('contextModification');
+    expect(
+      z.object({ contextModification: z.string() }).loose().parse(JSON.parse(first)),
+    ).toHaveProperty('contextModification');
 
     const second = handleLocalClineHook(
       repos,
@@ -152,13 +148,7 @@ describe('local Cline hooks', () => {
   });
 
   it('keeps a stable identity across task start and prompt submit for the same task', () => {
-    const start = handleLocalClineHook(
-      repos,
-      CLINE,
-      CONTEXT,
-      'cline-task-start',
-      'extension',
-    );
+    const start = handleLocalClineHook(repos, CLINE, CONTEXT, 'cline-task-start', 'extension');
     expect(start).toContain(CLINE.agentId);
     expect(repos.agents.get(CLINE.agentId)).toBeDefined();
   });

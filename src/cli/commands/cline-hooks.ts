@@ -107,9 +107,7 @@ const SDK_HOOK_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 function normalizeHookName(payload: ClinePayload): string {
-  return (payload.hookName ?? payload.hook_name ?? '')
-    .toLowerCase()
-    .replace(/[^a-z]/gu, '');
+  return (payload.hookName ?? payload.hook_name ?? '').toLowerCase().replace(/[^a-z]/gu, '');
 }
 
 export function clineSurface(payload: ClinePayload): ClineSurface {
@@ -133,10 +131,7 @@ export function clineWorkspace(rawJson: string): string {
  * `CONCORD_AGENT_ID` stays authoritative; otherwise the task id — stable for
  * the life of a Cline task, including resumes — derives the session identity.
  */
-function clineIdentity(
-  payload: ClinePayload,
-  env: NodeJS.ProcessEnv,
-): AgentIdentity | undefined {
+function clineIdentity(payload: ClinePayload, env: NodeJS.ProcessEnv): AgentIdentity | undefined {
   const resolved = resolveIdentity(env, { kind: 'cline' });
   if (resolved !== undefined) return resolved;
   const taskId = taskIdOf(payload);
@@ -154,13 +149,8 @@ function inboxOutput(messages: readonly DeliverableMessage[]): string {
   return hookOutput(messages.length === 0 ? undefined : renderInboxBody(messages));
 }
 
-function rosterOthers(
-  repos: Repositories,
-  agentId: string,
-): RosterLine[] {
-  return buildRoster(repos.agents.list(), Date.now()).filter(
-    (peer) => peer.agentId !== agentId,
-  );
+function rosterOthers(repos: Repositories, agentId: string): RosterLine[] {
+  return buildRoster(repos.agents.list(), Date.now()).filter((peer) => peer.agentId !== agentId);
 }
 
 export function handleLocalClineHook(
@@ -176,7 +166,11 @@ export function handleLocalClineHook(
       ensureAgentRegistered(repos, identity, context.repoRoot);
       registerPullEndpoint(repos, identity.agentId, 'cline');
       return hookOutput(
-        clineSessionStartMessage(identity.agentId, context.workspaceId, rosterOthers(repos, identity.agentId)),
+        clineSessionStartMessage(
+          identity.agentId,
+          context.workspaceId,
+          rosterOthers(repos, identity.agentId),
+        ),
       );
     case 'cline-user-prompt-submit':
       // Only the extension's prompt-submit output reaches the model for sure.

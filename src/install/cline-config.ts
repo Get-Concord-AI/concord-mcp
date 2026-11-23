@@ -22,16 +22,12 @@ import {
 
 export function clineHome(env: NodeJS.ProcessEnv): string {
   const configured = env['CLINE_DIR']?.trim();
-  return configured === undefined || configured === ''
-    ? join(userHome(env), '.cline')
-    : configured;
+  return configured === undefined || configured === '' ? join(userHome(env), '.cline') : configured;
 }
 
 export function clineDataDir(env: NodeJS.ProcessEnv): string {
   const configured = env['CLINE_DATA_DIR']?.trim();
-  return configured === undefined || configured === ''
-    ? join(clineHome(env), 'data')
-    : configured;
+  return configured === undefined || configured === '' ? join(clineHome(env), 'data') : configured;
 }
 
 export function clineMcpSettingsPath(env: NodeJS.ProcessEnv): string {
@@ -66,9 +62,7 @@ function vscodeExtensionDirs(env: NodeJS.ProcessEnv): string[] {
   const home = userHome(env);
   const appDataEnv = env['APPDATA']?.trim();
   const appData =
-    appDataEnv === undefined || appDataEnv === ''
-      ? join(home, 'AppData', 'Roaming')
-      : appDataEnv;
+    appDataEnv === undefined || appDataEnv === '' ? join(home, 'AppData', 'Roaming') : appDataEnv;
   const extension = join('User', 'globalStorage', 'saoudrizwan.claude-dev');
   return [
     join(appData, 'Code', extension),
