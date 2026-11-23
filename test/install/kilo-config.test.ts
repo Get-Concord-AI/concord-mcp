@@ -66,9 +66,7 @@ describe('kiloConfigDir', () => {
 
   it('expands a leading ~ against the user home', () => {
     const { home, env } = kiloEnv();
-    expect(kiloConfigDir({ ...env, KILO_CONFIG_DIR: '~/kilo-work' })).toBe(
-      join(home, 'kilo-work'),
-    );
+    expect(kiloConfigDir({ ...env, KILO_CONFIG_DIR: '~/kilo-work' })).toBe(join(home, 'kilo-work'));
   });
 });
 
@@ -159,7 +157,11 @@ describe('kiloMcpState', () => {
       'kilo.jsonc',
       JSON.stringify({ mcp: { concord: { ...CONCORD_ENTRY, enabled: false } } }),
     );
-    writeGlobalConfig(home, 'opencode.json', JSON.stringify({ mcp: { concord: { enabled: true } } }));
+    writeGlobalConfig(
+      home,
+      'opencode.json',
+      JSON.stringify({ mcp: { concord: { enabled: true } } }),
+    );
     expect(kiloMcpState(env)).toEqual({ state: 'installed' });
   });
 
@@ -167,7 +169,11 @@ describe('kiloMcpState', () => {
     const { home, env } = kiloEnv();
     writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
     const dir = join(home, 'kilo-work');
-    writeConfigDirConfig(dir, 'kilo.jsonc', JSON.stringify({ mcp: { concord: { enabled: false } } }));
+    writeConfigDirConfig(
+      dir,
+      'kilo.jsonc',
+      JSON.stringify({ mcp: { concord: { enabled: false } } }),
+    );
     expect(kiloMcpState({ ...env, KILO_CONFIG_DIR: dir }).state).toBe('disabled');
   });
 
@@ -177,7 +183,9 @@ describe('kiloMcpState', () => {
       home,
       'kilo.json',
       JSON.stringify({
-        mcp: { concord: { type: 'local', command: ['my-own-server'], environment: { FOO: 'bar' } } },
+        mcp: {
+          concord: { type: 'local', command: ['my-own-server'], environment: { FOO: 'bar' } },
+        },
       }),
     );
     expect(kiloMcpState(env)).toEqual({ state: 'conflict', path });
@@ -219,7 +227,9 @@ describe('kiloMcpState', () => {
       home,
       'kilo.json',
       JSON.stringify({
-        mcp: { concord: { type: 'local', command: ['concord-mcp'], env: { CONCORD_AGENT_KIND: 'kilo' } } },
+        mcp: {
+          concord: { type: 'local', command: ['concord-mcp'], env: { CONCORD_AGENT_KIND: 'kilo' } },
+        },
       }),
     );
     expect(kiloMcpState(env)).toEqual({ state: 'installed' });

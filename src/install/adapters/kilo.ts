@@ -1,5 +1,10 @@
 import { HARNESS_CONFIGS } from '../../domain/harness-config.js';
-import { kiloConfigDir, kiloConfigHome, kiloMcpState, installKiloMcpConfig } from '../kilo-config.js';
+import {
+  kiloConfigDir,
+  kiloConfigHome,
+  kiloMcpState,
+  installKiloMcpConfig,
+} from '../kilo-config.js';
 import type { AdapterReport } from './index.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
 

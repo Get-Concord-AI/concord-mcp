@@ -4,7 +4,14 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 
 import { userHome } from '../config/paths.js';
-import { isEscaped, isJsonObject, parseJsoncObject, propertyObject, removeProperty, uncomment } from './jsonc-edit.js';
+import {
+  isEscaped,
+  isJsonObject,
+  parseJsoncObject,
+  propertyObject,
+  removeProperty,
+  uncomment,
+} from './jsonc-edit.js';
 import { jsonValueSchema, type JsonObject, type JsonValue } from './json-value.js';
 import {
   AGENT_KIND_ENV,
@@ -327,9 +334,7 @@ function removeConcordEntry(text: string): string | undefined {
   if (concord === undefined) return undefined;
   // Confirm the located entry is the owned one before touching anything.
   try {
-    const located = parseKiloServer(
-      parseJsoncObject(inner.slice(concord.open, concord.close + 1)),
-    );
+    const located = parseKiloServer(parseJsoncObject(inner.slice(concord.open, concord.close + 1)));
     if (located === undefined || !isKiloConcordEntry(located)) return undefined;
   } catch {
     return undefined;
