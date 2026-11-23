@@ -10,6 +10,7 @@ import {
   type PresenceEntry,
   type StaleClaim,
 } from '../domain/presence.js';
+import { resolvePathsFromCheckout } from '../workspaces/overlap-paths.js';
 
 export interface ActiveEntry {
   taskId: string;
@@ -96,6 +97,10 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
   );
   const activeStatuses = new Set<TaskStatus>(ACTIVE_STATUSES);
   const active = tasks.filter((task) => activeStatuses.has(task.status));
+  const pathsFromCheckout = resolvePathsFromCheckout(
+    repos.checkoutRoot,
+    active.map((task) => task.expectedFiles),
+  );
 
   const overlaps: OverlapPair[] = [];
   // Overlap is symmetric. Scan only the upper triangle so every task pair is
@@ -114,6 +119,7 @@ export function buildStatus(repos: Repositories, now: number = Date.now()): Stat
       },
       active,
       index + 1,
+      { platform: process.platform, pathsFromCheckout },
     )) {
       overlaps.push({ a: task.taskId, b: warning.taskId, reasons: warning.reasons });
     }

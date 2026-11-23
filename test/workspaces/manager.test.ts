@@ -6,6 +6,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { workspaceIdForRoot } from '../../src/config/paths.js';
 import { openRepositories } from '../../src/db/index.js';
+import { handleClaimWork } from '../../src/tools/claim-work.js';
+import { handleGetTaskContext } from '../../src/tools/get-task-context.js';
+import { handleGetWorkState } from '../../src/tools/get-work-state.js';
 import { WorkspaceManager, routedRepositories } from '../../src/workspaces/manager.js';
 
 function repoDir(label: string): string {
@@ -69,6 +72,34 @@ describe('WorkspaceManager', () => {
 
     manager.select(workspaceIdForRoot(first));
     expect(routed.tasks.list().map((task) => task.taskId)).toEqual(['FIRST']);
+  });
+
+  it('scopes root claim overlaps to the currently selected workspace', () => {
+    const first = repoDir('claim-first');
+    const second = repoDir('claim-second');
+    const manager = new WorkspaceManager(first);
+    const routed = routedRepositories(manager);
+    manager.join(second);
+    handleClaimWork(routed, { task_id: 'ROOT', title: 'Claims root', expected_files: ['/'] });
+
+    const outside = handleClaimWork(routed, {
+      task_id: 'OUTSIDE',
+      title: 'Outside workspace',
+      expected_files: [join(first, 'src', 'app.ts')],
+    });
+    expect(outside.overlaps).toEqual([]);
+
+    const inside = handleClaimWork(routed, {
+      task_id: 'INSIDE',
+      title: 'Inside workspace',
+      expected_files: [join(second, 'src', 'app.ts')],
+    });
+    expect(inside.overlaps.map((warning) => warning.taskId)).toEqual(['ROOT']);
+    expect(handleGetTaskContext(routed, { task_id: 'INSIDE' }).overlaps).toEqual(inside.overlaps);
+
+    const { overlaps } = handleGetWorkState(routed);
+    expect(overlaps).toHaveLength(1);
+    expect([overlaps[0]?.a, overlaps[0]?.b].sort()).toEqual(['INSIDE', 'ROOT']);
   });
 
   it('opens a workspace only once when it is selected repeatedly', () => {
