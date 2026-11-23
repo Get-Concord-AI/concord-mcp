@@ -65,9 +65,12 @@ program.hook('preAction', (command, actionCommand) => {
     parent === 'cloud' ||
     ((parent === 'inbox' || CLOUD_SERVED.has(actionCommand.name())) &&
       linkedMachine(process.env) !== undefined);
-  activeCommand = nonLocal
-    ? undefined
-    : { name: actionCommand.name(), startedAt: performance.now() };
+  // `work` is refused on a linked machine (exit 1), and the local CLI records
+  // its calls itself, so it is not counted as a successful operation here.
+  activeCommand =
+    nonLocal || actionCommand.name() === 'work'
+      ? undefined
+      : { name: actionCommand.name(), startedAt: performance.now() };
 });
 
 program.hook('postAction', (_command, actionCommand) => {

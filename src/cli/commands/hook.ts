@@ -314,10 +314,19 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     .command('hook <event>')
     .description(
       'Run a Concord hook. events: pre-tool-use (PreToolUse overlap gate), ' +
-        'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, and stop.',
+        'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, ' +
+        'stop, and kiro-session-start and kiro-user-prompt-submit.',
     )
     .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {
+      if (event.startsWith('kiro-')) {
+        const { isKiroHookEvent, runKiroHook } = await import('./kiro-hooks.js');
+        if (isKiroHookEvent(event)) {
+          const output = await runKiroHook(event, readStdin());
+          if (output !== '') process.stdout.write(`${output}\n`);
+          return;
+        }
+      }
       if (event.startsWith('devin-')) {
         const { isDevinHookEvent, runDevinHook } = await import('./devin-hooks.js');
         if (isDevinHookEvent(event)) {
