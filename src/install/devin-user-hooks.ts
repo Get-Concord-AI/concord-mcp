@@ -1,27 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { z } from 'zod';
-
 import { devinMcpConfigPath } from './devin-config.js';
+import { jsonObjectSchema, type JsonObject, type JsonValue } from './json-value.js';
 
 const EVENTS = ['SessionStart', 'UserPromptSubmit', 'SessionEnd'] as const;
-type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
-interface JsonObject {
-  [key: string]: JsonValue;
-}
-
-const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.null(),
-    z.array(jsonValueSchema),
-    z.record(z.string(), jsonValueSchema),
-  ]),
-);
-const objectSchema = z.record(z.string(), jsonValueSchema);
 
 interface ObjectRange {
   key: number;
@@ -129,7 +112,7 @@ function rootObjectRange(text: string, key: string): ObjectRange | undefined {
 
 function parsedObject(text: string): JsonObject {
   const value: unknown = JSON.parse(uncomment(text));
-  return objectSchema.parse(value);
+  return jsonObjectSchema.parse(value);
 }
 
 function commentsIn(text: string): string[] {
@@ -187,7 +170,7 @@ export function upsertDevinUserHooksConfig(existing: string | undefined): string
   ) {
     throw new Error('Devin config hooks must be an object.');
   }
-  const hooks = objectSchema.parse(previous ?? {});
+  const hooks = jsonObjectSchema.parse(previous ?? {});
   const nextHooks = { ...hooks };
   for (const event of EVENTS) {
     const current = hooks[event];

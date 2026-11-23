@@ -1,13 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { z } from 'zod';
+import { jsonValueSchema, type JsonObject, type JsonValue } from './json-value.js';
 
 const EVENTS = ['SessionStart', 'UserPromptSubmit', 'SessionEnd'] as const;
-type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
-interface JsonObject {
-  [key: string]: JsonValue;
-}
 
 interface DevinCommandHook extends JsonObject {
   type: 'command';
@@ -18,17 +14,6 @@ interface DevinHookEntry extends JsonObject {
   matcher: string;
   hooks: DevinCommandHook[];
 }
-
-const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.null(),
-    z.array(jsonValueSchema),
-    z.record(z.string(), jsonValueSchema),
-  ]),
-);
 
 function commandFor(event: (typeof EVENTS)[number]): string {
   return `concord hook devin-${event
