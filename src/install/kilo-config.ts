@@ -194,10 +194,13 @@ export function installKiloMcpConfig(executable: string, env: NodeJS.ProcessEnv)
 
 /**
  * Whether a global Kilo config registers an enabled Concord server Concord
- * owns. 'unreadable' means a config file exists but cannot be parsed; a
- * disabled (`enabled: false`) entry does not count as installed.
+ * owns. 'unreadable' means a config file exists but cannot be parsed — it
+ * takes priority over a working entry in a sibling file, since Kilo loads
+ * all of them. A disabled (`enabled: false`) entry does not count as
+ * installed.
  */
 export function kiloMcpInstalled(env: NodeJS.ProcessEnv): boolean | 'unreadable' {
+  let found = false;
   let unreadable = false;
   for (const path of kiloGlobalConfigPaths(env)) {
     if (!existsSync(path)) continue;
@@ -217,10 +220,13 @@ export function kiloMcpInstalled(env: NodeJS.ProcessEnv): boolean | 'unreadable'
     }
     const entry = config.mcp?.[CONCORD_SERVER_KEY];
     if (entry !== undefined && isKiloConcordEntry(entry) && entry.enabled !== false) {
-      return true;
+      found = true;
     }
   }
-  return unreadable ? 'unreadable' : false;
+  // A config Kilo cannot read is reported even when another file still has a
+  // working entry: the broken file is a problem the user has to fix.
+  if (unreadable) return 'unreadable';
+  return found;
 }
 
 /**
@@ -232,9 +238,16 @@ export function kiloMcpInstalled(env: NodeJS.ProcessEnv): boolean | 'unreadable'
  */
 export function uninstallKiloMcpConfig(env: NodeJS.ProcessEnv): void {
   for (const path of kiloGlobalConfigPaths(env)) {
-    if (!existsSync(path)) continue;
-    const existing = readFileSync(path, 'utf8');
-    if (ownedEntry(existing) === undefined) continue;
+    let existing: string;
+    try {
+      if (!existsSync(path)) continue;
+      existing = readFileSync(path, 'utf8');
+      if (ownedEntry(existing) === undefined) continue;
+    } catch {
+      // An unreadable or malformed file is left untouched; the remaining
+      // config files are still checked.
+      continue;
+    }
     const config = parseKiloConfig(existing);
     const servers = Object.fromEntries(
       Object.entries(config.mcp ?? {}).filter(([name]) => name !== CONCORD_SERVER_KEY),

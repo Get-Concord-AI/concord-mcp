@@ -149,6 +149,13 @@ describe('kiloMcpInstalled', () => {
     writeGlobalConfig(home, 'kilo.json', '{ not json');
     expect(kiloMcpInstalled(env)).toBe('unreadable');
   });
+
+  it('reports unreadable even when another file has a working entry', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(home, 'kilo.json', '{ not json');
+    writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+    expect(kiloMcpInstalled(env)).toBe('unreadable');
+  });
 });
 
 const serversSchema = z.object({
@@ -213,5 +220,21 @@ describe('uninstallKiloMcpConfig', () => {
     uninstallKiloMcpConfig(env);
 
     expect(readFileSync(path, 'utf8')).toBe(before);
+  });
+
+  it('skips a malformed file but still removes entries from the others', () => {
+    const { home, env } = kiloEnv();
+    const broken = writeGlobalConfig(home, 'kilo.json', '{ not json');
+    const good = writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }),
+    );
+
+    uninstallKiloMcpConfig(env);
+
+    expect(readFileSync(broken, 'utf8')).toBe('{ not json');
+    const next = serversSchema.parse(JSON.parse(readFileSync(good, 'utf8')));
+    expect(next.mcp?.['concord']).toBeUndefined();
   });
 });
