@@ -13,7 +13,11 @@ import { writeArtifacts } from '../../artifacts/index.js';
 import { LINKED_MACHINE_MESSAGE, linkedMachine } from '../../cloud/target.js';
 import { resolveRepoRoot } from '../../config/paths.js';
 import { openRepositories, type Repositories } from '../../db/index.js';
-import { resolveIdentity, type AgentIdentity } from '../../domain/identity.js';
+import {
+  resolveIdentity,
+  resolveServerIdentity,
+  type AgentIdentity,
+} from '../../domain/identity.js';
 import {
   finishWorkInputShape,
   transferWorkInputShape,
@@ -218,36 +222,43 @@ function resolvedKind(
   return trimmed(env['CONCORD_AGENT_KIND']);
 }
 
+function suppliedAgentId(json: JsonObject): string | undefined {
+  const supplied = json['agent_id'];
+  return typeof supplied === 'string' ? trimmed(supplied) : undefined;
+}
+
 /**
- * `--agent` names this caller the way CONCORD_AGENT_ID does for the MCP server,
- * but a session this process can see still wins: letting the flag override it
- * would let one session act as another agent, the same hole `resolveInboxOwner`
- * closes for the inbox. The flag is trusted only where no session identity is
- * visible (a Grok or Cursor monitor, a script).
+ * The session this process can see comes from the environment alone, the way
+ * `resolveServerIdentity` finds it for `concord-mcp`. `--kind` and the start
+ * JSON `kind` are caller input: letting them filter the lookup would hide the
+ * session and let a JSON `agent_id` or `--agent` act as another agent. They set
+ * only the kind recorded for this agent.
+ *
+ * With a visible session, an `--agent` or JSON `agent_id` naming anyone else is
+ * refused, the same rule `resolveInboxOwner` applies to the inbox. `--agent` is
+ * trusted only where no session is visible (a Grok or Cursor monitor, a script).
  */
 function workIdentity(
+  json: JsonObject,
   flags: WorkFlags,
   kind: string | undefined,
   env: NodeJS.ProcessEnv,
 ): AgentIdentity | undefined {
-  const options = kind === undefined ? {} : { kind };
-  const own = resolveIdentity(env, options);
-  const flagged = flags.agent?.trim();
-  if (flagged === undefined || flagged === '') return own;
-  if (own !== undefined) {
-    if (own.agentId !== flagged) {
-      throw new Error(`This session is agent ${own.agentId}; it cannot act as ${flagged}.`);
+  const flagged = trimmed(flags.agent);
+  const visible = resolveServerIdentity(env);
+  if (visible === undefined) {
+    if (flagged === undefined) return undefined;
+    return resolveIdentity(
+      { ...env, CONCORD_AGENT_ID: flagged },
+      kind === undefined ? {} : { kind },
+    );
+  }
+  for (const claimed of [flagged, suppliedAgentId(json)]) {
+    if (claimed !== undefined && claimed !== visible.agentId) {
+      throw new Error(`This session is agent ${visible.agentId}; it cannot act as ${claimed}.`);
     }
-    return own;
   }
-  // A --kind naming a harness with no session source filters the visible
-  // session out of `own`, which would hand --agent a free impersonation.
-  // Fail closed on any session identity this process can still see.
-  const visible = resolveIdentity(env);
-  if (visible !== undefined && visible.agentId !== flagged) {
-    throw new Error(`This session is agent ${visible.agentId}; it cannot act as ${flagged}.`);
-  }
-  return resolveIdentity({ ...env, CONCORD_AGENT_ID: flagged }, options);
+  return kind === undefined ? visible : { ...visible, kind };
 }
 
 function toolArguments(
@@ -296,7 +307,7 @@ export async function runWork(
     const repoRoot = resolveRepoRoot(options.cwd, options.env);
     const flags = input.flags ?? {};
     const kind = resolvedKind(action, json, flags, options.env);
-    const identity = workIdentity(flags, kind, options.env);
+    const identity = workIdentity(json, flags, kind, options.env);
     const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, options.env, {
       open: (databasePath, project) => {
         const repos = openRepositories(databasePath, project);

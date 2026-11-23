@@ -18,15 +18,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`current_version`, `latest_version`, `command`), the same optional field
   the MCP server adds; the check is skipped in CI and with
   `CONCORD_NO_UPDATE_CHECK=1`, and a failed check never fails the command.
+  When the process can see a session identity, the command acts as that
+  session: an `--agent` or JSON `agent_id` naming a different agent is
+  refused, whatever `--kind` or the JSON `kind` says.
 - The installed agent instructions, the session-start message, and the README
   now name `concord work` as a second path next to the MCP tools, with a
   section for shell-only agents and how to choose a stable agent id. MCP stays
   the main path. Workflow instructions move to version 8 and the global block
   to version 2.
-- `concord work --agent` can no longer override a session identity the
-  process can see: when the session resolves to a different agent id the
-  command fails, matching the inbox rule, instead of letting one session act
-  as another.
 
 ### Changed
 

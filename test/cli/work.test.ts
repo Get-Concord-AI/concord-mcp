@@ -33,7 +33,11 @@ import {
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { LINKED_MACHINE_MESSAGE } from '../../src/cloud/target.js';
 import { openRepositories, type Repositories } from '../../src/db/index.js';
-import { agentIdForSession, UNRESOLVED_IDENTITY_MESSAGE } from '../../src/domain/identity.js';
+import {
+  agentIdForSession,
+  SESSION_SOURCES,
+  UNRESOLVED_IDENTITY_MESSAGE,
+} from '../../src/domain/identity.js';
 import {
   CONCORD_GLOBAL_INSTRUCTIONS,
   CONCORD_INSTRUCTIONS,
@@ -56,6 +60,7 @@ const noticeSchema = z.object({
     .optional(),
 });
 const agentSchema = z.object({ agent_id: z.string() });
+const presenceSchema = z.object({ presence: z.array(z.object({ agentId: z.string() })) });
 const errorSchema = z.object({ error: z.string() });
 const workStateSchema = z.object({
   tasks: z.array(
@@ -394,6 +399,54 @@ describe('concord work', () => {
     );
   });
 
+  it('refuses a JSON agent_id when --kind filters out the visible session', async () => {
+    const sessionAgent = agentIdForSession('claude-code', 'sess-123');
+    const jsonPath = writeInput(
+      'spoof-flag.json',
+      JSON.stringify({ task_id: 'spoof', title: 'Spoof', agent_id: 'codex:victim' }),
+    );
+    const denied = await run(
+      'start',
+      { jsonPath, flags: { kind: 'cursor' } },
+      { CLAUDE_CODE_SESSION_ID: 'sess-123' },
+    );
+    expect(failed(denied)).toBe(
+      `This session is agent ${sessionAgent}; it cannot act as codex:victim.`,
+    );
+    expect(parsed(await run('inspect', {}), presenceSchema).presence).toEqual([]);
+  });
+
+  it('refuses a JSON agent_id that disagrees with the session whatever the JSON kind', async () => {
+    const sessionAgent = agentIdForSession('claude-code', 'sess-123');
+    const spoofed = writeInput(
+      'spoof-kind.json',
+      JSON.stringify({
+        task_id: 'spoof',
+        title: 'Spoof',
+        kind: 'cursor',
+        agent_id: 'codex:victim',
+      }),
+    );
+    const denied = await run(
+      'start',
+      { jsonPath: spoofed },
+      { CLAUDE_CODE_SESSION_ID: 'sess-123' },
+    );
+    expect(failed(denied)).toBe(
+      `This session is agent ${sessionAgent}; it cannot act as codex:victim.`,
+    );
+
+    const own = writeInput(
+      'own-kind.json',
+      JSON.stringify({ task_id: 'own', title: 'Own', kind: 'cursor', agent_id: sessionAgent }),
+    );
+    const started = parsed(
+      await run('start', { jsonPath: own }, { CLAUDE_CODE_SESSION_ID: 'sess-123' }),
+      agentSchema,
+    );
+    expect(started.agent_id).toBe(sessionAgent);
+  });
+
   it('uses one kind for the start arguments and the registered agent', async () => {
     const flagged = writeInput(
       'kind-flag.json',
@@ -707,6 +760,10 @@ describe('concord work', () => {
     const savedClaude = process.env['CLAUDE_PROJECT_DIR'];
     const savedDevin = process.env['DEVIN_PROJECT_DIR'];
     const savedAgent = process.env['CONCORD_AGENT_ID'];
+    // The harness running this suite may expose its own session, which would
+    // refuse the --agent below.
+    const sessionKeys = ['CONCORD_AGENT_KIND', ...SESSION_SOURCES.map((source) => source.envVar)];
+    const savedSessions = sessionKeys.map((key) => [key, process.env[key]] as const);
     const restore = (key: string, value: string | undefined): void => {
       if (value === undefined) Reflect.deleteProperty(process.env, key);
       else process.env[key] = value;
@@ -721,6 +778,7 @@ describe('concord work', () => {
       delete process.env['CLAUDE_PROJECT_DIR'];
       delete process.env['DEVIN_PROJECT_DIR'];
       delete process.env['CONCORD_AGENT_ID'];
+      for (const key of sessionKeys) Reflect.deleteProperty(process.env, key);
 
       const program = cli(telemetry);
       await program.parseAsync(
@@ -803,6 +861,7 @@ describe('concord work', () => {
       restore('CLAUDE_PROJECT_DIR', savedClaude);
       restore('DEVIN_PROJECT_DIR', savedDevin);
       restore('CONCORD_AGENT_ID', savedAgent);
+      for (const [key, value] of savedSessions) restore(key, value);
     }
   });
 
