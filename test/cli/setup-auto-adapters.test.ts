@@ -25,11 +25,15 @@ describe('resolveAutoAdaptersChoice', () => {
     expect(await resolveAutoAdaptersChoice({ env, interactive: false, flag: true })).toBe(true);
   });
 
-  it('is saved by setup in the user config', () => {
+  it('is saved by setup in the user config', async () => {
     const env = home();
     const repo = mkdtempSync(join(tmpdir(), 'concord-auto-adapters-repo-'));
     mkdirSync(join(repo, '.git'));
-    runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, mcp: false, autoAdapters: true });
+    await runSetup(repo, {
+      env: { ...env, CONCORD_REPO_ROOT: repo },
+      mcp: false,
+      autoAdapters: true,
+    });
     expect(readUserConfig(env).autoAdapters).toBe(true);
   });
 });

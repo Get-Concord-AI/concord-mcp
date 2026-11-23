@@ -3,12 +3,12 @@ import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
-import { writeArtifacts } from '../../artifacts/index.js';
 import { installAntigravityHooks } from '../../install/antigravity-hooks.js';
 import { installClaudeHook } from '../../install/claude-hooks.js';
 import { installCodexMcpConfig } from '../../install/codex-config.js';
 import { installDevinMcpConfig } from '../../install/devin-config.js';
 import { installDevinHooks } from '../../install/devin-hooks.js';
+import { installKiroWorkspaceHooks } from '../../install/kiro-config.js';
 import { applyGlobalMode, type GlobalModeReport } from '../../install/global-mode.js';
 import { readUserConfig, writeUserConfig } from '../../config/user-config.js';
 import { standaloneInstall, standaloneUpgrade } from '../../config/install-mode.js';
@@ -26,7 +26,6 @@ import {
 import { cloudTargetFor } from '../../cloud/target.js';
 import { resolveRepoRoot, workspaceIdForRoot } from '../../config/paths.js';
 import { runInteractive } from '../../install/spawn-command.js';
-import { openContext } from '../context.js';
 import { findAvailableUpdate, type AvailableUpdate } from '../../update-notifier.js';
 import { VERSION } from '../../version.js';
 
@@ -233,13 +232,17 @@ export function ensureConcordIgnored(concordPath: string): void {
  * linked machine it installs the harness side and creates no local store,
  * which would be a second network no cloud agent could reach.
  */
-export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
+export async function runSetup(cwd: string, options: SetupOptions = {}): Promise<SetupResult> {
   const env = options.env ?? process.env;
   const repoRoot = resolveRepoRoot(cwd, env);
   const cloud = cloudTargetFor(repoRoot, env);
   let state: SetupState;
   if (cloud === undefined) {
     // Setting a repository up gives it its own store, whatever global mode says.
+    const [{ openContext }, { writeArtifacts }] = await Promise.all([
+      import('../context.js'),
+      import('../../artifacts/index.js'),
+    ]);
     const ctx = openContext(cwd, env, { local: true });
     ensureConcordIgnored(ctx.concordPath);
     writeArtifacts(ctx.concordPath, ctx.repos);
@@ -263,6 +266,7 @@ export function runSetup(cwd: string, options: SetupOptions = {}): SetupResult {
       written.push(installDevinHooks(repoRoot));
       written.push(...installMcpConfigs(repoRoot));
       written.push(installAntigravityHooks(repoRoot));
+      written.push(installKiroWorkspaceHooks(repoRoot));
     }
     // Global mode owns a user-level Cursor entry; without it, one is a stale
     // registration that would shadow this repository's pinned one.
@@ -382,7 +386,7 @@ export function registerSetupCommand(program: Command): void {
         if (options.claudeHooks === true) {
           setupOptions.claudeHooks = true;
         }
-        const result = runSetup(process.cwd(), setupOptions);
+        const result = await runSetup(process.cwd(), setupOptions);
         process.stdout.write(
           `Concord setup complete\n` +
             `  repository: ${result.repoRoot}\n` +
