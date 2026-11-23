@@ -7,7 +7,7 @@ still open — so there is no Concord adapter for it. What works today is
 in-memory MCP transport, so every action is validated, attributed, and recorded
 exactly like an MCP call.
 
-`concord work` merged after the 0.23.0 release; check `concord work --help` —
+`concord work` requires Concord 0.24.0 or later; check `concord work --help` —
 if your install does not know the command, upgrade first. The README's
 [Shell-only agents](../README.md#shell-only-agents-concord-work) section covers
 the command surface itself; this page is the Aider-specific workflow.
@@ -47,18 +47,39 @@ full tool arguments as a JSON object for the rest — `operation`,
 `agent_id`. Every command prints the tool's structured result as JSON; a
 failure prints `{"error": "…"}` on stdout, the message on stderr, and exits 1.
 
-`finish` and mutating `transfer` actions require `--expected-version`: the task
-`version` from the `start`/`inspect` result you last read, so a stale writer is
-rejected instead of silently overwriting someone else's change.
+`finish` and mutating `transfer` actions require `--expected-version` (or
+`expected_version` in the JSON): the task `version` from the `start`/`inspect`
+result you last read, so a stale writer is rejected instead of silently
+overwriting someone else's change.
 
-Peer messaging uses `update` with an `operation` the flags don't expose:
+A handoff offer needs a `what_changed` summary, and `--to` must name an agent
+registered in this workspace. A minimal `handoff.json`:
 
 ```json
-// prompt another agent
-{"operation":"prompt","to_agent_id":"claude:peer","content":"Can you check the schema?","idempotency_key":"k-1"}
+{ "what_changed": "Login form validates email; server check still TODO" }
+```
 
-// answer a message you drained
-{"operation":"reply","reply_to_message_id":"<message-id>","content":"Schema is in src/schema.ts","idempotency_key":"k-2"}
+Peer messaging uses `update` with an `operation` the flags don't expose. To
+prompt another agent, put this in `msg.json`:
+
+```json
+{
+  "operation": "prompt",
+  "to_agent_id": "claude:peer",
+  "content": "Can you check the schema?",
+  "idempotency_key": "k-1"
+}
+```
+
+To answer a message you drained:
+
+```json
+{
+  "operation": "reply",
+  "reply_to_message_id": "<message-id>",
+  "content": "Schema is in src/schema.ts",
+  "idempotency_key": "k-2"
+}
 ```
 
 `idempotency_key` makes a retried send safe; reuse it only for the same message.
@@ -73,9 +94,10 @@ you would poll — at task start, before finishing, or on a cadence:
 concord inbox drain --agent aider:fix-login-bug --provider aider
 ```
 
-prints each queued message as one JSON line (`messageId`, `senderAgentId`,
-`content`, `expectsReply`, …) and marks it delivered; empty output means the
-inbox is clear. For the full inbox/outbox view with per-message receipts
+prints the queued messages as one JSON array on a single line (each with
+`messageId`, `senderAgentId`, `content`, `expectsReply`, …) and marks them
+delivered; empty output means the inbox is clear (or that the command ran
+outside a Concord workspace). For the full inbox/outbox view with per-message receipts
 (`sent` → `delivered` → `read`/`replied`) and expiry, inspect your own agent:
 
 ```sh
@@ -92,9 +114,10 @@ that changes nothing, use `concord messages --agent aider:fix-login-bug
 ## Letting the model drive it
 
 Aider cannot call Concord itself, but it can run shell commands you approve.
-Keep the commands above where the model sees them — a `CONCORD.md` in the repo
-root, or Aider's shell-command suggestions — and approve the `concord work …`
-lines it proposes. Treat the printed JSON as the source of truth; never let the
+`concord setup` writes Concord's instructions into the repo's `AGENTS.md`,
+including how to treat messages from other agents; Aider does not load it on
+its own, so start Aider with `aider --read AGENTS.md` and keep the commands
+above at hand. Approve the `concord work …` lines it proposes. Treat the printed JSON as the source of truth; never let the
 model invent agent ids.
 
 ## Limits
@@ -103,9 +126,9 @@ model invent agent ids.
   injection, no idle wake-up. Senders see `queued_pull` until your next drain.
 - **Delivered ≠ read.** A drain proves the message reached your terminal, not
   that the model saw it; there is no transcript hook to prove more. Reply with
-  `update_work` so the sender gets a receipt.
+  `concord work update --json` so the sender gets a receipt.
 - **Identity is manual.** Reusing a slug across unrelated sessions makes them
   one agent; changing it mid-task changes who owns the task.
 - **Per-repo state.** Run the commands from inside the repository (or set
-  `CONCORD_REPO_ROOT`), and note `concord work` refuses Concord Cloud-linked
-  machines.
+  `CONCORD_REPO_ROOT`), and note `concord work` refuses machines linked with
+  `concord cloud link`.
