@@ -244,4 +244,76 @@ describe('resolveLiveAgent', () => {
     resolveLiveAgent(repos, undefined, ENV, REPO_ROOT, IDENTITY_OPTIONS, deps);
     expect(walk).toHaveBeenCalledTimes(2);
   });
+
+  it("never lets one monitor reuse another monitor's cached ancestors", () => {
+    repos = freshRepos();
+    registerAgent(repos, LIVE_AGENT);
+    repos.sessionBindings.upsert(CLIENT_PID, LIVE_AGENT, KIND);
+    const walk = vi.fn(() => [{ pid: CLIENT_PID, name: 'claude' }]);
+    const deps = liveDeps({ ancestors: walk });
+    const firstMonitor = { ...ENV, CONCORD_MONITOR_PID: '111' };
+    const secondMonitor = { ...ENV, CONCORD_MONITOR_PID: '222' };
+
+    // A resumed session's replacement monitor shares the agent id but has its
+    // own process ancestry: it must walk, not inherit the dead monitor's pids.
+    resolveLiveAgent(repos, undefined, firstMonitor, REPO_ROOT, IDENTITY_OPTIONS, deps);
+    resolveLiveAgent(repos, undefined, secondMonitor, REPO_ROOT, IDENTITY_OPTIONS, deps);
+
+    expect(walk).toHaveBeenCalledTimes(2);
+  });
+
+  it("takes the monitor start time as the freshness floor, not each drain's", () => {
+    repos = freshRepos();
+    registerAgent(repos, LIVE_AGENT);
+    // Written while the monitor lived but before this drain process began:
+    // exactly what a /resume records. The env-carried monitor start keeps it
+    // acceptable even though the drain itself is newer than the binding.
+    repos.sessionBindings.upsert(
+      CLIENT_PID,
+      LIVE_AGENT,
+      KIND,
+      new Date(Date.now() - 30_000).toISOString(),
+    );
+    const monitorEnv = {
+      ...ENV,
+      CONCORD_MONITOR_STARTED_AT: String(Math.floor((Date.now() - 120_000) / 1000)),
+    };
+
+    const result = resolveLiveAgent(
+      repos,
+      undefined,
+      monitorEnv,
+      REPO_ROOT,
+      IDENTITY_OPTIONS,
+      liveDeps(),
+    );
+
+    expect(result).toEqual({ agentId: LIVE_AGENT, drifted: true });
+  });
+
+  it('still rejects a binding older than the monitor itself', () => {
+    repos = freshRepos();
+    registerAgent(repos, LIVE_AGENT);
+    repos.sessionBindings.upsert(
+      CLIENT_PID,
+      LIVE_AGENT,
+      KIND,
+      new Date(Date.now() - 3_600_000).toISOString(),
+    );
+    const monitorEnv = {
+      ...ENV,
+      CONCORD_MONITOR_STARTED_AT: String(Math.floor((Date.now() - 120_000) / 1000)),
+    };
+
+    const result = resolveLiveAgent(
+      repos,
+      undefined,
+      monitorEnv,
+      REPO_ROOT,
+      IDENTITY_OPTIONS,
+      liveDeps(),
+    );
+
+    expect(result).toEqual({ agentId: SPAWN_AGENT, drifted: false });
+  });
 });

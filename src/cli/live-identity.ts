@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { z } from 'zod';
 
+import { userConcordDir } from '../config/user-config.js';
 import type { Repositories, SessionBinding } from '../db/index.js';
 import {
   liveSessionIdentity,
@@ -37,6 +37,20 @@ const LIVE_BINDING_DEPTH = 6;
  * the cached pids, which also pick up bindings recorded after the walk.
  */
 const NEGATIVE_CACHE_MS = 60_000;
+
+/**
+ * The monitor's start time, seconds since epoch, exported by watch-inbox.sh.
+ * Each drain is a fresh process, so its own start time would reject every
+ * binding written before the poll that happens to run — including the one a
+ * `/resume` recorded while the monitor was already alive.
+ */
+const MONITOR_STARTED_AT_ENV = 'CONCORD_MONITOR_STARTED_AT';
+/**
+ * One id per monitor run, exported by watch-inbox.sh and inherited by every
+ * drain it spawns. The ancestor cache is keyed by it: a second monitor — a
+ * resumed session's replacement — must never reuse the first one's ancestry.
+ */
+const MONITOR_PID_ENV = 'CONCORD_MONITOR_PID';
 
 /** Test seams: which ancestors to probe and where the discovery cache lives. */
 export interface LiveIdentityDeps {
@@ -75,8 +89,38 @@ function processStartedAtMs(deps: LiveIdentityDeps): number {
   return nowMs(deps) - process.uptime() * 1000;
 }
 
+/**
+ * The freshness floor for adopted bindings: when the monitor started, which
+ * every drain it spawns inherits through the environment. A bare `inbox watch`
+ * is its own monitor, so its process start is the floor; a one-shot drain has
+ * no monitor lifetime to speak of and keeps its own.
+ */
+function monitorStartedAtMs(env: NodeJS.ProcessEnv, deps: LiveIdentityDeps): number {
+  const raw = env[MONITOR_STARTED_AT_ENV]?.trim();
+  if (raw !== undefined && raw !== '') {
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  }
+  return processStartedAtMs(deps);
+}
+
+/**
+ * Which monitor this invocation serves: the id watch-inbox.sh exports, or the
+ * parent pid — which is what determines the ancestor chain anyway — for a
+ * long-lived `inbox watch` and for drains nothing spawned on a monitor's behalf.
+ */
+function monitorKey(env: NodeJS.ProcessEnv): string {
+  const exported = env[MONITOR_PID_ENV]?.trim();
+  return exported !== undefined && exported !== '' ? exported : `ppid-${String(process.ppid)}`;
+}
+
+/**
+ * The discovery cache lives under `~/.concord/`, next to the machine-wide
+ * store: a shared temp dir would let another local account plant a symlink at
+ * the predictable path and have this process write through it.
+ */
 function cacheDirFor(deps: LiveIdentityDeps): string {
-  return deps.cacheDir ?? join(tmpdir(), 'concord-live-identity');
+  return deps.cacheDir ?? join(userConcordDir(process.env), 'live-identity');
 }
 
 function cachePath(dir: string, key: string): string {
@@ -176,12 +220,16 @@ function discoverBinding(
   repos: Repositories,
   envIdentity: AgentIdentity,
   repoRoot: string,
+  env: NodeJS.ProcessEnv,
   deps: LiveIdentityDeps,
 ): SessionBinding | undefined {
   const dir = cacheDirFor(deps);
-  const key = `${repoRoot}\n${envIdentity.agentId}`;
+  // Scoped to this monitor: another client's monitor for the same agent must
+  // walk its own ancestry, never inherit a dead client's cached pids. The v2
+  // tag retires entries written before the key carried the monitor.
+  const key = `${repoRoot}\n${envIdentity.agentId}\n${monitorKey(env)}\nv2`;
   const cached = readAncestorCache(dir, key);
-  const startedAtMs = cached?.startedAtMs ?? processStartedAtMs(deps);
+  const startedAtMs = cached?.startedAtMs ?? monitorStartedAtMs(env, deps);
   const at = nowMs(deps);
 
   if (cached !== undefined) {
@@ -207,6 +255,7 @@ function liveIdentityFor(
   repos: Repositories,
   envIdentity: AgentIdentity | undefined,
   repoRoot: string,
+  env: NodeJS.ProcessEnv,
   options: ResolveIdentityOptions,
   deps: LiveIdentityDeps,
 ): LiveSessionResolution {
@@ -218,7 +267,7 @@ function liveIdentityFor(
   ) {
     return { identity: envIdentity, drifted: false };
   }
-  const binding = discoverBinding(repos, envIdentity, repoRoot, deps);
+  const binding = discoverBinding(repos, envIdentity, repoRoot, env, deps);
   if (binding === undefined) return { identity: envIdentity, drifted: false };
   return liveSessionIdentity(envIdentity, binding);
 }
@@ -239,7 +288,7 @@ export function resolveLiveAgent(
   deps: LiveIdentityDeps = {},
 ): LiveAgentResolution {
   const envIdentity = resolveIdentity(env, options);
-  const live = liveIdentityFor(repos, envIdentity, repoRoot, options, deps);
+  const live = liveIdentityFor(repos, envIdentity, repoRoot, env, options, deps);
   const own = live.identity;
 
   const given = explicit?.trim();

@@ -11,6 +11,14 @@ set -uo pipefail
 CONCORD_BIN="${CONCORD_BIN:-concord}"
 CONCORD_INBOX_POLL_SECONDS="${CONCORD_INBOX_POLL_SECONDS:-2}"
 
+# Every drain this monitor spawns inherits these: the CLI keys its
+# ancestor-discovery cache by the monitor id, so a second monitor never
+# reuses the first one's process ancestry, and it takes the monitor's start
+# as the freshness floor for session bindings — each drain is a fresh process
+# whose own start would reject bindings a `/resume` recorded meanwhile.
+export CONCORD_MONITOR_PID="$$"
+export CONCORD_MONITOR_STARTED_AT="$(date +%s)"
+
 # A monitor orphaned by a crashed or killed harness would keep draining
 # messages into a pipe nobody reads, marking them delivered to a dead session.
 # The harness is whatever started this script. Claude Code starts monitors
@@ -77,6 +85,16 @@ workspace_ready() {
 if ! workspace_ready; then
   exit 0
 fi
+
+# On the way out, drop the receiver lease the drains have been beating. A
+# heartbeat that outlives the monitor keeps the rewake fallback from arming
+# for the ~10s it stays valid, so an orderly stop releases it at once. A
+# SIGKILLed monitor cannot run this; its lease simply expires on its own.
+release_receiver() {
+  "${CONCORD_BIN}" inbox release >/dev/null 2>&1 || true
+}
+trap release_receiver EXIT
+trap 'exit 0' TERM INT HUP
 
 # Linked to Concord Cloud: one long-lived receiver long-polls the cloud, so a
 # message arrives within moments and the monitor costs one request per round,

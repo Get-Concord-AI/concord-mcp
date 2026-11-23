@@ -817,4 +817,29 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         },
       );
     });
+
+  inbox
+    .command('release')
+    .description("Drop this session's idle receiver lease, so hooks stop seeing a live monitor")
+    .option('--agent <id>', 'Agent id; defaults to CONCORD_AGENT_ID, then to the current session')
+    .option('--provider <name>', 'Client the agent runs in', 'claude-code')
+    .action(async (options) => {
+      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
+      if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
+      if (access.kind === 'unusable') return;
+      // Cloud receivers release themselves when their watch exits.
+      if (access.kind === 'cloud') return;
+      const context = await import('../context.js').then((module) =>
+        module.openContext(process.cwd()),
+      );
+      // The lease lives on the agent the monitor serves now — after a /resume
+      // drift that is the live binding's agent, not the spawn-time env's.
+      const live = resolveLiveAgent(context.repos, options.agent, process.env, context.repoRoot, {
+        kind: options.provider,
+      });
+      const endpoint = context.repos.agentEndpoints.getByAgent(live.agentId);
+      if (endpoint !== undefined) {
+        context.repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+      }
+    });
 }

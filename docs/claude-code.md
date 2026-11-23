@@ -100,7 +100,10 @@ Concord works around both halves of that:
   session's inbox instead of the abandoned one.
 - **Reachability.** While no receiver heartbeat is live, the Stop hook's
   `asyncRewake` waiter steps in and wakes the idle session with the next
-  message, then stands down once a monitor is back.
+  message, then stands down once a monitor is back. A monitor that exits
+  cleanly drops its heartbeat at once (`concord inbox release`), so the
+  fallback can arm without waiting out the lease; only a killed monitor
+  leaves it to expire on its own (~10s).
 
 If messages still do not arrive, check `concord inbox status` from the repo:
 a workspace that is not Concord-enabled exits the monitor silently by design.
