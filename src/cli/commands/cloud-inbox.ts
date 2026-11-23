@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { cloudSessionFor } from '../../cloud/proxy.js';
+import { cloudSessionFor } from '../../cloud/session.js';
 import {
   asCloudAgent,
   CloudApiError,

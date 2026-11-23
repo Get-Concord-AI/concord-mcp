@@ -50,16 +50,16 @@ Each T3 provider instance uses the vendor's own binary and config:
 Coverage follows whichever vendor agent the thread runs — T3 contributes the
 launch, not the integration.
 
-| T3 provider      | Concord path                                        | Delivery                                                        |
-| ---------------- | --------------------------------------------------- | --------------------------------------------------------------- |
-| Claude Code      | MCP + `concord-relay` plugin (SDK session)          | Hooks while busy; `asyncRewake` waiter wakes idle sessions      |
-| Codex            | `[mcp_servers.concord]` + `[[hooks.*]]` in config.toml | Hooks while busy; idle messages wait for the next turn        |
-| OpenCode         | `opencode.json` MCP + request-metadata identity      | Pull/busy; the managed controller needs `concord adapters opencode` |
-| Grok Build       | `~/.grok/config.toml` MCP + hooks                    | Hooks while busy; agent-started monitor for idle                |
-| Kiro             | `~/.kiro` user MCP + hooks                           | Hooks while busy; idle messages wait for the next prompt        |
-| Cursor           | `~/.cursor/mcp.json` MCP                             | Unverified — T3 drives `cursor-agent`, not the `cursor` binary  |
-| Antigravity (`agy`) | `.agents/mcp_config.json` + `~/.gemini/config`    | Hooks while busy; idle messages wait for the next prompt        |
-| ACP agents       | Agent-dependent                                      | Unverified per agent — see below                                |
+| T3 provider         | Concord path                                           | Delivery                                                            |
+| ------------------- | ------------------------------------------------------ | ------------------------------------------------------------------- |
+| Claude Code         | MCP + `concord-relay` plugin (SDK session)             | Hooks while busy; `asyncRewake` waiter wakes idle sessions          |
+| Codex               | `[mcp_servers.concord]` + `[[hooks.*]]` in config.toml | Hooks while busy; idle messages wait for the next turn              |
+| OpenCode            | `opencode.json` MCP + request-metadata identity        | Pull/busy; the managed controller needs `concord adapters opencode` |
+| Grok Build          | `~/.grok/config.toml` MCP + hooks                      | Hooks while busy; agent-started monitor for idle                    |
+| Kiro                | `~/.kiro` user MCP + hooks                             | Hooks while busy; idle messages wait for the next prompt            |
+| Cursor              | `~/.cursor/mcp.json` MCP                               | Unverified — T3 drives `cursor-agent`, not the `cursor` binary      |
+| Antigravity (`agy`) | `.agents/mcp_config.json` + `~/.gemini/config`         | Hooks while busy; idle messages wait for the next prompt            |
+| ACP agents          | Agent-dependent                                        | Unverified per agent — see below                                    |
 
 "Unverified" means the path is inferred from how T3 launches the agent, not
 confirmed in a live T3 session. Check `concord status` inside a thread before
@@ -87,14 +87,14 @@ Concord's project files (`.mcp.json`, `.cursor/mcp.json`, `.claude/` hooks,
 
 ## Message delivery
 
-| Harness         | Busy turn                    | Idle session                                  |
-| --------------- | ---------------------------- | --------------------------------------------- |
-| Claude Code     | PostToolUse and Stop hooks   | `asyncRewake` waiter (see below)              |
-| Codex           | PostToolUse and Stop hooks   | Next prompt in the thread                     |
-| OpenCode        | Pull on next tool call       | Next turn                                     |
-| Grok Build      | Hooks                        | Agent-started `concord inbox watch` monitor   |
-| Kiro            | Hooks                        | Next prompt                                   |
-| Antigravity     | Hooks                        | Next prompt                                   |
+| Harness     | Busy turn                  | Idle session                                |
+| ----------- | -------------------------- | ------------------------------------------- |
+| Claude Code | PostToolUse and Stop hooks | `asyncRewake` waiter (see below)            |
+| Codex       | PostToolUse and Stop hooks | Next prompt in the thread                   |
+| OpenCode    | Pull on next tool call     | Next turn                                   |
+| Grok Build  | Hooks                      | Agent-started `concord inbox watch` monitor |
+| Kiro        | Hooks                      | Next prompt                                 |
+| Antigravity | Hooks                      | Next prompt                                 |
 
 **Claude Code.** T3 Code drives Claude through the Claude Agent SDK
 (`CLAUDE_CODE_ENTRYPOINT=sdk-ts`), and the SDK never starts plugin monitors —
@@ -127,7 +127,7 @@ do for a Codex session Concord did not launch.
 - **Cursor.** T3 Code drives the `cursor-agent` binary. Concord's Cursor
   integration targets the `cursor` harness, so coverage under T3 Code is
   unverified.
-- **T3 Code's own MCP server.** T3 Code exposes `/mcp` so that *outside* agents
+- **T3 Code's own MCP server.** T3 Code exposes `/mcp` so that _outside_ agents
   (Claude Code in your terminal, ChatGPT, bots) can read and drive T3 threads.
   That is the reverse direction from Concord and does not interact with it.
 - **Remote environments.** When T3 Code runs agents on another machine (T3
