@@ -8,6 +8,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `concord work start|inspect|update|transfer|finish`: the five workflow tools
+  from the shell, for agents that can run commands but not host an MCP client.
+  Takes the tool's arguments as JSON (`--json <file|->`) plus a few flags and
+  prints the tool's result as JSON. On a failure it prints `{"error": …}`,
+  writes the message to stderr, and exits 1. The tools run in-process, so
+  validation, identity, and results match `concord-mcp`. When a newer release
+  is in the daily update cache, the result includes `update_available`
+  (`current_version`, `latest_version`, `command`), the same optional field
+  the MCP server adds; the check is skipped in CI and with
+  `CONCORD_NO_UPDATE_CHECK=1`, and a failed check never fails the command.
+  When the process can see a session identity, the command acts as that
+  session: an `--agent` or JSON `agent_id` naming a different agent is
+  refused, whatever `--kind` or the JSON `kind` says.
+- The installed agent instructions, the session-start message, and the README
+  now name `concord work` as a second path next to the MCP tools, with a
+  section for shell-only agents and how to choose a stable agent id. MCP stays
+  the main path. Workflow instructions move to version 8 and the global block
+  to version 2.
 - Kiro support ([docs/kiro.md](./docs/kiro.md)). `concord setup` registers the
   `concord-mcp` server in `.kiro/settings/mcp.json`, writes always-on steering
   to `.kiro/steering/concord.md`, and installs lifecycle hooks in
