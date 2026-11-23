@@ -40,6 +40,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `react-devtools-core` is no longer installed. It was a runtime dependency
+  that nothing imports (Ink treats it as an optional peer, loaded only with
+  `DEV=true`), and it brought in `shell-quote` 1.10.0, the only critical
+  advisory in `pnpm audit --prod`. A `pnpm.overrides` entry keeps the
+  standalone install from pulling it in as Ink's peer.
 - The README's Quick start explains how to fix `EACCES: permission denied` from
   `npm install -g` on Linux with a user-owned npm prefix instead of `sudo`
   (#368).
