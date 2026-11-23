@@ -481,9 +481,7 @@ describe('global harness adapters', () => {
       const raw: unknown = JSON.parse(
         readFileSync(join(home, '.config', 'kilo', 'kilo.jsonc'), 'utf8'),
       );
-      const config = z
-        .object({ mcp: z.record(z.string(), z.unknown()) })
-        .parse(raw);
+      const config = z.object({ mcp: z.record(z.string(), z.unknown()) }).parse(raw);
       expect(config.mcp['concord']).toBeUndefined();
       expect(config.mcp['probe']).toBeDefined();
       expect(kiloReport(env)).toMatchObject({ status: 'action_required' });

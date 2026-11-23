@@ -136,7 +136,9 @@ describe('kiloMcpInstalled', () => {
       home,
       'kilo.json',
       JSON.stringify({
-        mcp: { concord: { type: 'local', command: ['npx', '-y', '@concord-ai/concord-mcp@1.2.3'] } },
+        mcp: {
+          concord: { type: 'local', command: ['npx', '-y', '@concord-ai/concord-mcp@1.2.3'] },
+        },
       }),
     );
     expect(kiloMcpInstalled(env)).toBe(true);
