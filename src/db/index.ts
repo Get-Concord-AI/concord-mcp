@@ -18,6 +18,10 @@ import {
 import { createReviewRepository, type ReviewRepository } from './repositories/reviews.js';
 import { createSearchRepository, type SearchRepository } from './repositories/search.js';
 import {
+  createSessionBindingRepository,
+  type SessionBindingRepository,
+} from './repositories/session-bindings.js';
+import {
   createTaskUpdateRepository,
   type TaskUpdateRepository,
 } from './repositories/task-updates.js';
@@ -38,6 +42,7 @@ export type {
 } from './repositories/ownership-events.js';
 export type { NewAgent, AgentRepository } from './repositories/agents.js';
 export type { NewAgentEndpoint, AgentEndpointRepository } from './repositories/agent-endpoints.js';
+export type { SessionBinding, SessionBindingRepository } from './repositories/session-bindings.js';
 export type {
   ClaimOptions,
   NewAgentMessage,
@@ -80,6 +85,7 @@ export interface Repositories {
   agents: AgentRepository;
   agentEndpoints: AgentEndpointRepository;
   agentMessages: AgentMessageRepository;
+  sessionBindings: SessionBindingRepository;
   ownershipEvents: OwnershipEventRepository;
   search: SearchRepository;
 }
@@ -100,6 +106,7 @@ export function createRepositories(
     agents: createAgentRepository(db),
     agentEndpoints: createAgentEndpointRepository(db),
     agentMessages: createAgentMessageRepository(db, project),
+    sessionBindings: createSessionBindingRepository(db),
     ownershipEvents: createOwnershipEventRepository(db, project),
     search: createSearchRepository(db, project),
   };
