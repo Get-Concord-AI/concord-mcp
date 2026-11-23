@@ -17,7 +17,15 @@ CONCORD_INBOX_POLL_SECONDS="${CONCORD_INBOX_POLL_SECONDS:-2}"
 # as the freshness floor for session bindings — each drain is a fresh process
 # whose own start would reject bindings a `/resume` recorded meanwhile.
 export CONCORD_MONITOR_PID="$$"
-export CONCORD_MONITOR_STARTED_AT="$(date +%s)"
+# Milliseconds, not `date +%s` seconds: the floor must not reach back into the
+# past, or a binding another session wrote for a pid these drains share would
+# look fresh enough to adopt. `node` is certain to be on PATH — concord's own
+# shebang needs it — with `date` only as a degraded fallback.
+_monitor_started_ms="$(node -p 'Date.now()' 2>/dev/null)"
+case "$_monitor_started_ms" in
+  '' | *[!0-9]*) _monitor_started_ms="$(( $(date +%s) * 1000 ))" ;;
+esac
+export CONCORD_MONITOR_STARTED_AT="$_monitor_started_ms"
 
 # A monitor orphaned by a crashed or killed harness would keep draining
 # messages into a pipe nobody reads, marking them delivered to a dead session.

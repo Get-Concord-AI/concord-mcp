@@ -39,10 +39,12 @@ const LIVE_BINDING_DEPTH = 6;
 const NEGATIVE_CACHE_MS = 60_000;
 
 /**
- * The monitor's start time, seconds since epoch, exported by watch-inbox.sh.
- * Each drain is a fresh process, so its own start time would reject every
- * binding written before the poll that happens to run — including the one a
- * `/resume` recorded while the monitor was already alive.
+ * The monitor's start time in milliseconds since epoch, exported by
+ * watch-inbox.sh. Each drain is a fresh process, so its own start time would
+ * reject every binding written before the poll that happens to run —
+ * including the one a `/resume` recorded while the monitor was already alive.
+ * Millisecond precision matters: a whole-second floor reaches back into the
+ * past and can adopt a binding that predates the monitor itself.
  */
 const MONITOR_STARTED_AT_ENV = 'CONCORD_MONITOR_STARTED_AT';
 /**
@@ -98,8 +100,8 @@ function processStartedAtMs(deps: LiveIdentityDeps): number {
 function monitorStartedAtMs(env: NodeJS.ProcessEnv, deps: LiveIdentityDeps): number {
   const raw = env[MONITOR_STARTED_AT_ENV]?.trim();
   if (raw !== undefined && raw !== '') {
-    const seconds = Number(raw);
-    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+    const ms = Number(raw);
+    if (Number.isFinite(ms) && ms > 0) return ms;
   }
   return processStartedAtMs(deps);
 }

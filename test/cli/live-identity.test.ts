@@ -276,7 +276,7 @@ describe('resolveLiveAgent', () => {
     );
     const monitorEnv = {
       ...ENV,
-      CONCORD_MONITOR_STARTED_AT: String(Math.floor((Date.now() - 120_000) / 1000)),
+      CONCORD_MONITOR_STARTED_AT: String(Date.now() - 120_000),
     };
 
     const result = resolveLiveAgent(
@@ -291,6 +291,36 @@ describe('resolveLiveAgent', () => {
     expect(result).toEqual({ agentId: LIVE_AGENT, drifted: true });
   });
 
+  it('rejects a binding written before the monitor started, even within the same second', () => {
+    repos = freshRepos();
+    registerAgent(repos, LIVE_AGENT);
+    // Half a second before the monitor: a seconds-precision floor would still
+    // reach it and adopt a binding that predates this monitor entirely.
+    const monitorStart = Date.now();
+    repos.sessionBindings.upsert(
+      CLIENT_PID,
+      LIVE_AGENT,
+      KIND,
+      new Date(monitorStart - 500).toISOString(),
+    );
+    const monitorEnv = {
+      ...ENV,
+      CONCORD_MONITOR_PID: '333',
+      CONCORD_MONITOR_STARTED_AT: String(monitorStart),
+    };
+
+    const result = resolveLiveAgent(
+      repos,
+      undefined,
+      monitorEnv,
+      REPO_ROOT,
+      IDENTITY_OPTIONS,
+      liveDeps(),
+    );
+
+    expect(result).toEqual({ agentId: SPAWN_AGENT, drifted: false });
+  });
+
   it('still rejects a binding older than the monitor itself', () => {
     repos = freshRepos();
     registerAgent(repos, LIVE_AGENT);
@@ -302,7 +332,7 @@ describe('resolveLiveAgent', () => {
     );
     const monitorEnv = {
       ...ENV,
-      CONCORD_MONITOR_STARTED_AT: String(Math.floor((Date.now() - 120_000) / 1000)),
+      CONCORD_MONITOR_STARTED_AT: String(Date.now() - 120_000),
     };
 
     const result = resolveLiveAgent(
