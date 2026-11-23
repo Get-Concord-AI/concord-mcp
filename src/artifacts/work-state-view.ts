@@ -11,7 +11,7 @@ import {
   type StaleClaim,
 } from '../domain/presence.js';
 
-interface ActiveEntry {
+export interface ActiveEntry {
   taskId: string;
   agent: string;
   agentId: string | null;
@@ -24,25 +24,25 @@ interface ActiveEntry {
   parentTaskId: string | null;
 }
 
-interface OverlapPair {
+export interface OverlapPair {
   a: string;
   b: string;
   reasons: string[];
 }
 
-interface ReviewEntry {
+export interface ReviewEntry {
   taskId: string;
   testsCount: number;
   guardrailsCount: number;
   openQuestionCount: number;
 }
 
-interface OpenQuestionEntry {
+export interface OpenQuestionEntry {
   taskId: string;
   question: string;
 }
 
-interface CommunicationEntry {
+export interface CommunicationEntry {
   agentId: string;
   promptable: boolean;
   provider: string | null;

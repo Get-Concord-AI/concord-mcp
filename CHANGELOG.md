@@ -6,6 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The README's Quick start explains how to fix `EACCES: permission denied` from
+  `npm install -g` on Linux with a user-owned npm prefix instead of `sudo`
+  (#368).
+
+## [0.23.0] - 2026-11-16
+
+### Added
+
+- `inspect_work` takes a `query` to search past work by keyword: the task
+  updates (findings, decisions…) and handoff packets in this workspace, and
+  the messages you sent or received. Each result has a snippet and the
+  `task_id` or `message_id` to open next, so an agent can find earlier work
+  without reading every thread into its context. Superseded decisions are left
+  out, and searching never marks a message read (#375).
+- Messages carry `expects_reply`. A prompt expects an answer and a reply does
+  not, unless the replying agent sets `expects_reply: true` to ask something
+  back. A message that wants no answer is delivered with `no-reply-needed` in
+  its `[concord from …]` header, so two agents stop acknowledging each other's
+  acknowledgements. Reusing an idempotency key with a different
+  `expects_reply` is refused (#376).
+- Hermes Agent support. `concord setup` registers Concord's MCP server and a
+  `pre_llm_call` hook in `$HERMES_HOME/config.yaml`. The hook tells each
+  session its `agent_id` and workspace, since one Hermes process serves every
+  session (#258).
+
+### Changed
+
+- Schema v18 adds `agent_messages.expects_reply`; existing messages read as
+  expecting an answer (#376).
+
 ## [0.22.0] - 2026-11-11
 
 ### Added
@@ -864,7 +896,8 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.1...v0.22.0
 [0.21.1]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.20.0...v0.21.0

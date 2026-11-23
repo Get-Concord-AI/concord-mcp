@@ -1,6 +1,6 @@
 {
   "name": "@concord-ai/concord-mcp",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Cross-harness communication and shared work-state for coding agents through MCP.",
   "mcpName": "io.github.Get-Concord-AI/concord-mcp",
   "keywords": [
@@ -57,14 +57,15 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@commander-js/extra-typings": "^15.0.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@commander-js/extra-typings": "^15.1.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "better-sqlite3": "^13.0.2",
-    "commander": "^15.0.0",
+    "commander": "^15.1.0",
     "ink": "8.0.0",
     "js-yaml": "^5.4.3",
     "react": "19.3.1",
     "react-devtools-core": "8.0.0",
+    "yaml": "^2.9.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-import { outboxReceiptLines } from './inspect-messages.js';
+import { inspectWorkResponse } from './inspect-work-response.js';
 import { handleInspectWork } from './inspect-work.js';
 import { describeReceipt, toReceipt } from '../domain/receipts.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -193,7 +193,7 @@ export function handleStartWork(
   input: WithActor<StartWorkInput>,
 ): StartWorkResult {
   const transact = repos.db.transaction(() => startWork(repos, input));
-  return transact();
+  return transact.immediate();
 }
 
 export { handleInspectWork, type InspectWorkResult } from './inspect-work.js';
@@ -221,6 +221,9 @@ export function handleUpdateWork(
       `supersedes and supersede_reason work only with operation record, not ${operation}.`,
     );
   }
+  if (operation === 'record' && input.expects_reply !== undefined) {
+    throw new Error('expects_reply applies only to prompt and reply.');
+  }
   if (operation !== 'record') {
     return handleSendAgentMessageWithDelivery(
       repos,
@@ -231,6 +234,7 @@ export function handleUpdateWork(
         replyToMessageId: input.reply_to_message_id,
         taskId: input.task_id,
         content: input.content,
+        expectsReply: input.expects_reply,
         idempotencyKey: updateRequired(input.idempotency_key, 'idempotency_key', operation),
       },
       dispatcher,
@@ -385,7 +389,7 @@ export function handleFinishWork(
     }
     return { evidence, task: evidence.task };
   });
-  return transact();
+  return transact.immediate();
 }
 
 function taskFields(task: TaskRecord): Record<string, unknown> {
@@ -631,7 +635,8 @@ export function registerWorkflowTools(
       title: 'Inspect work',
       description:
         'Read the workspace, one task, one agent communication inbox/outbox, or one durable ' +
-        'prompt/reply thread by supplying at most one selector.',
+        'prompt/reply thread by supplying at most one selector. query searches past messages, ' +
+        'findings, decisions and handoffs; search before asking a peer what was already found.',
       inputSchema: inspectWorkInputShape,
       annotations: {
         readOnlyHint: true,
@@ -644,103 +649,7 @@ export function registerWorkflowTools(
       const workspace = selectToolWorkspace(selectWorkspace, args.workspace_id);
       const requestMeta = parseOpenCodeRequestIdentityMetadata(extra._meta);
       const result = handleInspectWork(repos, args, sessionForRequest(requestMeta)?.agentId);
-      if (result.scope === 'workspace') {
-        return withSessionAdvisories({
-          content: [
-            {
-              type: 'text',
-              text: withWorkspaceText(
-                `${String(result.state.active.length)} active task(s), ` +
-                  `${String(result.state.overlaps.length)} overlap(s), ` +
-                  `${String(result.state.presence.length)} registered agent(s).`,
-                workspace,
-              ),
-            },
-          ],
-          structuredContent: {
-            ...workspaceStructured(workspace),
-            scope: result.scope,
-            presence: result.state.presence,
-            active: result.state.active,
-            overlaps: result.state.overlaps,
-            stale_claims: result.state.staleClaims,
-            review_ready: result.state.reviewReady,
-            open_questions: result.state.openQuestions,
-            communications: result.state.communications,
-          },
-        });
-      }
-      if (result.scope === 'agent') {
-        return withSessionAdvisories({
-          content: [
-            {
-              type: 'text',
-              text: withWorkspaceText(
-                `${result.communication.agentId}; promptable ${String(result.communication.promptable)}, ` +
-                  (result.communication.private
-                    ? result.communication.messages
-                    : `${String(result.communication.inbox.length)} inbox message(s), ` +
-                      `${String(result.communication.outbox.length)} outbox message(s)` +
-                      outboxReceiptLines(result.communication.outbox)) +
-                  (result.communication.awaitingUserSince === null
-                    ? '.'
-                    : `; waiting on its user since ${result.communication.awaitingUserSince}.`),
-                workspace,
-              ),
-            },
-          ],
-          structuredContent: {
-            ...workspaceStructured(workspace),
-            scope: result.scope,
-            ...result.communication,
-          },
-        });
-      }
-      if (result.scope === 'message') {
-        return withSessionAdvisories({
-          content: [
-            {
-              type: 'text',
-              text: withWorkspaceText(
-                `${String(result.thread.length)} message(s) in thread.`,
-                workspace,
-              ),
-            },
-          ],
-          structuredContent: {
-            ...workspaceStructured(workspace),
-            scope: result.scope,
-            thread: result.thread,
-            events: result.events,
-          },
-        });
-      }
-      return withSessionAdvisories({
-        content: [
-          {
-            type: 'text',
-            text: withWorkspaceText(
-              `${result.context.task.taskId}; status ${result.context.task.status}, ` +
-                `version ${String(result.context.task.version)}, ` +
-                `${String(result.context.updates.length)} update(s).`,
-              workspace,
-            ),
-          },
-        ],
-        structuredContent: {
-          ...workspaceStructured(workspace),
-          scope: result.scope,
-          task: result.context.task,
-          owner_liveness: result.context.ownerLiveness,
-          updates: result.context.updates,
-          latest_handoff: result.context.latestHandoff ?? null,
-          latest_review: result.context.latestReview ?? null,
-          pending_handoff: result.context.pendingHandoff ?? null,
-          ownership_history: result.context.ownershipHistory,
-          overlaps: result.context.overlaps,
-          messages: result.context.messages,
-        },
-      });
+      return withSessionAdvisories(inspectWorkResponse(result, workspace));
     },
   );
 
@@ -841,6 +750,7 @@ export function registerWorkflowTools(
             sender_agent_id: result.message.senderAgentId,
             recipient_agent_id: result.message.recipientAgentId,
             reply_to_message_id: result.message.replyToMessageId,
+            expects_reply: result.message.expectsReply,
             task_id: result.message.taskId,
             task_updated_at: result.task?.updatedAt ?? null,
             provider: result.message.provider,

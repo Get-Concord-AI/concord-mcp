@@ -7,7 +7,7 @@ export const CONCORD_INSTRUCTION_VERSION = '7';
 /** Concise MCP-native guidance, versioned with the running server. */
 export const CONCORD_SERVER_INSTRUCTIONS = `Concord coordinates coding agents through five workflow tools.
 - Call start_work before editing. It registers your agent, claims or accepts the task, and reports overlaps.
-- Use inspect_work to read workspace, task, agent, or message context. Use update_work for durable progress or to prompt/reply to another promptable workspace agent, including while that agent is busy.
+- Use inspect_work to read workspace, task, agent, or message context, or with query to search past messages, findings, and handoffs. Use update_work for durable progress or to prompt/reply to another promptable workspace agent, including while that agent is busy.
 - Use transfer_work for assignment, acceptance, decline, release, reassignment, evidence-bearing handoff offers, and reopening.
 - Call finish_work before finishing, review, or closure with changed files, tests, assumptions, decisions, risks, and provenance.
 Keep claims small and resolve reported overlaps before editing.

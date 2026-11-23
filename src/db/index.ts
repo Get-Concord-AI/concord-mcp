@@ -16,6 +16,7 @@ import {
   type OwnershipEventRepository,
 } from './repositories/ownership-events.js';
 import { createReviewRepository, type ReviewRepository } from './repositories/reviews.js';
+import { createSearchRepository, type SearchRepository } from './repositories/search.js';
 import {
   createTaskUpdateRepository,
   type TaskUpdateRepository,
@@ -80,6 +81,7 @@ export interface Repositories {
   agentEndpoints: AgentEndpointRepository;
   agentMessages: AgentMessageRepository;
   ownershipEvents: OwnershipEventRepository;
+  search: SearchRepository;
 }
 
 /** Bind all repositories to an open database; task-scoped ones see only `project`. */
@@ -99,6 +101,7 @@ export function createRepositories(
     agentEndpoints: createAgentEndpointRepository(db),
     agentMessages: createAgentMessageRepository(db, project),
     ownershipEvents: createOwnershipEventRepository(db, project),
+    search: createSearchRepository(db, project),
   };
 }
 
