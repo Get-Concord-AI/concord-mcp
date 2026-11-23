@@ -201,6 +201,19 @@ approval_mode = "approve"
     expect(result).toContain(trust);
     expect(result).toContain(settings);
   });
+
+  it('leaves blank lines inside multi-line strings alone', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const server = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"`;
+    const user = 'developer_instructions = """\nfirst\n\n\nsecond\n"""';
+    writeFileSync(codexConfigFile(env), `${user}\n\n${server}\n\n${upsertCodexHooks(undefined)}`);
+
+    uninstallCodexConfig(env);
+
+    const result = readFileSync(codexConfigFile(env), 'utf8');
+    expect(result).toContain(user);
+    expect(result).not.toContain('concord');
+  });
 });
 
 describe('removeCodexMcpServer', () => {

@@ -204,4 +204,19 @@ command = "my-session-hook"
       expect(config).toContain(trust);
     }
   });
+
+  it('recognizes a hook with a comment between its headers', () => {
+    const commented = BLOCK.replace(
+      '[[hooks.SessionStart]]\n',
+      '[[hooks.SessionStart]]\n# a note\n',
+    );
+
+    expectOneBlock(upsertCodexHooks(`${commented}\n`));
+  });
+
+  it('leaves blank lines inside multi-line strings alone', () => {
+    const user = 'developer_instructions = """\nfirst\n\n\nsecond\n"""\n';
+
+    expect(upsertCodexHooks(user)).toContain(user);
+  });
 });

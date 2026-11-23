@@ -26,13 +26,18 @@ function isHeader(line: TomlLine): boolean {
   return !line.inString && TABLE_HEADER.test(line.text);
 }
 
+function isBlank(line: TomlLine | undefined): boolean {
+  return line !== undefined && !line.inString && line.text.trim() === '';
+}
+
 /** Blank and comment lines belong to what follows them. */
 function isDecoration(line: TomlLine | undefined): boolean {
-  return (
-    line !== undefined &&
-    !line.inString &&
-    (line.text.trim() === '' || COMMENT_LINE.test(line.text))
-  );
+  return isBlank(line) || (line !== undefined && !line.inString && COMMENT_LINE.test(line.text));
+}
+
+/** Keeps `line` unless it is a second blank line in a row; string contents always stay. */
+function keepLine(kept: TomlLine[], line: TomlLine): void {
+  if (!isBlank(line) || !isBlank(kept[kept.length - 1])) kept.push(line);
 }
 
 /** Where the table at `header` ends: the next header, minus the comments above it. */
@@ -142,7 +147,7 @@ function concordHookEnd(lines: readonly TomlLine[], start: number): number | und
   if (event === undefined) return undefined;
 
   let child = start + 1;
-  while (lines[child]?.text.trim() === '') child += 1;
+  while (isDecoration(lines[child])) child += 1;
   const header = lines[child];
   if (header === undefined || header.inString) return undefined;
   if (header.text.trim() !== `[[hooks.${event}.hooks]]`) return undefined;
@@ -157,7 +162,7 @@ function concordHookEnd(lines: readonly TomlLine[], start: number): number | und
 /** `source` without Concord's hooks and comment lines, and where its first hook was. */
 function stripConcordHooks(source: string): { lines: string[]; spot: number | undefined } {
   const lines = sourceLines(source);
-  const kept: string[] = [];
+  const kept: TomlLine[] = [];
   let spot: number | undefined;
   let index = 0;
   while (index < lines.length) {
@@ -169,11 +174,11 @@ function stripConcordHooks(source: string): { lines: string[]; spot: number | un
     }
     const line = lines[index];
     if (line !== undefined && (line.inString || !CONCORD_COMMENTS.has(line.text.trim()))) {
-      kept.push(line.text);
+      keepLine(kept, line);
     }
     index += 1;
   }
-  return { lines: kept, spot };
+  return { lines: kept.map((line) => line.text), spot };
 }
 
 /** `lines` joined, without blank lines at either end. */
@@ -200,8 +205,7 @@ export function upsertCodexHooks(existing: string | undefined): string {
     CONCORD_HOOKS_BLOCK,
     joinTrimmed(lines.slice(at)),
   ];
-  const text = parts.filter((part) => part !== '').join('\n\n');
-  return `${text.replace(/\n{3,}/gu, '\n\n')}\n`;
+  return `${parts.filter((part) => part !== '').join('\n\n')}\n`;
 }
 
 /**
@@ -236,16 +240,17 @@ export function installCodexMcpConfig(env: NodeJS.ProcessEnv = process.env): str
  * transport, and Codex refuses to load the whole config.
  */
 export function removeCodexMcpServer(source: string): string {
-  const kept: string[] = [];
+  const kept: TomlLine[] = [];
   let inConcordTable = false;
-  for (const { text, inString } of tomlLines(source)) {
+  for (const line of tomlLines(source)) {
+    const { text, inString } = line;
     const table = inString ? undefined : /^\s*\[\[?([^\]]+)\]\]?\s*(?:#.*)?$/u.exec(text)?.[1];
     if (table !== undefined) inConcordTable = CONCORD_TOML_KEY.test(tomlKeyPath(table));
-    if (!inConcordTable) kept.push(text);
+    if (!inConcordTable) keepLine(kept, line);
   }
   return kept
+    .map((line) => line.text)
     .join('\n')
-    .replace(/\n{3,}/gu, '\n\n')
     .replace(/^\n+/u, '');
 }
 
