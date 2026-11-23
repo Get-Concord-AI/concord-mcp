@@ -306,6 +306,39 @@ describe('detectOverlaps', () => {
     ]);
   });
 
+  it.each([
+    ['.', '.'],
+    ['.', './'],
+    ['./', '/'],
+    ['/', '.'],
+  ])('flags two whole-repo claims %j and %j as the same file', (left, right) => {
+    const first = task({ taskId: 'FIRST', expectedFiles: [left] });
+    const second = task({ taskId: 'SECOND', expectedFiles: [right] });
+    const reasons = ['same file(s): .'];
+
+    expect(detectOverlaps(first, [second])).toEqual([
+      { taskId: 'SECOND', title: 'SECOND', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(second, [first])).toEqual([
+      { taskId: 'FIRST', title: 'FIRST', reasons, kinds: ['same_file'] },
+    ]);
+  });
+
+  it.each([
+    ['src', 'directory claim covers file(s): . -> src'],
+    ['README.md', 'directory claim covers file(s): . -> README.md'],
+  ])('flags a root claim against %j as the same file', (entry, reason) => {
+    const rootClaim = task({ taskId: 'ROOT', expectedFiles: ['.'] });
+    const other = task({ taskId: 'OTHER', expectedFiles: [entry] });
+
+    expect(detectOverlaps(rootClaim, [other])).toEqual([
+      { taskId: 'OTHER', title: 'OTHER', reasons: [reason], kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(other, [rootClaim])).toEqual([
+      { taskId: 'ROOT', title: 'ROOT', reasons: [reason], kinds: ['same_file'] },
+    ]);
+  });
+
   it('scopes root claims to the repository in both directions', () => {
     const repoRoot = resolve('workspace');
     const rootClaim = task({ taskId: 'ROOT', expectedFiles: ['.'] });

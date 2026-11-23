@@ -190,9 +190,11 @@ function detailsFor(
   const reasons: string[] = [];
   const kinds: OverlapKind[] = [];
 
+  // Root claims normalize to `.` here (not `''`), so two whole-repo claims
+  // collide as the same entry.
   const sameFiles = sortedIntersection(
-    candidate.expectedFiles.map(normalizePath).filter((file) => file !== ''),
-    existing.expectedFiles.map(normalizePath).filter((file) => file !== ''),
+    candidate.expectedFiles.map(normalizeClaimEntry).filter((file) => file !== ''),
+    existing.expectedFiles.map(normalizeClaimEntry).filter((file) => file !== ''),
   );
   if (sameFiles.length > 0) {
     reasons.push(`same file(s): ${sameFiles.join(', ')}`);
