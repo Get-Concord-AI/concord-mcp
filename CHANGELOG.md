@@ -40,6 +40,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   client pid hosts, and servers resolve that live binding per request instead
   of trusting their spawn-time environment. The first drift surfaces a
   one-time `identity_drift` advisory (#358).
+- On Windows and macOS, overlap detection and `concord check` treat paths that
+  differ only in case as the same file or directory, so a claim on
+  `src/components/Button.tsx` now collides with an edit of
+  `src/Components/Button.tsx`, and a `Src/App` directory claim covers
+  `src/app/x.ts`. Linux stays case-sensitive (#384).
 
 ## [0.23.0] - 2026-11-16
 

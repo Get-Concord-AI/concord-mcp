@@ -3,7 +3,13 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { TaskRecord } from '../../src/db/index.js';
-import { detectOverlaps, normalizePath, type OverlapSurface } from '../../src/domain/overlap.js';
+import {
+  detectOverlaps,
+  entryCoversFile,
+  normalizePath,
+  pathKey,
+  type OverlapSurface,
+} from '../../src/domain/overlap.js';
 
 function task(partial: Partial<TaskRecord> & { taskId: string }): TaskRecord {
   return {
@@ -215,6 +221,91 @@ describe('detectOverlaps', () => {
     expect(sameDir[0]?.reasons).toContain('same directory: src/billing');
   });
 
+  it.each(['win32', 'darwin'] as const)(
+    'treats paths that differ only in case as the same file on %s',
+    (platform) => {
+      const warnings = detectOverlaps(
+        { ...candidate, taskId: 'TASK-CASE', expectedFiles: ['src/Components/Button.tsx'] },
+        [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+        0,
+        { platform },
+      );
+      expect(warnings[0]?.reasons).toContain('same file(s): src/components/Button.tsx');
+    },
+  );
+
+  it('treats directories that differ only in case as the same directory on win32', () => {
+    const warnings = detectOverlaps(
+      { ...candidate, taskId: 'TASK-CASE', expectedFiles: ['src/Components/Card.tsx'] },
+      [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+      0,
+      { platform: 'win32' },
+    );
+    expect(warnings[0]?.reasons).toContain('same directory: src/components');
+  });
+
+  it('keeps paths case-sensitive on linux', () => {
+    const warnings = detectOverlaps(
+      {
+        taskId: 'TASK-CASE',
+        expectedFiles: ['src/Components/Button.tsx'],
+        modules: [],
+        domains: [],
+        riskTags: [],
+      },
+      [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+      0,
+      { platform: 'linux' },
+    );
+    expect(warnings).toEqual([]);
+  });
+
+  it('compares paths case-sensitively when no platform is given', () => {
+    const warnings = detectOverlaps(
+      { ...candidate, taskId: 'TASK-CASE', expectedFiles: ['src/Components/Button.tsx'] },
+      [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+    );
+    expect(warnings).toEqual([]);
+    expect(pathKey('src/App.tsx')).toBe('src/App.tsx');
+    expect(pathKey('src/App.tsx', 'darwin')).toBe('src/app.tsx');
+  });
+
+  it('flags a directory claim that differs only in case on win32, not on linux', () => {
+    const dir = task({ taskId: 'DIR', expectedFiles: ['Src/App'] });
+    const file = task({ taskId: 'FILE', expectedFiles: ['src/app/x.ts'] });
+    const reasons = ['directory claim covers file(s): Src/App -> src/app/x.ts'];
+
+    expect(detectOverlaps(dir, [file], 0, { platform: 'win32' })).toEqual([
+      { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(file, [dir], 0, { platform: 'win32' })).toEqual([
+      { taskId: 'DIR', title: 'DIR', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(dir, [file], 0, { platform: 'linux' })).toEqual([]);
+    expect(detectOverlaps(file, [dir], 0, { platform: 'linux' })).toEqual([]);
+  });
+
+  it('still flags root claims against mixed-case paths on every platform', () => {
+    const rootClaim = task({ taskId: 'ROOT', expectedFiles: ['./'] });
+    const fileClaim = task({ taskId: 'FILE', expectedFiles: ['Src/App/x.ts'] });
+    const reasons = ['directory claim covers file(s): . -> Src/App/x.ts'];
+
+    for (const platform of ['win32', 'darwin', 'linux'] as const) {
+      expect(detectOverlaps(rootClaim, [fileClaim], 0, { platform })).toEqual([
+        { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
+      ]);
+    }
+  });
+
+  it('matches entryCoversFile case-insensitively only on win32 and darwin', () => {
+    expect(entryCoversFile('Src/App', 'src/app/x.ts', { platform: 'win32' })).toBe(true);
+    expect(entryCoversFile('Src/App/X.ts', 'src/app/x.ts', { platform: 'darwin' })).toBe(true);
+    expect(entryCoversFile('.', 'Src/App/x.ts', { platform: 'win32' })).toBe(true);
+    expect(entryCoversFile('Src/App', 'src/app/x.ts', { platform: 'linux' })).toBe(false);
+    expect(entryCoversFile('Src/App', 'src/app/x.ts')).toBe(false);
+    expect(entryCoversFile('src/app', 'src/application/x.ts', { platform: 'win32' })).toBe(false);
+  });
+
   it('returns nothing for disjoint tasks', () => {
     expect(
       detectOverlaps(candidate, [
@@ -352,10 +443,10 @@ describe('detectOverlaps', () => {
       [normalizePath(repoRoot), ''],
     ]);
 
-    expect(detectOverlaps(rootClaim, [fileClaim], 0, pathsFromCheckout)).toEqual([
+    expect(detectOverlaps(rootClaim, [fileClaim], 0, { pathsFromCheckout })).toEqual([
       { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
     ]);
-    expect(detectOverlaps(fileClaim, [rootClaim], 0, pathsFromCheckout)).toEqual([
+    expect(detectOverlaps(fileClaim, [rootClaim], 0, { pathsFromCheckout })).toEqual([
       { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
     ]);
     expect(detectOverlaps(rootClaim, [fileClaim])).toEqual([]);
@@ -368,8 +459,8 @@ describe('detectOverlaps', () => {
       'X:/other-project/notes.md',
     ]) {
       const otherClaim = task({ taskId: 'OTHER', expectedFiles: [outside] });
-      expect(detectOverlaps(rootClaim, [otherClaim], 0, pathsFromCheckout)).toEqual([]);
-      expect(detectOverlaps(otherClaim, [rootClaim], 0, pathsFromCheckout)).toEqual([]);
+      expect(detectOverlaps(rootClaim, [otherClaim], 0, { pathsFromCheckout })).toEqual([]);
+      expect(detectOverlaps(otherClaim, [rootClaim], 0, { pathsFromCheckout })).toEqual([]);
     }
   });
 
