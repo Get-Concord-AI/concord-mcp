@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { openDatabase } from '../../src/db/connection.js';
@@ -279,5 +279,80 @@ describe('at most one deny per question', () => {
     beforeWait(repos);
 
     expect(repos.agentEndpoints.getByAgent('beta')?.userWaitDeniedAt).toBeNull();
+  });
+});
+
+describe('the allowance belongs to the session that was denied', () => {
+  let repos: Repositories;
+  const asked = new Date('2026-11-22T10:00:00.000Z');
+  const soon = new Date(asked.getTime() + 5_000);
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    registerAgent(repos, 'alpha');
+    registerAgent(repos, 'beta');
+    registerPullEndpoint(repos, 'beta', 'claude-code');
+  });
+
+  it("does not let another session's question skip the drain", () => {
+    send(repos, 'first', 'k1');
+    expect(ids(beforeWait(repos, SESSION, asked))).toHaveLength(1);
+
+    const fresh = send(repos, 'for whoever asks next', 'k2');
+    // Another session of the same agent, or a fresh one after a restart.
+    expect(ids(beforeWait(repos, 'session-2', soon))).toEqual([fresh]);
+  });
+
+  it("keeps the denied session's allowance when another session asks first", () => {
+    send(repos, 'first', 'k1');
+    beforeWait(repos, SESSION, asked);
+
+    // Session 2 has nothing to show, so it neither denies nor spends anything.
+    expect(beforeWait(repos, 'session-2', soon)).toEqual({ held: [], claimed: [] });
+
+    send(repos, 'and another', 'k2');
+    expect(beforeWait(repos, SESSION, soon)).toEqual({ held: [], claimed: [] });
+  });
+
+  it('records which session the deny was for', () => {
+    send(repos, 'first', 'k1');
+    beforeWait(repos, SESSION, asked);
+
+    const endpoint = repos.agentEndpoints.getByAgent('beta');
+    expect(endpoint?.userWaitDeniedAt).toBe(asked.toISOString());
+    expect(endpoint?.userWaitDeniedSession).toBe(sessionKey(SESSION));
+  });
+});
+
+describe('a monitor drain racing the hook', () => {
+  it('cannot take a message between listing held messages and claiming queued ones', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'concord-race-')), 'concord.db');
+    const hook = createRepositories(openDatabase(path));
+    const monitor = createRepositories(openDatabase(path));
+    // Fail at once instead of waiting out the lock the hook holds.
+    monitor.db.pragma('busy_timeout = 0');
+    registerAgent(hook, 'alpha');
+    registerAgent(hook, 'beta');
+    registerPullEndpoint(hook, 'beta', 'claude-code');
+    const messageId = send(hook, 'in the gap', 'k1');
+
+    // The monitor, in another process, polls right after the hook has listed
+    // what this session holds and before it claims what is queued.
+    let monitorTook: DeliverableMessage[] | undefined;
+    const listUnread = hook.agentMessages.listUnreadForSession.bind(hook.agentMessages);
+    vi.spyOn(hook.agentMessages, 'listUnreadForSession').mockImplementation((agent, session) => {
+      const held = listUnread(agent, session);
+      try {
+        monitorTook = monitorDrain(monitor);
+      } catch {
+        monitorTook = [];
+      }
+      return held;
+    });
+
+    const result = drainBeforeUserWait(hook, 'beta', 'claude-code', sessionKey(SESSION));
+
+    expect(monitorTook).toEqual([]);
+    expect(ids(result)).toEqual([messageId]);
   });
 });

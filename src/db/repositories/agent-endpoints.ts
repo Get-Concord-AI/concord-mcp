@@ -20,6 +20,12 @@ export interface NewAgentEndpoint {
   expiresAt?: string | null;
 }
 
+/** A hook denied `session`'s question at `at` to show it messages first. */
+export interface UserWaitDenial {
+  at: string;
+  session: string | null;
+}
+
 export interface AgentEndpointRepository {
   upsert(endpoint: NewAgentEndpoint): AgentEndpointRecord;
   get(endpointId: string): AgentEndpointRecord | undefined;
@@ -34,10 +40,10 @@ export interface AgentEndpointRepository {
    */
   setAwaitingUser(agentId: string, since: string | null): void;
   /**
-   * Record that a hook denied `agentId`'s question to show it messages first
-   * (`at`), or that the next question was let through (`null`).
+   * Record that a hook denied a question from `agentId`'s session to show it
+   * messages first, or that the session's next question was let through (`null`).
    */
-  setUserWaitDenied(agentId: string, at: string | null): void;
+  setUserWaitDenied(agentId: string, denial: UserWaitDenial | null): void;
   disconnect(endpointId: string): AgentEndpointRecord | undefined;
 }
 
@@ -91,7 +97,9 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
     WHERE agent_id = @agent_id
   `);
   const setUserWaitDeniedStmt = db.prepare(`
-    UPDATE agent_endpoints SET user_wait_denied_at = @at WHERE agent_id = @agent_id
+    UPDATE agent_endpoints
+    SET user_wait_denied_at = @at, user_wait_denied_session = @session
+    WHERE agent_id = @agent_id
   `);
   const clearReceiverStmt = db.prepare(`
     UPDATE agent_endpoints
@@ -159,8 +167,12 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
     setAwaitingUser(agentId, since) {
       setAwaitingUserStmt.run({ agent_id: agentId, since });
     },
-    setUserWaitDenied(agentId, at) {
-      setUserWaitDeniedStmt.run({ agent_id: agentId, at });
+    setUserWaitDenied(agentId, denial) {
+      setUserWaitDeniedStmt.run({
+        agent_id: agentId,
+        at: denial?.at ?? null,
+        session: denial?.session ?? null,
+      });
     },
     disconnect(endpointId) {
       disconnectStmt.run({ endpoint_id: endpointId, now: new Date().toISOString() });

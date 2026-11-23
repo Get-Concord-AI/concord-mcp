@@ -306,10 +306,11 @@ export const migrations: readonly string[] = [
     updated_at TEXT NOT NULL
   );
   `,
-  // 020 — when a hook last denied the session's question to show it messages
-  // first. The next question is let through, so a held message or a chatty
-  // peer can never keep the user from being asked.
+  // 020 — when a hook last denied a session's question to show it messages
+  // first, and which session. That session's next question is let through, so
+  // a held message or a chatty peer can never keep the user from being asked.
   `
   ALTER TABLE agent_endpoints ADD COLUMN user_wait_denied_at TEXT;
+  ALTER TABLE agent_endpoints ADD COLUMN user_wait_denied_session TEXT;
   `,
 ];

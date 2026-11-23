@@ -152,10 +152,16 @@ function deniedRecently(deniedAt: string, now: Date): boolean {
  * When there is anything to show, the hook denies the call and the user is
  * not asked yet, so the waiting-on-user flag is cleared.
  *
- * At most one deny per question: the question asked right after a deny is let
- * through untouched, so a message the transcript does not show as read yet, or
- * a peer that keeps sending, can never keep the user from being asked. Anything
- * still waiting reaches the model after the answer, as it would without this hook.
+ * At most one deny per question: the question the same session asks right
+ * after a deny is let through untouched, so a message the transcript does not
+ * show as read yet, or a peer that keeps sending, can never keep the user from
+ * being asked. Anything still waiting reaches the model after the answer, as it
+ * would without this hook. Another session of the same agent, or a fresh one,
+ * never spends that allowance.
+ *
+ * Runs as one immediate transaction: the monitor, in another process, cannot
+ * claim a message between listing what it holds and claiming what is queued,
+ * which would leave a message in neither list.
  */
 export function drainBeforeUserWait(
   repos: Repositories,
@@ -164,23 +170,27 @@ export function drainBeforeUserWait(
   session: string | null,
   now: Date = new Date(),
 ): BeforeUserWait {
-  const deniedAt = repos.agentEndpoints.getByAgent(agentId)?.userWaitDeniedAt ?? null;
-  if (deniedAt !== null) {
-    // Spent either way: one deny earns one question let through.
-    repos.agentEndpoints.setUserWaitDenied(agentId, null);
-    if (deniedRecently(deniedAt, now)) return NOTHING_TO_SHOW;
-  }
-  // Listed before claiming, so a message claimed below is not also counted as held.
-  const held = repos.agentMessages.listUnreadForSession(agentId, session).map(toDeliverable);
-  const claimed = drainInbox(repos, agentId, provider, capabilityFor(provider), {
-    session,
-    via: 'hook',
+  const drain = repos.db.transaction((): BeforeUserWait => {
+    const endpoint = repos.agentEndpoints.getByAgent(agentId);
+    const deniedAt = endpoint?.userWaitDeniedAt ?? null;
+    if (deniedAt !== null && endpoint?.userWaitDeniedSession === session) {
+      // Spent either way: one deny earns one question let through.
+      repos.agentEndpoints.setUserWaitDenied(agentId, null);
+      if (deniedRecently(deniedAt, now)) return NOTHING_TO_SHOW;
+    }
+    // Listed before claiming, so a message claimed below is not also counted as held.
+    const held = repos.agentMessages.listUnreadForSession(agentId, session).map(toDeliverable);
+    const claimed = drainInbox(repos, agentId, provider, capabilityFor(provider), {
+      session,
+      via: 'hook',
+    });
+    if (held.length > 0 || claimed.length > 0) {
+      repos.agentEndpoints.setAwaitingUser(agentId, null);
+      repos.agentEndpoints.setUserWaitDenied(agentId, { at: now.toISOString(), session });
+    }
+    return { held, claimed };
   });
-  if (held.length > 0 || claimed.length > 0) {
-    repos.agentEndpoints.setAwaitingUser(agentId, null);
-    repos.agentEndpoints.setUserWaitDenied(agentId, now.toISOString());
-  }
-  return { held, claimed };
+  return drain.immediate();
 }
 
 /** The opaque key of the session this command runs for, when it can tell. */
