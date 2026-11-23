@@ -52,10 +52,11 @@ export interface KiroHookSpec {
 
 /**
  * SessionStart prints the agent id into the session; UserPromptSubmit drains
- * pending messages into the prompt; Stop drains messages that arrived during
- * the turn and returns Kiro's continue decision so the model can read them.
- * Kiro has no idle wake-up, so a message sent between turns waits until one of
- * these events fires.
+ * pending messages into the prompt. There is no Stop hook: Kiro adds a hook's
+ * stdout to the context only for SessionStart and UserPromptSubmit, so draining
+ * at turn end would mark messages delivered that the model never sees. Kiro has
+ * no idle wake-up, so a message sent during or between turns waits in the
+ * durable inbox until the next prompt.
  */
 export const KIRO_HOOKS: readonly KiroHookSpec[] = [
   {
@@ -67,11 +68,6 @@ export const KIRO_HOOKS: readonly KiroHookSpec[] = [
     name: 'concord-user-prompt-submit',
     trigger: 'UserPromptSubmit',
     command: 'concord hook kiro-user-prompt-submit',
-  },
-  {
-    name: 'concord-stop',
-    trigger: 'Stop',
-    command: 'concord hook kiro-stop',
   },
 ];
 

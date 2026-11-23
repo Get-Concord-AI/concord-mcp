@@ -329,7 +329,7 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     },
     installedCapabilities: ['pull', 'steer', 'busy'],
     installedDetail:
-      'Kiro is registered with Concord; lifecycle hooks add messages on prompt submit and at turn end, and anything sent while idle waits in the durable inbox.',
+      'Kiro is registered with Concord; lifecycle hooks add messages on prompt submit, and anything sent after that waits in the durable inbox until the next prompt.',
     unsupportedDetail: 'Kiro lifecycle hooks need Kiro CLI V3 or Kiro IDE 1.0 or newer.',
   },
   deepseek: {

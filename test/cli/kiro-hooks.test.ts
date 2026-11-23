@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import { z } from 'zod';
 
 import {
   handleLocalKiroHook,
@@ -27,7 +26,8 @@ describe('Kiro hook events', () => {
   it('recognises only the events Concord installs', () => {
     expect(isKiroHookEvent('kiro-session-start')).toBe(true);
     expect(isKiroHookEvent('kiro-user-prompt-submit')).toBe(true);
-    expect(isKiroHookEvent('kiro-stop')).toBe(true);
+    // Kiro does not hand Stop hook output back to the model, so there is no stop event.
+    expect(isKiroHookEvent('kiro-stop')).toBe(false);
     expect(isKiroHookEvent('kiro-session-end')).toBe(false);
     expect(isKiroHookEvent('session-start')).toBe(false);
   });
@@ -74,22 +74,22 @@ describe('local Kiro hooks', () => {
     expect(handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-user-prompt-submit')).toBe('');
   });
 
-  it('asks Kiro to continue the turn when a message arrived before stop', () => {
+  it('keeps a message that arrives mid-turn for the next prompt', () => {
     handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-session-start');
     handleRegisterAgent(repos, { agent_id: 'codex:peer0001', kind: 'codex' });
+    expect(handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-user-prompt-submit')).toBe('');
     handleSendAgentMessage(repos, {
       operation: 'prompt',
       agentId: 'codex:peer0001',
       toAgentId: KIRO.agentId,
-      content: 'Late update before stop.',
+      content: 'Late update during the turn.',
       idempotencyKey: 'k-2',
     });
 
-    const stop = z
-      .object({ decision: z.literal('block'), reason: z.string() })
-      .parse(JSON.parse(handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-stop')));
-    expect(stop.reason).toContain('Late update');
-    expect(handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-stop')).toBe('');
+    // No hook drains at turn end, so the message is still pending when the next prompt arrives.
+    expect(handleLocalKiroHook(repos, KIRO, '/repo', 'kiro-user-prompt-submit')).toContain(
+      'Late update during the turn.',
+    );
   });
 });
 

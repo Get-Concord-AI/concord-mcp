@@ -36,21 +36,21 @@ over the derived id.
 
 ## Delivery
 
-Kiro hooks fire on session start, user prompt submit, and turn end. Concord uses
-them as follows:
+Concord installs two Kiro hooks:
 
 - `SessionStart` registers presence and advertises the session as a pull
   endpoint.
 - `UserPromptSubmit` drains pending messages and adds them to the prompt's
   context.
-- `Stop` drains messages that arrived during the turn and returns Kiro's
-  `{"decision":"block","reason":"..."}` payload, which continues the turn so
-  the model reads them. When nothing arrived, the hook prints nothing and the
-  turn ends normally.
+
+Concord does not install a `Stop` hook. Kiro adds a hook's stdout to the agent
+context for `SessionStart` and `UserPromptSubmit`, but its docs define no way
+for a turn-end hook to hand output back to the model. A Stop drain would mark
+messages delivered that the model never reads.
 
 Kiro has no hook that wakes an idle session, so Concord reports Kiro as
-`busy` reachable only. A message sent while a Kiro session is idle waits in the
-durable inbox and arrives on the next prompt or Stop. Nothing polls, and no
+`busy` reachable only. A message sent after a prompt was submitted waits in the
+durable inbox and arrives with the next prompt. Nothing polls, and no
 background monitor is started.
 
 Kiro runs workspace and user hooks side by side. If both
@@ -89,27 +89,24 @@ inbox until you drain them.
 ## Verified behavior
 
 Kiro's documentation covers workspace and user MCP configuration, steering with
-`inclusion: always`, and the v1 hooks format with `SessionStart`,
-`UserPromptSubmit`, and `Stop` triggers. It also documents the Stop hook's
-`{"decision":"block","reason":"..."}` payload for continuing a turn:
+`inclusion: always`, and the v1 hooks format with `SessionStart` and
+`UserPromptSubmit` triggers:
 
 - [MCP configuration](https://kiro.dev/docs/mcp/)
 - [Steering](https://kiro.dev/docs/steering/)
 - [Hooks](https://kiro.dev/docs/hooks/)
-- [Agent Stop](https://kiro.dev/docs/hooks/types/#agent-stop)
 
 The installed hooks follow Kiro's documented v1 contract: SessionStart and
-UserPromptSubmit add command stdout to context, and Agent Stop continues the
-turn when the command prints the documented block decision. Older Kiro versions
+UserPromptSubmit add command stdout to context. Older Kiro versions
 without hooks still get the MCP tools through the manual registration above,
 but no automatic delivery.
 
 If `concord adapters status` reports Kiro as `action_required`, check that
 `.kiro/settings/mcp.json` parses and that `.kiro/hooks/concord.json` still
-contains the three `concord-*` hooks. Restart Kiro after changing either file.
+contains the two `concord-*` hooks. Restart Kiro after changing either file.
 
 ## Cloud-linked repositories
 
 In a repository linked to Concord Cloud, Kiro hooks register and drain through
 the cloud like every other harness. Nothing local is written for delivery; the
-same busy-only `UserPromptSubmit`/`Stop` path applies.
+same busy-only `UserPromptSubmit` path applies.

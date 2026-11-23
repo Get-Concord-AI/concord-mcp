@@ -45,8 +45,8 @@ function report(
 }
 
 /**
- * Kiro's adapter status. Delivery is busy-only: Kiro hooks fire on session
- * start, prompt submit, and turn end but never wake an idle session, so an
+ * Kiro's adapter status. Delivery is busy-only: Concord's Kiro hooks fire on
+ * session start and prompt submit but never wake an idle session, so an
  * installed Kiro session reports pull only — never idle reachability.
  */
 export function statusKiro(

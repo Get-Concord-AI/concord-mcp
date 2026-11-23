@@ -312,7 +312,7 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     .description(
       'Run a Concord hook. events: pre-tool-use (PreToolUse overlap gate), ' +
         'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, ' +
-        'stop, and kiro-session-start, kiro-user-prompt-submit, and kiro-stop.',
+        'stop, and kiro-session-start and kiro-user-prompt-submit.',
     )
     .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {

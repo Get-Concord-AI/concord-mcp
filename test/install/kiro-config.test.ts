@@ -38,19 +38,14 @@ function parseHooks(content: string): z.infer<typeof hooksFile> {
 }
 
 describe('Kiro hooks config', () => {
-  it('writes the three lifecycle hooks in the v1 format', () => {
+  it('writes the session-start and prompt-submit hooks in the v1 format, with no Stop hook', () => {
     const parsed = parseHooks(upsertKiroHooks(undefined, '.kiro/hooks/concord.json'));
 
     expect(parsed.version).toBe('v1');
-    expect(parsed.hooks.map((hook) => hook.trigger)).toEqual([
-      'SessionStart',
-      'UserPromptSubmit',
-      'Stop',
-    ]);
+    expect(parsed.hooks.map((hook) => hook.trigger)).toEqual(['SessionStart', 'UserPromptSubmit']);
     expect(parsed.hooks.map((hook) => hook.action.command)).toEqual([
       'concord hook kiro-session-start',
       'concord hook kiro-user-prompt-submit',
-      'concord hook kiro-stop',
     ]);
   });
 
@@ -89,7 +84,6 @@ describe('Kiro hooks config', () => {
       'my-lint',
       'concord-session-start',
       'concord-user-prompt-submit',
-      'concord-stop',
     ]);
     expect(upsertKiroHooks(installed, '.kiro/hooks/concord.json')).toBe(installed);
   });
@@ -141,7 +135,7 @@ describe('Kiro installation', () => {
 
     expect(relative).toBe(join('.kiro', 'hooks', 'concord.json'));
     const first = readFileSync(path, 'utf8');
-    expect(parseHooks(first).hooks).toHaveLength(3);
+    expect(parseHooks(first).hooks).toHaveLength(2);
     installKiroWorkspaceHooks(root);
     expect(readFileSync(path, 'utf8')).toBe(first);
   });

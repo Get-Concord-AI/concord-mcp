@@ -13,12 +13,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to `.kiro/steering/concord.md`, and installs lifecycle hooks in
   `.kiro/hooks/concord.json`. The hooks derive a distinct `kiro:<hash>` agent
   from the session payload, register a pull endpoint, and add peer messages to
-  the context on prompt submit. On Stop, they return Kiro's `decision: "block"`
-  payload when messages arrived during the turn, so Kiro continues with them
-  instead of draining them silently. Kiro does not wake an idle session, so it
-  reports `busy` reachability only and leaves messages in the durable inbox
-  between turns. Existing Kiro configuration is merged and left intact on
-  rerun and uninstall.
+  the context on prompt submit. There is no Stop hook, because Kiro does not
+  hand a turn-end hook's output back to the model, so a message that arrives
+  mid-turn waits for the next prompt instead of being drained unseen. Kiro does
+  not wake an idle session, so it reports `busy` reachability only and leaves
+  messages in the durable inbox between turns. Existing Kiro configuration is
+  merged and left intact on rerun and uninstall.
 
 ### Changed
 
@@ -28,9 +28,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Kiro's Stop hook returns Kiro's `decision: "block"` payload instead of
-  writing the inbox body to stdout, so a message that arrives during a turn is
-  shown to the model instead of being drained without reaching it.
 - Kiro uninstall keeps unrelated top-level settings in the hooks file and only
   deletes it when nothing user-authored remains.
 - Global mode adopts the Kiro MCP entry that setup wrote and removes it again

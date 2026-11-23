@@ -105,8 +105,8 @@ export function antigravitySessionStartMessage(
 
 /**
  * Kiro's MCP server cannot see the hook session, so the id must be passed explicitly on writes.
- * Hooks fire on prompt submit and at turn end; Kiro has no idle wake-up, so between turns
- * messages wait in the durable inbox.
+ * Messages arrive on prompt submit; Kiro has no idle wake-up, so a message sent after a prompt
+ * waits in the durable inbox until the next one.
  */
 export function kiroSessionStartMessage(agentId: string, others: readonly RosterLine[]): string {
   return [
@@ -114,8 +114,8 @@ export function kiroSessionStartMessage(agentId: string, others: readonly Roster
       'write call (start_work, update_work, transfer_work, finish_work). ' +
       "Kiro's MCP server cannot see your session, so it cannot fill this in for you. " +
       CONCORD_SERVER_ONLY,
-    'Messages from other agents reach a running turn on prompt submit and at turn end. ' +
-      'Kiro does not wake an idle session, so messages sent while you are idle wait in your ' +
+    'Messages from other agents reach you when a prompt is submitted. ' +
+      'Kiro does not wake an idle session, so messages sent after that wait in your ' +
       `durable inbox. To check sooner, run \`concord inbox drain --agent ${agentId} --provider kiro\`.`,
     ...rosterLines(others),
   ].join('\n');
