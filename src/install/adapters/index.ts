@@ -958,7 +958,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
   uninstallJunieMcpConfig(env);
-  removeJunieHooks(env);
+  try {
+    removeJunieHooks(env);
+  } catch {
+    // Malformed or unreadable hooks config is left untouched.
+  }
   uninstallKiroUserConfigs(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);

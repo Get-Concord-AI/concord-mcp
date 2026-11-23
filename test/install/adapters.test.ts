@@ -845,6 +845,24 @@ describe('global harness adapters', () => {
       expect(hooksRemaining).not.toContain('concord hook junie-');
     }
   });
+
+  it('finishes global uninstall and removes state even when Junie hooks config is malformed', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-junie-malformed-uninstall-'));
+    const env = { HOME: home, USERPROFILE: home };
+    const hooksPath = join(home, '.junie', 'config.json');
+    mkdirSync(dirname(hooksPath), { recursive: true });
+    const broken = '{ malformed hooks json';
+    writeFileSync(hooksPath, broken);
+
+    const statePath = join(home, '.concord', 'adapters.json');
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, '{}');
+
+    const report = uninstallGlobalAdapters(env);
+    expect(report).toBeDefined();
+    expect(existsSync(statePath)).toBe(false);
+    expect(readFileSync(hooksPath, 'utf8')).toBe(broken);
+  });
 });
 
 describe('versionTuple', () => {
