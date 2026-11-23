@@ -6,23 +6,6 @@ import { linkedMachine } from '../cloud/target.js';
 import { resolveRepoRoot } from '../config/paths.js';
 import { createTelemetryClient } from '../telemetry/client.js';
 import { VERSION } from '../version.js';
-import { registerAdaptersCommand } from './commands/adapters.js';
-import { registerCheckCommand } from './commands/check.js';
-import { registerCloudCommand } from './commands/cloud.js';
-import { registerDashboardCommand } from './commands/dashboard.js';
-import { registerDoctorCommand } from './commands/doctor.js';
-import { registerExportCommand } from './commands/export.js';
-import { registerHandoffCommand } from './commands/handoff.js';
-import { registerHookCommand } from './commands/hook.js';
-import { registerInboxCommand } from './commands/inbox.js';
-import { registerMessagesCommand } from './commands/messages.js';
-import { registerReviewPacketCommand } from './commands/review-packet.js';
-import { registerSetupCommand } from './commands/setup.js';
-import { registerStatus } from './commands/status.js';
-import { registerTasks } from './commands/tasks.js';
-import { registerWatchCommand } from './commands/watch.js';
-import { registerWhoCommand } from './commands/who.js';
-import { registerWorkCommand, reportWorkFailure } from './commands/work.js';
 import { notifyIfUpdateAvailable } from '../update-notifier.js';
 import { configureCliWorkspace, parseCliWorkspaceOptions } from './workspace-options.js';
 
@@ -78,32 +61,99 @@ program.hook('postAction', (_command, actionCommand) => {
   }
 });
 
-registerSetupCommand(program);
-registerAdaptersCommand(program);
-registerStatus(program);
-registerWhoCommand(program);
-registerMessagesCommand(program);
-registerTasks(program);
-registerCheckCommand(program);
-registerDashboardCommand(program);
-registerWatchCommand(program);
-registerHookCommand(program, telemetry);
-registerInboxCommand(program, telemetry);
-registerHandoffCommand(program);
-registerWorkCommand(program, telemetry);
-registerReviewPacketCommand(program);
-registerExportCommand(program);
-registerDoctorCommand(program);
-registerCloudCommand(program);
+type RegisterCommand = (target: Command) => void;
+
+/**
+ * Every top-level command, in help order, with the module that defines it.
+ *
+ * Loaded on demand: agent hooks run this CLI on every tool call, and importing
+ * every command up front (the Ink dashboard, the MCP SDK) cost seconds per
+ * call. A run defines only the command it was asked for; help, a bare
+ * `concord`, and an unknown command still define them all.
+ */
+const COMMANDS: ReadonlyMap<string, () => Promise<RegisterCommand>> = new Map<
+  string,
+  () => Promise<RegisterCommand>
+>([
+  ['setup', async () => (await import('./commands/setup.js')).registerSetupCommand],
+  ['adapters', async () => (await import('./commands/adapters.js')).registerAdaptersCommand],
+  ['status', async () => (await import('./commands/status.js')).registerStatus],
+  ['who', async () => (await import('./commands/who.js')).registerWhoCommand],
+  ['messages', async () => (await import('./commands/messages.js')).registerMessagesCommand],
+  ['tasks', async () => (await import('./commands/tasks.js')).registerTasks],
+  ['check', async () => (await import('./commands/check.js')).registerCheckCommand],
+  ['dashboard', async () => (await import('./commands/dashboard.js')).registerDashboardCommand],
+  ['watch', async () => (await import('./commands/watch.js')).registerWatchCommand],
+  [
+    'hook',
+    async () => {
+      const { registerHookCommand } = await import('./commands/hook.js');
+      return (target) => {
+        registerHookCommand(target, telemetry);
+      };
+    },
+  ],
+  [
+    'inbox',
+    async () => {
+      const { registerInboxCommand } = await import('./commands/inbox.js');
+      return (target) => {
+        registerInboxCommand(target, telemetry);
+      };
+    },
+  ],
+  ['handoff', async () => (await import('./commands/handoff.js')).registerHandoffCommand],
+  [
+    'work',
+    async () => {
+      const { registerWorkCommand } = await import('./commands/work.js');
+      return (target) => {
+        registerWorkCommand(target, telemetry);
+      };
+    },
+  ],
+  [
+    'review-packet',
+    async () => (await import('./commands/review-packet.js')).registerReviewPacketCommand,
+  ],
+  ['export', async () => (await import('./commands/export.js')).registerExportCommand],
+  ['doctor', async () => (await import('./commands/doctor.js')).registerDoctorCommand],
+  ['cloud', async () => (await import('./commands/cloud.js')).registerCloudCommand],
+]);
+
+const registeredCommands = new Set<string>();
+
+/** Define the command `args` asks for, or every command when it names none we know. */
+async function registerCommands(args: readonly string[]): Promise<void> {
+  const requested = topLevelCommand(args);
+  const only = requested !== undefined && COMMANDS.has(requested) ? requested : undefined;
+  const pending = [...COMMANDS].filter(
+    ([name]) => (only === undefined || name === only) && !registeredCommands.has(name),
+  );
+  const loaded = await Promise.all(
+    pending.map(async ([name, load]) => ({ name, register: await load() })),
+  );
+  for (const { name, register } of loaded) {
+    register(program);
+    registeredCommands.add(name);
+  }
+}
 
 /** Global options that take a value and therefore hide the following token. */
 const GLOBAL_VALUE_FLAGS = new Set(['-C', '--repo', '--workspace']);
 
-/** The first positional token, past global options placed before the command. */
-function topLevelCommand(argv: readonly string[]): string | undefined {
+/** Help flags. Placed before the command they ask for the root help, which lists every command. */
+const HELP_FLAGS = new Set(['-h', '--help']);
+
+/**
+ * The first positional token, past global options placed before the command.
+ * A help flag before any command means root help, so it reports no command.
+ */
+export function topLevelCommand(argv: readonly string[]): string | undefined {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === undefined) continue;
+    if (HELP_FLAGS.has(token)) return undefined;
     if (token === '--') return argv[index + 1];
     if (GLOBAL_VALUE_FLAGS.has(token)) {
       index += 1;
@@ -123,6 +173,7 @@ export async function runCli(argv?: readonly string[]): Promise<void> {
   const args = argv === undefined ? process.argv.slice(2) : [...argv];
   try {
     await notifyIfUpdateAvailable(VERSION);
+    await registerCommands(args);
     if (argv === undefined) await program.parseAsync();
     else await program.parseAsync(args, { from: 'user' });
   } catch (error) {
@@ -136,6 +187,7 @@ export async function runCli(argv?: readonly string[]): Promise<void> {
     // Global options are validated before the work action, so a bad `--workspace`
     // never reaches that command's own error writer.
     if (topLevelCommand(args) === 'work') {
+      const { reportWorkFailure } = await import('./commands/work.js');
       reportWorkFailure(error instanceof Error ? error.message : String(error));
       return;
     }
