@@ -19,11 +19,14 @@ slug per session and reuse it on every command:
 
 ```sh
 export CONCORD_AGENT_ID=aider:fix-login-bug
+export CONCORD_AGENT_KIND=aider
 ```
 
-The `aider:` prefix becomes the agent kind automatically. Use a new slug for a
-new session; reusing one continues the same identity, which is what you want
-when picking a task back up but not across unrelated chats. Alternatively pass
+`CONCORD_AGENT_KIND` is what `start_work` records as the agent kind — the id's
+`aider:` prefix alone does not reach the tool arguments, so export it (or pass
+`--kind aider` on `start`). Use a new slug for a new session; reusing one
+continues the same identity, which is what you want when picking a task back
+up but not across unrelated chats. Alternatively pass
 `--agent aider:fix-login-bug` on each command — trusted here precisely because
 no Concord session is visible to the shell.
 
@@ -72,15 +75,19 @@ concord inbox drain --agent aider:fix-login-bug --provider aider
 
 prints each queued message as one JSON line (`messageId`, `senderAgentId`,
 `content`, `expectsReply`, …) and marks it delivered; empty output means the
-inbox is clear. For a read-only view with delivery receipts that consumes
-nothing, use:
+inbox is clear. For the full inbox/outbox view with per-message receipts
+(`sent` → `delivered` → `read`/`replied`) and expiry, inspect your own agent:
 
 ```sh
-concord work inspect --json '{"agent_id":"aider:fix-login-bug"}'
+printf '%s\n' '{"agent_id":"aider:fix-login-bug"}' | concord work inspect --json -
 ```
 
-which returns `inbox`/`outbox` arrays with per-message status
-(`sent` → `delivered` → `replied`) and expiry.
+`--json` takes a file path or `-` for stdin, not inline JSON. Note that
+inspecting your own inbox is not a passive peek: Concord hands the message
+content to the caller, so shown inbox messages are marked **read** and will not
+be drained again. Run it as the agent that should see the mail. For a view
+that changes nothing, use `concord messages --agent aider:fix-login-bug
+--json` — read-only, receipts included.
 
 ## Letting the model drive it
 
