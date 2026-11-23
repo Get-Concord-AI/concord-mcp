@@ -4,6 +4,7 @@ import { registerCheckCommand } from './check.js';
 import { registerDoctorCommand } from './doctor.js';
 import { registerMessagesCommand } from './messages.js';
 import { registerSetupCommand } from './setup.js';
+import { registerLinkedWorkCommand } from './work-linked.js';
 
 /** Commands whose linked-machine paths work without opening Concord's local store. */
 export function registerCloudCompatibleCommands(program: Command): void {
@@ -11,4 +12,5 @@ export function registerCloudCompatibleCommands(program: Command): void {
   registerDoctorCommand(program);
   registerMessagesCommand(program);
   registerSetupCommand(program);
+  registerLinkedWorkCommand(program);
 }

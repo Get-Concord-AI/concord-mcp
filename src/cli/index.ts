@@ -26,5 +26,6 @@ const cloudCommand = firstCommand(process.argv.slice(2)) === 'cloud';
 if (linkedMachine(process.env) !== undefined || cloudCommand) {
   await import('./cloud-index.js');
 } else {
-  await import('./local-index.js');
+  const { runCli } = await import('./run.js');
+  await runCli();
 }

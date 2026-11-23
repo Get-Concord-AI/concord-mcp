@@ -1,14 +1,14 @@
-#!/usr/bin/env node
-import { Command } from '@commander-js/extra-typings';
 import { performance } from 'node:perf_hooks';
+
+import { Command } from '@commander-js/extra-typings';
 
 import { linkedMachine } from '../cloud/target.js';
 import { resolveRepoRoot } from '../config/paths.js';
 import { createTelemetryClient } from '../telemetry/client.js';
 import { VERSION } from '../version.js';
+import { registerAdaptersCommand } from './commands/adapters.js';
 import { registerCheckCommand } from './commands/check.js';
 import { registerCloudCommand } from './commands/cloud.js';
-import { registerAdaptersCommand } from './commands/adapters.js';
 import { registerDashboardCommand } from './commands/dashboard.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerExportCommand } from './commands/export.js';
@@ -22,6 +22,7 @@ import { registerStatus } from './commands/status.js';
 import { registerTasks } from './commands/tasks.js';
 import { registerWatchCommand } from './commands/watch.js';
 import { registerWhoCommand } from './commands/who.js';
+import { registerWorkCommand, reportWorkFailure } from './commands/work.js';
 import { notifyIfUpdateAvailable } from '../update-notifier.js';
 import { configureCliWorkspace, parseCliWorkspaceOptions } from './workspace-options.js';
 
@@ -58,9 +59,10 @@ program.hook('preAction', (command, actionCommand) => {
     parent === 'cloud' ||
     ((parent === 'inbox' || CLOUD_SERVED.has(actionCommand.name())) &&
       linkedMachine(process.env) !== undefined);
-  activeCommand = nonLocal
-    ? undefined
-    : { name: actionCommand.name(), startedAt: performance.now() };
+  activeCommand =
+    nonLocal || parent === 'work'
+      ? undefined
+      : { name: actionCommand.name(), startedAt: performance.now() };
 });
 
 program.hook('postAction', (_command, actionCommand) => {
@@ -88,25 +90,57 @@ registerWatchCommand(program);
 registerHookCommand(program, telemetry);
 registerInboxCommand(program, telemetry);
 registerHandoffCommand(program);
+registerWorkCommand(program, telemetry);
 registerReviewPacketCommand(program);
 registerExportCommand(program);
 registerDoctorCommand(program);
 registerCloudCommand(program);
 
-try {
-  await notifyIfUpdateAvailable(VERSION);
-  await program.parseAsync();
-} catch (error) {
-  if (activeCommand !== undefined) {
-    if (!backgroundCommands.has(activeCommand.name)) {
+/** Global options that take a value and therefore hide the following token. */
+const GLOBAL_VALUE_FLAGS = new Set(['-C', '--repo', '--workspace']);
+
+/** The first positional token, past global options placed before the command. */
+function topLevelCommand(argv: readonly string[]): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === undefined) continue;
+    if (token === '--') return argv[index + 1];
+    if (GLOBAL_VALUE_FLAGS.has(token)) {
+      index += 1;
+      continue;
+    }
+    if (token.startsWith('-')) continue;
+    return token;
+  }
+  return undefined;
+}
+
+/**
+ * Run the CLI. Pass `argv` as the user arguments (no `node` or script path);
+ * the default reads `process.argv`.
+ */
+export async function runCli(argv?: readonly string[]): Promise<void> {
+  const args = argv === undefined ? process.argv.slice(2) : [...argv];
+  try {
+    await notifyIfUpdateAvailable(VERSION);
+    if (argv === undefined) await program.parseAsync();
+    else await program.parseAsync(args, { from: 'user' });
+  } catch (error) {
+    if (activeCommand !== undefined && !backgroundCommands.has(activeCommand.name)) {
       telemetry?.recordOperation(
         activeCommand.name,
         'error',
         performance.now() - activeCommand.startedAt,
       );
     }
+    // Global options are validated before the work action, so a bad `--workspace`
+    // never reaches that command's own error writer.
+    if (topLevelCommand(args) === 'work') {
+      reportWorkFailure(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    throw error;
+  } finally {
+    await telemetry?.close();
   }
-  throw error;
-} finally {
-  await telemetry?.close();
 }
