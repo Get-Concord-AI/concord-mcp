@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Re-running `concord setup` (or any installer path that rewrites the
+  `concord` entry in an MCP config) now preserves the entry's other fields
+  — `disabled`, timeouts, client-specific options — instead of dropping
+  everything but `command`/`args`/`env`. Command, args, and env are still
+  always rewritten, which is how older package-runner installs migrate.
+
 ### Changed
 
 - The `concord` CLI loads only the command it runs, and the hook, inbox and

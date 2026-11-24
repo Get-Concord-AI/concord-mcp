@@ -60,6 +60,29 @@ describe('upsertMcpServer', () => {
   it('throws on malformed JSON rather than discarding it', () => {
     expect(() => upsertMcpServer('{ not json', '/tmp/project')).toThrow();
   });
+
+  it('keeps user fields on the Concord entry while refreshing command, args, and env', () => {
+    const existing = JSON.stringify({
+      mcpServers: {
+        concord: {
+          command: 'npx',
+          args: ['-y', '@concord-ai/concord-mcp@0.23.0'],
+          env: { CONCORD_REPO_ROOT: '/old/root', CUSTOM: 'x' },
+          disabled: false,
+          timeout: 30,
+        },
+      },
+    });
+    const out = upsertMcpServer(existing, '/tmp/project', { CONCORD_AGENT_KIND: 'cline' });
+    expect(out).toContain('"disabled": false');
+    expect(out).toContain('"timeout": 30');
+    expect(out).toContain('"CONCORD_REPO_ROOT": "/tmp/project"');
+    expect(out).toContain('"CONCORD_AGENT_KIND": "cline"');
+    // The runner shape migrates to the bare command; its args and foreign env go.
+    expect(out).not.toContain('"args"');
+    expect(out).not.toContain('CUSTOM');
+    expect(out).not.toContain('/old/root');
+  });
 });
 
 describe('installMcpConfigs', () => {
