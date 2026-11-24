@@ -583,6 +583,37 @@ describe('review follow-ups', () => {
     expect(status(repos, messageId)).toBe('sent');
   });
 
+  it('requeues a delivery recorded under no session when the recipient session ends', () => {
+    const messageId = send(repos, 'drifted delivery', 'k1');
+    // A monitor that drifted to this agent cannot name the live session, so
+    // the delivery is recorded with no session (#180).
+    drainInbox(repos, 'beta', 'claude-code', monitorCapabilityFor('claude-code'), {
+      session: null,
+      via: 'monitor',
+    });
+    expect(status(repos, messageId)).toBe('delivered');
+
+    const observed = observeHookEvent(repos, 'beta', hook({ hook_event_name: 'SessionEnd' }));
+    expect(observed.requeued).toEqual([messageId]);
+    expect(status(repos, messageId)).toBe('sent');
+  });
+
+  it('requeues a delivery recorded under no session when a fresh session starts', () => {
+    const messageId = send(repos, 'drifted delivery', 'k1');
+    drainInbox(repos, 'beta', 'claude-code', monitorCapabilityFor('claude-code'), {
+      session: null,
+      via: 'monitor',
+    });
+
+    const observed = observeHookEvent(
+      repos,
+      'beta',
+      hook({ hook_event_name: 'SessionStart', source: 'startup' }, 'new-session'),
+    );
+    expect(observed.requeued).toEqual([messageId]);
+    expect(status(repos, messageId)).toBe('sent');
+  });
+
   it('does not count a synthetic assistant entry as the model having read anything', () => {
     const messageId = send(repos, 'ping', 'k1');
     const [line] = renderMonitorLines(monitorDrain(repos));

@@ -203,17 +203,21 @@ export function createAgentMessageRepository(
       AND (delivered_session IS NULL OR delivered_session IS @session)
     ORDER BY created_at, message_id
   `);
+  // A delivery recorded under no session (a monitor that drifted and could not
+  // name the live one) belongs to no earlier session either: any fresh session
+  // of this agent may reclaim it, so NULL counts as "another session".
   const listRequeueableStmt = db.prepare(`
     SELECT * FROM agent_messages
     WHERE recipient_agent_id = @agent_id AND status = 'delivered'
       AND delivered_via IN ('monitor', 'hook', 'adapter')
-      AND delivered_session IS NOT NULL AND delivered_session IS NOT @session
+      AND (delivered_session IS NULL OR delivered_session IS NOT @session)
     ORDER BY created_at, message_id
   `);
   const listSessionUnreadStmt = db.prepare(`
     SELECT * FROM agent_messages
     WHERE recipient_agent_id = @agent_id AND status = 'delivered'
-      AND delivered_via IN ('monitor', 'hook', 'adapter') AND delivered_session = @session
+      AND delivered_via IN ('monitor', 'hook', 'adapter')
+      AND (delivered_session = @session OR delivered_session IS NULL)
     ORDER BY created_at, message_id
   `);
   const requeueStmt = db.prepare(`
