@@ -1,13 +1,15 @@
+import { renderPeerMessage, type PeerMessage } from '../domain/pull-inbox.js';
 import type { WorkspaceIdentity } from '../workspaces/manager.js';
 import { outboxReceiptLines } from './inspect-messages.js';
 import type { InspectWorkResult } from './inspect-work.js';
 import { searchText } from './search-work.js';
 import { withWorkspaceText, workspaceStructured } from './workspace-routing.js';
 
-/**
- * The MCP response for each `inspect_work` scope: a line of text for clients
- * that show only text, and the full view as structured content.
- */
+function messageText(messages: readonly PeerMessage[]): string {
+  return messages.map((message) => `\n\n${renderPeerMessage(message)}`).join('');
+}
+
+/** Render the visible messages in text too, so a text-only client can read and reply. */
 export function inspectWorkResponse(
   result: InspectWorkResult,
   workspace: WorkspaceIdentity | undefined,
@@ -52,7 +54,8 @@ export function inspectWorkResponse(
                   outboxReceiptLines(result.communication.outbox)) +
               (result.communication.awaitingUserSince === null
                 ? '.'
-                : `; waiting on its user since ${result.communication.awaitingUserSince}.`),
+                : `; waiting on its user since ${result.communication.awaitingUserSince}.`) +
+              (result.communication.private ? '' : messageText(result.communication.inbox)),
             workspace,
           ),
         },
@@ -81,7 +84,7 @@ export function inspectWorkResponse(
         {
           type: 'text' as const,
           text: withWorkspaceText(
-            `${String(result.thread.length)} message(s) in thread.`,
+            `${String(result.thread.length)} message(s) in thread.` + messageText(result.thread),
             workspace,
           ),
         },
@@ -101,7 +104,8 @@ export function inspectWorkResponse(
         text: withWorkspaceText(
           `${result.context.task.taskId}; status ${result.context.task.status}, ` +
             `version ${String(result.context.task.version)}, ` +
-            `${String(result.context.updates.length)} update(s).`,
+            `${String(result.context.updates.length)} update(s).` +
+            messageText(result.context.messages),
           workspace,
         ),
       },
