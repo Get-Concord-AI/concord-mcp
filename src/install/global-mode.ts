@@ -262,6 +262,7 @@ function applyFile(
   for (const path of paths) {
     try {
       const exists = existsSync(path);
+      if (!enable && !exists) continue;
       const existing = exists ? readFileSync(path, 'utf8') : undefined;
       if (registration !== undefined && !mayChange(registration, enable, existing, owned)) {
         continue;
