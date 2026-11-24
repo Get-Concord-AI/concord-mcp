@@ -278,6 +278,28 @@ approval_mode = "approve"
 
     expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(`${user}\n`);
   });
+
+  it('keeps the lines after the end marker', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const server = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"`;
+    const block = upsertCodexHooks(undefined).trimEnd();
+    writeFileSync(codexConfigFile(env), `${server}\n\n${block}\nmodel = "o3"\n`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('model = "o3"\n');
+  });
+
+  it('keeps a comment above the table after the server table', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const server = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"`;
+    const tui = '# my terminal settings\n[tui]\nalt_screen = true\n';
+    writeFileSync(codexConfigFile(env), `${server}\n\n${tui}`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(tui);
+  });
 });
 
 describe('removeCodexMcpServer', () => {

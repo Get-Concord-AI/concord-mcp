@@ -373,4 +373,22 @@ command = "my-session-hook"
     expect(result.split(BEGIN)).toHaveLength(3);
     expect(upsertCodexHooks(result)).toBe(result);
   });
+
+  it('moves the lines after the end marker with the block', () => {
+    // The user's Stop group below sends the block to the end of the file. TOML
+    // reads the lines after the end marker as part of Concord's last hook.
+    const after = 'model = "o3"\n# a note\neffort = "high"';
+    const config = [
+      '[mcp_servers.concord]\ncommand = "concord-mcp"',
+      `${BLOCK}\n${after}`,
+      `[[hooks.Stop]]\n${entry('Stop', 'user-stop')}`,
+    ].join('\n\n');
+    const setup = (text: string): string => upsertCodexHooks(upsertCodexMcpServer(text));
+
+    const result = setup(`${config}\n`);
+
+    expectConcordOnce(result);
+    expect(result).toContain(`${END}\n${after}\n`);
+    expect(setup(result)).toBe(result);
+  });
 });

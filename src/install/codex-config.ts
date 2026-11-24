@@ -158,24 +158,28 @@ function stringEntry(line: TomlLine): { key: string; value: string } | undefined
   return key === undefined || value === undefined ? undefined : { key, value };
 }
 
-/** The index past the entry headed at `entry`, if it runs exactly Concord's `command`. */
-function concordEntryEnd(
+/**
+ * If the entry headed at `entry` runs exactly Concord's `command`: where its own
+ * lines `end`, and where TOML's table ends (`tail`). Lines between the two came
+ * after Concord's end marker, so they are the user's, though TOML attaches them here.
+ */
+function concordEntry(
   lines: readonly TomlLine[],
   entry: number,
   command: string,
-): number | undefined {
+): { end: number; tail: number } | undefined {
+  const tail = tableEnd(lines, entry);
   // Concord's comment lines, such as the end marker, are never part of its entry.
-  let end = tableEnd(lines, entry);
   const marker = lines.findIndex(
-    (line, index) => index > entry && index < end && isConcordComment(line),
+    (line, index) => index > entry && index < tail && isConcordComment(line),
   );
-  if (marker !== -1) end = marker;
+  const end = marker === -1 ? tail : marker;
 
   const values = lines.slice(entry + 1, end).map(stringEntry);
   const ours =
     values.some((value) => value?.key === 'type' && value.value === 'command') &&
     values.some((value) => value?.key === 'command' && value.value === command);
-  return ours ? end : undefined;
+  return ours ? { end, tail } : undefined;
 }
 
 /** A `[[hooks.<event>]]` group, and the entries TOML attaches to it. */
@@ -192,14 +196,17 @@ function removeRange(removed: Set<number>, start: number, end: number): void {
 
 /**
  * Concord's entries, and each group left with nothing of the user's: no other
- * entry and no key such as `matcher`. `spot` is the first such group, unless a
+ * entry and no key such as `matcher`. `carried` are the user's lines that TOML
+ * attaches to Concord's entries. `spot` is the first removed group, unless a
  * user entry after it belongs to an earlier group that the block would steal.
  */
 function concordHookLines(lines: readonly TomlLine[]): {
   removed: Set<number>;
+  carried: Set<number>;
   spot: number | undefined;
 } {
   const removed = new Set<number>();
+  const carried = new Set<number>();
   const groups: HookGroup[] = [];
   const current = new Map<string, HookGroup>();
   const userEntries: number[] = [];
@@ -220,12 +227,16 @@ function concordHookLines(lines: readonly TomlLine[]): {
       group.entries += 1;
       group.firstEntry ??= index;
     }
-    const end = concordEntryEnd(lines, index, hook.command);
-    if (end === undefined) {
+    const found = concordEntry(lines, index, hook.command);
+    if (found === undefined) {
       userEntries.push(index);
       continue;
     }
-    removeRange(removed, index, end);
+    removeRange(removed, index, found.end);
+    for (let at = found.end; at < found.tail; at += 1) {
+      const after = lines[at];
+      if (after !== undefined && !isConcordComment(after)) carried.add(at);
+    }
     if (group !== undefined) group.concordEntries += 1;
   }
 
@@ -241,20 +252,35 @@ function concordHookLines(lines: readonly TomlLine[]): {
   }
   const first = spot;
   if (first !== undefined && userEntries.some((entry) => entry > first)) spot = undefined;
-  return { removed, spot };
+  return { removed, carried, spot };
 }
 
-/** `source` without Concord's hooks and comment lines, and where its first hook was. */
-function stripConcordHooks(source: string): { lines: string[]; spot: number | undefined } {
+/**
+ * `source` without Concord's hooks and comment lines, where its first hook was,
+ * and the user's lines that sat after its end marker, with where they sat.
+ */
+function stripConcordHooks(source: string): {
+  lines: string[];
+  spot: number | undefined;
+  carried: string[];
+  carriedAt: number | undefined;
+} {
   const lines = [...tomlLines(source)];
-  const { removed, spot: spotLine } = concordHookLines(lines);
+  const found = concordHookLines(lines);
   const kept: TomlLine[] = [];
+  const carried: string[] = [];
   let spot: number | undefined;
+  let carriedAt: number | undefined;
   for (const [index, line] of lines.entries()) {
-    if (index === spotLine) spot = kept.length;
-    if (!removed.has(index) && !isConcordComment(line)) keepLine(kept, line);
+    if (index === found.spot) spot = kept.length;
+    if (found.carried.has(index)) {
+      carriedAt ??= kept.length;
+      carried.push(line.text);
+    } else if (!found.removed.has(index) && !isConcordComment(line)) {
+      keepLine(kept, line);
+    }
   }
-  return { lines: kept.map((line) => line.text), spot };
+  return { lines: kept.map((line) => line.text), spot, carried, carriedAt };
 }
 
 /** `lines` joined, without blank lines at either end. */
@@ -278,11 +304,12 @@ export function upsertCodexHooks(existing: string | undefined): string {
 }
 
 function addHooksBlock(source: string): string {
-  const { lines, spot } = stripConcordHooks(source);
+  const { lines, spot, carried } = stripConcordHooks(source);
   const at = spot ?? lines.length;
+  // Lines that sat after the end marker stay after it, where TOML read them.
   const parts = [
     joinTrimmed(lines.slice(0, at)),
-    CONCORD_HOOKS_BLOCK,
+    [CONCORD_HOOKS_BLOCK, ...carried].join('\n'),
     joinTrimmed(lines.slice(at)),
   ];
   return `${parts.filter((part) => part !== '').join('\n\n')}\n`;
@@ -323,14 +350,19 @@ export function removeCodexMcpServer(source: string): string {
   return inLineEnding(source, removeServerTables);
 }
 
+/** Each table's own lines, so the comments above the table after it stay. */
 function removeServerTables(source: string): string {
-  const kept: TomlLine[] = [];
-  let inConcordTable = false;
-  for (const line of tomlLines(source)) {
-    const { text, inString } = line;
+  const lines = [...tomlLines(source)];
+  const removed = new Set<number>();
+  for (const [index, { text, inString }] of lines.entries()) {
     const table = inString ? undefined : /^\s*\[\[?([^\]]+)\]\]?\s*(?:#.*)?$/u.exec(text)?.[1];
-    if (table !== undefined) inConcordTable = CONCORD_TOML_KEY.test(tomlKeyPath(table));
-    if (!inConcordTable) keepLine(kept, line);
+    if (table !== undefined && CONCORD_TOML_KEY.test(tomlKeyPath(table))) {
+      removeRange(removed, index, tableEnd(lines, index));
+    }
+  }
+  const kept: TomlLine[] = [];
+  for (const [index, line] of lines.entries()) {
+    if (!removed.has(index)) keepLine(kept, line);
   }
   return kept
     .map((line) => line.text)
@@ -338,14 +370,21 @@ function removeServerTables(source: string): string {
     .replace(/^\n+/u, '');
 }
 
-/** Remove only Concord-owned Codex config while preserving hook trust tables. */
+/**
+ * Remove only Concord-owned Codex config while preserving hook trust tables.
+ * The server table goes first: once the hooks are gone, the lines after their
+ * end marker would read as part of whatever table is above them.
+ */
 export function uninstallCodexConfig(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const fullPath = codexConfigFile(env);
   if (!existsSync(fullPath)) return undefined;
-  const source = readFileSync(fullPath, 'utf8');
-  const uninstalled = inLineEnding(source, (text) =>
-    removeServerTables(stripConcordHooks(text).lines.join('\n')),
-  );
+  const uninstalled = inLineEnding(readFileSync(fullPath, 'utf8'), (text) => {
+    const { lines, carried, carriedAt } = stripConcordHooks(removeServerTables(text));
+    const at = carriedAt ?? lines.length;
+    const kept = [...lines.slice(0, at), ...carried, ...lines.slice(at)].join('\n');
+    const trimmed = kept.replace(/^\n+/u, '').replace(/\n*$/u, '');
+    return trimmed === '' ? '' : `${trimmed}\n`;
+  });
   writeFileSync(fullPath, uninstalled);
   return fullPath;
 }
