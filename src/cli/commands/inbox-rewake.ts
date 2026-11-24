@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { userConcordDir } from '../../config/user-config.js';
 import { renderMonitorLines, type DeliverableMessage } from '../../domain/pull-inbox.js';
 
 /**
@@ -72,6 +72,15 @@ function claimPath(agentId: string, dir: string): string {
   return join(dir, `${key}.waiter`);
 }
 
+/**
+ * Where waiter claims live. Under the user Concord dir rather than the shared
+ * temp dir: the file name is a predictable hash of the agent id, and a shared
+ * directory would let another local account plant a symlink there.
+ */
+export function defaultWaiterDir(env: NodeJS.ProcessEnv): string {
+  return join(userConcordDir(env), 'concord-rewake');
+}
+
 function readClaim(path: string): string | undefined {
   try {
     return readFileSync(path, 'utf8').trim();
@@ -95,10 +104,18 @@ export interface WaiterClaim {
 export function claimWaiter(
   agentId: string,
   token: string,
-  dir: string = join(tmpdir(), 'concord-rewake'),
+  dir: string = defaultWaiterDir(process.env),
 ): WaiterClaim {
   mkdirSync(dir, { recursive: true });
   const path = claimPath(agentId, dir);
+  try {
+    // Never write through a planted symlink: drop the link itself and claim
+    // the name fresh. readClaim/release only ever remove the link, never its
+    // target.
+    if (lstatSync(path).isSymbolicLink()) rmSync(path);
+  } catch {
+    // Absent or unreadable: writeFileSync below reports the real failure.
+  }
   writeFileSync(path, token);
   return {
     superseded: () => readClaim(path) !== token,

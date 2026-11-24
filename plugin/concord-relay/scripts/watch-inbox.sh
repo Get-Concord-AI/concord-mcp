@@ -26,6 +26,9 @@ case "$_monitor_started_ms" in
   '' | *[!0-9]*) _monitor_started_ms="$(( $(date +%s) * 1000 ))" ;;
 esac
 export CONCORD_MONITOR_STARTED_AT="$_monitor_started_ms"
+# One random token per launch: pids get recycled, so the receiver lease owner
+# and the ancestor cache key on this rather than the pid alone.
+export CONCORD_MONITOR_TOKEN="${_monitor_started_ms}-$$-${RANDOM}${RANDOM}${RANDOM}"
 
 # A monitor orphaned by a crashed or killed harness would keep draining
 # messages into a pipe nobody reads, marking them delivered to a dead session.

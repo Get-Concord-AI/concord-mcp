@@ -26,8 +26,12 @@ export interface AgentEndpointRepository {
   getByAgent(agentId: string): AgentEndpointRecord | undefined;
   list(): AgentEndpointRecord[];
   heartbeat(endpointId: string, expiresAt?: string | null): AgentEndpointRecord | undefined;
-  heartbeatReceiver(endpointId: string, expiresAt: string): AgentEndpointRecord | undefined;
-  clearReceiver(endpointId: string): AgentEndpointRecord | undefined;
+  heartbeatReceiver(
+    endpointId: string,
+    expiresAt: string,
+    owner?: string,
+  ): AgentEndpointRecord | undefined;
+  clearReceiver(endpointId: string, owner?: string): AgentEndpointRecord | undefined;
   /**
    * Record that `agentId`'s session stopped to wait on its user (`since`), or
    * moved on (`null`). Keeps the first timestamp of an ongoing wait.
@@ -74,7 +78,8 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
   `);
   const heartbeatReceiverStmt = db.prepare(`
     UPDATE agent_endpoints
-    SET receiver_expires_at = @receiver_expires_at, updated_at = @now
+    SET receiver_expires_at = @receiver_expires_at, receiver_owner = @receiver_owner,
+        updated_at = @now
     WHERE endpoint_id = @endpoint_id
   `);
   const setAwaitingUserStmt = db.prepare(`
@@ -87,8 +92,13 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
   `);
   const clearReceiverStmt = db.prepare(`
     UPDATE agent_endpoints
-    SET receiver_expires_at = NULL, updated_at = @now
+    SET receiver_expires_at = NULL, receiver_owner = NULL, updated_at = @now
     WHERE endpoint_id = @endpoint_id
+  `);
+  const clearReceiverOwnedStmt = db.prepare(`
+    UPDATE agent_endpoints
+    SET receiver_expires_at = NULL, receiver_owner = NULL, updated_at = @now
+    WHERE endpoint_id = @endpoint_id AND receiver_owner = @owner
   `);
 
   function get(endpointId: string): AgentEndpointRecord | undefined {
@@ -136,16 +146,25 @@ export function createAgentEndpointRepository(db: ConcordDatabase): AgentEndpoin
       });
       return get(endpointId);
     },
-    heartbeatReceiver(endpointId, expiresAt) {
+    heartbeatReceiver(endpointId, expiresAt, owner) {
       heartbeatReceiverStmt.run({
         endpoint_id: endpointId,
         receiver_expires_at: expiresAt,
+        receiver_owner: owner ?? null,
         now: new Date().toISOString(),
       });
       return get(endpointId);
     },
-    clearReceiver(endpointId) {
-      clearReceiverStmt.run({ endpoint_id: endpointId, now: new Date().toISOString() });
+    clearReceiver(endpointId, owner) {
+      if (owner === undefined) {
+        clearReceiverStmt.run({ endpoint_id: endpointId, now: new Date().toISOString() });
+      } else {
+        clearReceiverOwnedStmt.run({
+          endpoint_id: endpointId,
+          owner,
+          now: new Date().toISOString(),
+        });
+      }
       return get(endpointId);
     },
     setAwaitingUser(agentId, since) {

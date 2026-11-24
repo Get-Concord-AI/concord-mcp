@@ -29,7 +29,7 @@ import {
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { resolveAgentId, resolveInboxOwner } from '../agent-identity.js';
-import { resolveLiveAgent } from '../live-identity.js';
+import { monitorInstanceId, resolveLiveAgent } from '../live-identity.js';
 import { resolveStore } from '../../workspaces/store.js';
 import { launchDetachedConcord } from '../detached-host.js';
 import { codexThreadHostable } from '../embedding-host.js';
@@ -61,10 +61,15 @@ function receiverExpiry(interval: number, now = Date.now()): string {
   return new Date(now + Math.max(MIN_RECEIVER_TTL_MS, interval * 3)).toISOString();
 }
 
-function heartbeatReceiver(repos: Repositories, agentId: string, interval: number): void {
+function heartbeatReceiver(
+  repos: Repositories,
+  agentId: string,
+  interval: number,
+  owner: string,
+): void {
   const endpoint = repos.agentEndpoints.getByAgent(agentId);
   if (endpoint === undefined) throw new Error(`Agent ${agentId} has no registered endpoint.`);
-  repos.agentEndpoints.heartbeatReceiver(endpoint.endpointId, receiverExpiry(interval));
+  repos.agentEndpoints.heartbeatReceiver(endpoint.endpointId, receiverExpiry(interval), owner);
 }
 
 /**
@@ -174,6 +179,9 @@ export async function watchInbox(
   const monitorCapability = monitorCapabilityFor(provider);
   const session = currentSession(provider, options.hookPayload);
   const replaced = options.replaced ?? (() => false);
+  // The lease owner: only this watcher may clear what it heartbeats, so a
+  // stale watcher's teardown cannot drop a replacement monitor's receiver.
+  const receiverOwner = monitorInstanceId(process.env);
   // The agent and session stamped on each delivery follow resolveTarget when
   // present; finish() unwinds the endpoint of whoever was served last.
   let servedAgentId = agentId;
@@ -190,9 +198,11 @@ export async function watchInbox(
       try {
         registerPullEndpoint(repos, servedAgentId, provider);
         const endpoint = repos.agentEndpoints.getByAgent(servedAgentId);
-        // A replaced watcher leaves the receiver to the one that replaced it.
+        // A replaced watcher leaves the receiver to the one that replaced it;
+        // an owner-token check keeps a stale teardown from clearing a lease
+        // this process never held.
         if (endpoint !== undefined && !replaced()) {
-          repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+          repos.agentEndpoints.clearReceiver(endpoint.endpointId, receiverOwner);
         }
       } catch (registrationError) {
         if (error === undefined) error = registrationError;
@@ -214,7 +224,7 @@ export async function watchInbox(
           via: 'monitor',
         });
         if (options.receiverHeartbeat !== false) {
-          heartbeatReceiver(repos, target.agentId, interval);
+          heartbeatReceiver(repos, target.agentId, interval, receiverOwner);
         }
       } catch (error) {
         // A monitor is the session's live receive endpoint. Transient SQLite
@@ -604,7 +614,8 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
           via: isMonitor ? 'monitor' : 'hook',
         },
       );
-      if (isMonitor) heartbeatReceiver(context.repos, agentId, 2_000);
+      if (isMonitor)
+        heartbeatReceiver(context.repos, agentId, 2_000, monitorInstanceId(process.env));
       // Silence matters: a hook that prints on an empty inbox would inject
       // noise into the session on every single tool call.
       if (messages.length === 0) {
@@ -692,8 +703,14 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         : access.kind === 'cloud'
           ? watching(access.runtime, agentId)
           : receiverActive((await localContext()).repos.agentEndpoints.getByAgent(agentId));
-      if (!rewakeWaits(process.env, receiverAlive)) return;
+      // Claim first, then decide: a fresh claim supersedes any older fallback
+      // waiter still polling, so a Stop that sees a live receiver must not
+      // return without taking its place down with it.
       const claim = claimWaiter(agentId, randomUUID());
+      if (!rewakeWaits(process.env, receiverAlive)) {
+        claim.release();
+        return;
+      }
       const cancel = standDownWhenSuperseded(claim, () => {
         process.emit('SIGTERM', 'SIGTERM');
       });
@@ -839,7 +856,13 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       });
       const endpoint = context.repos.agentEndpoints.getByAgent(live.agentId);
       if (endpoint !== undefined) {
-        context.repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+        // Only the monitor instance that holds the lease may drop it: after a
+        // /resume swap this process can resolve to an agent a replacement
+        // monitor now serves, and clearing blindly would strand its receiver.
+        context.repos.agentEndpoints.clearReceiver(
+          endpoint.endpointId,
+          monitorInstanceId(process.env),
+        );
       }
     });
 }

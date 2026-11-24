@@ -210,6 +210,53 @@ describe('pull-transport inbox', () => {
     );
   });
 
+  it('keeps a lease a replacement monitor took over when the stale watcher exits', async () => {
+    registerPullEndpoint(repos, 'beta', 'claude-code');
+    send(repos, 'swap mid-watch', 'owner-swap-1');
+    const previous = process.env['CONCORD_MONITOR_TOKEN'];
+    process.env['CONCORD_MONITOR_TOKEN'] = 'stale-watcher';
+    try {
+      await watchInbox(repos, 'beta', 'claude-code', 250, true, () => {
+        // A replacement monitor claims the lease while this watcher is mid-poll.
+        const endpoint = repos.agentEndpoints.getByAgent('beta');
+        if (endpoint !== undefined) {
+          repos.agentEndpoints.heartbeatReceiver(
+            endpoint.endpointId,
+            new Date(Date.now() + 60_000).toISOString(),
+            'replacement-monitor',
+          );
+        }
+      });
+    } finally {
+      if (previous === undefined) delete process.env['CONCORD_MONITOR_TOKEN'];
+      else process.env['CONCORD_MONITOR_TOKEN'] = previous;
+    }
+
+    const endpoint = repos.agentEndpoints.getByAgent('beta');
+    expect(endpoint?.receiverOwner).toBe('replacement-monitor');
+    expect(endpoint?.receiverExpiresAt).not.toBeNull();
+  });
+
+  it('only lets the recorded owner clear the receiver lease', () => {
+    registerPullEndpoint(repos, 'beta', 'claude-code');
+    const endpoint = repos.agentEndpoints.getByAgent('beta');
+    expect(endpoint).toBeDefined();
+    if (endpoint === undefined) return;
+
+    repos.agentEndpoints.heartbeatReceiver(
+      endpoint.endpointId,
+      new Date(Date.now() + 10_000).toISOString(),
+      'monitor-a',
+    );
+    expect(repos.agentEndpoints.getByAgent('beta')?.receiverOwner).toBe('monitor-a');
+
+    repos.agentEndpoints.clearReceiver(endpoint.endpointId, 'monitor-b');
+    expect(repos.agentEndpoints.getByAgent('beta')?.receiverExpiresAt).not.toBeNull();
+
+    repos.agentEndpoints.clearReceiver(endpoint.endpointId, 'monitor-a');
+    expect(repos.agentEndpoints.getByAgent('beta')?.receiverExpiresAt).toBeNull();
+  });
+
   it('keeps a live watcher running through transient SQLite contention', async () => {
     registerPullEndpoint(repos, 'beta', 'gemini');
     send(repos, 'wake up after contention', 'monitor-busy');

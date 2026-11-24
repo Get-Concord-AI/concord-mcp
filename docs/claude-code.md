@@ -97,13 +97,21 @@ Concord works around both halves of that:
 - **Identity.** Every SessionStart hook records which agent the client now
   hosts (`session_bindings`). The monitor consults it on each poll, so a
   monitor that survives a `/resume` or `/clear` keeps draining the _live_
-  session's inbox instead of the abandoned one.
+  session's inbox instead of the abandoned one. On a machine linked to
+  Concord Cloud (`concord cloud link`), identity stays environment-based —
+  session bindings are local — so this correction does not apply there.
 - **Reachability.** While no receiver heartbeat is live, the Stop hook's
   `asyncRewake` waiter steps in and wakes the idle session with the next
   message, then stands down once a monitor is back. A monitor that exits
   cleanly drops its heartbeat at once (`concord inbox release`), so the
   fallback can arm without waiting out the lease; only a killed monitor
   leaves it to expire on its own (~10s).
+
+One gap remains: a session that lands at the prompt right after a `/resume`
+with no live monitor gets no waiter until its first turn ends — SessionStart
+only registers and observes, and the fallback arms at Stop. A message sent in
+that window waits for the user's first turn (or a manual
+`concord inbox drain --provider claude-code`).
 
 If messages still do not arrive, check `concord inbox status` from the repo:
 a workspace that is not Concord-enabled exits the monitor silently by design.

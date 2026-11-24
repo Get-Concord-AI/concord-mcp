@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,6 +8,7 @@ import { z } from 'zod';
 
 import {
   claimWaiter,
+  defaultWaiterDir,
   hostsRewake,
   renderRewake,
   REWAKE_HEADER,
@@ -109,6 +111,36 @@ describe('asyncRewake waiter for SDK-hosted Claude Code', () => {
     claimWaiter('claude-code:4f2a91c7', 'token-2', dir);
 
     await expect(stopped).resolves.toBeUndefined();
+  });
+
+  it('claims under the user Concord dir by default, not the shared temp dir', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-home-'));
+    expect(defaultWaiterDir({ HOME: home, USERPROFILE: home })).toBe(
+      join(home, '.concord', 'concord-rewake'),
+    );
+  });
+
+  it('never writes a claim through a planted symlink', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'concord-rewake-'));
+    const target = join(dir, 'target.txt');
+    writeFileSync(target, 'untouched');
+    const agentId = 'claude-code:symlink01';
+    // Plant what an attacker in a shared dir could: a symlink at the
+    // predictable claim path pointing at a file of their choosing.
+    const key = createHash('sha256').update(agentId).digest('hex').slice(0, 16);
+    const claim = join(dir, `${key}.waiter`);
+    try {
+      symlinkSync(target, claim, 'file');
+    } catch {
+      // Windows without developer mode cannot create file symlinks.
+      return;
+    }
+
+    claimWaiter(agentId, 'token-1', dir);
+
+    expect(readFileSync(target, 'utf8')).toBe('untouched');
+    expect(lstatSync(claim).isSymbolicLink()).toBe(false);
+    expect(readFileSync(claim, 'utf8').trim()).toBe('token-1');
   });
 });
 

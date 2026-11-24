@@ -138,23 +138,44 @@ describe('resolveLiveAgent', () => {
     expect(walk).not.toHaveBeenCalled();
   });
 
-  it('honours the skipBinding seam used by callers that already hold live truth', () => {
+  it('never probes past the first non-shell ancestor', () => {
     repos = freshRepos();
     registerAgent(repos, LIVE_AGENT);
-    repos.sessionBindings.upsert(CLIENT_PID, LIVE_AGENT, KIND);
-    const walk = vi.fn(() => [{ pid: CLIENT_PID, name: 'claude' }]);
-
-    const result = resolveLiveAgent(
+    // The client is the first non-shell ancestor; anything deeper hosts
+    // another client's session — here, a binding only the outer client has.
+    repos.sessionBindings.upsert(30, LIVE_AGENT, KIND);
+    const outerOnly = resolveLiveAgent(
       repos,
       undefined,
       ENV,
       REPO_ROOT,
       IDENTITY_OPTIONS,
-      liveDeps({ ancestors: walk, skipBinding: true }),
+      liveDeps({
+        ancestors: () => [
+          { pid: 10, name: 'sh' },
+          { pid: 20, name: 'claude' },
+          { pid: 30, name: 'claude' },
+        ],
+      }),
     );
+    expect(outerOnly).toEqual({ agentId: SPAWN_AGENT, drifted: false });
 
-    expect(result).toEqual({ agentId: SPAWN_AGENT, drifted: false });
-    expect(walk).not.toHaveBeenCalled();
+    repos.sessionBindings.upsert(20, LIVE_AGENT, KIND);
+    const bound = resolveLiveAgent(
+      repos,
+      undefined,
+      ENV,
+      REPO_ROOT,
+      IDENTITY_OPTIONS,
+      liveDeps({
+        ancestors: () => [
+          { pid: 10, name: 'sh' },
+          { pid: 20, name: 'claude' },
+          { pid: 30, name: 'claude' },
+        ],
+      }),
+    );
+    expect(bound).toEqual({ agentId: LIVE_AGENT, drifted: true });
   });
 
   it('rejects an explicit agent that disagrees with the live session', () => {
@@ -260,6 +281,42 @@ describe('resolveLiveAgent', () => {
     resolveLiveAgent(repos, undefined, secondMonitor, REPO_ROOT, IDENTITY_OPTIONS, deps);
 
     expect(walk).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reuse a cache entry when a new monitor lands on a recycled pid', () => {
+    repos = freshRepos();
+    registerAgent(repos, LIVE_AGENT);
+    repos.sessionBindings.upsert(CLIENT_PID, LIVE_AGENT, KIND);
+    const walk = vi.fn(() => [{ pid: CLIENT_PID, name: 'claude' }]);
+    const deps = liveDeps({ ancestors: walk });
+    // Same exported pid, different launch: the start time alone must split
+    // the cache key, or the new monitor inherits the old one's ancestry and
+    // freshness floor.
+    const firstMonitor = {
+      ...ENV,
+      CONCORD_MONITOR_PID: '777',
+      CONCORD_MONITOR_STARTED_AT: String(Date.now() - 120_000),
+    };
+    const secondMonitor = {
+      ...ENV,
+      CONCORD_MONITOR_PID: '777',
+      CONCORD_MONITOR_STARTED_AT: String(Date.now() - 60_000),
+    };
+
+    resolveLiveAgent(repos, undefined, firstMonitor, REPO_ROOT, IDENTITY_OPTIONS, deps);
+    const second = resolveLiveAgent(
+      repos,
+      undefined,
+      secondMonitor,
+      REPO_ROOT,
+      IDENTITY_OPTIONS,
+      deps,
+    );
+
+    expect(walk).toHaveBeenCalledTimes(2);
+    // The binding was written "now" — after both monitor starts — so the
+    // second monitor still adopts it through its own fresh walk.
+    expect(second).toEqual({ agentId: LIVE_AGENT, drifted: true });
   });
 
   it("takes the monitor start time as the freshness floor, not each drain's", () => {

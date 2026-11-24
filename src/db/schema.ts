@@ -306,4 +306,10 @@ export const migrations: readonly string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  // 020 — which monitor instance holds the receiver lease. Only the process
+  // that keeps heartbeating the lease may clear it, so a stale watcher's
+  // teardown cannot drop a replacement monitor's receiver after a /resume.
+  `
+  ALTER TABLE agent_endpoints ADD COLUMN receiver_owner TEXT;
+  `,
 ];

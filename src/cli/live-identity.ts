@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { z } from 'zod';
@@ -15,6 +15,7 @@ import {
   type ResolveIdentityOptions,
 } from '../domain/identity.js';
 import { ancestorChain, type AncestorProcess } from '../parent-chain.js';
+import { isShellWrapper } from './session-binding.js';
 
 /**
  * The CLI's view of the live session, for commands that outlive a `/resume`.
@@ -28,7 +29,13 @@ import { ancestorChain, type AncestorProcess } from '../parent-chain.js';
  * surviving monitor keeps serving the session that is actually live.
  */
 
-/** How far up the process tree a CLI command looks for its bound client. */
+/**
+ * How far up the process tree a CLI command looks for its bound client. The
+ * walk stops at the first ancestor that is not a shell wrapper — the client
+ * itself — the same boundary `recordClientBinding` writes to, so a session
+ * started from another client's shell can never adopt the outer session's
+ * binding while its own is still unrecorded.
+ */
 const LIVE_BINDING_DEPTH = 6;
 /**
  * How long "no ancestor carries a binding" stands before the process table is
@@ -53,13 +60,16 @@ const MONITOR_STARTED_AT_ENV = 'CONCORD_MONITOR_STARTED_AT';
  * resumed session's replacement — must never reuse the first one's ancestry.
  */
 const MONITOR_PID_ENV = 'CONCORD_MONITOR_PID';
+/**
+ * One random token per monitor launch, exported by watch-inbox.sh next to the
+ * pid and start time. Pids get recycled; the token cannot be.
+ */
+const MONITOR_TOKEN_ENV = 'CONCORD_MONITOR_TOKEN';
 
 /** Test seams: which ancestors to probe and where the discovery cache lives. */
 export interface LiveIdentityDeps {
   ancestors?: () => AncestorProcess[];
   cacheDir?: string;
-  /** The invocation already carries live session truth (a hook payload). */
-  skipBinding?: boolean;
   now?: () => number;
 }
 
@@ -107,13 +117,35 @@ function monitorStartedAtMs(env: NodeJS.ProcessEnv, deps: LiveIdentityDeps): num
 }
 
 /**
- * Which monitor this invocation serves: the id watch-inbox.sh exports, or the
- * parent pid — which is what determines the ancestor chain anyway — for a
- * long-lived `inbox watch` and for drains nothing spawned on a monitor's behalf.
+ * Which monitor this invocation serves: the per-launch token watch-inbox.sh
+ * exports, else the exported pid plus start time, else this process's own
+ * pid and start — which is what determines the ancestor chain anyway — for a
+ * long-lived `inbox watch` and for drains nothing spawned on a monitor's
+ * behalf. The pid alone is not enough: pids get recycled, and a new monitor
+ * inheriting a dead one's cache entry would adopt its ancestry *and* its
+ * freshness floor.
  */
-function monitorKey(env: NodeJS.ProcessEnv): string {
-  const exported = env[MONITOR_PID_ENV]?.trim();
-  return exported !== undefined && exported !== '' ? exported : `ppid-${String(process.ppid)}`;
+/**
+ * The `self:` instance id, computed once: its floor mixes the wall clock
+ * with process uptime, so recomputing it per call can tick between polls —
+ * and under a mocked clock it ticks every call, splitting the cache key.
+ */
+let selfInstanceIdMemo: string | undefined;
+
+function selfInstanceId(deps: LiveIdentityDeps): string {
+  selfInstanceIdMemo ??= `self:${String(process.pid)}:${String(Math.floor(processStartedAtMs(deps)))}`;
+  return selfInstanceIdMemo;
+}
+
+export function monitorInstanceId(env: NodeJS.ProcessEnv, deps: LiveIdentityDeps = {}): string {
+  const token = env[MONITOR_TOKEN_ENV]?.trim();
+  if (token !== undefined && token !== '') return `token:${token}`;
+  const pid = env[MONITOR_PID_ENV]?.trim();
+  const started = env[MONITOR_STARTED_AT_ENV]?.trim();
+  if ((pid !== undefined && pid !== '') || (started !== undefined && started !== '')) {
+    return `env:${pid ?? ''}:${started ?? ''}`;
+  }
+  return selfInstanceId(deps);
 }
 
 /**
@@ -144,6 +176,9 @@ function readAncestorCache(dir: string, key: string): AncestorCache | undefined 
   }
 }
 
+/** Cache entries older than this are swept on the next write. */
+const ANCESTOR_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
 function writeAncestorCache(
   dir: string,
   key: string,
@@ -161,22 +196,47 @@ function writeAncestorCache(
         walkedAt: new Date(walkedAtMs).toISOString(),
       }),
     );
+    // One file per repo/agent/monitor key would otherwise accumulate forever.
+    const cutoff = walkedAtMs - ANCESTOR_CACHE_TTL_MS;
+    for (const entry of readdirSync(dir)) {
+      if (!entry.endsWith('.json')) continue;
+      const file = join(dir, entry);
+      try {
+        if (statSync(file).mtimeMs < cutoff) rmSync(file, { force: true });
+      } catch {
+        // A file that vanished or cannot be stat'ed is not worth failing over.
+      }
+    }
   } catch {
     // The cache is best-effort: a missed write costs one extra ancestor walk.
   }
 }
 
 /**
- * This process's ancestors, nearest first. Walked once per cache period: on
- * Windows each level is a `powershell` spawn, too expensive to pay per poll.
- * The full list is kept — not just the bound pid — so a binding recorded for
- * any of them later is found by the cheap per-poll lookups.
+ * This process's ancestors, nearest first, up to and including the first
+ * that is not a shell wrapper — the bound client. Anything deeper hosts
+ * other clients' sessions, so it is never probed. Walked once per cache
+ * period: on Windows each level is a `powershell` spawn, too expensive to
+ * pay per poll. The full list is kept — not just the bound pid — so a
+ * binding recorded for any of them later is found by the cheap per-poll
+ * lookups.
  */
+function boundAncestors(ancestors: readonly AncestorProcess[]): AncestorProcess[] {
+  const bound: AncestorProcess[] = [];
+  for (const ancestor of ancestors) {
+    bound.push(ancestor);
+    if (!isShellWrapper(ancestor.name)) break;
+  }
+  return bound;
+}
+
 function discoverAncestors(deps: LiveIdentityDeps): number[] {
   if (deps.ancestors !== undefined) {
-    return deps.ancestors().map((ancestor) => ancestor.pid);
+    return boundAncestors(deps.ancestors()).map((ancestor) => ancestor.pid);
   }
-  return ancestorChain(LIVE_BINDING_DEPTH, process.ppid).map((ancestor) => ancestor.pid);
+  return ancestorChain(LIVE_BINDING_DEPTH, process.ppid, (a) => !isShellWrapper(a.name)).map(
+    (ancestor) => ancestor.pid,
+  );
 }
 
 /** A binding only counts when written while this monitor lived and its agent exists. */
@@ -226,10 +286,12 @@ function discoverBinding(
   deps: LiveIdentityDeps,
 ): SessionBinding | undefined {
   const dir = cacheDirFor(deps);
-  // Scoped to this monitor: another client's monitor for the same agent must
-  // walk its own ancestry, never inherit a dead client's cached pids. The v2
-  // tag retires entries written before the key carried the monitor.
-  const key = `${repoRoot}\n${envIdentity.agentId}\n${monitorKey(env)}\nv2`;
+  // Scoped to this monitor *instance*: another client's monitor for the same
+  // agent must walk its own ancestry, never inherit a dead client's cached
+  // pids — and a recycled pid must not hand a new monitor the old one's
+  // ancestor list and freshness floor either. The v3 tag retires entries
+  // written before the key carried the launch identity.
+  const key = `${repoRoot}\n${envIdentity.agentId}\n${monitorInstanceId(env, deps)}\nv3`;
   const cached = readAncestorCache(dir, key);
   const startedAtMs = cached?.startedAtMs ?? monitorStartedAtMs(env, deps);
   const at = nowMs(deps);
@@ -264,8 +326,7 @@ function liveIdentityFor(
   if (
     envIdentity === undefined ||
     envIdentity.origin === 'operator' ||
-    options.hookPayload !== undefined ||
-    deps.skipBinding === true
+    options.hookPayload !== undefined
   ) {
     return { identity: envIdentity, drifted: false };
   }
