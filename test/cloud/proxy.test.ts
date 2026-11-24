@@ -272,6 +272,38 @@ describe('the cloud proxy', () => {
     }
   });
 
+  it('keeps the session worktree root when workspace_id names its repository', async () => {
+    const primary = mkdtempSync(join(tmpdir(), 'concord-primary-'));
+    const worktree = mkdtempSync(join(tmpdir(), 'concord-worktree-'));
+    mkdirSync(join(primary, '.git'));
+    mkdirSync(join(worktree, '.git'));
+    const worktreeSession: CloudSession = {
+      ...session,
+      repoRoot: primary,
+      checkoutRoot: worktree,
+    };
+    const routed = createCloudProxyServer(worktreeSession, (target) => connectCloud(target));
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await routed.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    try {
+      const result = await harness.callTool({
+        name: 'inspect_work',
+        arguments: {
+          workspace_id: workspaceIdForRoot(primary),
+          expected_files: [join(worktree, 'src', 'b.ts')],
+        },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(cloud.calls.at(-1)).toMatchObject({ expected_files: ['src/b.ts'] });
+    } finally {
+      await harness.close();
+      await routed.close();
+    }
+  });
+
   it('refuses a workspace_id outside CONCORD_ALLOWED_ROOTS', async () => {
     const allowed = mkdtempSync(join(tmpdir(), 'concord-allowed-'));
     const other = mkdtempSync(join(tmpdir(), 'concord-denied-repo-'));

@@ -159,7 +159,9 @@ function routeForArgs(
   return {
     projectKey: cloudProjectKeyForRoot(root, session.machineKey),
     repoRoot: root,
-    checkoutRoot: root,
+    // The same repository keeps the session's own checkout: a server running
+    // in a linked worktree must still relativize paths inside that worktree.
+    checkoutRoot: root === session.repoRoot ? session.checkoutRoot : root,
   };
 }
 
