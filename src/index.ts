@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   // Adapter repair is an independent child command and runs in either mode.
   const adapterCheck = startBackgroundAdapterCheck(identity, process.env);
   if (cloud !== undefined) {
-    const proxy = createCloudProxyServer(cloud, () => connectCloud(cloud));
+    const proxy = createCloudProxyServer(cloud, connectCloud);
     await proxy.connect(new StdioServerTransport());
     return;
   }

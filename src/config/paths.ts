@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 
 /** Directory name that holds all Concord state within a repo. */
 export const CONCORD_DIR = '.concord';
@@ -138,8 +138,7 @@ export function workspaceIdForRoot(repoRoot: string): string {
   return `${WORKSPACE_ID_PREFIX}${Buffer.from(canonicalPath(repoRoot), 'utf8').toString('base64url')}`;
 }
 
-/** Decode and validate a workspace id returned by `workspaceIdForRoot`. */
-export function workspaceRootFromId(workspaceId: string): string {
+function decodeWorkspaceId(workspaceId: string): string {
   if (!workspaceId.startsWith(WORKSPACE_ID_PREFIX)) {
     throw new Error(`Invalid workspace id: ${workspaceId}`);
   }
@@ -152,7 +151,40 @@ export function workspaceRootFromId(workspaceId: string): string {
   ) {
     throw new Error(`Invalid workspace id: ${workspaceId}`);
   }
-  return resolveExplicitRepoRoot(decoded);
+  return decoded;
+}
+
+/** Decode and validate a workspace id returned by `workspaceIdForRoot`. */
+export function workspaceRootFromId(workspaceId: string): string {
+  return resolveExplicitRepoRoot(decodeWorkspaceId(workspaceId));
+}
+
+/**
+ * The checkout a workspace id names, without collapsing a linked worktree to
+ * its primary root — or undefined when the id is not a Concord workspace id.
+ * File paths an agent passes live inside that checkout, so callers that
+ * relativize them need the worktree path `workspaceRootFromId` would lose.
+ */
+export function workspaceCheckoutPath(workspaceId: string): string | undefined {
+  try {
+    return decodeWorkspaceId(workspaceId);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The `CONCORD_ALLOWED_ROOTS` allowlist as written: undefined when unset or
+ * blank, else the trimmed non-empty entries — possibly an empty list, which
+ * denies every workspace, exactly as `WorkspaceManager` treats it.
+ */
+export function allowedRootsFromEnv(env: NodeJS.ProcessEnv): string[] | undefined {
+  const raw = env['CONCORD_ALLOWED_ROOTS'];
+  if (raw === undefined || raw.trim() === '') return undefined;
+  return raw
+    .split(delimiter)
+    .map((root) => root.trim())
+    .filter((root) => root !== '');
 }
 
 /** Absolute path to the `.concord/` directory for a given repo root. */
