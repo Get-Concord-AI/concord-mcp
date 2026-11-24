@@ -169,17 +169,54 @@ function concordEntry(
   command: string,
 ): { end: number; tail: number } | undefined {
   const tail = tableEnd(lines, entry);
-  // Concord's comment lines, such as the end marker, are never part of its entry.
-  const marker = lines.findIndex(
-    (line, index) => index > entry && index < tail && isConcordComment(line),
+  const values = lines.slice(entry + 1, tail).map(stringEntry);
+  const typeAt = values.findIndex((value) => value?.key === 'type' && value.value === 'command');
+  const commandAt = values.findIndex(
+    (value) => value?.key === 'command' && value.value === command,
   );
-  const end = marker === -1 ? tail : marker;
+  if (typeAt === -1 || commandAt === -1) return undefined;
 
-  const values = lines.slice(entry + 1, end).map(stringEntry);
-  const ours =
-    values.some((value) => value?.key === 'type' && value.value === 'command') &&
-    values.some((value) => value?.key === 'command' && value.value === command);
-  return ours ? { end, tail } : undefined;
+  // The first of Concord's comment lines after its keys, such as the end marker, ends the entry.
+  const keys = entry + 1 + Math.max(typeAt, commandAt);
+  const marker = lines.findIndex(
+    (line, index) => index > keys && index < tail && isConcordComment(line),
+  );
+  return { end: marker === -1 ? tail : marker, tail };
+}
+
+const KEY_LINE = /^\s*((?:[\w-]+|"[^"]*"|'[^']*')(?:\s*\.\s*(?:[\w-]+|"[^"]*"|'[^']*'))*)\s*=/u;
+
+function lineKey(line: TomlLine): string | undefined {
+  if (line.inString) return undefined;
+  const key = KEY_LINE.exec(line.text)?.[1];
+  return key === undefined ? undefined : tomlKeyPath(key);
+}
+
+/**
+ * Lines carried from repeated Concord blocks, merged into the one table they now
+ * share: a key set twice keeps its first value. Codex ignores these keys inside a
+ * hook, but a repeated key would stop it loading the file at all.
+ */
+function mergeCarried(lines: readonly TomlLine[]): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  let pending: string[] = [];
+  let dropping = false;
+  for (const line of lines) {
+    // Comments and blank lines go with what follows them.
+    if (isDecoration(line)) {
+      pending.push(line.text);
+      continue;
+    }
+    const key = lineKey(line);
+    if (key !== undefined) {
+      dropping = seen.has(key);
+      seen.add(key);
+    }
+    if (!dropping) merged.push(...pending, line.text);
+    pending = [];
+  }
+  return [...merged, ...pending];
 }
 
 /** A `[[hooks.<event>]]` group, and the entries TOML attaches to it. */
@@ -268,19 +305,24 @@ function stripConcordHooks(source: string): {
   const lines = [...tomlLines(source)];
   const found = concordHookLines(lines);
   const kept: TomlLine[] = [];
-  const carried: string[] = [];
+  const carried: TomlLine[] = [];
   let spot: number | undefined;
   let carriedAt: number | undefined;
   for (const [index, line] of lines.entries()) {
     if (index === found.spot) spot = kept.length;
     if (found.carried.has(index)) {
       carriedAt ??= kept.length;
-      carried.push(line.text);
+      carried.push(line);
     } else if (!found.removed.has(index) && !isConcordComment(line)) {
       keepLine(kept, line);
     }
   }
-  return { lines: kept.map((line) => line.text), spot, carried, carriedAt };
+  return {
+    lines: kept.map((line) => line.text),
+    spot,
+    carried: mergeCarried(carried),
+    carriedAt,
+  };
 }
 
 /** `lines` joined, without blank lines at either end. */

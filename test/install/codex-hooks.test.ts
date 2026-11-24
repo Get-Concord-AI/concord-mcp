@@ -391,4 +391,28 @@ command = "my-session-hook"
     expect(result).toContain(`${END}\n${after}\n`);
     expect(setup(result)).toBe(result);
   });
+
+  it('recognizes a hook with a marker between its keys', () => {
+    const drifted = BLOCK.replace(
+      `type = "command"\ncommand = "${STOP}"`,
+      `type = "command"\n${BEGIN}\ncommand = "${STOP}"`,
+    );
+
+    expectConcordOnce(upsertCodexHooks(`${drifted}\n`));
+  });
+
+  it.each([
+    ['the same line', 'model = "o3"', 'model = "o3"', 'model = "o3"'],
+    ['different values', 'model = "o3"', 'model = "o4"', 'model = "o3"'],
+    ['the same multi-line value', 'arr = [\n  "a",\n]', 'arr = [\n  "a",\n]', 'arr = [\n  "a",\n]'],
+  ])('merges repeated blocks followed by %s into one valid table', (_, first, second, kept) => {
+    const repeated = `${BLOCK}\n${first}\n\n[tui]\nalt_screen = true\n\n${BLOCK}\n${second}\n`;
+
+    const result = upsertCodexHooks(repeated);
+
+    expectConcordOnce(result);
+    expect(result).toContain(`${END}\n${kept}\n`);
+    expect(result.split('\n').filter((line) => /^(model|arr) =/u.test(line))).toHaveLength(1);
+    expect(upsertCodexHooks(result)).toBe(result);
+  });
 });
