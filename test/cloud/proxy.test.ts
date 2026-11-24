@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -150,6 +150,21 @@ function fakeCloud(): {
   return { server, requests, calls };
 }
 
+/**
+ * A linked worktree of `primary` laid out the way git lays it out: `.git` is
+ * a pointer file into the primary's gitdir, whose `commondir` leads back to
+ * `primary/.git` — the metadata `findRepoRoot` follows to the primary root.
+ */
+function linkedWorktreeOf(primary: string): string {
+  const worktree = mkdtempSync(join(tmpdir(), 'concord-linked-'));
+  const gitDir = join(primary, '.git', 'worktrees', 'linked');
+  mkdirSync(gitDir, { recursive: true });
+  writeFileSync(join(gitDir, 'commondir'), '../..\n');
+  writeFileSync(join(gitDir, 'gitdir'), `${join(worktree, '.git')}\n`);
+  writeFileSync(join(worktree, '.git'), `gitdir: ${gitDir}\n`);
+  return worktree;
+}
+
 describe('the cloud proxy', () => {
   const cloud = fakeCloud();
   let session: CloudSession;
@@ -274,15 +289,17 @@ describe('the cloud proxy', () => {
 
   it('keeps the session worktree root when workspace_id names its repository', async () => {
     const primary = mkdtempSync(join(tmpdir(), 'concord-primary-'));
-    const worktree = mkdtempSync(join(tmpdir(), 'concord-worktree-'));
     mkdirSync(join(primary, '.git'));
-    mkdirSync(join(worktree, '.git'));
+    const worktree = linkedWorktreeOf(primary);
+    const canonicalPrimary = realpathSync(primary);
     const worktreeSession: CloudSession = {
       ...session,
-      repoRoot: primary,
+      repoRoot: canonicalPrimary,
       checkoutRoot: worktree,
     };
-    const routed = createCloudProxyServer(worktreeSession, (target) => connectCloud(target));
+    const routed = createCloudProxyServer(worktreeSession, (target) => connectCloud(target), {
+      CONCORD_ALLOWED_ROOTS: primary,
+    });
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await routed.connect(serverSide);
     const harness = new Client({ name: 'harness', version: '0.0.0' });
@@ -297,7 +314,23 @@ describe('the cloud proxy', () => {
         },
       });
       expect(result.isError).toBeFalsy();
+      // The primary checkout names the project the call lands in.
+      expect(cloud.requests.at(-1)).toMatchObject({
+        'x-concord-project': machineProjectKey('machine-1', canonicalPrimary),
+      });
+      // ...while paths still relativize against the session's worktree.
       expect(cloud.calls.at(-1)).toMatchObject({ expected_files: ['src/b.ts'] });
+
+      // The same allowlist the local workspace manager enforces applies here:
+      // a workspace outside CONCORD_ALLOWED_ROOTS is denied, not rerouted.
+      const other = mkdtempSync(join(tmpdir(), 'concord-other-'));
+      mkdirSync(join(other, '.git'));
+      const blocked = await harness.callTool({
+        name: 'inspect_work',
+        arguments: { workspace_id: workspaceIdForRoot(other) },
+      });
+      expect(blocked.isError).toBe(true);
+      expect(JSON.stringify(blocked.content)).toContain('not allowed');
     } finally {
       await harness.close();
       await routed.close();
@@ -306,9 +339,10 @@ describe('the cloud proxy', () => {
 
   it('routes paths inside a linked worktree the workspace_id names', async () => {
     const primary = mkdtempSync(join(tmpdir(), 'concord-primary-'));
-    const worktree = mkdtempSync(join(tmpdir(), 'concord-linked-'));
     mkdirSync(join(primary, '.git'));
-    mkdirSync(join(worktree, '.git'));
+    const worktree = linkedWorktreeOf(primary);
+    const canonicalPrimary = realpathSync(primary);
+    const canonicalWorktree = realpathSync(worktree);
     // The server started at the primary checkout; the hook named the worktree.
     const routed = createCloudProxyServer(session, (target) => connectCloud(target));
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -321,11 +355,15 @@ describe('the cloud proxy', () => {
         name: 'inspect_work',
         arguments: {
           workspace_id: workspaceIdForRoot(worktree),
-          expected_files: [join(worktree, 'src', 'c.ts')],
+          expected_files: [join(canonicalWorktree, 'src', 'c.ts')],
         },
       });
       expect(result.isError).toBeFalsy();
-      // The worktree path relativizes against the worktree, not the primary root.
+      // The worktree's primary checkout names the project...
+      expect(cloud.requests.at(-1)).toMatchObject({
+        'x-concord-project': machineProjectKey('machine-1', canonicalPrimary),
+      });
+      // ...while the worktree path relativizes against the worktree itself.
       expect(cloud.calls.at(-1)).toMatchObject({ expected_files: ['src/c.ts'] });
     } finally {
       await harness.close();
