@@ -145,10 +145,16 @@ function clineIdentity(payload: ClinePayload, env: NodeJS.ProcessEnv): AgentIden
   return { agentId: agentIdForSession('cline', taskId), kind: 'cline', origin: 'hook' };
 }
 
-/** Cline reads a JSON control object; `contextModification` is added to context. */
+/**
+ * Cline reads a JSON control object; `contextModification` is added to
+ * context. `cancel` is optional in the contract, but emitting it explicitly
+ * keeps an empty hook from ever looking malformed to a stricter parser.
+ */
 function hookOutput(contextModification: string | undefined): string {
-  if (contextModification === undefined || contextModification === '') return '{}';
-  return JSON.stringify({ contextModification });
+  if (contextModification === undefined || contextModification === '') {
+    return JSON.stringify({ cancel: false });
+  }
+  return JSON.stringify({ cancel: false, contextModification });
 }
 
 function inboxOutput(messages: readonly DeliverableMessage[]): string {
@@ -229,7 +235,7 @@ export function handleLocalClineHook(
         }
         const pending = repos.agentMessages.listPendingForRecipient(identity.agentId).length;
         return pending === 0
-          ? '{}'
+          ? hookOutput(undefined)
           : hookOutput(
               `${String(pending)} Concord message(s) wait in your inbox. ` +
                 `Run \`concord inbox drain --agent ${identity.agentId} --provider cline\` to read them.`,
@@ -270,7 +276,7 @@ export async function handleCloudClineHook(
         if (surface !== 'sdk') {
           await registerInCloud(runtime, identity.agentId, 'cline', cwd);
         }
-        return '{}';
+        return hookOutput(undefined);
       }
       return inboxOutput(await drainFromCloud(runtime, identity.agentId, 'cline'));
   }
@@ -291,7 +297,7 @@ export async function runClineHook(
   const identity = clineIdentity(payload, env);
   if (identity === undefined) {
     return event === 'cline-user-prompt-submit'
-      ? '{}'
+      ? hookOutput(undefined)
       : hookOutput(`Concord: ${UNRESOLVED_IDENTITY_MESSAGE}`);
   }
   const repoRoot = clineWorkspace(rawJson);
@@ -302,7 +308,7 @@ export async function runClineHook(
   const access = cloudAccess(repoRoot, { timeoutMs: HOOK_TIMEOUT_MS }, projectEnv);
   if (access.kind === 'unusable') {
     process.stderr.write(`Concord Cloud could not be reached: ${access.reason}\n`);
-    return '{}';
+    return hookOutput(undefined);
   }
   if (access.kind === 'local') {
     try {
@@ -317,7 +323,7 @@ export async function runClineHook(
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       process.stderr.write(`Concord could not open the local workspace: ${detail}\n`);
-      return '{}';
+      return hookOutput(undefined);
     }
   }
   try {
@@ -325,6 +331,6 @@ export async function runClineHook(
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     process.stderr.write(`Concord Cloud could not be reached: ${detail}\n`);
-    return '{}';
+    return hookOutput(undefined);
   }
 }

@@ -35,7 +35,7 @@
         <mxCell id="w1" value="D1 · Global MCP entry&#10;mcpServers.concord = { command: concord-mcp,&#10;env: { CONCORD_AGENT_KIND: 'cline' } }&#10;+ preserve unrelated servers/keys" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
           <mxGeometry x="40" y="235" width="290" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="w2" value="D2 · Repo rules file&#10;.cline/rules/concord.md  (vs .clinerules/ vs both)&#10;+ instructions: agent_id, workspace_id, pull-only inbox" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+        <mxCell id="w2" value="D2 · Repo rules file&#10;.cline/rules/concord.md  (.clinerules honored when present)&#10;+ instructions: agent_id, workspace_id, pull-only inbox" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
           <mxGeometry x="40" y="330" width="290" height="80" as="geometry" />
         </mxCell>
         <mxCell id="w3" value="D3 · Lifecycle hooks (optional)&#10;.cline/hooks/TaskStart + UserPromptSubmit&#10;→ cline:&lt;hash(taskId)&gt; identity + busy-turn inbox inject&#10;(vs none / global ~/.cline/hooks)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">

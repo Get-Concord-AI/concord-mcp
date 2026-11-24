@@ -364,7 +364,7 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
       background: false,
       verified: false,
     },
-    installedCapabilities: ['pull', 'steer', 'busy'],
+    installedCapabilities: ['pull', 'busy'],
     installedDetail:
       'Cline is registered with Concord through its global MCP settings; lifecycle hooks register each task and, in the VS Code extension, inject inbox messages on prompt submit. CLI sessions pull from the durable inbox; idle wake-up is not verified.',
     unsupportedDetail: 'Cline lifecycle hooks and MCP settings need Cline v3.0.0 or newer.',

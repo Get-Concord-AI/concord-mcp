@@ -125,8 +125,7 @@ For
 [Kiro](./docs/kiro.md), it writes `.kiro/settings/mcp.json`,
 `.kiro/hooks/concord.json`, and `.kiro/steering/concord.md`. For
 [Cline](./docs/cline.md), it registers the server in Cline's global MCP
-settings and installs global lifecycle hooks plus `.clinerules/` and
-`.cline/rules/` guidance. It also writes
+settings and installs global lifecycle hooks plus `.cline/rules/` guidance. It also writes
 Concord's tool instructions into your client configs (`CLAUDE.md`, `AGENTS.md`,
 `.codex/`, `.cursor/rules/`). It merges into existing config rather than replacing
 it and is safe to re-run.

@@ -206,6 +206,10 @@ function clineHookContent(spec: ClineHookSpec): string {
   if (process.platform === 'win32') {
     return (
       `# ${CLINE_HOOK_MARKER}\n` +
+      // PS 5.1 pipes strings to native commands with $OutputEncoding, which
+      // defaults to ASCII; the console encodings are left alone because their
+      // setters throw when the streams are redirected, as they are here.
+      '$OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n' +
       '$payload = [Console]::In.ReadToEnd()\n' +
       `$payload | & concord hook ${spec.event}\n`
     );

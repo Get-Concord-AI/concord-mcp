@@ -776,7 +776,7 @@ describe('global harness adapters', () => {
       expect(entry).toMatchObject({
         detected: true,
         status: 'installed',
-        capabilities: ['pull', 'steer', 'busy'],
+        capabilities: ['pull', 'busy'],
       });
 
       const mcp = z

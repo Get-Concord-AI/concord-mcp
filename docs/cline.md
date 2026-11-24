@@ -1,10 +1,10 @@
 # Cline
 
-Concord supports Cline — the CLI (`cline`), the VS Code extension, and
-JetBrains surfaces, which all share one configuration. Run `concord setup` in
-a repository and Cline gets the five Concord workflow tools, always-on rules,
-and global lifecycle hooks that register each task and deliver peer messages
-into a running turn.
+Concord supports Cline — the CLI (`cline`) and the VS Code extension, which
+share one configuration (JetBrains surfaces are unverified). Run
+`concord setup` in a repository and Cline gets the five Concord workflow
+tools, always-on rules, and global lifecycle hooks that register each task
+and deliver peer messages on the next prompt in the VS Code extension.
 
 Cline is detected from `cline` on `PATH`, an existing `~/.cline` or
 `Cline` directory under the OS Documents folder (or `~/Documents`), or a
@@ -24,8 +24,8 @@ registration is user-level:
 | `<Documents>/Cline/Hooks/<Hook>`                 | Lifecycle hooks, read by the extension (and the SDK where it scans)      |
 | `~/Documents/Cline/Hooks/<Hook>`                 | The same hooks for the SDK's own Documents lookup                        |
 | `~/.cline/hooks/<Hook>`                          | The same hooks for SDK/CLI layouts (`CLINE_DIR`-aware)                   |
-| `.clinerules/concord.md`                         | Concord workflow rules (repository, written by `concord setup`)          |
-| `.cline/rules/concord.md`                        | The same rules for the newer rules directory (repository)                |
+| `.cline/rules/concord.md`                        | Concord workflow rules (repository, written by `concord setup`)          |
+| `.clinerules/concord.md` or `.clinerules`        | The same rules when the repo already uses the legacy layout              |
 | `~/.cline/rules/concord.md`                      | User-level rules when global mode is on (SDK/CLI global rules dir)       |
 | `<Documents>/Cline/Rules/concord.md`             | The same rules where the extension and SDK resolvers look                |
 
@@ -35,7 +35,10 @@ folder redirection), `xdg-user-dir DOCUMENTS` on Linux, `~/Documents` as
 the fallback — plus the literal `~/Documents` the SDK resolver scans.
 `CONCORD_DOCUMENTS_DIR` overrides the lookup. The settings path honors
 `CLINE_MCP_SETTINGS_PATH`, `CLINE_DATA_DIR`, and `CLINE_DIR`, matching
-Cline's own resolution order.
+Cline's own resolution order. Paths were verified against `cline/cline`
+`main` — including the extension's legacy migration that moves MCP
+settings from VS Code `globalStorage` into this shared file — against
+Cline v3.x; payload parity was checked, not a live extension session.
 
 All files are merged into existing content. Unrelated MCP servers,
 settings, rules, and same-named hooks the user owns are preserved, and

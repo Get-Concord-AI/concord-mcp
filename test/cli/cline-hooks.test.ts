@@ -118,7 +118,7 @@ describe('local Cline hooks', () => {
       'cline-user-prompt-submit',
       'extension',
     );
-    expect(second).toBe('{}');
+    expect(second).toBe('{"cancel":false}');
   });
 
   it('does not drain on the SDK surface, where hook output never reaches the model', () => {
@@ -265,7 +265,7 @@ describe('runClineHook end to end', () => {
       JSON.stringify({ hookName: 'UserPromptSubmit', workspaceRoots: [workspace] }),
       env,
     );
-    expect(prompt).toBe('{}');
+    expect(prompt).toBe('{"cancel":false}');
   });
 
   it('returns an empty control object when the local workspace cannot be opened', async () => {
@@ -279,7 +279,7 @@ describe('runClineHook end to end', () => {
       workspace_roots: [notDir],
     });
 
-    await expect(runClineHook('cline-task-start', payload, env)).resolves.toBe('{}');
+    await expect(runClineHook('cline-task-start', payload, env)).resolves.toBe('{"cancel":false}');
   });
 });
 
