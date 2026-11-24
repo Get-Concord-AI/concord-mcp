@@ -214,6 +214,23 @@ approval_mode = "approve"
     expect(result).toContain(user);
     expect(result).not.toContain('concord');
   });
+
+  it("keeps a user's own concord inbox hook", () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const user = [
+      '[[hooks.Stop]]',
+      '[[hooks.Stop.hooks]]',
+      'type = "command"',
+      'command = "concord inbox watch --mine"',
+    ].join('\n');
+    writeFileSync(codexConfigFile(env), `${user}\n\n${upsertCodexHooks(undefined)}`);
+
+    uninstallCodexConfig(env);
+
+    const result = readFileSync(codexConfigFile(env), 'utf8');
+    expect(result).toContain(user);
+    expect(result).not.toContain('--from-hook');
+  });
 });
 
 describe('removeCodexMcpServer', () => {

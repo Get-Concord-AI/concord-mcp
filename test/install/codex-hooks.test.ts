@@ -56,15 +56,16 @@ describe('upsertCodexHooks', () => {
     expect(result).toContain('command = "concord-mcp"');
   });
 
-  it('replaces a previous block rather than stacking a second one', () => {
-    const stale = upsertCodexHooks(undefined).replace(
+  it("keeps a user's own concord inbox hook", () => {
+    // Only Concord's exact commands are its own, even inside the markers.
+    const edited = upsertCodexHooks(undefined).replace(
       'concord inbox register --from-hook --provider codex',
-      'concord inbox register --old-flag',
+      'concord inbox watch --mine',
     );
-    const result = upsertCodexHooks(stale);
+    const result = upsertCodexHooks(edited);
 
-    expect(result).not.toContain('--old-flag');
-    expect(result.match(/\[\[hooks\.SessionStart\]\]/gu)).toHaveLength(1);
+    expect(result).toContain('command = "concord inbox watch --mine"');
+    expect(result.match(/concord inbox register/gu)).toHaveLength(1);
   });
 
   it('migrates exact legacy unfenced hooks without duplicating relay hosts', () => {
@@ -218,5 +219,62 @@ command = "my-session-hook"
     const user = 'developer_instructions = """\nfirst\n\n\nsecond\n"""\n';
 
     expect(upsertCodexHooks(user)).toContain(user);
+  });
+
+  it('keeps a line after the end marker', () => {
+    const result = upsertCodexHooks(`${BLOCK}\nmodel = "o3"\n`);
+
+    expectOneBlock(result);
+    expect(result).toContain('model = "o3"');
+    expect(upsertCodexHooks(result)).toBe(result);
+  });
+
+  it("keeps a user hook whose multi-line command looks like Concord's", () => {
+    const user = [
+      '[[hooks.SessionStart]]',
+      '[[hooks.SessionStart.hooks]]',
+      'type = "command"',
+      'command = """',
+      "sh -c 'echo hi'",
+      'command = "concord inbox register --from-hook --provider codex"',
+      '"""',
+    ].join('\n');
+
+    expect(upsertCodexHooks(`${user}\n`)).toContain(user);
+  });
+
+  it("keeps Concord's command under another event", () => {
+    const user = [
+      '[[hooks.Stop]]',
+      '[[hooks.Stop.hooks]]',
+      'type = "command"',
+      'command = "concord inbox register --from-hook --provider codex"',
+    ].join('\n');
+
+    expect(upsertCodexHooks(`${user}\n`)).toContain(user);
+  });
+
+  it('recognizes headers with trailing comments or extra spaces', () => {
+    const noted = BLOCK.replace('[[hooks.SessionStart]]\n', '[[hooks.SessionStart]] # note\n')
+      .replace('[[hooks.SessionStart.hooks]]', '[[hooks.SessionStart.hooks]]  # note')
+      .replace('[[hooks.Stop.hooks]]', '[[ hooks.Stop.hooks ]]');
+
+    const result = upsertCodexHooks(`${noted}\n`);
+
+    expectOneBlock(result);
+    expect(result).not.toContain('# note');
+    expect(result.match(/--format stop/gu)).toHaveLength(1);
+  });
+
+  it('recognizes keys with trailing comments', () => {
+    const noted = BLOCK.replace(
+      'type = "command"\ncommand = "concord inbox register --from-hook --provider codex"',
+      'type = "command" # note\ncommand = "concord inbox register --from-hook --provider codex" # note',
+    );
+
+    const result = upsertCodexHooks(`${noted}\n`);
+
+    expectOneBlock(result);
+    expect(result.match(/concord inbox register/gu)).toHaveLength(1);
   });
 });

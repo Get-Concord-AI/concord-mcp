@@ -107,55 +107,77 @@ export function upsertCodexMcpServer(existing: string | undefined): string {
 const HOOKS_BEGIN = '# >>> concord hooks >>>';
 const HOOKS_END = '# <<< concord hooks <<<';
 
+/** Concord's Codex hooks: one per event, each with the exact command it runs. */
+const CONCORD_HOOKS = [
+  { event: 'SessionStart', command: 'concord inbox register --from-hook --provider codex' },
+  {
+    event: 'PostToolUse',
+    command: 'concord inbox drain --from-hook --provider codex --format post-tool-use',
+  },
+  { event: 'Stop', command: 'concord inbox drain --from-hook --provider codex --format stop' },
+] as const;
+
 /**
  * Codex passes its session id on stdin rather than in the environment, so every
  * hook reads the payload to work out which agent it is.
  */
-const CONCORD_HOOKS_BLOCK = `${HOOKS_BEGIN}
-# Delivers Concord messages from other agents into this session. Remove this
-# block (markers included) to opt out.
-[[hooks.SessionStart]]
-[[hooks.SessionStart.hooks]]
-type = "command"
-command = "concord inbox register --from-hook --provider codex"
-
-[[hooks.PostToolUse]]
-[[hooks.PostToolUse.hooks]]
-type = "command"
-command = "concord inbox drain --from-hook --provider codex --format post-tool-use"
-
-[[hooks.Stop]]
-[[hooks.Stop.hooks]]
-type = "command"
-command = "concord inbox drain --from-hook --provider codex --format stop"
-${HOOKS_END}`;
+const CONCORD_HOOKS_BLOCK = [
+  HOOKS_BEGIN,
+  '# Delivers Concord messages from other agents into this session. Remove this',
+  '# block (markers included) to opt out.',
+  CONCORD_HOOKS.map(
+    ({ event, command }) =>
+      `[[hooks.${event}]]\n[[hooks.${event}.hooks]]\ntype = "command"\ncommand = "${command}"`,
+  ).join('\n\n'),
+  HOOKS_END,
+].join('\n');
 
 /** The markers and the note under the begin marker. */
 const CONCORD_COMMENTS = new Set(
   CONCORD_HOOKS_BLOCK.split('\n').filter((line) => COMMENT_LINE.test(line)),
 );
 
-const HOOK_EVENTS = ['SessionStart', 'PostToolUse', 'Stop'] as const;
-const COMMAND_TYPE = /^type\s*=\s*"command"$/u;
-const CONCORD_COMMAND = /^command\s*=\s*"concord inbox /u;
+function isConcordComment(line: TomlLine): boolean {
+  return !line.inString && CONCORD_COMMENTS.has(line.text.trim());
+}
+
+/** The key of an array-of-tables header such as `[[ hooks.Stop ]] # note`. */
+function arrayTableKey(line: TomlLine | undefined): string | undefined {
+  if (line === undefined || line.inString) return undefined;
+  const key = /^\[\[([^\]]+)\]\]\s*(?:#.*)?$/u.exec(line.text.trim())?.[1];
+  return key === undefined ? undefined : tomlKeyPath(key);
+}
+
+/** The key and string value a `key = "value"` line sets, ignoring a trailing comment. */
+function stringEntry(line: TomlLine): { key: string; value: string } | undefined {
+  if (line.inString) return undefined;
+  const match = /^([\w-]+)\s*=\s*(?:"([^"\\]*)"|'([^']*)')\s*(?:#.*)?$/u.exec(line.text.trim());
+  const key = match?.[1];
+  const value = match?.[2] ?? match?.[3];
+  return key === undefined || value === undefined ? undefined : { key, value };
+}
 
 /** The index past the Concord hook starting at `start`, if one starts there. */
 function concordHookEnd(lines: readonly TomlLine[], start: number): number | undefined {
-  const parent = lines[start];
-  if (parent === undefined || parent.inString) return undefined;
-  const event = HOOK_EVENTS.find((name) => parent.text.trim() === `[[hooks.${name}]]`);
-  if (event === undefined) return undefined;
+  const key = arrayTableKey(lines[start]);
+  const hook = CONCORD_HOOKS.find(({ event }) => key === `hooks.${event}`);
+  if (hook === undefined) return undefined;
 
   let child = start + 1;
   while (isDecoration(lines[child])) child += 1;
-  const header = lines[child];
-  if (header === undefined || header.inString) return undefined;
-  if (header.text.trim() !== `[[hooks.${event}.hooks]]`) return undefined;
+  if (arrayTableKey(lines[child]) !== `hooks.${hook.event}.hooks`) return undefined;
 
-  const end = tableEnd(lines, child);
-  const body = lines.slice(child + 1, end).map((line) => line.text.trim());
+  // Concord's comment lines, such as the end marker, are never part of its hook.
+  let end = tableEnd(lines, child);
+  const marker = lines.findIndex(
+    (line, index) => index > child && index < end && isConcordComment(line),
+  );
+  if (marker !== -1) end = marker;
+
+  const entries = lines.slice(child + 1, end).map(stringEntry);
   const ours =
-    body.some((line) => COMMAND_TYPE.test(line)) && body.some((line) => CONCORD_COMMAND.test(line));
+    entries.some((entry) => entry?.key === 'type' && entry.value === 'command') &&
+    entries.some((entry) => entry?.key === 'command' && entry.value === hook.command);
   return ours ? end : undefined;
 }
 
@@ -173,9 +195,7 @@ function stripConcordHooks(source: string): { lines: string[]; spot: number | un
       continue;
     }
     const line = lines[index];
-    if (line !== undefined && (line.inString || !CONCORD_COMMENTS.has(line.text.trim()))) {
-      keepLine(kept, line);
-    }
+    if (line !== undefined && !isConcordComment(line)) keepLine(kept, line);
     index += 1;
   }
   return { lines: kept.map((line) => line.text), spot };
