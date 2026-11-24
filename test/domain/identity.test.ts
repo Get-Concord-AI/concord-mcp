@@ -7,12 +7,32 @@ import {
   resolveActorId,
   resolveIdentity,
   resolveOpenCodeRequestIdentity,
+  resolveServerIdentity,
   UNRESOLVED_IDENTITY_MESSAGE,
 } from '../../src/domain/identity.js';
 
 const SESSION = 'a1b2c3d4-e5f6-7890';
 
 describe('resolveIdentity', () => {
+  it('binds the OpenHands server to the current conversation even inside another harness', () => {
+    const env = {
+      CONCORD_AGENT_KIND: 'openhands',
+      CLAUDE_CODE_SESSION_ID: 'outer-session',
+      CONCORD_OPENHANDS_CONVERSATION_ID: SESSION,
+    };
+    const parent = resolveServerIdentity(env);
+    expect(parent).toEqual({
+      kind: 'openhands',
+      origin: 'session',
+      agentId: agentIdForSession('openhands', SESSION),
+    });
+    expect(
+      resolveServerIdentity({ ...env, CONCORD_OPENHANDS_CONVERSATION_ID: 'child' })?.agentId,
+    ).toBe(agentIdForSession('openhands', 'child'));
+    expect(
+      resolveServerIdentity({ ...env, CONCORD_OPENHANDS_CONVERSATION_ID: '' }),
+    ).toBeUndefined();
+  });
   it('uses an explicit DeepSeek identity without borrowing inherited harness sessions', () => {
     const inherited = { CLAUDE_CODE_SESSION_ID: SESSION, AGENT_SESSION_ID: 'goose-parent' };
     expect(resolveIdentity(inherited, { kind: 'deepseek' })).toBeUndefined();

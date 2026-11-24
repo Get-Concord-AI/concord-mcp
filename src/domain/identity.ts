@@ -39,6 +39,7 @@ export const SESSION_SOURCES: readonly SessionSource[] = [
   { kind: 'claude-code', envVar: 'CLAUDE_CODE_SESSION_ID' },
   { kind: 'grok', envVar: 'GROK_SESSION_ID' },
   { kind: 'goose', envVar: 'AGENT_SESSION_ID' },
+  { kind: 'openhands', envVar: 'CONCORD_OPENHANDS_CONVERSATION_ID' },
   // Hermes sets this for its hooks and terminal commands. Its MCP servers start
   // before any session and never see it; Hermes sessions resolve through hooks.
   { kind: 'hermes', envVar: 'HERMES_SESSION_ID' },
