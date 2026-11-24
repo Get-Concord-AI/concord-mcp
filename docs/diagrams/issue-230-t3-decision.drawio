@@ -1,0 +1,89 @@
+<mxfile host="app.diagrams.net" agent="devin" version="24.0.0">
+  <diagram id="t3-decision" name="Issue #230 decision">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="850" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Issue #230 — T3 Code support: decision gate" style="text;html=1;fontSize=18;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="275" y="10" width="550" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Flow: T3 architecture -->
+        <mxCell id="t3" value="T3 Code (pingdotgg/t3code)&#10;Control plane — NOT an agent&#10;t3 server + desktop/web/mobile clients" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="380" y="60" width="340" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="spawn" value="Spawns vendor agent CLIs per thread&#10;(claude via Agent SDK, codex app-server,&#10;cursor-agent, opencode, grok, kiro-cli, agy, ACP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="330" y="160" width="440" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="t3" target="spawn">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Decision diamonds -->
+        <mxCell id="q1" value="Can T3 host MCP itself?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="390" y="260" width="320" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="spawn" target="q1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a1" value="NO — it orchestrates vendor agents;&#10;its own /mcp is the reverse direction" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="740" y="275" width="300" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="e2l" value="no" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="q1" target="a1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="q2" value="Do vendor configs reach the agents?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="390" y="360" width="320" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="q1" target="q2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="YES for CLI providers (same binaries +&#10;config dirs); managed runtimes + ACP = gaps" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="60" y="375" width="290" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="e3l" value="yes*" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="q2" target="a2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="q3" value="Is there a T3 hook/env surface&#10;Concord could attach to?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="390" y="460" width="320" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="q2" target="q3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" value="NO — no session env var (vs CONDUCTOR_SESSION_ID),&#10;no hook API; per-instance env vars are user-set only" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="740" y="475" width="310" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="e4l" value="no" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="q3" target="a3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Conclusion -->
+        <mxCell id="concl" value="Concord coverage already exists per vendor harness.&#10;Worktrees resolve to primary .concord/ store.&#10;Claude idle-wake already handled via asyncRewake (sdk-ts)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="330" y="580" width="440" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="q3" target="concl">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Options -->
+        <mxCell id="opts-title" value="Choose the deliverable:" style="text;html=1;fontSize=13;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="60" y="690" width="200" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="optA" value="A — Docs-only (recommended)&#10;docs/t3-code.md modeled on conductor.md + README row.&#10;Covers setup, per-provider matrix, global-mode for worktrees,&#10;managed-runtime + ACP caveats. No code to attach to." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="720" width="300" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="optB" value="B — Docs + small fix&#10;Same doc, plus a minimal code change IF a verified&#10;gap appears (e.g. user-level claude hooks, T3 env&#10;detection). Nothing verified-needed so far." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="400" y="720" width="300" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="optC" value="C — Close as covered&#10;Comment + close: every T3 provider is already a&#10;Concord harness; docs optional later. Cheapest, but every T3&#10;user re-does this triage." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="740" y="720" width="300" height="100" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
