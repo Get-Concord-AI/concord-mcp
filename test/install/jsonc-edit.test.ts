@@ -19,6 +19,11 @@ describe('uncomment', () => {
     expect(clean).not.toContain('tail');
     expect(clean).not.toContain('mid');
   });
+
+  it('keeps the length when a comment holds characters outside the BMP', () => {
+    const text = '/* 😀 */ { "a": 1 } // 🚀 tail';
+    expect(uncomment(text)).toHaveLength(text.length);
+  });
 });
 
 describe('parseJsoncObject', () => {
@@ -39,14 +44,25 @@ describe('isJsonObject', () => {
 });
 
 describe('propertyObject', () => {
-  it('locates a "key": {…} span by index', () => {
+  it('locates a direct child "key": {…} span by index', () => {
     const text = '{\n  "mcp": {\n    // inner\n    "concord": { "command": "concord-mcp" }\n  }\n}';
+    const mcp = propertyObject(text, 'mcp');
+    if (mcp === undefined) throw new Error('expected mcp');
+    const slice = text.slice(mcp.open, mcp.close + 1);
+    const range = propertyObject(slice, 'concord');
+    if (range === undefined) throw new Error('expected a range');
+    expect(slice.slice(range.key, range.key + 9)).toBe('"concord"');
+    expect(slice[range.open]).toBe('{');
+    expect(slice[range.close]).toBe('}');
+    expect(propertyObject(text, 'missing')).toBeUndefined();
+  });
+
+  it('ignores a nested key of the same name', () => {
+    const text = '{"other":{"options":{"concord":{"x":1}}},"concord":{"y":2}}';
     const range = propertyObject(text, 'concord');
     if (range === undefined) throw new Error('expected a range');
-    expect(text.slice(range.key, range.key + 9)).toBe('"concord"');
-    expect(text[range.open]).toBe('{');
-    expect(text[range.close]).toBe('}');
-    expect(propertyObject(text, 'missing')).toBeUndefined();
+    expect(text.slice(range.open, range.close + 1)).toBe('{"y":2}');
+    expect(propertyObject('{"other":{"concord":{}}}', 'concord')).toBeUndefined();
   });
 });
 

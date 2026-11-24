@@ -10,7 +10,9 @@ import { jsonObjectSchema, type JsonObject, type JsonValue } from './json-value.
 export function uncomment(text: string): string {
   return text.replace(
     /("(?:\\.|[^"\\])*")|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//gu,
-    (part, quoted: string | undefined) => quoted ?? part.replace(/[^\r\n]/gu, ' '),
+    // One space per UTF-16 unit, so an emoji in a comment keeps every later index.
+    (part, quoted: string | undefined) =>
+      quoted ?? part.replace(/[^\r\n]/gu, (char) => ' '.repeat(char.length)),
   );
 }
 
@@ -51,12 +53,35 @@ export interface ObjectRange {
   close: number;
 }
 
+/**
+ * The object value of `key` directly inside the first object in `text`. A key
+ * of the same name nested deeper (say a server named "hooks" under
+ * `mcpServers`, or a `concord` key inside another server's options) is not it.
+ */
 export function propertyObject(text: string, key: string): ObjectRange | undefined {
   const clean = uncomment(text);
-  const match = new RegExp(`"${key}"\\s*:\\s*\\{`, 'u').exec(clean);
-  if (match === null) return undefined;
-  const open = match.index + match[0].lastIndexOf('{');
-  return { key: match.index, open, close: objectEnd(clean, open) };
+  const rootOpen = clean.indexOf('{');
+  if (rootOpen === -1) return undefined;
+  let depth = 0;
+  for (let index = rootOpen; index < clean.length; index += 1) {
+    const char = clean[index];
+    if (char === '{' || char === '[') depth += 1;
+    else if (char === '}' || char === ']') depth -= 1;
+    else if (char === '"') {
+      let end = index + 1;
+      while (end < clean.length && !(clean[end] === '"' && !isEscaped(clean, end))) end += 1;
+      if (depth === 1 && clean.slice(index + 1, end) === key) {
+        const value = /^\s*:\s*\{/u.exec(clean.slice(end + 1));
+        if (value !== null) {
+          const open = end + value[0].length;
+          return { key: index, open, close: objectEnd(clean, open) };
+        }
+      }
+      index = end;
+    }
+    if (depth === 0) return undefined;
+  }
+  return undefined;
 }
 
 export function directCommas(text: string, range: Pick<ObjectRange, 'open' | 'close'>): number[] {
