@@ -231,6 +231,24 @@ approval_mode = "approve"
     expect(result).toContain(user);
     expect(result).not.toContain('--from-hook');
   });
+
+  it("keeps a user's entry in its own group", () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const userEntry = '[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "my-hook"';
+    const concordEntry =
+      '[[hooks.SessionStart.hooks]]\ntype = "command"\n' +
+      'command = "concord inbox register --from-hook --provider codex"';
+    writeFileSync(
+      codexConfigFile(env),
+      `[[hooks.SessionStart]]\n${concordEntry}\n\n${userEntry}\n`,
+    );
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(
+      `[[hooks.SessionStart]]\n\n${userEntry}\n`,
+    );
+  });
 });
 
 describe('removeCodexMcpServer', () => {

@@ -27,6 +27,29 @@ function outsideBlock(text: string): string[] {
   return outside.filter((line) => line.trim() !== '');
 }
 
+const REGISTER = 'concord inbox register --from-hook --provider codex';
+const STOP = 'concord inbox drain --from-hook --provider codex --format stop';
+
+function entry(event: string, command: string): string {
+  return `[[hooks.${event}.hooks]]\ntype = "command"\ncommand = "${command}"`;
+}
+
+/** The line of the group header that the entry running `command` belongs to. */
+function groupOf(text: string, event: string, command: string): number {
+  const lines = text.split('\n');
+  return lines.slice(0, lines.indexOf(`command = "${command}"`)).lastIndexOf(`[[hooks.${event}]]`);
+}
+
+/** One block, and each of Concord's commands exactly once. */
+function expectConcordOnce(text: string): void {
+  const lines = text.split('\n');
+  expect(lines.filter((line) => line === BEGIN)).toHaveLength(1);
+  expect(lines.filter((line) => line === END)).toHaveLength(1);
+  for (const command of BLOCK.split('\n').filter((line) => line.startsWith('command = '))) {
+    expect(lines.filter((line) => line === command)).toHaveLength(1);
+  }
+}
+
 describe('upsertCodexHooks', () => {
   it('creates the config when Codex has none', () => {
     const result = upsertCodexHooks(undefined);
@@ -276,5 +299,54 @@ command = "my-session-hook"
 
     expectOneBlock(result);
     expect(result.match(/concord inbox register/gu)).toHaveLength(1);
+  });
+
+  it.each([
+    ['first', [REGISTER, 'my-hook']],
+    ['second', [REGISTER, 'my-hook'].reverse()],
+  ])("keeps a user's entry in its own group when Concord's comes %s", (_, commands) => {
+    const shared = `[[hooks.SessionStart]]\n${commands.map((command) => entry('SessionStart', command)).join('\n\n')}\n`;
+
+    const result = upsertCodexHooks(shared);
+
+    expectConcordOnce(result);
+    expect(groupOf(result, 'SessionStart', 'my-hook')).toBe(0);
+    expect(upsertCodexHooks(result)).toBe(result);
+  });
+
+  it('keeps a matcher on the group Concord wrote', () => {
+    const matched = BLOCK.replace(
+      '[[hooks.SessionStart]]\n',
+      '[[hooks.SessionStart]]\nmatcher = "startup"\n',
+    );
+
+    const result = upsertCodexHooks(`${matched}\n`);
+
+    expectConcordOnce(result);
+    expect(result).toContain('[[hooks.SessionStart]]\nmatcher = "startup"\n');
+    expect(upsertCodexHooks(result)).toBe(result);
+  });
+
+  it("removes a group holding Concord's entry twice", () => {
+    const result = upsertCodexHooks(
+      `[[hooks.Stop]]\n${entry('Stop', STOP)}\n\n${entry('Stop', STOP)}\n`,
+    );
+
+    expectConcordOnce(result);
+    expect(result.split('\n').filter((line) => line === '[[hooks.Stop]]')).toHaveLength(1);
+  });
+
+  it('never moves a user entry into a group Concord writes', () => {
+    // The last entry belongs to the user's Stop group at the top of the file.
+    const interleaved = [
+      `[[hooks.Stop]]\n${entry('Stop', 'user-stop-1')}`,
+      `[[hooks.SessionStart]]\n${entry('SessionStart', REGISTER)}`,
+      entry('Stop', 'user-stop-2'),
+    ].join('\n\n');
+
+    const result = upsertCodexHooks(`${interleaved}\n`);
+
+    expectConcordOnce(result);
+    expect(groupOf(result, 'Stop', 'user-stop-2')).toBe(groupOf(result, 'Stop', 'user-stop-1'));
   });
 });

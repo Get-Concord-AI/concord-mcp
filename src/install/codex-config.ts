@@ -157,46 +157,101 @@ function stringEntry(line: TomlLine): { key: string; value: string } | undefined
   return key === undefined || value === undefined ? undefined : { key, value };
 }
 
-/** The index past the Concord hook starting at `start`, if one starts there. */
-function concordHookEnd(lines: readonly TomlLine[], start: number): number | undefined {
-  const key = arrayTableKey(lines[start]);
-  const hook = CONCORD_HOOKS.find(({ event }) => key === `hooks.${event}`);
-  if (hook === undefined) return undefined;
-
-  let child = start + 1;
-  while (isDecoration(lines[child])) child += 1;
-  if (arrayTableKey(lines[child]) !== `hooks.${hook.event}.hooks`) return undefined;
-
-  // Concord's comment lines, such as the end marker, are never part of its hook.
-  let end = tableEnd(lines, child);
+/** The index past the entry headed at `entry`, if it runs exactly Concord's `command`. */
+function concordEntryEnd(
+  lines: readonly TomlLine[],
+  entry: number,
+  command: string,
+): number | undefined {
+  // Concord's comment lines, such as the end marker, are never part of its entry.
+  let end = tableEnd(lines, entry);
   const marker = lines.findIndex(
-    (line, index) => index > child && index < end && isConcordComment(line),
+    (line, index) => index > entry && index < end && isConcordComment(line),
   );
   if (marker !== -1) end = marker;
 
-  const entries = lines.slice(child + 1, end).map(stringEntry);
+  const values = lines.slice(entry + 1, end).map(stringEntry);
   const ours =
-    entries.some((entry) => entry?.key === 'type' && entry.value === 'command') &&
-    entries.some((entry) => entry?.key === 'command' && entry.value === hook.command);
+    values.some((value) => value?.key === 'type' && value.value === 'command') &&
+    values.some((value) => value?.key === 'command' && value.value === command);
   return ours ? end : undefined;
+}
+
+/** A `[[hooks.<event>]]` group, and the entries TOML attaches to it. */
+interface HookGroup {
+  header: number;
+  firstEntry: number | undefined;
+  entries: number;
+  concordEntries: number;
+}
+
+function removeRange(removed: Set<number>, start: number, end: number): void {
+  for (let index = start; index < end; index += 1) removed.add(index);
+}
+
+/**
+ * Concord's entries, and each group left with nothing of the user's: no other
+ * entry and no key such as `matcher`. `spot` is the first such group, unless a
+ * user entry after it belongs to an earlier group that the block would steal.
+ */
+function concordHookLines(lines: readonly TomlLine[]): {
+  removed: Set<number>;
+  spot: number | undefined;
+} {
+  const removed = new Set<number>();
+  const groups: HookGroup[] = [];
+  const current = new Map<string, HookGroup>();
+  const userEntries: number[] = [];
+  for (const [index, line] of lines.entries()) {
+    const key = arrayTableKey(line);
+    const hook = CONCORD_HOOKS.find(
+      ({ event }) => key === `hooks.${event}` || key === `hooks.${event}.hooks`,
+    );
+    if (hook === undefined) continue;
+    if (key === `hooks.${hook.event}`) {
+      const group = { header: index, firstEntry: undefined, entries: 0, concordEntries: 0 };
+      groups.push(group);
+      current.set(hook.event, group);
+      continue;
+    }
+    const group = current.get(hook.event);
+    if (group !== undefined) {
+      group.entries += 1;
+      group.firstEntry ??= index;
+    }
+    const end = concordEntryEnd(lines, index, hook.command);
+    if (end === undefined) {
+      userEntries.push(index);
+      continue;
+    }
+    removeRange(removed, index, end);
+    if (group !== undefined) group.concordEntries += 1;
+  }
+
+  let spot: number | undefined;
+  for (const group of groups) {
+    if (group.entries === 0 || group.concordEntries < group.entries) continue;
+    const ownEnd = tableEnd(lines, group.header);
+    if (lines.slice(group.header + 1, ownEnd).some((line) => !isDecoration(line))) continue;
+    let end = ownEnd;
+    while (isDecoration(lines[end])) end += 1;
+    removeRange(removed, group.header, end === group.firstEntry ? end : ownEnd);
+    spot ??= group.header;
+  }
+  const first = spot;
+  if (first !== undefined && userEntries.some((entry) => entry > first)) spot = undefined;
+  return { removed, spot };
 }
 
 /** `source` without Concord's hooks and comment lines, and where its first hook was. */
 function stripConcordHooks(source: string): { lines: string[]; spot: number | undefined } {
   const lines = sourceLines(source);
+  const { removed, spot: spotLine } = concordHookLines(lines);
   const kept: TomlLine[] = [];
   let spot: number | undefined;
-  let index = 0;
-  while (index < lines.length) {
-    const hookEnd = concordHookEnd(lines, index);
-    if (hookEnd !== undefined) {
-      spot ??= kept.length;
-      index = hookEnd;
-      continue;
-    }
-    const line = lines[index];
-    if (line !== undefined && !isConcordComment(line)) keepLine(kept, line);
-    index += 1;
+  for (const [index, line] of lines.entries()) {
+    if (index === spotLine) spot = kept.length;
+    if (!removed.has(index) && !isConcordComment(line)) keepLine(kept, line);
   }
   return { lines: kept.map((line) => line.text), spot };
 }
