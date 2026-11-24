@@ -97,11 +97,20 @@ export function upsertMcpServer(
     ...(extraEnv ?? {}),
   };
 
+  // Keep per-server settings a client stores beside the command, such as Roo's
+  // `disabled` or `alwaysAllow`. Only the keys Concord itself writes are replaced.
+  const current = looseObjectSchema.safeParse(servers[CONCORD_SERVER_KEY]);
+  const replaced = new Set(['command', 'args', 'env']);
+  const userSettings = Object.fromEntries(
+    Object.entries(current.success ? current.data : {}).filter(([key]) => !replaced.has(key)),
+  );
+
   const next = {
     ...config,
     mcpServers: {
       ...servers,
       [CONCORD_SERVER_KEY]: {
+        ...userSettings,
         command: CONCORD_SERVER_COMMAND,
         ...(Object.keys(env).length === 0 ? {} : { env }),
       },

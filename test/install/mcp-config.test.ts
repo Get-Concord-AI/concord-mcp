@@ -19,6 +19,20 @@ import {
 } from '../../src/install/mcp-config.js';
 
 describe('upsertMcpServer', () => {
+  it('keeps per-server settings such as disabled when refreshing the concord entry', () => {
+    const existing = JSON.stringify({
+      mcpServers: {
+        concord: { command: 'concord-mcp', disabled: true, alwaysAllow: ['status'] },
+      },
+    });
+    const out = z
+      .object({ mcpServers: z.object({ concord: z.record(z.string(), z.unknown()) }) })
+      .parse(JSON.parse(upsertMcpServer(existing, '/tmp/project')));
+    expect(out.mcpServers.concord['disabled']).toBe(true);
+    expect(out.mcpServers.concord['alwaysAllow']).toEqual(['status']);
+    expect(out.mcpServers.concord['command']).toBe(CONCORD_SERVER_COMMAND);
+  });
+
   it('registers the concord server in an empty config', () => {
     const out = upsertMcpServer(undefined, '/tmp/project');
     expect(out).toContain('mcpServers');
