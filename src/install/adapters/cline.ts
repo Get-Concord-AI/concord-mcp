@@ -7,6 +7,7 @@ import {
   clineHooksPresent,
   clineMcpSettingsPath,
   installClineUserConfigs,
+  uninstallClineUserConfigs,
 } from '../cline-config.js';
 import { hasMcpServer } from '../mcp-config.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
@@ -25,24 +26,29 @@ function mcpState(env: NodeJS.ProcessEnv): FileState {
 }
 
 /**
- * The canonical hook directory is `~/Documents/Cline/Hooks`: the only global
- * directory the VS Code extension reads, and one the SDK scans as well. The
- * `~/.cline/hooks` copy is belt-and-suspenders for SDK-only layouts.
+ * The first hook directory is the extension's canonical `Cline/Hooks` under
+ * the OS-resolved Documents folder — the only global directory it reads, and
+ * one the SDK scans as well. The `~/Documents` and `~/.cline` copies cover
+ * the SDK's own Documents lookup under OneDrive redirection and SDK-only
+ * layouts.
  */
 type HookState = 'present' | 'missing' | 'partial';
 
 /**
- * The extension reads only `~/Documents/Cline/Hooks`; `~/.cline/hooks` is the
- * SDK fallback. A complete fallback must not mask a canonical directory the
- * user blocked, so 'present' requires the first directory — anything less is
- * 'partial' when some hooks exist somewhere and 'missing' when none do.
+ * The extension reads only its Documents `Cline/Hooks`; the other
+ * directories are fallbacks. A complete fallback must not mask a canonical
+ * directory the user blocked, so 'present' requires the first directory —
+ * anything less is 'partial' when some hooks exist somewhere and 'missing'
+ * when none do.
  */
 function hooksState(env: NodeJS.ProcessEnv): HookState {
-  const [primaryDir, secondaryDir] = clineGlobalHookDirs(env);
+  const [primaryDir, ...fallbackDirs] = clineGlobalHookDirs(env);
   const primary = primaryDir === undefined ? 'missing' : clineHooksPresent(primaryDir);
   if (primary === 'present') return 'present';
-  const secondary = secondaryDir === undefined ? 'missing' : clineHooksPresent(secondaryDir);
-  return primary === 'partial' || secondary !== 'missing' ? 'partial' : 'missing';
+  const fallbacks = fallbackDirs.map((dir) => clineHooksPresent(dir));
+  return primary === 'partial' || fallbacks.some((state) => state !== 'missing')
+    ? 'partial'
+    : 'missing';
 }
 
 function report(
@@ -100,7 +106,7 @@ export function statusCline(
   if (hooks === 'partial') {
     return report(
       'action_required',
-      'Some Concord Cline hooks are missing or blocked — check ~/Documents/Cline/Hooks, the only directory the extension reads. Run `concord setup` to repair them.',
+      'Some Concord Cline hooks are missing or blocked — check the Cline Hooks directory under your Documents folder, the only one the extension reads. Run `concord setup` to repair them.',
     );
   }
   if (mcp === 'present') {
@@ -127,4 +133,25 @@ export function installCline(env: NodeJS.ProcessEnv): void {
     }
   }
   installClineUserConfigs(env);
+}
+
+/**
+ * Cline's slice of the adapter dispatch, kept beside its status and install
+ * logic so `adapters/index.ts` only names the harness. Status resolves the
+ * executable itself; install and uninstall own their error boundaries.
+ */
+export function statusClineAdapter(env: NodeJS.ProcessEnv): AdapterReport {
+  return statusCline(executablePath(HARNESS_CONFIGS.cline.executable, env), env);
+}
+
+export function installClineAdapter(env: NodeJS.ProcessEnv): void {
+  installCline(env);
+}
+
+export function uninstallClineAdapter(env: NodeJS.ProcessEnv): void {
+  try {
+    uninstallClineUserConfigs(env);
+  } catch {
+    // Preserve malformed or unreadable Cline config and continue cleanup.
+  }
 }

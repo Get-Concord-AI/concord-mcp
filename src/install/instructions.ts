@@ -117,11 +117,15 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
   you expect to touch. Cline's MCP server cannot see your session or this
   workspace, so pass \`agent_id: "<id>"\` on \`start_work\`, \`update_work\`,
   \`transfer_work\`, and \`finish_work\` calls; on \`inspect_work\` pass
-  \`agent_id\` only to read your own inbox. Your id comes from Concord's
-  lifecycle hooks: the VS Code extension prints it when a task starts; in the
-  CLI, find the \`cline:*\` agent your hooks registered via \`inspect_work\`,
-  or run \`concord inbox register --provider cline --agent cline:<label>\` once
-  and reuse the id it prints. Do not invent an id.
+  \`agent_id\` only to read your own inbox. Your id: in the VS Code extension,
+  use the \`cline:*\` id Concord's task-start hook printed in your context —
+  it belongs to this task alone. In the CLI/SDK, hook output never reaches
+  you, so use the \`CONCORD_AGENT_ID\` your operator set, or register a fresh
+  id once per session —
+  \`concord inbox register --provider cline --agent cline:<unique-label>\` —
+  and reuse it only within that session. Never reuse an id across sessions:
+  two sessions sharing one claim work and drain each other's inbox. Do not
+  invent an id.
 - \`workspace_id\`: when hook context gave you one, pass \`workspace_id\` on
   every call so work lands in this repository; otherwise omit it and the
   server resolves the workspace from its working directory. If a response
@@ -217,9 +221,12 @@ Concord section, follow that instead of this one.
   you expect to touch. It registers you, claims them, and reports overlaps with
   other agents; resolve overlaps before editing. Cline's MCP server cannot see
   your session, so pass \`agent_id\` on \`start_work\`, \`update_work\`,
-  \`transfer_work\`, and \`finish_work\`: use the \`cline:*\` id Concord's
-  lifecycle hooks registered (the VS Code extension prints it at task start),
-  or keep one stable id such as \`cline:<label>\`.
+  \`transfer_work\`, and \`finish_work\`: in the VS Code extension use the
+  \`cline:*\` id Concord's task-start hook printed in your context; everywhere
+  else use \`CONCORD_AGENT_ID\` or a fresh id you register once per session —
+  \`concord inbox register --provider cline --agent cline:<unique-label>\`.
+  Never reuse an id across sessions: shared ids claim work and drain each
+  other's inbox.
 - Use \`inspect_work\` to see who else is here, \`update_work\` for progress and
   messages to other agents, and \`transfer_work\` for handoffs.
 - Messages reach the VS Code extension on each prompt; everywhere else drain

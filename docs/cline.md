@@ -7,9 +7,10 @@ and global lifecycle hooks that register each task and deliver peer messages
 into a running turn.
 
 Cline is detected from `cline` on `PATH`, an existing `~/.cline` or
-`~/Documents/Cline` directory, or a VS Code-family extension install
-(`saoudrizwan.claude-dev` in `globalStorage`), including an extension that has
-never run far enough to create `~/.cline`.
+`Cline` directory under the OS Documents folder (or `~/Documents`), or a
+VS Code-family extension install (`saoudrizwan.claude-dev` in
+`globalStorage`), including an extension that has never run far enough to
+create `~/.cline`.
 
 ## What setup writes
 
@@ -20,19 +21,29 @@ registration is user-level:
 | File                                             | Purpose                                                                  |
 | ------------------------------------------------ | ------------------------------------------------------------------------ |
 | `~/.cline/data/settings/cline_mcp_settings.json` | Registers the `concord-mcp` stdio server with `CONCORD_AGENT_KIND=cline` |
-| `~/Documents/Cline/Hooks/<Hook>`                 | Lifecycle hooks, read by the extension and the SDK                       |
+| `<Documents>/Cline/Hooks/<Hook>`                 | Lifecycle hooks, read by the extension (and the SDK where it scans)      |
+| `~/Documents/Cline/Hooks/<Hook>`                 | The same hooks for the SDK's own Documents lookup                        |
 | `~/.cline/hooks/<Hook>`                          | The same hooks for SDK/CLI layouts (`CLINE_DIR`-aware)                   |
 | `.clinerules/concord.md`                         | Concord workflow rules (repository, written by `concord setup`)          |
 | `.cline/rules/concord.md`                        | The same rules for the newer rules directory (repository)                |
-| `~/.cline/rules/concord.md`                      | User-level rules when global mode is on                                  |
+| `~/.cline/rules/concord.md`                      | User-level rules when global mode is on (SDK/CLI global rules dir)       |
+| `<Documents>/Cline/Rules/concord.md`             | The same rules where the extension and SDK resolvers look                |
 
-The settings path honors `CLINE_MCP_SETTINGS_PATH`, `CLINE_DATA_DIR`, and
-`CLINE_DIR`, matching Cline's own resolution order.
+`<Documents>` is the OS Documents folder resolved the way Cline resolves
+it — the `MyDocuments` known folder on Windows (which follows OneDrive
+folder redirection), `xdg-user-dir DOCUMENTS` on Linux, `~/Documents` as
+the fallback — plus the literal `~/Documents` the SDK resolver scans.
+`CONCORD_DOCUMENTS_DIR` overrides the lookup. The settings path honors
+`CLINE_MCP_SETTINGS_PATH`, `CLINE_DATA_DIR`, and `CLINE_DIR`, matching
+Cline's own resolution order.
 
-All files are merged into existing content. Unrelated MCP servers, settings,
-rules, and same-named hooks the user owns are preserved, and re-running setup
-is idempotent. An unreadable or malformed settings file is reported and left
-untouched.
+All files are merged into existing content. Unrelated MCP servers,
+settings, rules, and same-named hooks the user owns are preserved, and
+re-running setup is idempotent. The `concord` MCP entry Concord writes
+carries a `CONCORD_MANAGED` env marker: only a marked entry is rewritten
+or removed, so a hand-written `concord` server — even one pinned with
+`CONCORD_REPO_ROOT` — survives setup and uninstall. An unreadable or
+malformed settings file is reported and left untouched.
 
 On Windows the hook files are `<HookName>.ps1`; elsewhere they are
 extensionless executables, which is what each Cline surface requires. Hook
@@ -50,11 +61,14 @@ this session's `agent_id`.
 
 Pass that `agent_id` explicitly on `start_work`, `update_work`,
 `transfer_work`, and `finish_work`. On `inspect_work`, leave `agent_id` off
-unless you are reading your own inbox. The CLI cannot show hook output, so a
-CLI session finds its `cline:*` agent in `inspect_work`'s workspace view, or
-runs `concord inbox register --provider cline --agent cline:<label>` once and
-reuses the id it prints. For a human-chosen name, set `CONCORD_AGENT_ID`
-before starting Cline; it wins over the derived id.
+unless you are reading your own inbox. The CLI/SDK never shows hook output,
+so a CLI session cannot discover the `cline:*` id its hooks registered —
+and two CLI sessions in one repo would both appear in the roster anyway.
+Instead, set `CONCORD_AGENT_ID` before starting Cline (it wins over the
+derived id), or register a fresh id once per session —
+`concord inbox register --provider cline --agent cline:<unique-label>` —
+and reuse it only within that session. Never reuse an id across sessions:
+two sessions sharing one claim work and drain each other's inbox.
 
 ## Workspace routing
 
@@ -74,12 +88,18 @@ explicitly; the id is stable for the checkout.
 
 Concord installs three global hooks:
 
-- `TaskStart` / `TaskResume` register presence, advertise the pull endpoint,
-  and emit the session-start context (agent id, workspace id, roster).
+- `TaskStart` / `TaskResume` register presence and, except on the SDK/CLI
+  surface, advertise the pull endpoint; they emit the session-start context
+  (agent id, workspace id, roster). The SDK runs hooks detached and its
+  output never reaches the model, so the `cline:<hash>` id it would
+  register is one nobody can address — no endpoint is advertised there,
+  which would only leave a ghost that looks reachable.
 - `UserPromptSubmit` drains pending messages into the prompt's context —
-  **only for extension payloads**. The SDK/CLI runs hooks detached and never
-  shows their output, so draining there would mark messages delivered that no
-  session sees; those sessions get an endpoint refresh instead and pull from
+  **only for extension payloads**, and only as many as fit under Cline's
+  50,000-character `contextModification` cap; the rest stay pending for the
+  next prompt. The SDK/CLI runs hooks detached and never shows their
+  output, so draining there would mark messages delivered that no session
+  sees; those sessions get a pending-count notice instead and pull from
   the durable inbox.
 
 Cline has no hook that wakes an idle session, so Concord reports Cline as
@@ -125,7 +145,8 @@ If you manage client configuration yourself, add this to
 }
 ```
 
-Then install the hook files from `~/Documents/Cline/Hooks/` (or
-`~/.cline/hooks/`): on Windows `<HookName>.ps1`, elsewhere an extensionless
-executable. Each forwards the JSON payload on stdin to `concord hook
-cline-<event>` for `TaskStart`, `TaskResume`, and `UserPromptSubmit`.
+Then install the hook files from the `Cline/Hooks` directory under your
+OS Documents folder (or `~/Documents/Cline/Hooks/`, `~/.cline/hooks/`): on
+Windows `<HookName>.ps1`, elsewhere an extensionless executable. Each
+forwards the JSON payload on stdin to `concord hook cline-<event>` for
+`TaskStart`, `TaskResume`, and `UserPromptSubmit`.

@@ -15,8 +15,11 @@ import { z } from 'zod';
 import {
   clineDetected,
   clineDocumentsDir,
+  clineEntryIsManaged,
   clineGlobalHookDirs,
   clineGlobalRulesDir,
+  clineGlobalRulesDirs,
+  clineGlobalRulesPaths,
   clineHome,
   clineHookFileNames,
   clineHooksPresent,
@@ -32,7 +35,10 @@ const mcpConfig = z.object({
 
 function fakeHome(): { home: string; env: NodeJS.ProcessEnv } {
   const home = mkdtempSync(join(tmpdir(), 'concord-cline-home-'));
-  return { home, env: { HOME: home, USERPROFILE: home } };
+  return {
+    home,
+    env: { HOME: home, USERPROFILE: home, CONCORD_DOCUMENTS_DIR: join(home, 'Documents') },
+  };
 }
 
 function readMcp(path: string): z.infer<typeof mcpConfig> {
@@ -65,10 +71,31 @@ describe('Cline paths', () => {
   it('resolves the global rules and hook directories under the Cline home', () => {
     const { home, env } = fakeHome();
     expect(clineGlobalRulesDir(env)).toBe(join(home, '.cline', 'rules'));
+    // The Documents override equals ~/Documents here, so the hook dirs
+    // deduplicate to the extension-facing one plus the SDK home fallback.
     expect(clineGlobalHookDirs(env)).toEqual([
-      join(clineDocumentsDir(env), 'Hooks'),
+      join(home, 'Documents', 'Cline', 'Hooks'),
       join(home, '.cline', 'hooks'),
     ]);
+  });
+
+  it('covers every rules directory Cline resolves, including OneDrive markers', () => {
+    const { home, env } = fakeHome();
+    const oneDrive = join(home, 'OneDrive');
+    const dirs = clineGlobalRulesDirs({
+      ...env,
+      OneDrive: oneDrive,
+      OneDriveConsumer: '',
+    });
+    expect(dirs).toEqual([
+      join(home, '.cline', 'rules'),
+      join(home, 'Documents', 'Cline', 'Rules'),
+      join(home, 'Cline', 'Rules'),
+      join(oneDrive, 'Documents', 'Cline', 'Rules'),
+    ]);
+    expect(clineGlobalRulesPaths(env)).toContain(
+      join(home, 'Documents', 'Cline', 'Rules', 'concord.md'),
+    );
   });
 });
 
@@ -98,7 +125,7 @@ describe('Cline user configs', () => {
     const config = readMcp(mcpPath);
     expect(config.mcpServers['concord']).toMatchObject({
       command: 'concord-mcp',
-      env: { CONCORD_AGENT_KIND: 'cline' },
+      env: { CONCORD_AGENT_KIND: 'cline', CONCORD_MANAGED: 'true' },
     });
 
     for (const dir of clineGlobalHookDirs(env)) {
@@ -187,6 +214,43 @@ describe('Cline user configs', () => {
     if (secondary !== undefined) {
       expect(clineHooksPresent(secondary)).toBe('present');
     }
+  });
+
+  it('leaves a hand-written concord-mcp entry alone on install and uninstall', () => {
+    const { env } = fakeHome();
+    const mcpPath = clineMcpSettingsPath(env);
+    mkdirSync(dirname(mcpPath), { recursive: true });
+    // A user's own entry that happens to look Concord-shaped: concord-mcp
+    // pinned to a repo, but no managed marker.
+    const userEntry = {
+      mcpServers: {
+        concord: {
+          command: 'concord-mcp',
+          env: { CONCORD_AGENT_KIND: 'cline', CONCORD_REPO_ROOT: '/pinned/repo' },
+        },
+      },
+    };
+    writeFileSync(mcpPath, `${JSON.stringify(userEntry, null, 2)}\n`);
+
+    expect(clineEntryIsManaged(readFileSync(mcpPath, 'utf8'))).toBe(false);
+    installClineUserConfigs(env);
+    expect(JSON.parse(readFileSync(mcpPath, 'utf8'))).toEqual(userEntry);
+    uninstallClineUserConfigs(env);
+    expect(JSON.parse(readFileSync(mcpPath, 'utf8'))).toEqual(userEntry);
+  });
+
+  it('rewrites and removes only marker-carrying concord entries', () => {
+    const { env } = fakeHome();
+    installClineUserConfigs(env);
+    const mcpPath = clineMcpSettingsPath(env);
+    expect(clineEntryIsManaged(readFileSync(mcpPath, 'utf8'))).toBe(true);
+
+    // A rerun rewrites the canonical entry and keeps the marker.
+    installClineUserConfigs(env);
+    expect(clineEntryIsManaged(readFileSync(mcpPath, 'utf8'))).toBe(true);
+
+    uninstallClineUserConfigs(env);
+    expect(readMcp(mcpPath).mcpServers).not.toHaveProperty('concord');
   });
 
   it('uninstall removes only Concord-owned entries and hook files', () => {

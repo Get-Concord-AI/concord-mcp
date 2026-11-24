@@ -156,6 +156,59 @@ describe('local Cline hooks', () => {
     expect(start).toContain(CLINE.agentId);
     expect(repos.agents.get(CLINE.agentId)).toBeDefined();
   });
+
+  it('registers presence but no pull endpoint on the SDK surface', () => {
+    handleLocalClineHook(repos, CLINE, CONTEXT, 'cline-task-start', 'sdk');
+    // Presence is honest about a running task; a pull endpoint would claim
+    // reachability for an id the detached hook output can never show.
+    expect(repos.agents.get(CLINE.agentId)).toBeDefined();
+    expect(repos.agentEndpoints.getByAgent(CLINE.agentId)).toBeUndefined();
+  });
+
+  it('claims only the messages that fit under the hook context cap', () => {
+    handleLocalClineHook(repos, CLINE, CONTEXT, 'cline-task-start', 'extension');
+    handleRegisterAgent(repos, { agent_id: 'codex:peer0001', kind: 'codex' });
+    const markers = ['MSG-ONE', 'MSG-TWO', 'MSG-THREE', 'MSG-FOUR'];
+    markers.forEach((marker, index) => {
+      handleSendAgentMessage(repos, {
+        operation: 'prompt',
+        agentId: 'codex:peer0001',
+        toAgentId: CLINE.agentId,
+        content: `${marker} ${'x'.repeat(16_000)}`,
+        idempotencyKey: `cap-${String(index)}`,
+      });
+    });
+
+    const first = handleLocalClineHook(
+      repos,
+      CLINE,
+      CONTEXT,
+      'cline-user-prompt-submit',
+      'extension',
+    );
+    const body = z
+      .object({ contextModification: z.string() })
+      .loose()
+      .parse(JSON.parse(first)).contextModification;
+    // Cline truncates contextModification at 50,000 chars: what we emit must
+    // stay under it, and only the claimed messages may be marked delivered.
+    // Pending order follows (created_at, message_id), not insertion order.
+    expect(body.length).toBeLessThan(50_000);
+    const delivered = markers.filter((marker) => body.includes(marker));
+    expect(delivered).toHaveLength(2);
+    expect(repos.agentMessages.listPendingForRecipient(CLINE.agentId)).toHaveLength(2);
+
+    const second = handleLocalClineHook(
+      repos,
+      CLINE,
+      CONTEXT,
+      'cline-user-prompt-submit',
+      'extension',
+    );
+    const rest = markers.filter((marker) => !delivered.includes(marker));
+    for (const marker of rest) expect(second).toContain(marker);
+    expect(repos.agentMessages.listPendingForRecipient(CLINE.agentId)).toHaveLength(0);
+  });
 });
 
 describe('runClineHook end to end', () => {
@@ -276,5 +329,24 @@ describe('cloud Cline hooks', () => {
     const message = control.contextModification ?? '';
     expect(message).toContain(`agent_id: "${CLINE.agentId}"`);
     expect(message).toContain(`workspace_id: "${workspaceIdForRoot(repoRoot)}"`);
+  });
+
+  it('advertises no cloud endpoint on the SDK surface', async () => {
+    let endpointPuts = 0;
+    const runtime = runtimeWith([
+      [
+        'PUT /v1/agents/a-uuid/endpoint',
+        () => {
+          endpointPuts += 1;
+          return ok({ endpoint: {} });
+        },
+      ],
+    ]);
+
+    await handleCloudClineHook(runtime, CLINE, repoRoot, 'cline-task-start', 'sdk');
+    expect(endpointPuts).toBe(0);
+
+    await handleCloudClineHook(runtime, CLINE, repoRoot, 'cline-task-start', 'extension');
+    expect(endpointPuts).toBeGreaterThan(0);
   });
 });

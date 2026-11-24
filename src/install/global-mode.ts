@@ -14,7 +14,12 @@ import { codexHome } from './codex-config.js';
 import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
 import { deepseekHome } from './deepseek-config.js';
-import { clineDetected, clineGlobalRulesDir, clineMcpSettingsPath } from './cline-config.js';
+import {
+  clineDetected,
+  clineGlobalRulesPaths,
+  clineManagedEnv,
+  clineMcpSettingsPath,
+} from './cline-config.js';
 import {
   devinMcpConfigPath,
   hasDevinMcpServer,
@@ -72,7 +77,9 @@ interface UserFile {
   readonly registration?: Registration | undefined;
   /** Optional harness version gate for a registration format. */
   readonly supported?: ((env: NodeJS.ProcessEnv) => boolean) | undefined;
-  readonly path: (env: NodeJS.ProcessEnv) => string;
+  readonly path?: ((env: NodeJS.ProcessEnv) => string) | undefined;
+  /** Every file this entry owns part of; takes precedence over `path`. */
+  readonly paths?: ((env: NodeJS.ProcessEnv) => string[]) | undefined;
   readonly install: (existing: string | undefined, path: string) => string;
   readonly uninstall: (existing: string) => string;
 }
@@ -208,7 +215,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     isDetected: clineDetected,
-    path: (env) => join(clineGlobalRulesDir(env), 'concord.md'),
+    paths: clineGlobalRulesPaths,
     install: (existing) => upsertBlock(existing ?? '', CLINE_GLOBAL_INSTRUCTIONS),
     uninstall: (existing) => {
       const rest = removeBlock(existing);
@@ -219,7 +226,7 @@ const USER_FILES: readonly UserFile[] = [
     isDetected: clineDetected,
     registration: { id: 'cline', present: hasMcpServer },
     path: clineMcpSettingsPath,
-    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('cline')),
+    install: (existing) => upsertMcpServer(existing, undefined, clineManagedEnv()),
     uninstall: removeMcpServer,
   },
 ];
@@ -248,35 +255,39 @@ function applyFile(
   owned: Set<string>,
   report: GlobalModeReport,
 ): void {
-  const path = file.path(env);
-  const exists = existsSync(path);
-  if (enable ? !isFileDetected(file, env) : !exists) return;
+  const paths = file.paths?.(env) ?? (file.path === undefined ? [] : [file.path(env)]);
+  if (enable ? !isFileDetected(file, env) : !paths.some((path) => existsSync(path))) return;
   if (enable && file.supported !== undefined && !file.supported(env)) return;
-  try {
-    const existing = exists ? readFileSync(path, 'utf8') : undefined;
-    const { registration } = file;
-    if (registration !== undefined && !mayChange(registration, enable, existing, owned)) return;
-    const next = enable ? file.install(existing, path) : file.uninstall(existing ?? '');
-    if (next !== existing) {
-      if (next === '') {
-        rmSync(path);
-      } else {
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, next);
+  const { registration } = file;
+  for (const path of paths) {
+    try {
+      const exists = existsSync(path);
+      const existing = exists ? readFileSync(path, 'utf8') : undefined;
+      if (registration !== undefined && !mayChange(registration, enable, existing, owned)) {
+        continue;
       }
-      report.written.push(path);
+      const next = enable ? file.install(existing, path) : file.uninstall(existing ?? '');
+      if (next !== existing) {
+        if (next === '') {
+          rmSync(path);
+        } else {
+          mkdirSync(dirname(path), { recursive: true });
+          writeFileSync(path, next);
+        }
+        report.written.push(path);
+      }
+      if (registration !== undefined) {
+        if (enable) owned.add(registration.id);
+        else owned.delete(registration.id);
+      }
+    } catch (error) {
+      // A parse error already names the file it could not change.
+      report.warnings.push(
+        error instanceof McpConfigParseError
+          ? error.message
+          : `${path}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-    if (registration !== undefined) {
-      if (enable) owned.add(registration.id);
-      else owned.delete(registration.id);
-    }
-  } catch (error) {
-    // A parse error already names the file it could not change.
-    report.warnings.push(
-      error instanceof McpConfigParseError
-        ? error.message
-        : `${path}: ${error instanceof Error ? error.message : String(error)}`,
-    );
   }
 }
 

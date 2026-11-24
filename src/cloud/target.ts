@@ -92,24 +92,11 @@ function cachedOriginRemote(repoRoot: string): string | undefined {
 }
 
 /**
- * The cloud project a repository root works in, without consulting the
- * machine link: a repository is its git remote's project, as every clone
- * names it; one with no remote is a project of its own on this machine;
- * anything outside a repository is `general`.
- */
-export function cloudProjectKeyForRoot(
-  repoRoot: string,
-  machineKey: string,
-  originRemote: OriginRemote = cachedOriginRemote,
-): string {
-  return isRepository(repoRoot)
-    ? (repositoryProjectKey(repoRoot, originRemote) ?? machineProjectKey(machineKey, repoRoot))
-    : GENERAL_PROJECT;
-}
-
-/**
  * The cloud project a folder works in on a linked machine, or undefined on an
- * unlinked one.
+ * unlinked one. A repository is its git remote's project, as every clone names
+ * it; one with no remote is a project of its own on this machine; anything
+ * outside a repository is `general`, where agents that belong to no repository
+ * meet.
  */
 export function cloudTargetFor(
   repoRoot: string,
@@ -119,6 +106,9 @@ export function cloudTargetFor(
   const machine = linkedMachine(env);
   if (machine === undefined) return undefined;
 
-  const projectKey = cloudProjectKeyForRoot(repoRoot, machine.machineKey, originRemote);
+  const projectKey = isRepository(repoRoot)
+    ? (repositoryProjectKey(repoRoot, originRemote) ??
+      machineProjectKey(machine.machineKey, repoRoot))
+    : GENERAL_PROJECT;
   return { apiUrl: machine.credentials.apiUrl, projectKey };
 }

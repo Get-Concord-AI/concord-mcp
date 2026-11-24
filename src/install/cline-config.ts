@@ -1,12 +1,15 @@
+import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+
+import { z } from 'zod';
 
 import { userHome } from '../config/paths.js';
 import { executablePath } from './adapters/probe.js';
 import {
   agentKindEnv,
+  CONCORD_SERVER_KEY,
   hasMcpServer,
-  isConcordServerOwned,
   removeMcpServer,
   upsertMcpServer,
 } from './mcp-config.js';
@@ -16,8 +19,9 @@ import {
  * extension, and JetBrains surfaces — there is no project-scoped MCP config.
  * `CLINE_MCP_SETTINGS_PATH` overrides the file, `CLINE_DATA_DIR` its parent
  * `settings/` directory's grandparent, and `CLINE_DIR` the `~/.cline` root.
- * Lifecycle hooks live in `~/Documents/Cline/Hooks` (read by every surface)
- * and `~/.cline/hooks` (SDK/CLI), again relocatable through `CLINE_DIR`.
+ * Lifecycle hooks live under `<Documents>/Cline/Hooks` (the extension's
+ * canonical directory, which the SDK also scans) and `~/.cline/hooks`
+ * (SDK/CLI), again relocatable through `CLINE_DIR`.
  */
 
 export function clineHome(env: NodeJS.ProcessEnv): string {
@@ -42,19 +46,108 @@ export function clineGlobalRulesDir(env: NodeJS.ProcessEnv): string {
   return join(clineHome(env), 'rules');
 }
 
-/** `~/Documents/Cline` — the extension-facing half of Cline's global state. */
-export function clineDocumentsDir(env: NodeJS.ProcessEnv): string {
-  return join(userHome(env), 'Documents', 'Cline');
+/**
+ * The OS Documents folder, resolved once per process exactly the way Cline's
+ * `getDocumentsPath` resolves it: the `MyDocuments` known folder through
+ * PowerShell on Windows, `xdg-user-dir DOCUMENTS` on Linux, `~/Documents`
+ * as the shared fallback — so OneDrive folder redirection lands correctly.
+ * `CONCORD_DOCUMENTS_DIR` overrides the lookup for tests and exotic setups.
+ */
+const DOCUMENTS_DIR_ENV = 'CONCORD_DOCUMENTS_DIR';
+
+let osDocumentsDirCache: string | undefined;
+let osDocumentsDirResolved = false;
+
+function osDocumentsDir(): string | undefined {
+  if (osDocumentsDirResolved) return osDocumentsDirCache;
+  osDocumentsDirResolved = true;
+  const lookup =
+    process.platform === 'win32'
+      ? {
+          command: 'powershell',
+          args: [
+            '-NoProfile',
+            '-Command',
+            '[System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyDocuments)',
+          ],
+        }
+      : process.platform === 'linux'
+        ? { command: 'xdg-user-dir', args: ['DOCUMENTS'] }
+        : undefined;
+  if (lookup === undefined) return undefined;
+  try {
+    const result = spawnSync(lookup.command, lookup.args, {
+      encoding: 'utf8',
+      timeout: 5_000,
+      windowsHide: true,
+    });
+    const dir = result.status === 0 ? result.stdout.trim() : '';
+    if (dir !== '') osDocumentsDirCache = dir;
+  } catch {
+    // A missing helper falls through to the ~/Documents candidates.
+  }
+  return osDocumentsDirCache;
 }
 
 /**
- * Global hook directories, most authoritative first. `Documents/Cline/Hooks`
- * is the only global directory the VS Code extension reads and the SDK also
- * scans it, so it is the canonical one; `~/.cline/hooks` additionally covers
- * SDK-only layouts when `CLINE_DIR` relocates state.
+ * The `Cline` state directories under Documents, deduplicated: the
+ * OS-resolved one the VS Code extension reads first, then the literal
+ * `~/Documents` the SDK resolver scans — the two differ when Windows folder
+ * redirection moves Documents into OneDrive.
+ */
+export function clineDocumentsDirs(env: NodeJS.ProcessEnv): string[] {
+  const override = env[DOCUMENTS_DIR_ENV] ?? process.env[DOCUMENTS_DIR_ENV];
+  const trimmed = override?.trim();
+  const osDocuments = trimmed === undefined || trimmed === '' ? osDocumentsDir() : trimmed;
+  const dirs = osDocuments === undefined ? [] : [join(osDocuments, 'Cline')];
+  dirs.push(join(userHome(env), 'Documents', 'Cline'));
+  return [...new Set(dirs)];
+}
+
+/** The primary `Cline` state directory — the OS-resolved one when known. */
+export function clineDocumentsDir(env: NodeJS.ProcessEnv): string {
+  return clineDocumentsDirs(env)[0] ?? join(userHome(env), 'Documents', 'Cline');
+}
+
+/**
+ * Global hook directories, most authoritative first. The first Documents
+ * entry is the extension's canonical `Cline/Hooks`; the literal
+ * `~/Documents/Cline/Hooks` covers the SDK's own Documents lookup under
+ * OneDrive redirection, and `~/.cline/hooks` SDK-only layouts.
  */
 export function clineGlobalHookDirs(env: NodeJS.ProcessEnv): string[] {
-  return [join(clineDocumentsDir(env), 'Hooks'), join(clineHome(env), 'hooks')];
+  const dirs = clineDocumentsDirs(env).map((dir) => join(dir, 'Hooks'));
+  dirs.push(join(clineHome(env), 'hooks'));
+  return [...new Set(dirs)];
+}
+
+/** Environment markers OneDrive folder redirection sets on Windows. */
+const ONEDRIVE_ENV_VARS = ['OneDrive', 'OneDriveConsumer', 'OneDriveCommercial'] as const;
+
+/**
+ * Every global rules directory Cline's resolver scans, Concord's own
+ * `~/.cline/rules` first: the Documents `Cline/Rules` locations, the
+ * `~/Cline/Rules` fallback, and the OneDrive-redirected candidates the SDK
+ * adds for each marker variable.
+ */
+export function clineGlobalRulesDirs(env: NodeJS.ProcessEnv): string[] {
+  const dirs = [join(clineHome(env), 'rules')];
+  for (const documentsDir of clineDocumentsDirs(env)) {
+    dirs.push(join(documentsDir, 'Rules'));
+  }
+  dirs.push(join(userHome(env), 'Cline', 'Rules'));
+  for (const key of ONEDRIVE_ENV_VARS) {
+    const value = env[key]?.trim();
+    if (value !== undefined && value !== '') {
+      dirs.push(join(value, 'Documents', 'Cline', 'Rules'));
+    }
+  }
+  return [...new Set(dirs)];
+}
+
+/** The `concord.md` path inside each global rules directory. */
+export function clineGlobalRulesPaths(env: NodeJS.ProcessEnv): string[] {
+  return clineGlobalRulesDirs(env).map((dir) => join(dir, 'concord.md'));
 }
 
 /** VS Code globalStorage locations for the Cline extension (`saoudrizwan.claude-dev`). */
@@ -81,7 +174,7 @@ export function clineDetected(env: NodeJS.ProcessEnv): boolean {
   return (
     executablePath('cline', env) !== undefined ||
     existsSync(clineHome(env)) ||
-    existsSync(clineDocumentsDir(env)) ||
+    clineDocumentsDirs(env).some((dir) => existsSync(dir)) ||
     vscodeExtensionDirs(env).some((dir) => existsSync(dir))
   );
 }
@@ -146,18 +239,49 @@ export function clineHooksPresent(dir: string): 'present' | 'missing' | 'partial
 }
 
 /**
+ * The env Concord stamps on the `concord` entry it writes to Cline's MCP
+ * settings. The marker is what proves Concord installed the entry: a
+ * hand-written `concord-mcp` server — even one pinned with
+ * `CONCORD_REPO_ROOT` — carries no marker and is left alone on both install
+ * and uninstall.
+ */
+export const CLINE_MANAGED_ENV = 'CONCORD_MANAGED';
+
+/** The env a Concord-written Cline MCP entry carries. */
+export function clineManagedEnv(): Record<string, string> {
+  return { ...agentKindEnv('cline'), [CLINE_MANAGED_ENV]: 'true' };
+}
+
+const clineEntrySchema = z.object({ env: z.record(z.string(), z.string()).optional() }).loose();
+
+/** Whether the `concord` entry in Cline's settings carries Concord's marker. */
+export function clineEntryIsManaged(existing: string): boolean {
+  try {
+    const config = z
+      .object({ mcpServers: z.record(z.string(), z.unknown()).optional() })
+      .loose()
+      .parse(JSON.parse(existing));
+    const entry = clineEntrySchema.safeParse(config.mcpServers?.[CONCORD_SERVER_KEY]);
+    return entry.success && entry.data.env?.[CLINE_MANAGED_ENV] === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Register the Concord MCP server in Cline's global settings and install the
- * lifecycle hooks in both global hook directories. A `concord` entry the user
- * wrote themselves is preserved; unrelated servers and settings always are.
- * Returns the absolute paths written.
+ * lifecycle hooks in every global hook directory. A `concord` entry the user
+ * wrote themselves — anything without Concord's managed marker — is
+ * preserved; unrelated servers and settings always are. Returns the absolute
+ * paths written.
  */
 export function installClineUserConfigs(env: NodeJS.ProcessEnv): string[] {
   const written: string[] = [];
   const mcpPath = clineMcpSettingsPath(env);
   const existing = existsSync(mcpPath) ? readFileSync(mcpPath, 'utf8') : undefined;
-  if (existing === undefined || !hasMcpServer(existing) || isConcordServerOwned(existing)) {
+  if (existing === undefined || !hasMcpServer(existing) || clineEntryIsManaged(existing)) {
     mkdirSync(dirname(mcpPath), { recursive: true });
-    writeFileSync(mcpPath, upsertMcpServer(existing, undefined, agentKindEnv('cline')));
+    writeFileSync(mcpPath, upsertMcpServer(existing, undefined, clineManagedEnv()));
     written.push(mcpPath);
   }
   for (const dir of clineGlobalHookDirs(env)) {
@@ -181,7 +305,7 @@ export function uninstallClineUserConfigs(env: NodeJS.ProcessEnv): void {
   if (existsSync(mcpPath)) {
     try {
       const existing = readFileSync(mcpPath, 'utf8');
-      if (hasMcpServer(existing) && isConcordServerOwned(existing)) {
+      if (hasMcpServer(existing) && clineEntryIsManaged(existing)) {
         writeFileSync(mcpPath, removeMcpServer(existing));
       }
     } catch {

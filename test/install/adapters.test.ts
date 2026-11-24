@@ -764,7 +764,12 @@ describe('global harness adapters', () => {
       const bin = join(home, 'bin');
       mkdirSync(bin);
       writeFakeVersion(bin, 'cline', '3.0.75');
-      const env = { HOME: home, USERPROFILE: home, PATH: bin };
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: bin,
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
 
       const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
       const entry = report.find((item) => item.harness === 'cline');
@@ -810,7 +815,12 @@ describe('global harness adapters', () => {
 
     it('detects Cline without its CLI through ~/.cline or ~/Documents/Cline', () => {
       const home = mkdtempSync(join(tmpdir(), 'concord-cline-detect-'));
-      const env = { HOME: home, USERPROFILE: home, PATH: join(home, 'empty-bin') };
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: join(home, 'empty-bin'),
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
       mkdirSync(join(home, '.cline'), { recursive: true });
 
       const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
@@ -823,7 +833,12 @@ describe('global harness adapters', () => {
       const bin = join(home, 'bin');
       mkdirSync(bin);
       writeFakeVersion(bin, 'cline', '2.9.9');
-      const env = { HOME: home, USERPROFILE: home, PATH: bin };
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: bin,
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
 
       const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
       expect(report.find((item) => item.harness === 'cline')).toMatchObject({
@@ -838,7 +853,12 @@ describe('global harness adapters', () => {
       const bin = join(home, 'bin');
       mkdirSync(bin);
       writeFakeVersion(bin, 'cline', '3.0.75');
-      const env = { HOME: home, USERPROFILE: home, PATH: bin };
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: bin,
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
       installGlobalAdapters(import.meta.url, env, undefined, LASTING);
 
       const report = uninstallGlobalAdapters(env);
@@ -863,7 +883,12 @@ describe('global harness adapters', () => {
       const bin = join(home, 'bin');
       mkdirSync(bin);
       writeFakeVersion(bin, 'cline', '3.0.75');
-      const env = { HOME: home, USERPROFILE: home, PATH: bin };
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: bin,
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
       installGlobalAdapters(import.meta.url, env, undefined, LASTING);
 
       // The complete ~/.cline/hooks fallback must not mask the directory the
@@ -874,7 +899,7 @@ describe('global harness adapters', () => {
 
       const entry = statusGlobalAdapters(env).find((item) => item.harness === 'cline');
       expect(entry?.status).toBe('action_required');
-      expect(entry?.detail).toContain('Documents/Cline/Hooks');
+      expect(entry?.detail).toContain('Cline Hooks directory under your Documents folder');
     });
   });
 });

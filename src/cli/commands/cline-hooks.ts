@@ -10,12 +10,17 @@ import {
   type AgentIdentity,
 } from '../../domain/identity.js';
 import { buildRoster } from '../../domain/presence.js';
-import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
+import {
+  renderInboxBody,
+  renderPeerMessage,
+  toDeliverable,
+  type DeliverableMessage,
+} from '../../domain/pull-inbox.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { openContext } from '../context.js';
 import { cloudRoster } from './cloud-hooks.js';
 import { cloudAccess, drainFromCloud, HOOK_TIMEOUT_MS, registerInCloud } from './cloud-inbox.js';
-import { drainInbox, registerPullEndpoint } from './inbox.js';
+import { registerPullEndpoint } from './inbox.js';
 import { clineSessionStartMessage, type RosterLine } from './session-start-message.js';
 
 /**
@@ -150,6 +155,39 @@ function inboxOutput(messages: readonly DeliverableMessage[]): string {
   return hookOutput(messages.length === 0 ? undefined : renderInboxBody(messages));
 }
 
+/**
+ * Cline truncates a hook's `contextModification` at 50,000 characters, so a
+ * backlog rendered whole would lose its tail — marked delivered but never
+ * seen. Stay well under the cap and claim only what fits; the rest stay
+ * pending for the next prompt.
+ */
+const CLINE_CONTEXT_LIMIT = 48_000;
+
+/**
+ * Drain the durable inbox for a prompt-submit hook, claiming messages one
+ * rendered block at a time until the next would overflow Cline's
+ * `contextModification` cap. A first message too large for the cap is still
+ * delivered alone — Cline truncates it, but the rest of the backlog survives
+ * for the next prompt instead of being marked delivered unseen.
+ */
+function drainInboxForCline(repos: Repositories, agentId: string): DeliverableMessage[] {
+  registerPullEndpoint(repos, agentId, 'cline');
+  repos.agents.heartbeat(agentId);
+  const pending = repos.agentMessages.listPendingForRecipient(agentId);
+  const fitted: string[] = [];
+  let size = 0;
+  for (const message of pending) {
+    const rendered = renderPeerMessage(toDeliverable(message));
+    const next = size + (fitted.length === 0 ? 0 : 2) + rendered.length;
+    if (next > CLINE_CONTEXT_LIMIT) break;
+    fitted.push(message.messageId);
+    size = next;
+  }
+  const first = pending[0];
+  if (fitted.length === 0 && first !== undefined) fitted.push(first.messageId);
+  return repos.agentMessages.claimPendingIds(agentId, 'cline', fitted).map(toDeliverable);
+}
+
 function rosterOthers(repos: Repositories, agentId: string): RosterLine[] {
   return buildRoster(repos.agents.list(), Date.now()).filter((peer) => peer.agentId !== agentId);
 }
@@ -165,7 +203,13 @@ export function handleLocalClineHook(
     case 'cline-task-start':
     case 'cline-task-resume':
       ensureAgentRegistered(repos, identity, context.repoRoot);
-      registerPullEndpoint(repos, identity.agentId, 'cline');
+      // The SDK runs hooks detached and its output never reaches the model,
+      // so a `cline:<hash>` id it registers is one nobody can address:
+      // advertising a pull endpoint would only leave a ghost that looks
+      // reachable. Presence stays — it is honest about a running task.
+      if (surface !== 'sdk') {
+        registerPullEndpoint(repos, identity.agentId, 'cline');
+      }
       return hookOutput(
         clineSessionStartMessage(
           identity.agentId,
@@ -180,7 +224,9 @@ export function handleLocalClineHook(
       // refreshed and a pending-count notice is emitted — harmless where the
       // output is ignored, a drain hint where it is shown.
       if (surface !== 'extension') {
-        registerPullEndpoint(repos, identity.agentId, 'cline');
+        if (surface !== 'sdk') {
+          registerPullEndpoint(repos, identity.agentId, 'cline');
+        }
         const pending = repos.agentMessages.listPendingForRecipient(identity.agentId).length;
         return pending === 0
           ? '{}'
@@ -189,7 +235,7 @@ export function handleLocalClineHook(
                 `Run \`concord inbox drain --agent ${identity.agentId} --provider cline\` to read them.`,
             );
       }
-      return inboxOutput(drainInbox(repos, identity.agentId, 'cline'));
+      return inboxOutput(drainInboxForCline(repos, identity.agentId));
   }
 }
 
@@ -203,7 +249,12 @@ export async function handleCloudClineHook(
   switch (event) {
     case 'cline-task-start':
     case 'cline-task-resume':
-      await registerInCloud(runtime, identity.agentId, 'cline', cwd);
+      // Cloud registration advertises the pull endpoint, which an sdk
+      // session can never be reached through — skip it entirely; presence
+      // registers on the session's first tool call anyway.
+      if (surface !== 'sdk') {
+        await registerInCloud(runtime, identity.agentId, 'cline', cwd);
+      }
       // The MCP server itself was started outside the repository, so the
       // session-start context must name the workspace the hook resolved —
       // the same id the local path reports — or cloud calls land elsewhere.
@@ -216,7 +267,9 @@ export async function handleCloudClineHook(
       );
     case 'cline-user-prompt-submit':
       if (surface !== 'extension') {
-        await registerInCloud(runtime, identity.agentId, 'cline', cwd);
+        if (surface !== 'sdk') {
+          await registerInCloud(runtime, identity.agentId, 'cline', cwd);
+        }
         return '{}';
       }
       return inboxOutput(await drainFromCloud(runtime, identity.agentId, 'cline'));
