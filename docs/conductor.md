@@ -79,8 +79,7 @@ to a session, covers cloud workspaces only.
 
 - **Cloud workspaces.** These run on Conductor's machines, not yours.
 - **Cursor chats.** These run through the Cursor API, not a local process.
-- **OpenCode chats.** Pull-based coverage is expected — Concord supports
-  OpenCode — but has not been verified inside Conductor.
+- **OpenCode chats.** Not covered inside Conductor.
 
 ## Check it
 

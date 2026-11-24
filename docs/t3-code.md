@@ -48,22 +48,24 @@ Each T3 provider instance uses the vendor's own binary and config:
 ## Coverage by provider
 
 Coverage follows whichever vendor agent the thread runs — T3 contributes the
-launch, not the integration.
+launch, not the integration. The whole matrix — this table and the delivery
+table under [Message delivery](#message-delivery) — is inferred from how T3
+launches each agent and from each harness's own documentation; none of it has
+been exercised in a live T3 session. Rows marked "Unverified" are the least
+certain. Check `concord status` inside a thread before relying on a given
+provider; once real threads have been run, the verified rows can be promoted
+and #230 closed.
 
-| T3 provider         | Concord path                                           | Delivery                                                            |
-| ------------------- | ------------------------------------------------------ | ------------------------------------------------------------------- |
-| Claude Code         | MCP + `concord-relay` plugin (SDK session)             | Hooks while busy; `asyncRewake` waiter wakes idle sessions          |
-| Codex               | `[mcp_servers.concord]` + `[[hooks.*]]` in config.toml | Hooks while busy; managed host attaches too — see below             |
-| OpenCode            | `opencode.json` MCP + request-metadata identity        | Pull/busy; the managed controller needs `concord adapters opencode` |
-| Grok Build          | `~/.grok/config.toml` MCP + hooks                      | Hooks while busy; agent-started monitor for idle                    |
-| Kiro                | `~/.kiro` user MCP + hooks                             | Next prompt only — Kiro has no mid-turn hook                        |
-| Cursor              | `~/.cursor/mcp.json` MCP                               | Unverified — T3 drives `cursor-agent`, not the `cursor` binary      |
-| Antigravity (`agy`) | `.agents/mcp_config.json` + `~/.gemini/config`         | Hooks while busy; idle messages wait for the next prompt            |
-| ACP agents          | Agent-dependent                                        | Unverified per agent — see below                                    |
-
-"Unverified" means the path is inferred from how T3 launches the agent, not
-confirmed in a live T3 session. Check `concord status` inside a thread before
-relying on a given provider.
+| T3 provider         | Concord path                                           | Delivery                                                                             |
+| ------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Claude Code         | MCP + `concord-relay` plugin (SDK session)             | Hooks while busy; `asyncRewake` waiter wakes idle sessions                           |
+| Codex               | `[mcp_servers.concord]` + `[[hooks.*]]` in config.toml | Hooks while busy; managed host attaches too — see below                              |
+| OpenCode            | `opencode.json` MCP + request-metadata identity        | Identified but not hosted — agent reads its inbox via `inspect_work`                 |
+| Grok Build          | `~/.grok/config.toml` MCP + hooks                      | Hooks while busy; agent-started monitor for idle                                     |
+| Kiro                | `~/.kiro` user MCP + hooks                             | Next prompt only — Kiro has no mid-turn hook                                         |
+| Cursor              | `~/.cursor/mcp.json` MCP                               | Unverified — T3 drives `cursor-agent`, not the `cursor` binary                       |
+| Antigravity (`agy`) | `.agents/mcp_config.json` + `~/.gemini/config`         | Hooks while busy; one-shot `inbox watch` monitor can wake idle — unverified under T3 |
+| ACP agents          | Agent-dependent                                        | Unverified per agent — see below                                                     |
 
 ## Identity
 
@@ -80,21 +82,23 @@ Concord resolves a linked worktree to the repository's primary `.concord/`
 store, so every thread of a repository shares one Concord workspace — claims
 and messages are visible across threads.
 
-Gitignored or untracked files are not copied into a new worktree. If you keep
-Concord's project files (`.mcp.json`, `.cursor/mcp.json`, `.claude/` hooks,
-`.concord/`) out of git, they will be missing inside worktree threads. Prefer
-`concord setup --global`, or commit the project files you want shared.
+Gitignored or untracked files are not copied into a new worktree. The shared
+`.concord/` store itself resolves to the primary checkout, so it is not at
+risk — but Concord's per-client config files are. If you keep them (`.mcp.json`,
+`.cursor/mcp.json`, `.claude/` hooks) out of git, they will be missing inside
+worktree threads. Prefer `concord setup --global`, or commit the project files
+you want shared.
 
 ## Message delivery
 
-| Harness     | Busy turn                  | Idle session                                 |
-| ----------- | -------------------------- | -------------------------------------------- |
-| Claude Code | PostToolUse and Stop hooks | `asyncRewake` waiter (see below)             |
-| Codex       | Hooks; host `turn/steer`   | Host `turn/start` or next prompt — see below |
-| OpenCode    | Pull on next tool call     | Next turn                                    |
-| Grok Build  | Hooks                      | Agent-started `concord inbox watch` monitor  |
-| Kiro        | None — no mid-turn hook    | Next prompt (`UserPromptSubmit` drain)       |
-| Antigravity | Hooks                      | Next prompt                                  |
+| Harness     | Busy turn                                | Idle session                                                           |
+| ----------- | ---------------------------------------- | ---------------------------------------------------------------------- |
+| Claude Code | PostToolUse and Stop hooks               | `asyncRewake` waiter (see below)                                       |
+| Codex       | Hooks                                    | Next prompt — see below                                                |
+| OpenCode    | Agent reads its inbox via `inspect_work` | Waits until the agent checks                                           |
+| Grok Build  | Hooks                                    | Agent-started `concord inbox watch` monitor                            |
+| Kiro        | None — no mid-turn hook                  | Next prompt (`UserPromptSubmit` drain)                                 |
+| Antigravity | Hooks                                    | One-shot `inbox watch --once` monitor wakes idle — unverified under T3 |
 
 **Claude Code.** T3 Code drives Claude through the Claude Agent SDK
 (`CLAUDE_CODE_ENTRYPOINT=sdk-ts`), and the SDK never starts plugin monitors —
@@ -113,13 +117,18 @@ launches Concord's managed host (`concord adapters host-codex`) for T3
 threads too: it resumes the thread through `codex app-server proxy` and can
 start turns in Concord's daemon. Those turns write the same rollout from a
 second process that T3's UI never shows — a competing writer, the same
-hazard Conductor is excluded for. To opt out, remove the
-`# >>> concord hooks >>>` block from `config.toml` (the markers document
-this) — ideally before starting T3 Codex sessions, since the `SessionStart`
-hook is what launches the host. The block only gates future launches: a host
-already running for a thread is a detached `concord adapters host-codex`
-process that keeps delivering until you end it in Task Manager or `ps`/`kill`.
-The thread keeps MCP tool access but loses hook-driven identity and
+hazard Conductor is excluded for. To opt out, edit `config.toml` and remove
+only Concord's hook entries and the `# >>> concord hooks >>>` /
+`# <<< concord hooks <<<` marker lines — keep any `[hooks.state]` tables Codex
+appended inside the fence, since deleting them erases your trust decisions
+for unrelated hooks and Codex will re-prompt for them. Do this before
+starting T3 Codex sessions if you can, since the `SessionStart` hook is what
+launches the host. The block only gates future launches: a host already
+running for a thread is a detached `concord adapters host-codex` process that
+keeps delivering until you end it in Task Manager or `ps`/`kill`. Re-running
+`concord setup` — or the adapter self-heal path when `autoAdapters` is on —
+writes the block back, so the opt-out is not permanent unless you avoid
+those. The thread keeps MCP tool access but loses hook-driven identity and
 delivery.
 
 ## Caveats
@@ -127,10 +136,11 @@ delivery.
 - **Codex competing writer.** Concord's managed host attaches to T3 Code Codex
   threads — T3 sets no embedding-host marker, so `codexThreadHostable` treats
   them as hostable — and can start turns in its own daemon that T3's UI never
-  shows, writing the same rollout. Opting out means removing the
-  `# >>> concord hooks >>>` block **and** killing any `host-codex` process
-  already running for the thread — see
-  [Message delivery](#message-delivery).
+  shows, writing the same rollout. Opting out means removing Concord's hook
+  entries and marker lines from `config.toml` — keeping any `[hooks.state]`
+  trust tables Codex wrote inside the fence — **and** killing any `host-codex`
+  process already running for the thread; `concord setup` writes the block
+  back — see [Message delivery](#message-delivery).
 - **Managed provider runtimes.** T3 Code's "Connect with ChatGPT" Codex
   instance and managed Antigravity use T3-managed config directories, not
   `~/.codex` or `~/.gemini/config`. Concord's registrations do not reach them.
@@ -167,8 +177,10 @@ concord status
 concord adapters status
 ```
 
-Start two threads in the same project on different providers — for example a
-Claude thread and a Codex thread — and ask one to message the other. The
-Claude thread starts a turn by itself when idle (`asyncRewake`); the Codex
-thread's managed host can start a turn in Concord's daemon (`turn/start`),
-or the message waits for its next prompt or hook drain.
+Then start two threads in the same project — a Claude thread and a Codex
+thread, say — and have each run `start_work` on a small task so both register
+as Concord agents. Send a message from one thread to the other, and read it
+in the receiving thread with `inspect_work`. That exercises the delivery
+paths Concord actually supports under T3 — hooks while busy, the
+`asyncRewake` waiter for an idle Claude session, and `inspect_work` pulls —
+without relying on the Codex managed host.
