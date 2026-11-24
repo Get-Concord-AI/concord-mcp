@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  react-devtools-core: '-'
+
 importers:
 
   .:
@@ -22,16 +25,13 @@ importers:
         version: 15.1.0
       ink:
         specifier: 8.0.0
-        version: 8.0.0(@types/react@19.3.0)(react-devtools-core@8.0.0)(react@19.3.1)
+        version: 8.0.0(@types/react@19.3.0)(react@19.3.1)
       js-yaml:
         specifier: ^5.4.3
         version: 5.5.0
       react:
         specifier: 19.3.1
         version: 19.3.1
-      react-devtools-core:
-        specifier: 8.0.0
-        version: 8.0.0
       ws:
         specifier: ^8.22.1
         version: 8.23.0
@@ -892,7 +892,7 @@ packages:
     peerDependencies:
       '@types/react': '>=19.3.0'
       react: '>=19.3.0'
-      react-devtools-core: '>=6.1.2'
+      react-devtools-core: '*'
     peerDependenciesMeta:
       '@types/react':
         optional: true
@@ -1196,9 +1196,6 @@ packages:
     resolution: {integrity: sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA==}
     engines: {node: '>= 0.10'}
 
-  react-devtools-core@8.0.0:
-    resolution: {integrity: sha512-DGXJX+sCn2zC3ZalHoJhmZJsvP4QTpERlmCQAOgExc4Vp74ywB9ZnO8992cKw5ZcOS5u8GtpchTUPbjTiu5zaw==}
-
   react-reconciler@0.34.0:
     resolution: {integrity: sha512-eVibvB1fc9j5Qf1KRkiM3GzRPBdjg2P6G6QV2f3P6Eb3OGMxRBhdg2rrUwjbV5JrQaJj8nOa8uajmmJA5tJWjQ==}
     engines: {node: '>=0.10.0'}
@@ -1255,10 +1252,6 @@ packages:
   shebang-regex@3.0.0:
     resolution: {integrity: sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==}
     engines: {node: '>=8'}
-
-  shell-quote@1.10.0:
-    resolution: {integrity: sha512-w1aiOKwKuRgtwAReIIj89puqg+I7GvX4IbLrvmhXbzQsj1+Zwi4VO3+fa6ZF91TWSjIxoEkKnMeHcLEODK5ZXA==}
-    engines: {node: '>= 0.4'}
 
   side-channel-list@1.0.1:
     resolution: {integrity: sha512-mjn/0bi/oUURjc5Xl7IaWi/OJJJumuoJFQJfDDyO46+hBWsfaVM65TBHq2eoZBhzl9EchxOijpkbRC8SVBQU0w==}
@@ -1489,18 +1482,6 @@ packages:
 
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
-
-  ws@7.5.13:
-    resolution: {integrity: sha512-rsKI6xDBFVf4r/x8XyChGK04QR/XHroxs/jUcoWvtEZM8TPU/X/uIY9B1CsSzYws9ZJb/6bbBu7dPhFW00CAoA==}
-    engines: {node: '>=8.3.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: ^5.0.2
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
 
   ws@8.23.0:
     resolution: {integrity: sha512-wCkmX8QMOrKjgO8HW2WyDbTSGeqkocxgDzS9iR79rEAexty6/2qzilx3Ag8Tqf9ykop3irLKle0MtVn5qjVnoQ==}
@@ -2322,7 +2303,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.3.0
 
-  ink@8.0.0(@types/react@19.3.0)(react-devtools-core@8.0.0)(react@19.3.1):
+  ink@8.0.0(@types/react@19.3.0)(react@19.3.1):
     dependencies:
       '@alcalzone/ansi-tokenize': 0.3.1
       ansi-escapes: 7.3.0
@@ -2350,7 +2331,6 @@ snapshots:
       yoga-layout: 3.2.1
     optionalDependencies:
       '@types/react': 19.3.0
-      react-devtools-core: 8.0.0
 
   ip-address@10.7.4: {}
 
@@ -2579,14 +2559,6 @@ snapshots:
       iconv-lite: 0.7.3
       unpipe: 1.0.0
 
-  react-devtools-core@8.0.0:
-    dependencies:
-      shell-quote: 1.10.0
-      ws: 7.5.13
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
   react-reconciler@0.34.0(react@19.3.1):
     dependencies:
       react: 19.3.1
@@ -2670,8 +2642,6 @@ snapshots:
       shebang-regex: 3.0.0
 
   shebang-regex@3.0.0: {}
-
-  shell-quote@1.10.0: {}
 
   side-channel-list@1.0.1:
     dependencies:
@@ -2841,8 +2811,6 @@ snapshots:
       string-width: 8.3.0
 
   wrappy@1.0.2: {}
-
-  ws@7.5.13: {}
 
   ws@8.23.0: {}
 
