@@ -13,13 +13,11 @@ const TABLE_HEADER = /^\s*\[/u;
 
 const COMMENT_LINE = /^\s*#/u;
 
-/** Lines split on `\n` (keeping `\r`), flagged when inside a multi-line string. */
-function sourceLines(source: string): TomlLine[] {
-  const raw = source.split('\n');
-  return Array.from(tomlLines(source), ({ inString }, index) => ({
-    text: raw[index] ?? '',
-    inString,
-  }));
+/** Runs `edit` on `\n` line endings, then restores the file's own, taken from its first line. */
+function inLineEnding(source: string, edit: (text: string) => string): string {
+  const eol = /\r?\n/u.exec(source)?.[0] ?? '\n';
+  const edited = edit(source.replaceAll('\r\n', '\n'));
+  return eol === '\n' ? edited : edited.replaceAll('\n', eol);
 }
 
 function isHeader(line: TomlLine): boolean {
@@ -78,13 +76,16 @@ function withTrailingBlankLine(lines: readonly string[]): string {
  * them, which a round-trip through a parser would discard — survive verbatim.
  */
 export function upsertCodexMcpServer(existing: string | undefined): string {
+  return inLineEnding(existing ?? '', addServerTable);
+}
+
+function addServerTable(source: string): string {
   const section = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"\n`;
-  const source = existing ?? '';
   if (source.trim() === '') {
     return section;
   }
 
-  const lines = sourceLines(source);
+  const lines = [...tomlLines(source)];
   const found = lines.findIndex(
     (line) => !line.inString && line.text.trim() === CODEX_SECTION_HEADER,
   );
@@ -245,7 +246,7 @@ function concordHookLines(lines: readonly TomlLine[]): {
 
 /** `source` without Concord's hooks and comment lines, and where its first hook was. */
 function stripConcordHooks(source: string): { lines: string[]; spot: number | undefined } {
-  const lines = sourceLines(source);
+  const lines = [...tomlLines(source)];
   const { removed, spot: spotLine } = concordHookLines(lines);
   const kept: TomlLine[] = [];
   let spot: number | undefined;
@@ -273,7 +274,11 @@ function joinTrimmed(lines: readonly string[]): string {
  * so no key is re-parented.
  */
 export function upsertCodexHooks(existing: string | undefined): string {
-  const { lines, spot } = stripConcordHooks(existing ?? '');
+  return inLineEnding(existing ?? '', addHooksBlock);
+}
+
+function addHooksBlock(source: string): string {
+  const { lines, spot } = stripConcordHooks(source);
   const at = spot ?? lines.length;
   const parts = [
     joinTrimmed(lines.slice(0, at)),
@@ -315,6 +320,10 @@ export function installCodexMcpConfig(env: NodeJS.ProcessEnv = process.env): str
  * transport, and Codex refuses to load the whole config.
  */
 export function removeCodexMcpServer(source: string): string {
+  return inLineEnding(source, removeServerTables);
+}
+
+function removeServerTables(source: string): string {
   const kept: TomlLine[] = [];
   let inConcordTable = false;
   for (const line of tomlLines(source)) {
@@ -333,7 +342,10 @@ export function removeCodexMcpServer(source: string): string {
 export function uninstallCodexConfig(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const fullPath = codexConfigFile(env);
   if (!existsSync(fullPath)) return undefined;
-  const { lines } = stripConcordHooks(readFileSync(fullPath, 'utf8'));
-  writeFileSync(fullPath, removeCodexMcpServer(lines.join('\n')));
+  const source = readFileSync(fullPath, 'utf8');
+  const uninstalled = inLineEnding(source, (text) =>
+    removeServerTables(stripConcordHooks(text).lines.join('\n')),
+  );
+  writeFileSync(fullPath, uninstalled);
   return fullPath;
 }

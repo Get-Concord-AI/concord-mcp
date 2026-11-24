@@ -112,6 +112,14 @@ describe('upsertCodexMcpServer', () => {
     );
     expect(upsertCodexMcpServer(out)).toBe(out);
   });
+
+  it('keeps a CRLF file CRLF', () => {
+    const out = upsertCodexMcpServer('model = "o3"\r\n');
+
+    expect(out).toBe(
+      `model = "o3"\r\n\r\n${CODEX_SECTION_HEADER}\r\ncommand = "${CONCORD_SERVER_COMMAND}"\r\n`,
+    );
+  });
 });
 
 describe('installCodexMcpConfig', () => {
@@ -248,6 +256,27 @@ approval_mode = "approve"
     expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(
       `[[hooks.SessionStart]]\n\n${userEntry}\n`,
     );
+  });
+
+  it('keeps a CRLF file CRLF', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const server = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"`;
+    const config = `model = "o3"\n\n${server}\n\n${upsertCodexHooks(undefined)}`;
+    writeFileSync(codexConfigFile(env), config.replaceAll('\n', '\r\n'));
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('model = "o3"\r\n');
+  });
+
+  it('leaves markers and hook headers inside a multi-line string alone', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const user = `notes = """\n${upsertCodexHooks(undefined).trimEnd()}\n"""`;
+    writeFileSync(codexConfigFile(env), `${user}\n`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(`${user}\n`);
   });
 });
 

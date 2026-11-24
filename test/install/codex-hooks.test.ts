@@ -349,4 +349,28 @@ command = "my-session-hook"
     expectConcordOnce(result);
     expect(groupOf(result, 'Stop', 'user-stop-2')).toBe(groupOf(result, 'Stop', 'user-stop-1'));
   });
+
+  it('keeps a CRLF file CRLF', () => {
+    const crlf = `model = "o3"\r\n\r\n${BLOCK.replaceAll('\n', '\r\n')}\r\n`;
+
+    expect(upsertCodexHooks(crlf)).toBe(crlf);
+    expect(upsertCodexHooks('model = "o3"\r\n')).toBe(crlf);
+  });
+
+  it("uses the first line's ending in a mixed file", () => {
+    const result = upsertCodexHooks('a = 1\r\nb = 2\n');
+
+    expect(result).toMatch(/^a = 1\r\nb = 2\r\n/u);
+    expect(result).not.toMatch(/[^\r]\n/u);
+  });
+
+  it('leaves markers and hook headers inside a multi-line string alone', () => {
+    const user = `notes = """\n${BLOCK}\n"""`;
+
+    const result = upsertCodexHooks(`${user}\n`);
+
+    expect(result).toContain(user);
+    expect(result.split(BEGIN)).toHaveLength(3);
+    expect(upsertCodexHooks(result)).toBe(result);
+  });
 });
