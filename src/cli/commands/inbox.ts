@@ -722,7 +722,13 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       };
       try {
         if (access.kind === 'cloud') {
-          await watchCloud(access.runtime, agentId, 'claude-code', true, wake, claim.superseded);
+          // The fallback drains like a monitor but is not one: advertising
+          // watchingUntil would make the next Stop stand down into a gap once
+          // this waiter is superseded, matching receiverHeartbeat: sdkHost.
+          await watchCloud(access.runtime, agentId, 'claude-code', true, wake, {
+            replaced: claim.superseded,
+            monitor: false,
+          });
           return;
         }
         await watchInbox(

@@ -17,6 +17,7 @@ import {
   drainFromCloud,
   registerInCloud,
   watchCloud,
+  watching,
 } from '../../src/cli/commands/cloud-inbox.js';
 import type { DeliverableMessage } from '../../src/domain/pull-inbox.js';
 import { fakeCloud, ok, type Route } from '../cloud/fake-cloud.js';
@@ -146,6 +147,40 @@ describe('cloud inbox', () => {
       (request) => request.path === '/v1/agents/a-uuid/endpoint',
     );
     expect(JSON.stringify(endpoint?.body)).toContain('idle');
+  });
+
+  it('runs a fallback waiter without advertising it as the monitor', async () => {
+    const cloud = fakeCloud([
+      ...registering,
+      ['PUT /v1/agents/a-uuid/endpoint/receiver', () => ok({ receiverExpiresAt: NOW })],
+      ['DELETE /v1/agents/a-uuid/endpoint/receiver', () => ({ status: 204, json: {} })],
+      ['POST /v1/messages/drain', () => ok({ messages: [message('wake up')] })],
+    ]);
+    const runtime = runtimeWith(cloud.fetch);
+    let watchingDuring = true;
+
+    await watchCloud(
+      runtime,
+      AGENT,
+      'claude-code',
+      true,
+      () => {
+        watchingDuring = watching(runtime, AGENT);
+      },
+      { monitor: false },
+    );
+
+    // It still receives — the receiver lease is renewed and released — but it
+    // never claims the monitor's watchingUntil, so the next Stop arms a fresh
+    // waiter instead of standing down into a delivery gap.
+    expect(watchingDuring).toBe(false);
+    expect(watching(runtime, AGENT)).toBe(false);
+    expect(cloud.requests.map((request) => `${request.method} ${request.path}`)).toEqual(
+      expect.arrayContaining([
+        'PUT /v1/agents/a-uuid/endpoint/receiver',
+        'DELETE /v1/agents/a-uuid/endpoint/receiver',
+      ]),
+    );
   });
 
   it('reports a link this machine cannot use, instead of falling back to local', () => {

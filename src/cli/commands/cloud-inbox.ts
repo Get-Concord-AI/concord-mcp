@@ -196,12 +196,24 @@ export async function watchCloud(
   once: boolean,
   /** Awaited before the next round, so a slow handoff never overlaps the next batch. */
   emit: (messages: readonly DeliverableMessage[], stop: AbortSignal) => Promise<void> | void,
-  /**
-   * Whether a newer receiver for this agent has replaced this one. A replaced
-   * receiver leaves the lease alone on the way out: it is the newer one's now.
-   */
-  replaced: () => boolean = () => false,
+  options: {
+    /**
+     * Whether a newer receiver for this agent has replaced this one. A replaced
+     * receiver leaves the lease alone on the way out: it is the newer one's now.
+     */
+    replaced?: () => boolean;
+    /**
+     * Whether this receiver is the agent's monitor. A fallback waiter — the
+     * rewake hook's cloud stand-in — still drains, but must not advertise the
+     * monitor capability or heartbeat `watchingUntil`: the next Stop would
+     * read that as a live receiver, stand down, and leave the agent with none
+     * once this waiter is superseded.
+     */
+    monitor?: boolean;
+  } = {},
 ): Promise<void> {
+  const replaced = options.replaced ?? (() => false);
+  const monitor = options.monitor ?? true;
   const stop = new AbortController();
   const stopped = (): boolean => stop.signal.aborted;
   const stopWatching = (): void => {
@@ -213,11 +225,13 @@ export async function watchCloud(
   try {
     while (!stopped()) {
       try {
-        agent ??= await registerInCloud(runtime, agentKey, provider, process.cwd(), true);
+        agent ??= await registerInCloud(runtime, agentKey, provider, process.cwd(), monitor);
         await renewReceiver(runtime, agent, RECEIVER_TTL_SECONDS);
-        updateAgentState(runtime, agentKey, {
-          watchingUntil: Date.now() + RECEIVER_TTL_SECONDS * 1000,
-        });
+        if (monitor) {
+          updateAgentState(runtime, agentKey, {
+            watchingUntil: Date.now() + RECEIVER_TTL_SECONDS * 1000,
+          });
+        }
         const messages = await drainOnce(runtime, agent, agentKey, MAX_WAIT_SECONDS, stop.signal);
         if (messages.length > 0) await emit(messages, stop.signal);
         if (once && messages.length > 0) return;
