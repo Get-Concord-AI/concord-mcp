@@ -41,6 +41,8 @@ export interface TomlBlock {
   readonly name: string | undefined;
   /** `key = "value"` pairs in the block's own table, before any child table. */
   readonly fields: Readonly<Record<string, string>>;
+  /** Every `key =` assignment name in the block's own table, any value shape. */
+  readonly keys: readonly string[];
   /** Env var names the block assigns (`env = {…}`, `env.KEY`, `[table.env]`). */
   readonly envKeys: readonly string[];
   /** An `env` assignment exists that `envKeys` cannot fully account for. */
@@ -79,6 +81,7 @@ export function concordTomlBlocks(
   const envInline = /^\s*["']?env["']?\s*=\s*\{(.*)\}/u;
   const envInlineOpen = /^\s*["']?env["']?\s*=\s*\{/u;
   const envAssign = /^\s*["']?env["']?\s*=/u;
+  const assignKey = /^\s*["']?([A-Za-z0-9_-]+)["']?\s*=/u;
   const envChildKey = /^\s*["']?([A-Za-z0-9_-]+)["']?\s*=/u;
   const envInnerKey = /(?:^|,)\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*=/gu;
   const envChildWeird = /^\s*[^=\s#"'][^=]*=|^\s*["'][^"']*["']\s*=/u;
@@ -89,6 +92,7 @@ export function concordTomlBlocks(
   let inEnvChild = false;
   let envOpaque = false;
   const envKeys: string[] = [];
+  const assignKeys: string[] = [];
   let fields: Record<string, string> = {};
   const reset = (): void => {
     open = undefined;
@@ -97,6 +101,7 @@ export function concordTomlBlocks(
     inEnvChild = false;
     envOpaque = false;
     envKeys.length = 0;
+    assignKeys.length = 0;
     fields = {};
   };
   const flush = (end: number): void => {
@@ -106,6 +111,7 @@ export function concordTomlBlocks(
         end,
         name: ownedName,
         fields,
+        keys: [...assignKeys],
         envKeys: [...envKeys],
         envOpaque,
       };
@@ -140,6 +146,8 @@ export function concordTomlBlocks(
       return;
     }
     if (inChildTable) return;
+    const assign = assignKey.exec(text);
+    if (assign !== null) assignKeys.push(assign[1] ?? '');
     if (ownedName === undefined) {
       const match = namePattern.exec(text);
       if (match !== null) ownedName = match[1] ?? match[2] ?? '';
@@ -263,10 +271,14 @@ const MCP_BLOCK = [
 
 const namedConcord = (block: TomlBlock): boolean => block.name === MCP_NAME;
 
+/** The only keys the `[[mcp_servers]]` block Concord writes may carry. */
+const MCP_OWNED_KEYS: ReadonlySet<string> = new Set(['name', 'transport', 'command', 'env']);
+
 /**
- * The `[[mcp_servers]]` shape Concord writes: a stdio `concord-mcp` command
- * and only `CONCORD_*` env keys. A `concord` entry in any other shape is the
- * user's own — main keeps a hand-written `concord` server (#361), so neither
+ * The `[[mcp_servers]]` shape Concord writes: a stdio `concord-mcp` command,
+ * only `CONCORD_*` env keys, and no extra settings. A `concord` entry in any
+ * other shape — custom `cwd`/`args`/`enabled`/remote fields included — is the
+ * user's own: main keeps a hand-written `concord` server (#361), so neither
  * setup nor uninstall may replace or remove it.
  */
 function vibeMcpOwned(block: TomlBlock): boolean {
@@ -275,7 +287,8 @@ function vibeMcpOwned(block: TomlBlock): boolean {
     block.fields['transport'] === 'stdio' &&
     block.fields['command'] === 'concord-mcp' &&
     !block.envOpaque &&
-    block.envKeys.every((key) => key.startsWith('CONCORD_'))
+    block.envKeys.every((key) => key.startsWith('CONCORD_')) &&
+    block.keys.every((key) => MCP_OWNED_KEYS.has(key))
   );
 }
 

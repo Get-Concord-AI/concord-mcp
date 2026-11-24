@@ -186,6 +186,44 @@ describe('upsertVibeMcpConfig', () => {
     }
   });
 
+  it('treats a concord entry with extra user settings as user-owned', () => {
+    for (const extra of [
+      'cwd = "/home/user/project"',
+      'args = ["--verbose"]',
+      'enabled = false',
+      'timeout = 30',
+    ]) {
+      const source = [
+        '[[mcp_servers]]',
+        'name = "concord"',
+        'transport = "stdio"',
+        'command = "concord-mcp"',
+        extra,
+        'env = { CONCORD_AGENT_KIND = "vibe" }',
+        '',
+      ].join('\n');
+      // Setup must not replace it.
+      expect(upsertVibeMcpConfig(source)).toBe(source);
+    }
+  });
+
+  it('leaves a concord entry with custom cwd untouched on uninstall', () => {
+    const { env } = tempEnv();
+    const source = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      'cwd = "/home/user/project"',
+      '',
+    ].join('\n');
+    const path = vibeMcpConfigPath(env);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, source);
+    expect(uninstallVibeMcpConfig(env)).toBeUndefined();
+    expect(readFileSync(path, 'utf8')).toBe(source);
+  });
+
   it('treats nested env subtables as user-owned', () => {
     const source = [
       '[[mcp_servers]]',
