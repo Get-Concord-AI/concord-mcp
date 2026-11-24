@@ -202,6 +202,7 @@ path.
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
 | Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
+| Aider (no MCP client)              | [Shell-only setup](./docs/aider.md)                |
 | Any other MCP-capable coding agent | [Manual setup](./docs/other-mcp-clients.md)        |
 
 > There is no universal `/concord` slash command — commands are client-specific.
