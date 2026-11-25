@@ -56,16 +56,16 @@ certain. Check `concord status` inside a thread before relying on a given
 provider; once real threads have been run, the verified rows can be promoted
 and #230 closed.
 
-| T3 provider         | Concord path                                           | Delivery                                                                             |
-| ------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| Claude Code         | MCP + `concord-relay` plugin (SDK session)             | Hooks while busy; `asyncRewake` waiter wakes idle sessions                           |
-| Codex               | `[mcp_servers.concord]` + `[[hooks.*]]` in config.toml | Hooks while busy; managed host attaches too — see below                              |
-| OpenCode            | `opencode.json` MCP + request-metadata identity        | Identified but not hosted — agent reads its inbox via `inspect_work`                 |
-| Grok Build          | `~/.grok/config.toml` MCP + hooks                      | Hooks while busy; agent-started monitor for idle                                     |
-| Kiro                | `~/.kiro` user MCP + hooks                             | Next prompt only — Kiro has no mid-turn hook                                         |
-| Cursor              | `~/.cursor/mcp.json` MCP                               | Unverified — T3 drives `cursor-agent`, not the `cursor` binary                       |
-| Antigravity (`agy`) | `.agents/mcp_config.json` + `~/.gemini/config`         | Hooks while busy; one-shot `inbox watch` monitor can wake idle — unverified under T3 |
-| ACP agents          | Agent-dependent                                        | Unverified per agent — see below                                                     |
+| T3 provider         | Concord path                                           | Delivery                                                                                            |
+| ------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Claude Code         | MCP + `concord-relay` plugin (SDK session)             | Hooks while busy; `asyncRewake` waiter wakes idle sessions                                          |
+| Codex               | `[mcp_servers.concord]` + `[[hooks.*]]` in config.toml | Hooks while busy; managed host also attaches unless the `SessionStart` entry is removed — see below |
+| OpenCode            | `opencode.json` MCP + request-metadata identity        | Identified but not hosted — agent reads its inbox via `inspect_work`                                |
+| Grok Build          | `~/.grok/config.toml` MCP + hooks                      | Hooks while busy; agent-started monitor for idle                                                    |
+| Kiro                | `~/.kiro` user MCP + hooks                             | Next prompt only — Kiro has no mid-turn hook                                                        |
+| Cursor              | `~/.cursor/mcp.json` MCP                               | Unverified — T3 drives `cursor-agent`, not the `cursor` binary                                      |
+| Antigravity (`agy`) | `.agents/mcp_config.json` + `~/.gemini/config`         | Hooks while busy; one-shot `inbox watch` monitor can wake idle — unverified under T3                |
+| ACP agents          | Agent-dependent                                        | Unverified per agent — see below                                                                    |
 
 ## Identity
 
@@ -117,30 +117,52 @@ launches Concord's managed host (`concord adapters host-codex`) for T3
 threads too: it resumes the thread through `codex app-server proxy` and can
 start turns in Concord's daemon. Those turns write the same rollout from a
 second process that T3's UI never shows — a competing writer, the same
-hazard Conductor is excluded for. To opt out, edit `config.toml` and remove
-only Concord's hook entries and the `# >>> concord hooks >>>` /
-`# <<< concord hooks <<<` marker lines — keep any `[hooks.state]` tables Codex
-appended inside the fence, since deleting them erases your trust decisions
-for unrelated hooks and Codex will re-prompt for them. Do this before
-starting T3 Codex sessions if you can, since the `SessionStart` hook is what
-launches the host. The block only gates future launches: a host already
-running for a thread is a detached `concord adapters host-codex` process that
-keeps delivering until you end it in Task Manager or `ps`/`kill`. Re-running
-`concord setup` — or the adapter self-heal path when `autoAdapters` is on —
-writes the block back, so the opt-out is not permanent unless you avoid
-those. The thread keeps MCP tool access but loses hook-driven identity and
-delivery.
+hazard Conductor is excluded for.
+
+The recommended setup for T3 Codex threads is to disable the managed host
+while keeping hook delivery. Of the three hook entries inside the
+`# >>> concord hooks >>>` fence, only the `SessionStart` one launches the
+host (`concord inbox register`); the `PostToolUse` and `Stop` entries are
+drains — they deliver waiting messages into the turn and start nothing. So
+in `~/.codex/config.toml`, delete only the `SessionStart` entry — the
+`[[hooks.SessionStart]]` and `[[hooks.SessionStart.hooks]]` table headers
+with their `type`/`command` lines — and keep the two drain entries, the
+fence markers, and any `[hooks.state]` tables Codex appended inside the
+fence. Deleting the `[hooks.state]` tables erases your trust decisions for
+unrelated hooks and Codex will re-prompt for them. Do this before starting
+T3 Codex sessions if you can, since only a future `SessionStart` can launch
+a host: one already running for a thread is a detached
+`concord adapters host-codex` process that keeps delivering until you end it
+in Task Manager or `ps`/`kill`. Re-running `concord setup` — or the adapter
+self-heal path when `autoAdapters` is on — writes the full block back, so
+the host opt-out is not permanent unless you avoid those.
+
+One consequence matters: the agent id is introduced only by the
+`SessionStart` hook's output, so a thread configured this way never learns
+its id — `start_work` without an explicit `agent_id` fails. Supply a unique
+one per thread, for example `codex:t3-<thread-name>`, on every workflow call.
+Never reuse one id across threads: two threads sharing an id claim and drain
+as each other. Delivery keeps working alongside any explicit id, because the
+drains compute their recipient from the hook payload rather than from
+anything the model passes — messages addressed to the payload-derived
+`codex:<hash of the thread id>` still surface mid-turn. Messages addressed
+to your explicit id land in its own inbox instead, which the drains do not
+drain; read those with `inspect_work`, passing the same id. Keeping the two
+drain entries is therefore worth it even though part of the delivery becomes
+pull-based — and removing them as well takes the thread fully down to
+`inspect_work`-only: nothing is pushed into a busy turn at all.
 
 ## Caveats
 
 - **Codex competing writer.** Concord's managed host attaches to T3 Code Codex
   threads — T3 sets no embedding-host marker, so `codexThreadHostable` treats
   them as hostable — and can start turns in its own daemon that T3's UI never
-  shows, writing the same rollout. Opting out means removing Concord's hook
-  entries and marker lines from `config.toml` — keeping any `[hooks.state]`
-  trust tables Codex wrote inside the fence — **and** killing any `host-codex`
-  process already running for the thread; `concord setup` writes the block
-  back — see [Message delivery](#message-delivery).
+  shows, writing the same rollout. The recommended setup removes only the
+  `SessionStart` hook entry from `config.toml` — keeping the drain entries,
+  the marker lines, and any `[hooks.state]` trust tables Codex wrote inside
+  the fence — **and** killing any `host-codex` process already running for
+  the thread; `concord setup` writes the block back — see
+  [Message delivery](#message-delivery).
 - **Managed provider runtimes.** T3 Code's "Connect with ChatGPT" Codex
   instance and managed Antigravity use T3-managed config directories, not
   `~/.codex` or `~/.gemini/config`. Concord's registrations do not reach them.
@@ -179,8 +201,14 @@ concord adapters status
 
 Then start two threads in the same project — a Claude thread and a Codex
 thread, say — and have each run `start_work` on a small task so both register
-as Concord agents. Send a message from one thread to the other, and read it
-in the receiving thread with `inspect_work`. That exercises the delivery
-paths Concord actually supports under T3 — hooks while busy, the
-`asyncRewake` waiter for an idle Claude session, and `inspect_work` pulls —
-without relying on the Codex managed host.
+as Concord agents. Send a message from one thread to the other.
+
+Reading it back in the receiving thread with `inspect_work` proves the shared
+workspace, registration, and the pull path — nothing more: that read succeeds
+even if every push path is broken. To verify push delivery, watch the
+receiving thread without pulling. A message sent to a thread mid-turn should
+surface in the turn on its own through the `PostToolUse` or `Stop` hook, and
+one sent to an idle Claude thread should wake the thread within seconds
+through the `asyncRewake` waiter. Until those have been observed live inside
+T3, treat the push rows in the delivery table as inferred — which is why this
+guide references rather than closes #230.
