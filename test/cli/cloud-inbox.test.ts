@@ -15,6 +15,7 @@ import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js'
 import {
   cloudAccess,
   drainFromCloud,
+  drainFromCloudCapped,
   registerInCloud,
   watchCloud,
 } from '../../src/cli/commands/cloud-inbox.js';
@@ -300,5 +301,69 @@ describe('cloud inbox', () => {
     await expect(drainFromCloud(runtime, AGENT, 'claude-code')).rejects.toThrow('in time');
 
     expect(Date.now() - started).toBeLessThan(1_500);
+  });
+});
+
+describe('drainFromCloudCapped', () => {
+  const measure = (entry: DeliverableMessage): number => entry.content.length;
+
+  function runtimeWithFetch(fetch: CloudRuntime['fetch']): CloudRuntime {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'concord-capped-'));
+    return {
+      apiUrl: 'https://api.example.test',
+      bearer: () => Promise.resolve('token'),
+      machineKey: 'machine-1',
+      projectKey: 'github.com/acme/app',
+      repoRoot,
+      checkoutRoot: repoRoot,
+      fetch,
+    };
+  }
+
+  it('claims only what fits and replays the overflow on the next drain', async () => {
+    // The cloud replays the batch only while the key is reused; a fresh key
+    // draws nothing once the batch was fully rendered.
+    const batch = [message('aaaa'), message('bbbb'), message('cccc')];
+    const keys: string[] = [];
+    const holder: { cloud?: ReturnType<typeof fakeCloud> } = {};
+    const cloud = fakeCloud([
+      ...registering,
+      [
+        'POST /v1/messages/drain',
+        () => {
+          const key =
+            /"drainKey":"([^"]+)"/.exec(
+              JSON.stringify(holder.cloud?.requests.at(-1)?.body ?? {}),
+            )?.[1] ?? '';
+          const replay = keys.includes(key);
+          if (!replay) keys.push(key);
+          return ok({ messages: replay || keys.length === 1 ? batch : [] });
+        },
+      ],
+    ]);
+    holder.cloud = cloud;
+    const runtime = runtimeWithFetch(cloud.fetch);
+
+    const first = await drainFromCloudCapped(runtime, AGENT, 'cline', 10, measure);
+    expect(first.map((entry) => entry.content)).toEqual(['aaaa', 'bbbb']);
+
+    const second = await drainFromCloudCapped(runtime, AGENT, 'cline', 10, measure);
+    expect(second.map((entry) => entry.content)).toEqual(['cccc']);
+
+    const third = await drainFromCloudCapped(runtime, AGENT, 'cline', 10, measure);
+    expect(third).toEqual([]);
+    expect(keys).toHaveLength(2);
+  });
+
+  it('delivers an oversized first message alone rather than dropping it', async () => {
+    const batch = [message('x'.repeat(100))];
+    const cloud = fakeCloud([
+      ...registering,
+      ['POST /v1/messages/drain', () => ok({ messages: batch })],
+    ]);
+    const runtime = runtimeWithFetch(cloud.fetch);
+
+    const drained = await drainFromCloudCapped(runtime, AGENT, 'cline', 10, measure);
+    expect(drained).toHaveLength(1);
   });
 });

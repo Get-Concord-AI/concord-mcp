@@ -1,7 +1,10 @@
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { cloudSessionFor } from '../../cloud/session.js';
 import {
+  agentCachePath,
   asCloudAgent,
   CloudApiError,
   connectPullEndpoint,
@@ -178,6 +181,89 @@ export function drainFromCloud(
     (agent) => drainOnce(runtime, agent, agentKey, 0),
     // Registered here because session start could not: advertise it too, as
     // every local drain does.
+    (agent) => advertise(runtime, agent, agentKey, provider, false),
+  );
+}
+
+/**
+ * The ids a capped drain already rendered for this batch, kept next to the
+ * drain tickets: the batch replays under its key until every message in it
+ * has been shown, so the record is what keeps already-seen messages from
+ * rendering twice. It resets when the batch is finally consumed.
+ */
+function shownIdsPath(runtime: CloudRuntime, agentKey: string): string {
+  return join(agentCachePath(runtime.repoRoot, agentKey).replace(/\.json$/, '.drains'), 'shown');
+}
+
+function readShownIds(path: string): ReadonlySet<string> {
+  try {
+    return new Set(
+      readFileSync(path, 'utf8')
+        .split('\n')
+        .filter((line) => line.trim() !== ''),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Drains like `drainFromCloud` but claims only what fits in `capBytes` of
+ * rendered output per call — Cline truncates hook context at 50,000
+ * characters, so a bigger batch would lose its tail: acknowledged, never
+ * shown. The rest stays in the batch, which the drain key replays on the next
+ * call; already-rendered ids are filtered out, and the key is only finished —
+ * releasing the batch — once everything in it was rendered. If the cloud does
+ * not replay a consumed batch the overflow behaves as before this change, so
+ * the worst case is the status quo, never a new loss.
+ */
+export function drainFromCloudCapped(
+  runtime: CloudRuntime,
+  agentKey: string,
+  provider: string,
+  capBytes: number,
+  measure: (message: DeliverableMessage) => number,
+): Promise<DeliverableMessage[]> {
+  return asCloudAgent(
+    runtime,
+    { agentKey, kind: provider },
+    async (agent) => {
+      const ticket = takeDrainKey(runtime, agentKey);
+      let raw: Awaited<ReturnType<typeof drainCloud>>;
+      try {
+        raw = await drainCloud(runtime, agent, ticket.key, 0);
+      } catch (error) {
+        if (!(error instanceof Error) || !transient(error)) throw error;
+        raw = await drainCloud(runtime, agent, ticket.key, 0);
+      }
+      const batch = toDeliverables(raw);
+      const markerPath = shownIdsPath(runtime, agentKey);
+      const shown = readShownIds(markerPath);
+      const unshown = batch.filter((message) => !shown.has(message.messageId));
+      const fitted: DeliverableMessage[] = [];
+      let size = 0;
+      for (const message of unshown) {
+        const next = size + (fitted.length === 0 ? 0 : 2) + measure(message);
+        if (next > capBytes && fitted.length > 0) break;
+        fitted.push(message);
+        size = next;
+      }
+      if (fitted.length < unshown.length) {
+        // Overflow survives: record what rendered and leave the key unfinished,
+        // so the batch replays and the next drain picks up where this one ran
+        // out of budget.
+        const ids = [...shown, ...fitted.map((message) => message.messageId)];
+        try {
+          writeFileSync(markerPath, ids.join('\n'));
+        } catch {
+          // A lost marker only means the next prompt re-renders a message.
+        }
+      } else {
+        ticket.finish();
+        rmSync(markerPath, { force: true });
+      }
+      return fitted;
+    },
     (agent) => advertise(runtime, agent, agentKey, provider, false),
   );
 }

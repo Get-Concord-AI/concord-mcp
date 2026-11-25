@@ -122,12 +122,14 @@ register the session and drain the inbox against the cloud instead of the
 local store, and the globally registered `concord-mcp` proxies its tool calls
 to the cloud project resolved from the server's own working directory. Cline
 has no MCP roots capability, so when the extension launches that server
-outside the repository the hook context's `workspace_id` is the routing
-signal: the cloud proxy decodes it to the checkout it names and connects to
-that checkout's project for the call, while calls without one keep the
-project the server started for. Pass it explicitly — the session-start
-message already tells the agent to — and reads and writes land in the
-project the hook registered, not wherever the server process happened to
+outside the repository the hook context still computes the workspace's
+`workspace_id` and tells the agent to pass it — the routing is right the
+moment the cloud proxy decodes it, which ships separately (#411); until that
+lands, calls without a decoded workspace keep the project the server started
+for, so run Cline with the MCP server inside the repository. Pass
+`workspace_id` explicitly either way — the session-start message already
+tells the agent to — and reads and writes land in the project the hook
+registered, not wherever the server process happened to
 start.
 
 ## Manual MCP registration

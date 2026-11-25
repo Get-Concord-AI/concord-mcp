@@ -53,6 +53,7 @@ import {
   upsertGeminiSettings,
   upsertGrokMcpServer,
   upsertMcpServer,
+  isConcordServerOwned,
 } from './mcp-config.js';
 
 /** What turning global mode on or off changed, and what it could not. */
@@ -240,7 +241,13 @@ function mayChange(
   existing: string | undefined,
   owned: ReadonlySet<string>,
 ): boolean {
-  if (owned.has(registration.id)) return true;
+  if (owned.has(registration.id)) {
+    // Ownership is only remembered state: the user may have replaced our
+    // entry with a hand-written `concord` server since. Removing on disable
+    // is safe only while the file still carries the entry Concord wrote.
+    if (!enable) return existing !== undefined && isConcordServerOwned(existing);
+    return true;
+  }
   return enable && (existing === undefined || !registration.present(existing));
 }
 
