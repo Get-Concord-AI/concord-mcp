@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { deliverOpenclawInbox } from '../../src/cli/commands/openclaw-adapter.js';
+import { deliverOpenclawInbox, receiverClaimKey } from '../../src/cli/commands/openclaw-adapter.js';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories } from '../../src/db/index.js';
 import { effectiveEndpointCapabilities } from '../../src/domain/delivery.js';
@@ -68,5 +68,16 @@ describe('OpenClaw live receiver', () => {
       deliverOpenclawInbox(repos, RECIPIENT, adapter, new AbortController().signal),
     ).rejects.toThrow('Gateway offline');
     expect(repos.agentMessages.get(id)?.status).toBe('sent');
+  });
+
+  it('keeps receivers in other projects and OpenClaw profiles from replacing each other', () => {
+    const base = receiverClaimKey(RECIPIENT, 'local:ws_a', {});
+    expect(receiverClaimKey(RECIPIENT, 'local:ws_a', { HOME: '/elsewhere' })).toBe(base);
+    expect(receiverClaimKey(RECIPIENT, 'local:ws_b', {})).not.toBe(base);
+    expect(receiverClaimKey(RECIPIENT, 'local:ws_a', { OPENCLAW_PROFILE: 'work' })).not.toBe(base);
+    expect(receiverClaimKey(RECIPIENT, 'local:ws_a', { OPENCLAW_STATE_DIR: '/tmp/oc' })).not.toBe(
+      base,
+    );
+    expect(receiverClaimKey('openclaw:main', 'local:ws_a', {})).not.toBe(base);
   });
 });

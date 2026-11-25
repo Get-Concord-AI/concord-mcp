@@ -17,6 +17,14 @@ import { heartbeatReceiver, isSqliteBusy, registerPullEndpoint } from './inbox.j
 const KIND = 'openclaw';
 const POLL_MS = 1_000;
 const HEALTH_MS = 15_000;
+/** OpenClaw settings that select a separate profile, state directory or Gateway. */
+const GATEWAY_ENV = [
+  'OPENCLAW_PROFILE',
+  'OPENCLAW_STATE_DIR',
+  'OPENCLAW_CONFIG_PATH',
+  'OPENCLAW_GATEWAY_URL',
+  'OPENCLAW_GATEWAY_PORT',
+] as const;
 const agentSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9_-]*$/u, 'Use an OpenClaw agent ID such as main.');
@@ -44,6 +52,17 @@ export async function deliverOpenclawInbox(
     });
     repos.agentMessages.markDelivered(message.messageId, KIND, runId, { via: 'adapter' });
   }
+}
+
+/**
+ * The receiver's claim key: one receiver per agent, Concord workspace and
+ * OpenClaw profile. A receiver for the same agent ID in another project or
+ * profile watches a different inbox and Gateway, so it must not stand this
+ * one down.
+ */
+export function receiverClaimKey(agentId: string, scope: string, env: NodeJS.ProcessEnv): string {
+  const gateway = GATEWAY_ENV.map((name) => `${name}=${env[name]?.trim() ?? ''}`);
+  return [agentId, scope, ...gateway].join('\0');
 }
 
 async function watchLocal(
@@ -84,12 +103,20 @@ export async function launchOpenclaw(rawAgent: string, cwd: string = process.cwd
   await call('health');
 
   const agentId = `openclaw:${agent}`;
+  const context =
+    access.kind === 'cloud'
+      ? undefined
+      : await import('../context.js').then((module) => module.openContext(cwd));
+  const scope =
+    access.kind === 'cloud'
+      ? `cloud:${access.runtime.apiUrl}:${access.runtime.projectKey}`
+      : `local:${context?.workspaceId ?? ''}`;
   const stop = new AbortController();
   const stopWatching = (): void => {
     stop.abort();
   };
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
-  const claim = claimWaiter(agentId, randomUUID());
+  const claim = claimWaiter(receiverClaimKey(agentId, scope, env), randomUUID());
   const cancel = standDownWhenSuperseded(claim, stopWatching);
   for (const signal of signals) process.once(signal, stopWatching);
   let checking = false;
@@ -110,9 +137,9 @@ export async function launchOpenclaw(rawAgent: string, cwd: string = process.cwd
   health.unref();
 
   try {
+    process.stdout.write(`Receiving live Concord messages for ${agentId}.\n`);
     if (access.kind === 'cloud') {
       const adapter = new OpenclawSessionAdapter(agent, undefined, call);
-      process.stdout.write(`Receiving live Concord messages for ${agentId}.\n`);
       await watchCloud(
         access.runtime,
         agentId,
@@ -124,19 +151,14 @@ export async function launchOpenclaw(rawAgent: string, cwd: string = process.cwd
       );
       return;
     }
-    const { openContext } = await import('../context.js');
-    const context = openContext(cwd);
-    try {
-      const adapter = new OpenclawSessionAdapter(agent, context.workspaceId, call);
-      process.stdout.write(`Receiving live Concord messages for ${agentId}.\n`);
-      await watchLocal(context.repos, agentId, adapter, stop.signal, claim.superseded);
-    } finally {
-      context.repos.db.close();
-    }
+    if (context === undefined) return;
+    const adapter = new OpenclawSessionAdapter(agent, context.workspaceId, call);
+    await watchLocal(context.repos, agentId, adapter, stop.signal, claim.superseded);
   } finally {
     clearInterval(health);
     cancel();
     claim.release();
     for (const signal of signals) process.off(signal, stopWatching);
+    context?.repos.db.close();
   }
 }
