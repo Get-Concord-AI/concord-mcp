@@ -122,10 +122,14 @@ describe('runVibeHook', () => {
 
   it('derives the agent from the Vibe payload session_id in a temp workspace', async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'concord-vibe-run-'));
+    const env = { HOME: process.env['HOME'], CLAUDE_CODE_SESSION_ID: 'claude-session' };
+    // Hooks only serve a workspace that already exists; opening its context
+    // materialises the store the way `concord setup` or a first MCP run would.
+    openContext(repoRoot, { HOME: process.env['HOME'] });
     const output = await runVibeHook(
       'vibe-session-start',
       payload('session_start', repoRoot, { source: 'startup' }),
-      { HOME: process.env['HOME'], CLAUDE_CODE_SESSION_ID: 'claude-session' },
+      env,
     );
 
     expect(context(output)).toContain(VIBE.agentId);
@@ -139,6 +143,9 @@ describe('runVibeHook', () => {
       CLAUDE_PROJECT_DIR: staleRoot,
       CONCORD_REPO_ROOT: staleRoot,
     };
+    // The hook only serves a workspace that already exists; the store under
+    // the payload cwd is what proves the pin beat the stale inherited root.
+    openContext(repoRoot, { HOME: process.env['HOME'] });
 
     const output = await runVibeHook(
       'vibe-session-start',
