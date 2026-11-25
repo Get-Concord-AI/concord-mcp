@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -52,7 +53,7 @@ export function openclawConfigPath(env: NodeJS.ProcessEnv): string {
 
 export function readOpenclawConfig(env: NodeJS.ProcessEnv): JsonObject {
   const path = openclawConfigPath(env);
-  if (!existsSync(path)) return {};
+  if (lstatSync(path, { throwIfNoEntry: false }) === undefined) return {};
   return jsonObjectSchema.parse(JSON5.parse(readFileSync(path, 'utf8')));
 }
 

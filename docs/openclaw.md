@@ -32,5 +32,5 @@ If the gateway starts Concord outside the repository, pass `workspace_id`.
 For local Concord, use the workspace ID printed by `concord setup` in that
 repository. For Concord Cloud, use the repository's Git remote.
 
-Use `concord adapters uninstall --yes` to remove Concord-managed registrations,
+Use `concord adapters uninstall` to remove Concord-managed registrations,
 including OpenClaw's.
