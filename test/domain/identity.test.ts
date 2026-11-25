@@ -33,6 +33,18 @@ describe('resolveIdentity', () => {
       resolveServerIdentity({ ...env, CONCORD_OPENHANDS_CONVERSATION_ID: '' }),
     ).toBeUndefined();
   });
+  it('only uses the OpenHands conversation variable for an explicitly bound server', () => {
+    const inherited = { CONCORD_OPENHANDS_CONVERSATION_ID: SESSION };
+    expect(resolveServerIdentity(inherited)).toBeUndefined();
+    expect(
+      resolveServerIdentity({ ...inherited, COPILOT_AGENT_SESSION_ID: 'copilot-child' }),
+    ).toEqual({
+      kind: 'copilot-cli',
+      origin: 'session',
+      agentId: agentIdForSession('copilot-cli', 'copilot-child'),
+    });
+  });
+
   it('uses an explicit DeepSeek identity without borrowing inherited harness sessions', () => {
     const inherited = { CLAUDE_CODE_SESSION_ID: SESSION, AGENT_SESSION_ID: 'goose-parent' };
     expect(resolveIdentity(inherited, { kind: 'deepseek' })).toBeUndefined();

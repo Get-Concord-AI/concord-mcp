@@ -124,7 +124,8 @@ export function identityForRequest(
 
 /** The session sources for a client, when that client exposes any. */
 function sourcesFor(kind: string | undefined): readonly SessionSource[] {
-  if (kind === undefined) return SESSION_SOURCES;
+  // Only the OpenHands plugin binds this variable to its own server process.
+  if (kind === undefined) return SESSION_SOURCES.filter((source) => source.kind !== 'openhands');
   return SESSION_SOURCES.filter((source) => source.kind === kind);
 }
 

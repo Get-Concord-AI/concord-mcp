@@ -62,4 +62,6 @@ The result should show `task.taskId` as `parser-check` and `task.agentId` as the
 
 Save the conversation ID returned at creation. After restarting the server with the same volume and checkout, reattach to that ID (`GET /api/conversations/{id}`) to retain the owner and inbox. A native fork (`POST /api/conversations/{id}/fork`) inherits the earlier conversation history and gets its own Concord identity. The parent keeps its claims, and new messages addressed to the parent stay in its inbox.
 
+The fork and peer-message integration test runs manually, outside CI. From the source checkout in the SDK 1.63 environment with the matching Concord CLI on `PATH`, run `PYTHONPATH=plugin/openhands python test/e2e/real/openhands_fork.py`.
+
 Ask OpenHands to call `inspect_work` on its own inbox during a turn. An idle conversation waits for its next turn. Inspecting the inbox can mark a message as read. Showing the body and message ID to a model that reads only MCP text requires [the `inspect_work` text response change](https://github.com/Get-Concord-AI/concord-mcp/pull/408).

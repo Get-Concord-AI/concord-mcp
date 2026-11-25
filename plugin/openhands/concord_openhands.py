@@ -5,9 +5,17 @@ from pathlib import Path
 from shutil import which
 
 from openhands.sdk.conversation.state import ConversationState
-from openhands.sdk.mcp import MCPServer, create_mcp_tools
+from openhands.sdk.mcp import MCPServer, MCPToolExecutor, create_mcp_tools
 from openhands.sdk.tool import ToolDefinition, register_tool
 from pydantic import SecretStr
+
+
+class ConcordToolExecutor(MCPToolExecutor):
+    def __call__(self, action, conversation=None):
+        # Messages and notes are shared text. Keep their arguments literal while
+        # still applying the conversation's output masking to the response.
+        observation = super().__call__(action)
+        return self._mask_observation(observation, conversation)
 
 
 class ConcordToolSet(ToolDefinition):
@@ -39,14 +47,18 @@ class ConcordToolSet(ToolDefinition):
                     )
                     if name in os.environ
                 },
-                # A server-wide name would give every fork the same inbox.
+                # Override any server-wide ID with a blank so each fork gets its own inbox.
                 "CONCORD_AGENT_ID": SecretStr(""),
                 "CONCORD_AGENT_KIND": SecretStr("openhands"),
                 "CONCORD_OPENHANDS_CONVERSATION_ID": SecretStr(str(conv_state.id)),
                 "CONCORD_REPO_ROOT": SecretStr(workspace),
             },
         )
-        return create_mcp_tools({"concord": server}).tools
+        client = create_mcp_tools({"concord": server})
+        return [
+            tool.set_executor(ConcordToolExecutor(tool.name, client))
+            for tool in client.tools
+        ]
 
 
 register_tool(ConcordToolSet.name, ConcordToolSet)
