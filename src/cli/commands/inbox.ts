@@ -568,6 +568,11 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       if (!DRAIN_FORMATS.includes(options.format)) {
         throw new Error(`Unknown --format: ${options.format}`);
       }
+      // The pre-question drain is local-only for now (#208): on a linked
+      // machine it could only see still-queued messages, could not keep its
+      // one-deny allowance, and would cost every question a remote round trip.
+      // Messages arrive after the user answers, as they did before the drain.
+      if (access.kind !== 'local' && options.format === 'pre-tool-use') return;
       if (access.kind === 'unusable') {
         reportCloudFailure(access.reason);
         return;
