@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories } from '../../src/db/index.js';
+import { renderedMessageIds } from '../../src/domain/pull-inbox.js';
 import { createServer } from '../../src/server.js';
 
 it('lets a text-only MCP client read a prompt and reply on the original thread', async () => {
@@ -54,11 +55,15 @@ it('lets a text-only MCP client read a prompt and reply on the original thread',
       .parse(inbox.content)
       .flatMap((block) => (block.type === 'text' ? [block.text] : []))
       .join('\n');
-    const [, replyId, receivedBody] =
-      /^\[concord from \S+ id=([^\s\]]+).*?\]\n([\s\S]+)$/m.exec(text) ?? [];
-    if (!replyId || !receivedBody) {
+    const block = text
+      .split(/\n\n(?=\[concord )/u)
+      .find((part) => part.startsWith('[concord from '));
+    const [replyId] = renderedMessageIds(block ?? '');
+    if (block === undefined || replyId === undefined) {
       throw new Error(`Missing reply ID or body in inbox text: ${text}`);
     }
+    const receivedBody = block.slice(block.indexOf('\n') + 1);
+    expect(receivedBody).toBe(body);
     const reply = await reader.client.callTool({
       name: 'update_work',
       arguments: {

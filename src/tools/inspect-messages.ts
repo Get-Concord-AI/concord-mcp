@@ -36,6 +36,12 @@ function participates(message: AgentMessageRecord, viewer: string): boolean {
   return message.senderAgentId === viewer || message.recipientAgentId === viewer;
 }
 
+const INSPECT_MESSAGE_LIMIT = 10;
+
+function isLiveMessage(message: AgentMessageRecord): boolean {
+  return message.status !== 'replied' && message.status !== 'failed';
+}
+
 /** Mark read what a verified `viewer` received among `messages`, returning them refreshed. */
 function readOnInspect(
   repos: Repositories,
@@ -72,21 +78,51 @@ export function privateMessagesNote(agentId: string): string {
   );
 }
 
+export interface AgentInboxInspection {
+  communication: AgentInboxView;
+  textInbox: MessageView[];
+}
+
 export function inspectAgentInbox(
   repos: Repositories,
   agentId: string,
   viewer: Viewer,
-): AgentInboxView {
-  const { inbox, outbox, ...presence } = inspectAgentCommunication(repos, agentId);
-  if (viewer.agentId !== agentId) {
-    return { ...presence, private: true, messages: privateMessagesNote(agentId) };
-  }
-  return {
-    ...presence,
-    private: false,
-    inbox: readOnInspect(repos, viewer, inbox).map(view),
-    outbox: outbox.map(view),
-  };
+): AgentInboxInspection {
+  return repos.db
+    .transaction((): AgentInboxInspection => {
+      const { inbox, outbox, ...presence } = inspectAgentCommunication(repos, agentId);
+      if (viewer.agentId !== agentId) {
+        return {
+          communication: { ...presence, private: true, messages: privateMessagesNote(agentId) },
+          textInbox: [],
+        };
+      }
+      const selected = new Set(
+        inbox
+          .filter(isLiveMessage)
+          .slice(-INSPECT_MESSAGE_LIMIT)
+          .map((message) => message.messageId),
+      );
+      let current = { inbox, outbox };
+      if (viewer.verified && selected.size > 0) {
+        repos.agentMessages.markReadByInspect(viewer.agentId, [...selected]);
+        // Recording a read also expires stale messages. Return their final receipts.
+        current = inspectAgentCommunication(repos, agentId);
+      }
+      const history = current.inbox.map(view);
+      return {
+        communication: {
+          ...presence,
+          private: false,
+          inbox: history,
+          outbox: current.outbox.map(view),
+        },
+        textInbox: history.filter(
+          (message) => selected.has(message.messageId) && isLiveMessage(message),
+        ),
+      };
+    })
+    .immediate();
 }
 
 export interface ThreadView {
@@ -135,7 +171,10 @@ export function visibleTaskMessages(
 }
 
 /** The newest outbox receipts, one line each, for clients that show only text. */
-export function outboxReceiptLines(outbox: readonly MessageView[], limit = 10): string {
+export function outboxReceiptLines(
+  outbox: readonly MessageView[],
+  limit = INSPECT_MESSAGE_LIMIT,
+): string {
   const recent = outbox.slice(-limit);
   if (recent.length === 0) return '';
   return (
