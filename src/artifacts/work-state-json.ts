@@ -25,9 +25,18 @@ interface WorkStatePresence {
   owner: string | null;
   summary: string | null;
   status: string;
+  reported_status: string;
+  execution_status: string;
   liveness: string;
   last_seen: string;
   age_seconds: number;
+  heartbeat_at: string;
+  heartbeat_liveness: string;
+  heartbeat_age_seconds: number;
+  activity_at: string | null;
+  activity_age_seconds: number | null;
+  summary_updated_at: string | null;
+  summary_age_seconds: number | null;
 }
 
 interface WorkState {
@@ -63,9 +72,18 @@ function toWorkStatePresence(entry: PresenceEntry): WorkStatePresence {
     owner: entry.owner,
     summary: entry.summary,
     status: entry.status,
+    reported_status: entry.status,
+    execution_status: entry.executionStatus,
     liveness: entry.liveness,
     last_seen: entry.lastSeen,
     age_seconds: entry.ageSeconds,
+    heartbeat_at: entry.heartbeatAt,
+    heartbeat_liveness: entry.heartbeatLiveness,
+    heartbeat_age_seconds: entry.heartbeatAgeSeconds,
+    activity_at: entry.activityAt,
+    activity_age_seconds: entry.activityAgeSeconds,
+    summary_updated_at: entry.summaryUpdatedAt,
+    summary_age_seconds: entry.summaryAgeSeconds,
   };
 }
 

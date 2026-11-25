@@ -1,18 +1,28 @@
 import { installGooseMcpConfig } from '../../src/install/goose-config.js';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
+import { recordedInvocations, writeFakeOpencode } from '../helpers/fake-opencode.js';
 
 import {
   devinSupportsDedicatedMcpConfig,
   installGlobalAdapters,
   statusGlobalAdapters,
   uninstallGlobalAdapters,
+  versionTuple,
 } from '../../src/install/adapters/index.js';
 
 // Links into this checkout count as lasting even when it lives under /tmp.
@@ -178,6 +188,52 @@ describe('global harness adapters', () => {
     });
   });
 
+  it('marks Cursor stop follow-ups that expect no reply with no-reply-needed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-cursor-no-reply-'));
+    mkdirSync(join(root, '.concord'));
+    writeFileSync(join(root, '.concord', 'concord.db'), '');
+    const drained = [
+      {
+        messageId: 'msg-reply',
+        senderAgentId: 'claude-code:peer',
+        taskId: 'TASK-1',
+        content: 'Yes, go ahead.',
+        expectsReply: false,
+      },
+      {
+        messageId: 'msg-prompt',
+        senderAgentId: 'claude-code:peer',
+        taskId: 'TASK-1',
+        content: 'Can you share the schema?',
+        expectsReply: true,
+      },
+    ];
+    const fakeConcord = writeFakeCommand(
+      root,
+      'fake-concord',
+      `if (process.argv[3] === 'drain') process.stdout.write(${JSON.stringify(JSON.stringify(drained))});\n`,
+    );
+
+    const hook = join(process.cwd(), 'plugin', 'cursor', 'concord-relay', 'cursor-hook.mjs');
+    const result = spawnSync(process.execPath, [hook, 'stop'], {
+      cwd: root,
+      env: {
+        ...process.env,
+        CONCORD_EXECUTABLE: fakeConcord,
+        CONCORD_CURSOR_DISABLE_HEARTBEAT: '1',
+      },
+      input: JSON.stringify({ conversation_id: 'cursor-conversation', workspace_roots: [root] }),
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      followup_message:
+        '[concord from claude-code:peer id=msg-reply task=TASK-1 no-reply-needed]\nYes, go ahead.\n\n' +
+        '[concord from claude-code:peer id=msg-prompt task=TASK-1]\nCan you share the schema?',
+    });
+  });
+
   it('reports monitor/controller quality separately from installation', () => {
     const report = statusGlobalAdapters({ HOME: mkdtempSync(join(tmpdir(), 'concord-empty-')) });
 
@@ -190,10 +246,32 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'harness-monitor',
+      'harness-monitor',
+      'managed-controller',
+      'harness-monitor',
       'managed-controller',
       'harness-monitor',
       'harness-monitor',
+      'harness-monitor',
     ]);
+  });
+
+  it('installs OpenClaw for an existing state directory without a CLI on PATH', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-openclaw-adapter-'));
+    const env = { HOME: home, PATH: join(home, 'empty') };
+    try {
+      mkdirSync(join(home, '.openclaw'));
+      const find = (report: ReturnType<typeof statusGlobalAdapters>) =>
+        report.find((entry) => entry.harness === 'openclaw');
+      expect(find(statusGlobalAdapters(env))?.status).toBe('action_required');
+      expect(find(installGlobalAdapters(import.meta.url, env))).toMatchObject({
+        status: 'installed',
+        capabilities: ['pull', 'busy'],
+      });
+      expect(find(uninstallGlobalAdapters(env))?.status).toBe('action_required');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('accepts Gemini completion injection set in the user settings', () => {
@@ -221,6 +299,92 @@ describe('global harness adapters', () => {
     );
 
     expect(geminiStatus()).toBe('installed');
+  });
+
+  describe('OpenCode', () => {
+    function opencodeEnv(version = '2.2.3') {
+      const home = mkdtempSync(join(tmpdir(), 'concord-oc-home-'));
+      const bin = join(home, 'bin');
+      mkdirSync(bin);
+      writeFakeOpencode(bin);
+      const log = join(home, 'calls.log');
+      return {
+        home,
+        log,
+        env: { HOME: home, PATH: bin, FAKE_OC_LOG: log, FAKE_OC_VERSION: version },
+      };
+    }
+    const opencodeReport = (env: NodeJS.ProcessEnv) =>
+      statusGlobalAdapters(env, undefined, undefined, LASTING).find(
+        (entry) => entry.harness === 'opencode',
+      );
+
+    it('is not detected without an OpenCode CLI', () => {
+      const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-empty-')), PATH: '' };
+
+      expect(opencodeReport(env)).toMatchObject({ detected: false, status: 'not_detected' });
+    });
+
+    it('rejects OpenCode releases before 2.0', () => {
+      const { env } = opencodeEnv('1.19.0');
+
+      expect(opencodeReport(env)).toMatchObject({
+        detected: true,
+        status: 'unsupported_version',
+        capabilities: [],
+      });
+    });
+
+    it('needs setup until Concord is registered, and reports launcher capabilities after', () => {
+      const { home, env } = opencodeEnv();
+      expect(opencodeReport(env)).toMatchObject({ status: 'action_required', capabilities: [] });
+
+      const mcp = join(home, 'mcp.json');
+      writeFileSync(
+        mcp,
+        JSON.stringify({ data: [{ name: 'concord', status: { status: 'connected' } }] }),
+      );
+      expect(opencodeReport({ ...env, FAKE_OC_MCP: mcp })).toMatchObject({
+        status: 'installed',
+        capabilities: ['pull', 'inject', 'steer', 'idle', 'busy'],
+      });
+    });
+
+    it('does not start a stopped OpenCode service to check registration', () => {
+      const { env, log } = opencodeEnv();
+
+      expect(opencodeReport({ ...env, FAKE_OC_SERVICE: 'stopped' })).toMatchObject({
+        detected: true,
+        status: 'action_required',
+        capabilities: [],
+      });
+      expect(recordedInvocations(log).filter((call) => call[0] === 'api')).toEqual([]);
+    });
+
+    it('registers Concord through `opencode mcp add` when adapters are installed', () => {
+      const { env, log } = opencodeEnv();
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      expect(recordedInvocations(log)).toContainEqual([
+        'mcp',
+        'add',
+        '--global',
+        '--env',
+        'CONCORD_AGENT_KIND=opencode',
+        'concord',
+        '--',
+        'concord-mcp',
+      ]);
+    });
+
+    it('does not touch an unsupported OpenCode', () => {
+      const { env, log } = opencodeEnv('1.19.0');
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      expect(recordedInvocations(log).filter((call) => call[0] === 'mcp')).toEqual([]);
+    });
   });
 
   it('requires Gemini completion injection in the current project', () => {
@@ -347,35 +511,6 @@ describe('global harness adapters', () => {
     const secondRun = readFileSync(configPath, 'utf8');
     const occurrences = secondRun.match(/concord-relay/g) ?? [];
     expect(occurrences).toHaveLength(2);
-  });
-
-  it('reports OpenClaw by its state directory and registers it when detected', () => {
-    const home = mkdtempSync(join(tmpdir(), 'concord-openclaw-home-'));
-    const env = { HOME: home, PATH: join(home, 'bin') };
-
-    const absent = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
-    expect(absent.find((entry) => entry.harness === 'openclaw')).toMatchObject({
-      detected: false,
-      status: 'not_detected',
-    });
-    expect(existsSync(join(home, '.openclaw', 'openclaw.json'))).toBe(false);
-
-    mkdirSync(join(home, '.openclaw'));
-    const present = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
-    expect(present.find((entry) => entry.harness === 'openclaw')).toMatchObject({
-      detected: true,
-      status: 'installed',
-      capabilities: ['pull', 'busy'],
-    });
-    const config = readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf8');
-    expect(config).toContain('@concord-ai/concord-mcp');
-    expect(config).toContain('"CONCORD_AGENT_KIND": "openclaw"');
-    expect(config).not.toContain('CONCORD_REPO_ROOT');
-
-    uninstallGlobalAdapters(env);
-    expect(readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf8')).not.toContain(
-      'concord-mcp',
-    );
   });
 
   it('does not install Goose config below the supported version', () => {
@@ -561,6 +696,63 @@ describe('global harness adapters', () => {
     expect(readFileSync(hooksPath, 'utf8')).toBe(broken);
   });
 
+  it.each([
+    { problem: 'malformed', detected: false },
+    { problem: 'malformed', detected: true },
+    { problem: 'unreadable', detected: false },
+    { problem: 'unreadable', detected: true },
+  ])(
+    'uninstalls later adapters when DeepSeek config is $problem (detected: $detected)',
+    ({ problem, detected }) => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-deepseek-uninstall-'));
+      try {
+        const bin = join(home, 'bin');
+        mkdirSync(bin);
+        writeFakeVersion(bin, 'copilot', 'GitHub Copilot CLI 1.0.100.');
+        writeFakeVersion(bin, 'devin', 'Devin CLI v3000.3');
+        if (detected) writeFakeVersion(bin, 'dsh', '0.2.2');
+        const env = { HOME: home, USERPROFILE: home, PATH: bin, ANTIGRAVITY_AGENT: '1' };
+        const installed = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+        for (const harness of ['copilot-cli', 'antigravity', 'devin']) {
+          expect(installed.find((entry) => entry.harness === harness)?.status).toBe('installed');
+        }
+
+        const configPath = join(home, '.dsh', 'cordis.patch.yml');
+        mkdirSync(dirname(configPath), { recursive: true });
+        rmSync(configPath, { force: true });
+        const broken = '- insert: [invalid\n';
+        if (problem === 'malformed') writeFileSync(configPath, broken);
+        // A directory makes readFileSync fail regardless of the user's permissions.
+        else mkdirSync(configPath);
+        const statePath = join(home, '.concord', 'adapters.json');
+        expect(existsSync(statePath)).toBe(true);
+
+        const report = uninstallGlobalAdapters(env);
+
+        expect(report.find((entry) => entry.harness === 'deepseek')?.status).toBe(
+          detected ? 'action_required' : 'not_detected',
+        );
+        for (const config of [
+          join(home, '.copilot', 'mcp-config.json'),
+          join(home, '.gemini', 'config', 'mcp_config.json'),
+          join(home, '.config', 'devin', 'mcp_config.json'),
+        ]) {
+          expect(readFileSync(config, 'utf8')).not.toContain('"concord"');
+        }
+        expect(existsSync(join(home, '.copilot', 'hooks', 'concord.json'))).toBe(false);
+        expect(existsSync(join(home, '.gemini', 'config', 'hooks.json'))).toBe(false);
+        expect(readFileSync(join(home, '.config', 'devin', 'config.json'), 'utf8')).not.toContain(
+          'concord hook',
+        );
+        expect(existsSync(statePath)).toBe(false);
+        if (problem === 'malformed') expect(readFileSync(configPath, 'utf8')).toBe(broken);
+        else expect(statSync(configPath).isDirectory()).toBe(true);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('reports action_required with remaining hooks detail when hooks remain but MCP is not registered', () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-ag-hooks-remaining-'));
     const env = { HOME: home, USERPROFILE: home, ANTIGRAVITY_AGENT: '1' };
@@ -580,5 +772,16 @@ describe('global harness adapters', () => {
     const agEntry = report.find((entry) => entry.harness === 'antigravity');
     expect(agEntry?.status).toBe('action_required');
     expect(agEntry?.detail).toContain('Concord lifecycle hooks remain installed');
+  });
+});
+
+describe('versionTuple', () => {
+  it('parses a v-prefixed version from Hermes output', () => {
+    expect(versionTuple('Hermes Agent v0.22.5')).toEqual([0, 22, 5]);
+    expect(versionTuple('v1.2.3')).toEqual([1, 2, 3]);
+  });
+
+  it('keeps rejecting version numbers embedded in identifiers', () => {
+    expect(versionTuple('HermesAgent0.22.5')).toBeUndefined();
   });
 });

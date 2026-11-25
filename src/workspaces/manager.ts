@@ -121,7 +121,7 @@ export class WorkspaceManager {
         workspaceId,
         repoRoot,
         concordPath: store.concordPath,
-        repos: this.#open(store.databasePath, store.project),
+        repos: { ...this.#open(store.databasePath, store.project), checkoutRoot: repoRoot },
       };
       this.#contexts.set(workspaceId, context);
     }
@@ -170,6 +170,9 @@ export function routedRepositories(manager: WorkspaceManager): Repositories {
     get project() {
       return manager.current().repos.project;
     },
+    get checkoutRoot() {
+      return manager.current().repos.checkoutRoot;
+    },
     get tasks() {
       return manager.current().repos.tasks;
     },
@@ -181,6 +184,9 @@ export function routedRepositories(manager: WorkspaceManager): Repositories {
     },
     get taskUpdates() {
       return manager.current().repos.taskUpdates;
+    },
+    get search() {
+      return manager.current().repos.search;
     },
     get events() {
       return manager.current().repos.events;
@@ -196,6 +202,9 @@ export function routedRepositories(manager: WorkspaceManager): Repositories {
     },
     get agentMessages() {
       return manager.current().repos.agentMessages;
+    },
+    get sessionBindings() {
+      return manager.current().repos.sessionBindings;
     },
   };
 }

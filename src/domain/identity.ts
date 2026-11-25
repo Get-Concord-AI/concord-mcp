@@ -39,6 +39,9 @@ export const SESSION_SOURCES: readonly SessionSource[] = [
   { kind: 'claude-code', envVar: 'CLAUDE_CODE_SESSION_ID' },
   { kind: 'grok', envVar: 'GROK_SESSION_ID' },
   { kind: 'goose', envVar: 'AGENT_SESSION_ID' },
+  // Hermes sets this for its hooks and terminal commands. Its MCP servers start
+  // before any session and never see it; Hermes sessions resolve through hooks.
+  { kind: 'hermes', envVar: 'HERMES_SESSION_ID' },
   // Copilot CLI hands its MCP servers the same id its hooks receive as `sessionId`.
   { kind: 'copilot-cli', envVar: 'COPILOT_AGENT_SESSION_ID' },
   // Set in Google Antigravity IDE environments (Windows, Linux, macOS).
@@ -67,6 +70,22 @@ const hookSessionSchema = z
   })
   .loose();
 
+const openCodeRequestMetaSchema = z
+  .object({
+    'ai.opencode/sessionID': z.string().trim().min(1),
+  })
+  .transform(({ 'ai.opencode/sessionID': sessionId }) => ({ sessionId }));
+
+export type OpenCodeRequestIdentityMetadata = z.infer<typeof openCodeRequestMetaSchema>;
+
+/** Parse the OpenCode V2 session metadata at the MCP request boundary. */
+export function parseOpenCodeRequestIdentityMetadata(
+  input: unknown,
+): OpenCodeRequestIdentityMetadata | undefined {
+  const parsed = openCodeRequestMetaSchema.safeParse(input);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /**
  * A stable agent id for one session of one client, e.g. `claude-code:4f2a91c7`.
  *
@@ -77,6 +96,29 @@ const hookSessionSchema = z
  */
 export function agentIdForSession(kind: string, sessionId: string): string {
   return `${kind}:${createHash('sha256').update(sessionId).digest('hex').slice(0, 8)}`;
+}
+
+/**
+ * OpenCode V2 supplies its opaque session id in MCP request metadata, not in
+ * the server process environment or the model-visible tool arguments.
+ */
+export function resolveOpenCodeRequestIdentity(
+  meta: OpenCodeRequestIdentityMetadata | undefined,
+): AgentIdentity | undefined {
+  if (meta === undefined) return undefined;
+  return {
+    agentId: agentIdForSession('opencode', meta.sessionId),
+    kind: 'opencode',
+    origin: 'session',
+  };
+}
+
+/** An operator-chosen identity remains authoritative for every request. */
+export function identityForRequest(
+  session: AgentIdentity | undefined,
+  request: AgentIdentity | undefined,
+): AgentIdentity | undefined {
+  return session?.origin === 'operator' ? session : (request ?? session);
 }
 
 /** The session sources for a client, when that client exposes any. */
@@ -185,6 +227,66 @@ export function resolveIdentity(
   return undefined;
 }
 
+/**
+ * The identity of the MCP server process, from the environment its client gave it.
+ *
+ * `CONCORD_AGENT_KIND` is set in the server entry `concord setup` writes for a
+ * client, and restricts the lookup to that client's own session variable. Without
+ * it, the first session variable present wins, which is wrong whenever the client
+ * was started from another harness's shell and inherited that harness's session id.
+ */
+export function resolveServerIdentity(env: NodeJS.ProcessEnv): AgentIdentity | undefined {
+  const kind = env['CONCORD_AGENT_KIND']?.trim();
+  return resolveIdentity(env, kind !== undefined && kind !== '' ? { kind } : {});
+}
+
+/**
+ * A live session recorded out-of-band by a hook, keyed by the client pid a
+ * server can check. Hooks fire in the session as it is now, so what they saw
+ * is fresher than anything in the server's spawn-time environment: after a
+ * `/resume` or `/clear`, the env keeps the abandoned session id while the
+ * binding carries the resumed one.
+ */
+export interface LiveSessionBinding {
+  agentId: string;
+  kind: string;
+}
+
+export interface LiveSessionResolution {
+  identity: AgentIdentity | undefined;
+  /** Env identity and the live binding named different agents. */
+  drifted: boolean;
+}
+
+/**
+ * The identity a server should act as: the binding a hook recorded for its
+ * client, when one exists. A binding only ever *corrects* an env identity —
+ * with no env identity at all, naming one anyway would hand a caller proof it
+ * never earned, so it keeps its unproven path instead. Two more guards keep
+ * it that way: an operator-chosen identity stays authoritative, and a binding
+ * belongs to this client only when it names the same kind — a nested client's
+ * ancestor chain can include a process an outer session of another kind bound.
+ */
+export function liveSessionIdentity(
+  env: AgentIdentity | undefined,
+  binding: LiveSessionBinding | undefined,
+): LiveSessionResolution {
+  if (
+    env === undefined ||
+    binding === undefined ||
+    env.origin === 'operator' ||
+    binding.kind !== env.kind
+  ) {
+    return { identity: env, drifted: false };
+  }
+  const identity: AgentIdentity = {
+    agentId: binding.agentId,
+    kind: binding.kind,
+    origin: 'hook',
+  };
+  return { identity, drifted: identity.agentId !== env.agentId };
+}
+
 /** The client prefix of an agent id, for ids supplied whole by an operator. */
 function kindOf(agentId: string): string {
   const separator = agentId.indexOf(':');
@@ -207,20 +309,13 @@ export const UNRESOLVED_IDENTITY_MESSAGE =
 export function resolveActorId(
   session: AgentIdentity | undefined,
   supplied: string | undefined,
-  fallback?: string,
+  kind?: string,
 ): string {
   if (session !== undefined) return session.agentId;
   const given = supplied?.trim();
   if (given !== undefined && given !== '') return given;
-  if (fallback !== undefined) return fallback;
+  if (kind === 'openclaw') {
+    throw new Error('Pass agent_id: "openclaw:<your agent id>" on OpenClaw workflow calls.');
+  }
   throw new Error(UNRESOLVED_IDENTITY_MESSAGE);
-}
-
-/**
- * The id used when a client that never reveals a session was set up without
- * per-agent instructions (OpenClaw with global mode off). It is the id OpenClaw's
- * default agent gets in global mode, so both setups name that agent the same way.
- */
-export function defaultActorIdFor(env: NodeJS.ProcessEnv): string | undefined {
-  return env['CONCORD_AGENT_KIND']?.trim() === 'openclaw' ? 'openclaw:main' : undefined;
 }

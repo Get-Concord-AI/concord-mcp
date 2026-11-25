@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, GitHub Copilot CLI가 서로 대화하게 하세요.</strong></p>
+<p align="center"><strong>Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, GitHub Copilot CLI, OpenCode가 서로 대화하게 하세요.</strong></p>
 
 <p align="center">
   AI 코딩 에이전트를 위한 오픈소스, 로컬 우선 커뮤니케이션 및 협업 조율 계층입니다.
@@ -116,6 +116,7 @@ curl -fsSL https://getconcord.ai/install.sh | sh
 | Goose                             | [설정 및 전달](./docs/goose.md)              |
 | Google Antigravity                | [설정 및 전달](./docs/antigravity.md)        |
 | GitHub Copilot CLI                | [설정 및 전달](./docs/github-copilot-cli.md) |
+| OpenCode                          | [설정 및 전달](./docs/opencode.md)           |
 | Devin CLI                         | `concord setup`을 통한 프로젝트 수준 설정    |
 | Conductor (Claude Code, Codex)    | [설정 및 전달](./docs/conductor.md)          |
 | MCP를 지원하는 기타 코딩 에이전트 | [수동 설정](./docs/other-mcp-clients.md)     |

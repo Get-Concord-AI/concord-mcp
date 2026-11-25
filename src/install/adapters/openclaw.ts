@@ -1,5 +1,11 @@
+import { existsSync } from 'node:fs';
+
 import { HARNESS_CONFIGS } from '../../domain/harness-config.js';
-import { openclawConfigInstalled, openclawStateDirExists } from '../openclaw-config.js';
+import {
+  openclawConfigInstalled,
+  openclawConfigPath,
+  openclawStateDir,
+} from '../openclaw-config.js';
 import type { AdapterReport } from './index.js';
 
 /** OpenClaw's Gateway may run as a service without its CLI on PATH, so its state directory also counts. */
@@ -7,7 +13,11 @@ export function isOpenclawDetected(
   executable: string | undefined,
   env: NodeJS.ProcessEnv,
 ): boolean {
-  return executable !== undefined || openclawStateDirExists(env);
+  return (
+    executable !== undefined ||
+    existsSync(openclawStateDir(env)) ||
+    existsSync(openclawConfigPath(env))
+  );
 }
 
 /**

@@ -28,8 +28,9 @@ export function rosterLines(others: readonly RosterLine[]): string[] {
  * second agent under it, after which no message to the id could be delivered.
  */
 export const CONCORD_SERVER_ONLY =
-  "Make Concord calls with this machine's `concord` MCP server; a chat app's Concord " +
-  "connector (such as claude.ai's) is a separate agent and must never be given this id.";
+  "Make Concord calls with this machine's `concord` MCP server, or from a shell with " +
+  "`concord work <action> --agent <id>`; a chat app's Concord connector (such as " +
+  "claude.ai's) is a separate agent and must never be given this id.";
 
 /** What a session is told at start: who it is, and who else is here. */
 export function sessionStartMessage(
@@ -53,6 +54,34 @@ export function sessionStartMessage(
 }
 
 /**
+ * Hermes starts one MCP server per process, from `$HOME`, before any session
+ * exists: it can see neither the session nor the project. The hook that knows
+ * both says which `agent_id` and, for a local store, which `workspace_id` to pass.
+ */
+export function hermesSessionStartMessage(
+  agentId: string,
+  workspaceId: string | undefined,
+  others: readonly RosterLine[],
+): string {
+  const ids =
+    workspaceId === undefined
+      ? `include \`agent_id: "${agentId}"\` on start_work, update_work, transfer_work, and finish_work calls.`
+      : `include \`agent_id: "${agentId}"\` and \`workspace_id: "${workspaceId}"\` on start_work, ` +
+        `update_work, transfer_work, and finish_work calls, and \`workspace_id\` on inspect_work.`;
+  return [
+    `Concord: this session is agent \`${agentId}\`` +
+      (workspaceId === undefined ? '. ' : ` in workspace \`${workspaceId}\`. `) +
+      "Hermes starts Concord's MCP server without your session or project, so " +
+      ids +
+      ' On inspect_work, `agent_id` selects whose inbox to read: pass your own id only to read ' +
+      `your inbox. Do not invent an id. ${CONCORD_SERVER_ONLY}`,
+    "Other agents' messages are delivered at the start of your next turn. To check sooner, run " +
+      `\`concord inbox drain --agent ${agentId} --provider hermes\` from this repository.`,
+    ...rosterLines(others),
+  ].join('\n');
+}
+
+/**
  * Antigravity's MCP server cannot see the session, so the id must be passed explicitly on writes.
  * Hooks only reach a running turn; an idle session hears peers through a one-shot background
  * monitor whose completion wakes it.
@@ -71,6 +100,24 @@ export function antigravitySessionStartMessage(
       `start exactly one background command now: \`${monitor}\`. Do not wait on it or ` +
       'poll it. When it completes with a message, answer it, then immediately start a fresh ' +
       'one with the same command.',
+    ...rosterLines(others),
+  ].join('\n');
+}
+
+/**
+ * Kiro's MCP server cannot see the hook session, so the id must be passed explicitly on writes.
+ * Messages arrive on prompt submit; Kiro has no idle wake-up, so a message sent after a prompt
+ * waits in the durable inbox until the next one.
+ */
+export function kiroSessionStartMessage(agentId: string, others: readonly RosterLine[]): string {
+  return [
+    `Concord: this session is agent \`${agentId}\`. Pass agent_id: "${agentId}" on every ` +
+      'write call (start_work, update_work, transfer_work, finish_work). ' +
+      "Kiro's MCP server cannot see your session, so it cannot fill this in for you. " +
+      CONCORD_SERVER_ONLY,
+    'Messages from other agents reach you when a prompt is submitted. ' +
+      'Kiro does not wake an idle session, so messages sent after that wait in your ' +
+      `durable inbox. To check sooner, run \`concord inbox drain --agent ${agentId} --provider kiro\`.`,
     ...rosterLines(others),
   ].join('\n');
 }

@@ -30,8 +30,14 @@ extensions:
     args:
       - -y
       - '@concord-ai/concord-mcp'
+    envs:
+      CONCORD_AGENT_KIND: goose
     timeout: 300
 ```
+
+`CONCORD_AGENT_KIND` makes the server read only Goose's own session id, so a
+Goose started from another harness's shell does not act as that harness's agent.
+Existing entries gain it the next time `concord setup` runs.
 
 > **Note:** Goose configuration is loaded and rewritten as YAML during
 > installation, so existing YAML comments may not be preserved.

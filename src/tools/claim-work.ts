@@ -2,6 +2,7 @@ import type { Repositories, TaskRecord } from '../db/index.js';
 import { assessClaimBreadth } from '../domain/decomposition.js';
 import type { ClaimWorkInput } from '../domain/operations.js';
 import { CLAIMED_STATUSES, detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
+import { resolvePathsFromCheckout } from '../workspaces/overlap-paths.js';
 
 export interface ClaimWorkResult {
   task: TaskRecord;
@@ -81,8 +82,17 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
   const activeOthers = repos.tasks
     .list()
     .filter((task) => task.taskId !== input.task_id && CLAIMED_STATUSES.has(task.status));
+  const pathsFromCheckout = resolvePathsFromCheckout(repos.checkoutRoot, [
+    scope.expectedFiles,
+    ...activeOthers.map((task) => task.expectedFiles),
+  ]);
 
-  const overlaps = detectOverlaps({ taskId: input.task_id, parentTaskId, ...scope }, activeOthers);
+  const overlaps = detectOverlaps(
+    { taskId: input.task_id, parentTaskId, ...scope },
+    activeOthers,
+    0,
+    { platform: process.platform, pathsFromCheckout },
+  );
 
   const scopeAdded = existing
     ? [
@@ -122,7 +132,7 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
 
   // Working refreshes presence: a registered agent stays live just by claiming.
   if (input.agent_id !== undefined) {
-    repos.agents.touch(input.agent_id);
+    repos.agents.recordActivity(input.agent_id);
   }
 
   return {

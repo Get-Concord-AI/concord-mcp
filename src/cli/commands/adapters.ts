@@ -1,5 +1,6 @@
 import type { Command } from '@commander-js/extra-typings';
-import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
+import { spawnCommand, stopCommand } from '../../install/spawn-command.js';
 
 import { z } from 'zod';
 
@@ -21,7 +22,6 @@ import {
   statusGlobalAdapters,
   uninstallGlobalAdapters,
 } from '../../install/adapters/index.js';
-import { openContext } from '../context.js';
 import { availablePort } from '../local-port.js';
 import { hostCodexInCloud } from './cloud-codex.js';
 import { codexThreadHostable } from '../embedding-host.js';
@@ -36,7 +36,7 @@ import { cloudAccess } from './cloud-inbox.js';
 import { reportMissingHarnessCli } from './missing-harness-cli.js';
 
 async function hostCodex(agentId: string, threadId: string): Promise<void> {
-  const context = openContext(process.cwd());
+  const context = await import('../context.js').then((module) => module.openContext(process.cwd()));
   ensureAgentRegistered(context.repos, { agentId, kind: 'codex' }, context.repoRoot);
   const client = new CodexDaemonClient();
   // Read receipts: the model answered, or the turn completed, with a pushed message as input.
@@ -85,7 +85,10 @@ async function hostCodex(agentId: string, threadId: string): Promise<void> {
   });
 }
 
-async function waitForCodexServer(url: string, server: ReturnType<typeof spawn>): Promise<void> {
+async function waitForCodexServer(
+  url: string,
+  server: ReturnType<typeof spawnCommand>,
+): Promise<void> {
   const healthUrl = url.replace(/^ws:/u, 'http:') + '/readyz';
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (server.exitCode !== null) {
@@ -161,6 +164,7 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
     reportMissingHarnessCli('Codex CLI', 'npm i -g @openai/codex');
     return;
   }
+  const selectedPath = resolve(executable);
   const port = await availablePort();
   const url = `ws://127.0.0.1:${String(port)}`;
   // The app-server, not the remote TUI, owns MCP child processes. Give both
@@ -170,13 +174,14 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
   // the complete managed tree from the resolved repository root.
   const context = codexManagedLaunchContext(repoRoot, url, process.env);
   const argv = codexLaunchArgv(url, args);
-  const server = spawn('codex', argv.appServer, {
+  const server = spawnCommand(selectedPath, argv.appServer, {
     ...context,
     stdio: ['ignore', 'ignore', 'inherit'],
+    windowsHide: true,
   });
   try {
     await waitForCodexServer(url, server);
-    const tui = spawn('codex', argv.tui, {
+    const tui = spawnCommand(selectedPath, argv.tui, {
       ...context,
       stdio: 'inherit',
     });
@@ -186,7 +191,7 @@ export async function launchCodex(args: readonly string[], repoRoot: string): Pr
     });
     if (code !== null && code !== 0) process.exitCode = code;
   } finally {
-    server.kill();
+    stopCommand(server, context.env);
   }
 }
 
@@ -260,6 +265,16 @@ export function registerAdaptersCommand(program: Command): void {
     // Copilot's own flags (-i, --allow-tool, ...) are forwarded, not parsed here.
     .allowUnknownOption()
     .action(async (args) => launchCopilot(args));
+  adapters
+    .command('opencode')
+    .description('Launch OpenCode as an identified session Concord can steer and wake')
+    .argument('[args...]', 'Arguments forwarded to OpenCode')
+    // OpenCode's own flags (--model, --prompt, ...) are forwarded, not parsed here.
+    .allowUnknownOption()
+    .action(async (args) => {
+      const { launchOpencode } = await import('./opencode-adapter.js');
+      await launchOpencode(args);
+    });
   adapters
     .command('gemini')
     .description('Launch Gemini CLI with its Concord inbox monitor started on the first turn')

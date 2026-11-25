@@ -2,27 +2,23 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import { startBackgroundAdapterCheck } from './adapter-check.js';
-import { writeArtifacts } from './artifacts/index.js';
 import { cloudSessionFor, connectCloud, createCloudProxyServer } from './cloud/proxy.js';
 import { LINKED_MACHINE_MESSAGE, linkedMachine } from './cloud/target.js';
-import { startBackgroundUpdateCheck } from './update-notifier.js';
 import { resolveCheckoutRoot, resolveRepoRoot } from './config/paths.js';
-import { resolveIdentity } from './domain/identity.js';
-import { createServer } from './server.js';
-import { ensureAgentRegistered } from './tools/register-agent.js';
-import { createTelemetryClient } from './telemetry/client.js';
-import { TelemetryTransport } from './telemetry/transport.js';
+import { resolveOpenCodeRequestIdentity, resolveServerIdentity } from './domain/identity.js';
 import { VERSION } from './version.js';
-import { hasExplicitRepoRoot, joinClientRoot } from './workspaces/client-roots.js';
-import { WorkspaceManager } from './workspaces/manager.js';
 
 async function main(): Promise<void> {
   const repoRoot = resolveRepoRoot(process.cwd(), process.env);
   // One server process per session, with the session id in its environment, so
   // this agent's identity is known before the transport connects — and it is the
   // same id the relay CLI derives for the same session.
-  const kind = process.env['CONCORD_AGENT_KIND']?.trim();
-  const identity = resolveIdentity(process.env, kind !== undefined && kind !== '' ? { kind } : {});
+  const identity = resolveServerIdentity(process.env);
+  // OpenCode passes its session id on each MCP request, not in the environment.
+  const requestIdentity =
+    process.env['CONCORD_AGENT_KIND']?.trim() === 'opencode'
+      ? resolveOpenCodeRequestIdentity
+      : undefined;
 
   // A machine linked to Concord Cloud works through it everywhere: no local
   // database, and no telemetry from this package for operations that are not local.
@@ -31,8 +27,9 @@ async function main(): Promise<void> {
     process.env,
     identity,
     resolveCheckoutRoot(process.cwd(), process.env),
+    requestIdentity,
   );
-  // Before the cloud branch: adapters are installed on this machine either way.
+  // Adapter repair is an independent child command and runs in either mode.
   const adapterCheck = startBackgroundAdapterCheck(identity, process.env);
   if (cloud !== undefined) {
     const proxy = createCloudProxyServer(cloud, () => connectCloud(cloud));
@@ -40,7 +37,29 @@ async function main(): Promise<void> {
     return;
   }
 
-  const workspaceManager = WorkspaceManager.fromEnvironment(repoRoot, process.env, {
+  // Keep the local workspace graph out of the Cloud path above. In
+  // particular, the workspace database layer loads better-sqlite3's native
+  // binding, which is unnecessary when every operation is proxied.
+  const [
+    { writeArtifacts },
+    { startBackgroundUpdateCheck },
+    { createServer },
+    { ensureAgentRegistered },
+    { createTelemetryClient },
+    { TelemetryTransport: telemetryTransport },
+    { hasExplicitRepoRoot, joinClientRoot },
+    { WorkspaceManager: workspaceManagerConstructor },
+  ] = await Promise.all([
+    import('./artifacts/index.js'),
+    import('./update-notifier.js'),
+    import('./server.js'),
+    import('./tools/register-agent.js'),
+    import('./telemetry/client.js'),
+    import('./telemetry/transport.js'),
+    import('./workspaces/client-roots.js'),
+    import('./workspaces/manager.js'),
+  ]);
+  const workspaceManager = workspaceManagerConstructor.fromEnvironment(repoRoot, process.env, {
     // Started unlinked, this server outlives a later `cloud login`; from then
     // on it opens no further local store, which no cloud agent could reach.
     refuseOpen: () =>
@@ -58,6 +77,7 @@ async function main(): Promise<void> {
   const server = createServer(workspaceManager.current().repos, {
     workspaceManager,
     ...(identity === undefined ? {} : { identity }),
+    ...(requestIdentity === undefined ? {} : { requestIdentity }),
     getAvailableUpdate: updateCheck.getAvailableUpdate,
     getAdapterNotice: adapterCheck.getNotice,
     ...(telemetry === undefined ? {} : { telemetry }),
@@ -83,7 +103,7 @@ async function main(): Promise<void> {
     };
   }
   const stdio = new StdioServerTransport();
-  const transport = telemetry === undefined ? stdio : new TelemetryTransport(stdio, telemetry);
+  const transport = telemetry === undefined ? stdio : new telemetryTransport(stdio, telemetry);
   process.once('beforeExit', () => {
     void telemetry?.close();
   });

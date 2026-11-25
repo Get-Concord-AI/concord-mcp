@@ -2,15 +2,34 @@ import { describe, expect, it } from 'vitest';
 
 import {
   agentIdForSession,
-  defaultActorIdFor,
+  liveSessionIdentity,
+  parseOpenCodeRequestIdentityMetadata,
   resolveActorId,
   resolveIdentity,
+  resolveOpenCodeRequestIdentity,
+  resolveServerIdentity,
   UNRESOLVED_IDENTITY_MESSAGE,
 } from '../../src/domain/identity.js';
 
 const SESSION = 'a1b2c3d4-e5f6-7890';
 
 describe('resolveIdentity', () => {
+  it('uses an explicit DeepSeek identity without borrowing inherited harness sessions', () => {
+    const inherited = { CLAUDE_CODE_SESSION_ID: SESSION, AGENT_SESSION_ID: 'goose-parent' };
+    expect(resolveIdentity(inherited, { kind: 'deepseek' })).toBeUndefined();
+    expect(
+      resolveIdentity(
+        { ...inherited, CONCORD_AGENT_ID: 'deepseek:session-a' },
+        {
+          kind: 'deepseek',
+        },
+      ),
+    ).toEqual({ agentId: 'deepseek:session-a', kind: 'deepseek', origin: 'operator' });
+    expect(resolveActorId(undefined, 'deepseek:registered-session')).toBe(
+      'deepseek:registered-session',
+    );
+    expect(() => resolveActorId(undefined, undefined)).toThrow(UNRESOLVED_IDENTITY_MESSAGE);
+  });
   it('derives identity from the session alone, so a plain session needs no setup', () => {
     const identity = resolveIdentity({ CLAUDE_CODE_SESSION_ID: SESSION });
 
@@ -47,6 +66,14 @@ describe('resolveIdentity', () => {
 
     expect(identity?.agentId).toBe(agentIdForSession('codex', SESSION));
     expect(identity?.origin).toBe('hook');
+  });
+
+  it('derives a Hermes identity from the session id passed to its MCP child', () => {
+    const identity = resolveIdentity({ HERMES_SESSION_ID: SESSION }, { kind: 'hermes' });
+
+    expect(identity?.agentId).toBe(agentIdForSession('hermes', SESSION));
+    expect(identity?.kind).toBe('hermes');
+    expect(identity?.origin).toBe('session');
   });
 
   it('derives a Goose identity from the session id Goose exports to extensions', () => {
@@ -116,6 +143,31 @@ describe('resolveIdentity', () => {
   });
 });
 
+describe('resolveOpenCodeRequestIdentity', () => {
+  it('hashes OpenCode V2 request metadata without returning the opaque session ID', () => {
+    const rawSessionId = 'ses_private-open-code-session';
+    const metadata = parseOpenCodeRequestIdentityMetadata({
+      'ai.opencode/sessionID': rawSessionId,
+    });
+    const identity = resolveOpenCodeRequestIdentity(metadata);
+
+    expect(identity).toEqual({
+      agentId: agentIdForSession('opencode', rawSessionId),
+      kind: 'opencode',
+      origin: 'session',
+    });
+    expect(JSON.stringify(identity)).not.toContain(rawSessionId);
+  });
+
+  it('ignores absent or malformed request metadata', () => {
+    expect(parseOpenCodeRequestIdentityMetadata(undefined)).toBeUndefined();
+    expect(parseOpenCodeRequestIdentityMetadata(null)).toBeUndefined();
+    expect(parseOpenCodeRequestIdentityMetadata({ 'ai.opencode/sessionID': '  ' })).toBeUndefined();
+    expect(parseOpenCodeRequestIdentityMetadata({ 'ai.opencode/sessionID': 1 })).toBeUndefined();
+    expect(resolveOpenCodeRequestIdentity(undefined)).toBeUndefined();
+  });
+});
+
 describe('resolveActorId', () => {
   const session = {
     agentId: 'claude-code:abcd1234',
@@ -137,21 +189,75 @@ describe('resolveActorId', () => {
     expect(resolveActorId(undefined, 'codex:1a2b3c4d')).toBe('codex:1a2b3c4d');
   });
 
-  it('gives a repository-only OpenClaw setup the default agent id, but never over a supplied one', () => {
-    const fallback = defaultActorIdFor({ CONCORD_AGENT_KIND: 'openclaw' });
-    expect(fallback).toBe('openclaw:main');
-    expect(resolveActorId(undefined, undefined, fallback)).toBe('openclaw:main');
-    expect(resolveActorId(undefined, 'openclaw:alpha', fallback)).toBe('openclaw:alpha');
-    expect(resolveActorId(session, undefined, fallback)).toBe('claude-code:abcd1234');
-  });
-
-  it('has no default id for other clients', () => {
-    expect(defaultActorIdFor({ CONCORD_AGENT_KIND: 'codex' })).toBeUndefined();
-    expect(defaultActorIdFor({})).toBeUndefined();
-  });
-
   it('explains how to fix an unidentifiable caller instead of minting an id', () => {
     expect(() => resolveActorId(undefined, undefined)).toThrow(UNRESOLVED_IDENTITY_MESSAGE);
     expect(() => resolveActorId(undefined, '  ')).toThrow(UNRESOLVED_IDENTITY_MESSAGE);
   });
+});
+
+describe('liveSessionIdentity', () => {
+  const env = {
+    agentId: 'claude-code:aaaabbbb',
+    kind: 'claude-code',
+    origin: 'session',
+  } as const;
+
+  it('corrects the env identity when a hook binding names the live session', () => {
+    const result = liveSessionIdentity(env, {
+      agentId: 'claude-code:ccccdddd',
+      kind: 'claude-code',
+    });
+    expect(result.identity?.agentId).toBe('claude-code:ccccdddd');
+    expect(result.identity?.origin).toBe('hook');
+    expect(result.drifted).toBe(true);
+  });
+
+  it('reports no drift when the binding confirms the env identity', () => {
+    const result = liveSessionIdentity(env, {
+      agentId: 'claude-code:aaaabbbb',
+      kind: 'claude-code',
+    });
+    expect(result.identity?.agentId).toBe('claude-code:aaaabbbb');
+    expect(result.drifted).toBe(false);
+  });
+
+  it('never mints an identity for a session-invisible server from a binding alone', () => {
+    const result = liveSessionIdentity(undefined, {
+      agentId: 'claude-code:ccccdddd',
+      kind: 'claude-code',
+    });
+    expect(result.identity).toBeUndefined();
+    expect(result.drifted).toBe(false);
+  });
+});
+
+describe('liveSessionIdentity binding proof', () => {
+  it('rejects a binding of another kind — a nested client keeps its own identity', () => {
+    const result = liveSessionIdentity(
+      { agentId: 'grok:11112222', kind: 'grok', origin: 'session' },
+      { agentId: 'claude-code:aaaabbbb', kind: 'claude-code' },
+    );
+    expect(result.identity?.agentId).toBe('grok:11112222');
+    expect(result.drifted).toBe(false);
+  });
+
+  it('never overrides an operator-chosen identity', () => {
+    const result = liveSessionIdentity(
+      { agentId: 'operator:chosen', kind: 'operator', origin: 'operator' },
+      { agentId: 'operator:other', kind: 'operator' },
+    );
+    expect(result.identity?.agentId).toBe('operator:chosen');
+    expect(result.drifted).toBe(false);
+  });
+});
+
+it('keeps OpenClaw agents distinct and requires an explicit ID', () => {
+  const identity = resolveServerIdentity({
+    CONCORD_AGENT_KIND: 'openclaw',
+    CLAUDE_CODE_SESSION_ID: SESSION,
+  });
+  expect(identity).toBeUndefined();
+  expect(resolveActorId(identity, 'openclaw:main', 'openclaw')).toBe('openclaw:main');
+  expect(resolveActorId(identity, 'openclaw:research', 'openclaw')).toBe('openclaw:research');
+  expect(() => resolveActorId(identity, undefined, 'openclaw')).toThrow('Pass agent_id');
 });

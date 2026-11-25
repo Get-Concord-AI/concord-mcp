@@ -276,4 +276,34 @@ export const migrations: readonly string[] = [
   ALTER TABLE task_updates ADD COLUMN supersede_reason TEXT;
   ALTER TABLE task_updates ADD COLUMN superseded_at TEXT;
   `,
+  // 017 — split presence out of last_seen into heartbeat, activity, summary
+  // change time, and execution status. last_seen stays as the freshest signal.
+  `
+  ALTER TABLE agents ADD COLUMN heartbeat_at TEXT;
+  ALTER TABLE agents ADD COLUMN activity_at TEXT;
+  ALTER TABLE agents ADD COLUMN summary_updated_at TEXT;
+  ALTER TABLE agents ADD COLUMN execution_status TEXT NOT NULL DEFAULT 'not_executing';
+
+  UPDATE agents SET
+    heartbeat_at = last_seen,
+    activity_at = last_seen,
+    summary_updated_at = CASE WHEN summary IS NULL THEN NULL ELSE last_seen END,
+    execution_status = CASE WHEN status = 'active' THEN 'executing' ELSE 'not_executing' END;
+  `,
+  // 018 — whether the sender wants an answer. Replies default to no, so two
+  // agents stop acknowledging each other's acknowledgements.
+  `
+  ALTER TABLE agent_messages ADD COLUMN expects_reply INTEGER NOT NULL DEFAULT 1;
+  `,
+  // 019 — which agent a client process currently hosts. Session-start hooks
+  // record it per ancestor pid so an MCP server spawned before a /resume can
+  // resolve the session that is live now, not the one it was launched with.
+  `
+  CREATE TABLE session_bindings (
+    client_pid INTEGER PRIMARY KEY,
+    agent_id   TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
 ];

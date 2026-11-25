@@ -16,12 +16,33 @@ const JSON_TARGETS: readonly string[] = [
   join('.cursor', 'mcp.json'),
   join('.agents', 'mcp_config.json'),
   join('.github', 'mcp.json'),
+  join('.kiro', 'settings', 'mcp.json'),
 ];
-/** Harness kind each project file pins, for files only one harness reads. */
+/** The variable that names the client an MCP server runs in. */
+export const AGENT_KIND_ENV = 'CONCORD_AGENT_KIND';
+
+/**
+ * The environment entry that pins a server to one client.
+ *
+ * A harness started from another harness's shell inherits that shell's session
+ * variable, so a server told nothing would take the parent's identity. With the
+ * kind pinned it reads only its own client's session variable.
+ */
+export function agentKindEnv(kind: string): Record<string, string> {
+  return { [AGENT_KIND_ENV]: kind };
+}
+
+/**
+ * Harness kind each project file pins, for files only one harness reads. A file
+ * more than one harness reads, such as `.mcp.json`, pins nothing: whichever
+ * client loads it must still resolve its own session.
+ */
 const PINNED_KINDS: ReadonlyMap<string, string> = new Map([
+  [join('.cursor', 'mcp.json'), 'cursor'],
   [join('.agents', 'mcp_config.json'), 'antigravity'],
   [join('.github', 'mcp.json'), 'copilot-cli'],
   [join('.qwen', 'settings.json'), 'qwen'],
+  [join('.kiro', 'settings', 'mcp.json'), 'kiro'],
 ]);
 const GEMINI_CONFIG_PATH = join('.gemini', 'settings.json');
 const GROK_CONFIG_PATH = join('.grok', 'config.toml');
@@ -101,25 +122,53 @@ export function hasMcpServer(existing: string): boolean {
 /** Matches Concord's `mcp_servers.concord` TOML key path and every key or subtable under it. */
 export const CONCORD_TOML_KEY = /^mcp_servers\.concord(?:\.|$)/u;
 
-/** Each key path Grok TOML assigns or opens as a table, spacing and quotes removed. */
-function* grokKeyPaths(existing: string): Generator<{ path: string; header: boolean }> {
+/** Where a Grok TOML key path comes from; Concord itself only writes `header` and `key` paths. */
+type GrokKeySource = 'header' | 'key' | 'dotted' | 'inline' | 'string';
+
+interface GrokKeyPath {
+  readonly path: string;
+  readonly source: GrokKeySource;
+  /** The assigned value's text, for `key` and `dotted` paths. */
+  readonly value: string;
+  readonly fenced: boolean;
+}
+
+/**
+ * Each key path Grok TOML assigns or opens as a table, spacing and quotes removed. A `dotted`
+ * path is one whose key reaches into a table the current header does not name; a `string`
+ * path is the table a multi-line string line sits in.
+ */
+function* grokKeyPaths(existing: string): Generator<GrokKeyPath> {
   let table = '';
+  let fenced = false;
   for (const { text, inString } of tomlLines(existing)) {
+    const trimmed = text.trim();
+    if (!inString && trimmed === GROK_FENCE_START) fenced = true;
+    if (!inString && trimmed === GROK_FENCE_END) {
+      fenced = false;
+      continue;
+    }
     // A line inside a multi-line string is text, however much it looks like TOML.
-    if (inString) continue;
+    if (inString) {
+      yield { path: table, source: 'string', value: '', fenced };
+      continue;
+    }
     const header = /^\s*\[([^\]]+)\]/u.exec(text)?.[1];
     if (header !== undefined) {
       table = tomlKeyPath(header);
-      yield { path: table, header: true };
+      yield { path: table, source: 'header', value: '', fenced };
       continue;
     }
-    const assignment = /^\s*([^=#]+?)\s*=/u.exec(text);
+    const assignment = /^\s*([^=#]+?)\s*=(.*)$/u.exec(text);
     const key = assignment?.[1];
     if (assignment === null || key === undefined) continue;
+    const rest = assignment[2] ?? '';
     const path = tomlKeyPath(table === '' ? key : `${table}.${key}`);
-    yield { path, header: false };
-    for (const inner of inlineTableKeys(text.slice(assignment[0].length))) {
-      yield { path: `${path}.${inner}`, header: false };
+    const value = rest.replace(/\s+#.*$/u, '').trim();
+    const dotted = tomlKeyPath(key).split('.').length > 1;
+    yield { path, source: dotted ? 'dotted' : 'key', value, fenced };
+    for (const inner of inlineTableKeys(rest)) {
+      yield { path: `${path}.${inner}`, source: 'inline', value: '', fenced };
     }
   }
 }
@@ -138,6 +187,11 @@ export function removeMcpServer(existing: string): string {
   return `${JSON.stringify({ ...config, mcpServers: servers }, null, 2)}\n`;
 }
 
+/** Whether an `mcpServers` config string holds a `concord` server somebody other than Concord wrote. */
+function hasUserMcpServer(existing: string): boolean {
+  return hasMcpServer(existing) && !isConcordServerOwned(existing);
+}
+
 /**
  * Register Concord and make Gemini return native background shell completions
  * to the agent. Existing Gemini settings, shell options, and MCP servers are
@@ -146,7 +200,13 @@ export function removeMcpServer(existing: string): string {
  * idle injection effect is gated separately by experimental model steering.
  */
 export function upsertGeminiSettings(existing: string | undefined, repoRoot?: string): string {
-  const withServer = looseObjectSchema.parse(JSON.parse(upsertMcpServer(existing, repoRoot)));
+  const withServer = looseObjectSchema.parse(
+    JSON.parse(
+      existing !== undefined && hasUserMcpServer(existing)
+        ? existing
+        : upsertMcpServer(existing, repoRoot, agentKindEnv('gemini')),
+    ),
+  );
   const currentTools = looseObjectSchema.safeParse(withServer['tools']);
   const tools = currentTools.success ? currentTools.data : {};
   const currentShell = looseObjectSchema.safeParse(tools['shell']);
@@ -180,7 +240,9 @@ export function upsertGrokMcpServer(
 ): string {
   const base = removeGrokMcpServer(existing ?? '');
   // TOML cannot add a `[mcp_servers.concord]` table to an inline `mcp_servers = { ... }`.
-  if ([...grokKeyPaths(base)].some(({ path, header }) => !header && path === 'mcp_servers')) {
+  if (
+    [...grokKeyPaths(base)].some(({ path, source }) => source === 'key' && path === 'mcp_servers')
+  ) {
     throw new McpConfigParseError(
       configPath,
       'sets mcp_servers as an inline table, which Concord cannot add to',
@@ -192,9 +254,10 @@ export function upsertGrokMcpServer(
     `command = ${JSON.stringify(CONCORD_SERVER_COMMAND)}`,
     'args = []',
     'enabled = true',
-    ...(repoRoot === undefined
-      ? []
-      : ['', '[mcp_servers.concord.env]', `CONCORD_REPO_ROOT = ${JSON.stringify(repoRoot)}`]),
+    '',
+    '[mcp_servers.concord.env]',
+    `${AGENT_KIND_ENV} = ${JSON.stringify('grok')}`,
+    ...(repoRoot === undefined ? [] : [`CONCORD_REPO_ROOT = ${JSON.stringify(repoRoot)}`]),
     GROK_FENCE_END,
   ].join('\n');
   return `${base}${base === '' ? '' : '\n\n'}${block}\n`;
@@ -228,11 +291,44 @@ export function removeGrokMcpServer(existing: string): string {
   return preserved.join('\n').trimEnd();
 }
 
+/** What Concord writes under `mcp_servers.concord`: each key path with the value it takes, or any value. */
+const GROK_WRITTEN_VALUES: ReadonlyMap<string, string | undefined> = new Map([
+  ['mcp_servers.concord.command', JSON.stringify(CONCORD_SERVER_COMMAND)],
+  ['mcp_servers.concord.args', '[]'],
+  ['mcp_servers.concord.enabled', 'true'],
+  ['mcp_servers.concord.env.CONCORD_REPO_ROOT', undefined],
+  [`mcp_servers.concord.env.${AGENT_KIND_ENV}`, undefined],
+]);
+const GROK_WRITTEN_TABLES: ReadonlySet<string> = new Set([
+  'mcp_servers.concord',
+  'mcp_servers.concord.env',
+]);
+
+/**
+ * Whether Grok TOML has a `concord` server outside Concord's own fence that
+ * holds anything Concord does not write: another command, arguments, extra
+ * environment, or a spelling Concord never uses (dotted keys, inline tables)
+ * and so could not cleanly replace. Setup leaves it alone.
+ */
+export function hasUserGrokMcpServer(existing: string): boolean {
+  for (const { path, source, value, fenced } of grokKeyPaths(existing)) {
+    if (fenced || !CONCORD_TOML_KEY.test(path)) continue;
+    if (source === 'header') {
+      if (!GROK_WRITTEN_TABLES.has(path)) return true;
+      continue;
+    }
+    if (source !== 'key' || !GROK_WRITTEN_VALUES.has(path)) return true;
+    const written = GROK_WRITTEN_VALUES.get(path);
+    if (written !== undefined && value !== written) return true;
+  }
+  return false;
+}
+
 function writeMcpConfig(repoRoot: string, relPath: string): string {
   const fullPath = join(repoRoot, relPath);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
 
-  if (existing !== undefined && hasMcpServer(existing) && !isConcordServerOwned(existing)) {
+  if (existing !== undefined && hasUserMcpServer(existing)) {
     return relPath;
   }
 
@@ -242,7 +338,7 @@ function writeMcpConfig(repoRoot: string, relPath: string): string {
     updated = upsertMcpServer(
       existing,
       repoRoot,
-      kind === undefined ? undefined : { CONCORD_AGENT_KIND: kind },
+      kind === undefined ? undefined : agentKindEnv(kind),
     );
   } catch {
     throw new McpConfigParseError(relPath);
@@ -256,6 +352,7 @@ function writeMcpConfig(repoRoot: string, relPath: string): string {
 function writeGrokMcpConfig(repoRoot: string): string {
   const fullPath = join(repoRoot, GROK_CONFIG_PATH);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
+  if (existing !== undefined && hasUserGrokMcpServer(existing)) return GROK_CONFIG_PATH;
   mkdirSync(dirname(fullPath), { recursive: true });
   writeFileSync(fullPath, upsertGrokMcpServer(existing, repoRoot));
   return GROK_CONFIG_PATH;
@@ -277,7 +374,8 @@ function writeGeminiConfig(repoRoot: string): string {
 
 /**
  * Register Concord in every project-scoped client config under `repoRoot`:
- * Claude Code, Cursor, Antigravity, Copilot CLI, Gemini CLI, and Grok Build.
+ * Claude Code, Cursor, Antigravity, Copilot CLI, Kiro, Gemini CLI, and Grok
+ * Build.
  * Codex uses its user-scoped TOML installer because that harness does not
  * expose a project MCP file.
  */
@@ -317,7 +415,7 @@ export function isConcordWrittenEntry(entry: unknown): boolean {
   }
   // If the user specified custom environment variables (other than CONCORD_REPO_ROOT or CONCORD_AGENT_KIND), it is custom.
   const envKeys = Object.keys(parsed.data.env ?? {});
-  if (envKeys.some((key) => key !== 'CONCORD_REPO_ROOT' && key !== 'CONCORD_AGENT_KIND')) {
+  if (envKeys.some((key) => key !== 'CONCORD_REPO_ROOT' && key !== AGENT_KIND_ENV)) {
     return false;
   }
   if (parsed.data.command === CONCORD_SERVER_COMMAND) return true;

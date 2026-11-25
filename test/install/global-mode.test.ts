@@ -1,14 +1,6 @@
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -45,6 +37,21 @@ function machine(harnesses: readonly string[] = HARNESSES): NodeJS.ProcessEnv & 
 const read = (path: string): string => readFileSync(path, 'utf8');
 
 describe('applyGlobalMode', () => {
+  it('preserves DeepSeek user instructions under DSH_HOME when global mode changes', () => {
+    const env = machine(['dsh']);
+    env['DSH_HOME'] = join(env.HOME, 'custom-dsh');
+    const path = join(env['DSH_HOME'], 'AGENTS.md');
+    mkdirSync(env['DSH_HOME']);
+    writeFileSync(path, '# My DeepSeek instructions\n');
+    applyGlobalMode(env, true);
+    const installed = read(path);
+    expect(installed).toContain('# My DeepSeek instructions');
+    expect(installed).toContain('start_work');
+    applyGlobalMode(env, true);
+    expect(read(path)).toBe(installed);
+    applyGlobalMode(env, false);
+    expect(read(path)).toBe('# My DeepSeek instructions\n');
+  });
   it('installs and removes Devin user MCP config and instructions', () => {
     const env = machine(['devin']);
     const on = applyGlobalMode(env, true);
@@ -94,148 +101,38 @@ describe('applyGlobalMode', () => {
     expect(existsSync(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).toBe(false);
   });
 
-  it('writes one instruction block per OpenClaw agent workspace and removes them cleanly', () => {
-    const env = machine(['openclaw']);
-    mkdirSync(join(env.HOME, '.openclaw'));
+  it('installs and removes Kiro user MCP config, steering, and hooks', () => {
+    const env = machine(['kiro']);
+    const hooks = join(env.HOME, '.kiro', 'hooks', 'concord.json');
+    mkdirSync(join(env.HOME, '.kiro', 'hooks'), { recursive: true });
     writeFileSync(
-      join(env.HOME, '.openclaw', 'openclaw.json'),
-      '{ agents: { entries: { main: { default: true }, research: {} } } }\n',
+      hooks,
+      `${JSON.stringify({
+        version: 'v1',
+        hooks: [
+          {
+            name: 'my-lint',
+            trigger: 'PostFileSave',
+            action: { type: 'command', command: 'lint' },
+          },
+        ],
+      })}\n`,
     );
-    const mainFile = join(env.HOME, '.openclaw', 'workspace', 'AGENTS.md');
-    const researchFile = join(env.HOME, '.openclaw', 'workspace-research', 'AGENTS.md');
-    mkdirSync(dirname(mainFile), { recursive: true });
-    writeFileSync(mainFile, '# Main agent\n');
 
     const on = applyGlobalMode(env, true);
+    expect(on.registrations).toEqual(['kiro']);
+    expect(read(join(env.HOME, '.kiro', 'steering', 'concord.md'))).toContain('start_work');
+    expect(read(join(env.HOME, '.kiro', 'settings', 'mcp.json'))).toContain('"CONCORD_AGENT_KIND"');
+    const installed = read(hooks);
+    expect(installed).toContain('my-lint');
+    expect(installed).toContain('concord hook kiro-session-start');
 
-    expect(on.warnings).toEqual([]);
-    expect(read(mainFile)).toMatch(/^# Main agent\n\n<!-- concord/u);
-    expect(read(mainFile)).toContain('agent_id: "openclaw:main"');
-    expect(read(mainFile)).not.toContain('openclaw:research');
-    expect(read(researchFile)).toContain('agent_id: "openclaw:research"');
-    expect(read(researchFile)).toContain('do not run `concord setup` yourself');
-
-    const off = applyGlobalMode(env, false, { registrations: on.registrations });
-
-    expect(off.warnings).toEqual([]);
-    expect(read(mainFile)).toBe('# Main agent\n');
-    expect(existsSync(researchFile)).toBe(false);
-  });
-
-  it('keeps the block when a saved OpenClaw path is now a symlink to the live workspace', () => {
-    const env = machine(['openclaw']);
-    const configPath = join(env.HOME, '.openclaw', 'openclaw.json');
-    const oldDir = join(env.HOME, 'old-workspace');
-    const linkDir = join(env.HOME, 'link-workspace');
-    mkdirSync(join(env.HOME, '.openclaw'));
-    mkdirSync(oldDir);
-    writeFileSync(
-      configPath,
-      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(oldDir)} }] } }\n`,
-    );
-    const on = applyGlobalMode(env, true);
-    symlinkSync(oldDir, linkDir);
-    writeFileSync(
-      configPath,
-      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(linkDir)} }] } }\n`,
-    );
-    const again = applyGlobalMode(env, true, { openclawFiles: on.openclawFiles });
-    expect(read(join(oldDir, 'AGENTS.md'))).toContain('agent_id: "openclaw:a"');
-    expect(again.openclawFiles).toEqual([join(linkDir, 'AGENTS.md')]);
-  });
-
-  it('keeps remembering an OpenClaw file it could not read, until the block is gone', () => {
-    // chmod 000 does not block reads on Windows or for root.
-    if (process.platform === 'win32' || process.getuid?.() === 0) return;
-    const env = machine(['openclaw']);
-    const configPath = join(env.HOME, '.openclaw', 'openclaw.json');
-    const oldDir = join(env.HOME, 'old-workspace');
-    mkdirSync(join(env.HOME, '.openclaw'));
-    mkdirSync(oldDir);
-    const oldFile = join(oldDir, 'AGENTS.md');
-    writeFileSync(
-      configPath,
-      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(oldDir)} }] } }\n`,
-    );
-    const on = applyGlobalMode(env, true);
-    writeFileSync(configPath, '{ agents: { list: [] } }\n');
-    chmodSync(oldFile, 0o000);
-    try {
-      const blocked = applyGlobalMode(env, true, { openclawFiles: on.openclawFiles });
-      expect(blocked.openclawFiles).toContain(oldFile);
-    } finally {
-      chmodSync(oldFile, 0o644);
-    }
-    const retry = applyGlobalMode(env, true, { openclawFiles: [oldFile] });
-    expect(retry.openclawFiles).not.toContain(oldFile);
-    expect(existsSync(oldFile)).toBe(false);
-  });
-
-  it('removes the block from an OpenClaw workspace the agent has left since it was written', () => {
-    const env = machine(['openclaw']);
-    const configPath = join(env.HOME, '.openclaw', 'openclaw.json');
-    const oldDir = join(env.HOME, 'old-workspace');
-    const newDir = join(env.HOME, 'new-workspace');
-    mkdirSync(join(env.HOME, '.openclaw'));
-    mkdirSync(oldDir);
-    const oldFile = join(oldDir, 'AGENTS.md');
-    const newFile = join(newDir, 'AGENTS.md');
-    writeFileSync(oldFile, '# Old\n');
-    writeFileSync(
-      configPath,
-      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(oldDir)} }] } }\n`,
-    );
-    const on = applyGlobalMode(env, true);
-    expect(on.openclawFiles).toEqual([oldFile]);
-    expect(read(oldFile)).toContain('agent_id: "openclaw:a"');
-
-    // The agent moves; the next run writes the new file and clears the old one.
-    writeFileSync(
-      configPath,
-      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(newDir)} }] } }\n`,
-    );
-    const moved = applyGlobalMode(env, true, { openclawFiles: on.openclawFiles });
-    expect(read(oldFile)).toBe('# Old\n');
-    expect(read(newFile)).toContain('agent_id: "openclaw:a"');
-    expect(moved.openclawFiles).toEqual([newFile]);
-
-    // The agent is removed from the config; turning global mode off still finds its file.
-    writeFileSync(configPath, '{ agents: { list: [] } }\n');
-    const off = applyGlobalMode(env, false, { openclawFiles: moved.openclawFiles });
-    expect(off.warnings).toEqual([]);
-    expect(existsSync(newFile)).toBe(false);
-    expect(off.openclawFiles).toEqual([]);
-  });
-
-  it('writes no agent id into a workspace that several OpenClaw agents share', () => {
-    const env = machine(['openclaw']);
-    const shared = join(env.HOME, 'shared');
-    const configPath = join(env.HOME, '.openclaw', 'openclaw.json');
-    mkdirSync(join(env.HOME, '.openclaw'));
-    const sharedFile = join(shared, 'AGENTS.md');
-    mkdirSync(shared, { recursive: true });
-    writeFileSync(
-      configPath,
-      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(shared)} }] } }\n`,
-    );
-    applyGlobalMode(env, true);
-    expect(read(sharedFile)).toContain('agent_id: "openclaw:a"');
-
-    writeFileSync(
-      configPath,
-      `{ agents: { list: [{ id: "a", workspace: ${JSON.stringify(shared)} }, { id: "b", workspace: ${JSON.stringify(`${shared}/`)} }] } }\n`,
-    );
-    const on = applyGlobalMode(env, true);
-
-    expect(on.warnings).toHaveLength(1);
-    expect(on.warnings[0]).toContain('agents a, b share this workspace');
-    expect(existsSync(sharedFile)).toBe(false);
-  });
-
-  it('skips OpenClaw instruction files when OpenClaw is not installed', () => {
-    const env = machine([]);
-    applyGlobalMode(env, true);
-    expect(existsSync(join(env.HOME, '.openclaw', 'workspace', 'AGENTS.md'))).toBe(false);
+    applyGlobalMode(env, false, { registrations: on.registrations });
+    expect(existsSync(join(env.HOME, '.kiro', 'steering', 'concord.md'))).toBe(false);
+    expect(read(join(env.HOME, '.kiro', 'settings', 'mcp.json'))).not.toContain('concord-mcp');
+    const remaining = read(hooks);
+    expect(remaining).toContain('my-lint');
+    expect(remaining).not.toContain('concord hook kiro-');
   });
 
   it('registers and instructs each installed harness, then removes only its own additions', () => {
@@ -464,60 +361,51 @@ describe('runSetup with global mode', () => {
   const present = (repo: string): string[] =>
     REPO_FILES.filter((relPath) => existsSync(join(repo, relPath)));
 
-  it('saves the choice and sets the repository up locally without writing repository files', () => {
+  it('saves the choice and sets the repository up locally without writing repository files', async () => {
     const env = machine([]);
     const repo = repository();
 
-    const result = runSetup(repo, {
+    const result = await runSetup(repo, {
       env: { ...env, CONCORD_REPO_ROOT: repo },
       global: true,
     });
 
-    expect(readUserConfig(env)).toEqual({
-      globalMode: true,
-      globalRegistrations: [],
-      globalOpenclawFiles: [],
-    });
-    expect(result.globalMode).toEqual({
-      written: [],
-      warnings: [],
-      registrations: [],
-      openclawFiles: [],
-    });
+    expect(readUserConfig(env)).toEqual({ globalMode: true, globalRegistrations: [] });
+    expect(result.globalMode).toEqual({ written: [], warnings: [], registrations: [] });
     expect(result.repoFilesSkipped).toBe(true);
     expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(true);
     expect(present(repo)).toEqual([]);
     expect(result.written.filter((path) => !path.startsWith(env.HOME))).toEqual([]);
   });
 
-  it('skips the repository files when global mode was saved earlier', () => {
+  it('skips the repository files when global mode was saved earlier', async () => {
     const env = machine([]);
     writeUserConfig(env, { globalMode: true });
     const repo = repository();
 
-    const result = runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo } });
+    const result = await runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo } });
 
     expect(result.repoFilesSkipped).toBe(true);
     expect(present(repo)).toEqual([]);
   });
 
-  it('skips the repository files with --no-mcp too, and leaves existing ones alone', () => {
+  it('skips the repository files with --no-mcp too, and leaves existing ones alone', async () => {
     const env = machine([]);
     const repo = repository();
     const existing = upsertBlock('# Mine\n', 'old instructions');
     writeFileSync(join(repo, 'CLAUDE.md'), existing);
 
-    runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, mcp: false, global: true });
+    await runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, mcp: false, global: true });
 
     expect(read(join(repo, 'CLAUDE.md'))).toBe(existing);
     expect(present(repo)).toEqual(['CLAUDE.md']);
   });
 
-  it('writes the repository files when asked with repoFiles', () => {
+  it('writes the repository files when asked with repoFiles', async () => {
     const env = machine([]);
     const repo = repository();
 
-    const result = runSetup(repo, {
+    const result = await runSetup(repo, {
       env: { ...env, CONCORD_REPO_ROOT: repo },
       global: true,
       repoFiles: true,
@@ -528,21 +416,21 @@ describe('runSetup with global mode', () => {
     expect(read(join(repo, 'CLAUDE.md'))).toContain(BLOCK_START);
   });
 
-  it('writes the repository files when global mode is off or was never chosen', () => {
+  it('writes the repository files when global mode is off or was never chosen', async () => {
     const env = machine([]);
     const turnedOff = repository();
-    runSetup(turnedOff, { env: { ...env, CONCORD_REPO_ROOT: turnedOff }, global: false });
+    await runSetup(turnedOff, { env: { ...env, CONCORD_REPO_ROOT: turnedOff }, global: false });
     expect(present(turnedOff)).toEqual(REPO_FILES);
 
     const neverChosen = repository();
-    const result = runSetup(neverChosen, {
+    const result = await runSetup(neverChosen, {
       env: { ...machine([]), CONCORD_REPO_ROOT: neverChosen },
     });
     expect(result.repoFilesSkipped).toBe(false);
     expect(present(neverChosen)).toEqual(REPO_FILES);
   });
 
-  it('judges Gemini by the settings global mode writes, so a first --require-adapters run passes', () => {
+  it('judges Gemini by the settings global mode writes, so a first --require-adapters run passes', async () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-global-home-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
@@ -550,7 +438,7 @@ describe('runSetup with global mode', () => {
     const env = { HOME: home, PATH: bin, CODEX_HOME: join(home, '.codex') };
     const repo = repository();
 
-    const result = runSetup(repo, {
+    const result = await runSetup(repo, {
       env: { ...env, CONCORD_REPO_ROOT: repo },
       global: true,
       adapters: true,
@@ -563,12 +451,12 @@ describe('runSetup with global mode', () => {
     expect(present(repo)).toEqual([]);
   });
 
-  it('writes the repository files when saved global mode is turned off in the same run', () => {
+  it('writes the repository files when saved global mode is turned off in the same run', async () => {
     const env = machine([]);
     writeUserConfig(env, { globalMode: true });
     const repo = repository();
 
-    runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, global: false });
+    await runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, global: false });
 
     expect(present(repo)).toEqual(REPO_FILES);
   });

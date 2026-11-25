@@ -107,10 +107,10 @@ function applyTransition(repos: Repositories, request: TransitionRequest): TaskL
       status: 'success',
       detail: `${String(request.task.version)} -> ${String(updated.version)}`,
     });
-    repos.agents.touch(request.actorAgentId);
+    repos.agents.recordActivity(request.actorAgentId);
     return { task: updated, ownershipEvent };
   });
-  return transact();
+  return transact.immediate();
 }
 
 export function handleAssignTask(

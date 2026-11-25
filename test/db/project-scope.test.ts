@@ -136,7 +136,12 @@ describe('project-scoped stores', () => {
     db.exec(`INSERT INTO agents (agent_id, kind, first_seen, last_seen)
       VALUES ('codex:a', 'codex', 't', 't'), ('codex:b', 'codex', 't', 't')`);
 
-    const message = { replyToMessageId: null, content: 'hello', idempotencyKey: 'k' } as const;
+    const message = {
+      replyToMessageId: null,
+      content: 'hello',
+      expectsReply: true,
+      idempotencyKey: 'k',
+    } as const;
     general.agentMessages.create({
       ...message,
       messageId: 'm1',
@@ -172,7 +177,7 @@ describe('project-scoped stores', () => {
     legacy.close();
 
     const upgraded = createRepositories(openDatabase(filename));
-    expect(upgraded.db.pragma('user_version', { simple: true })).toBe(16);
+    expect(upgraded.db.pragma('user_version', { simple: true })).toBe(19);
     // Found through the local project, so every copied row was put in it.
     expect(upgraded.tasks.get('TASK-1')?.title).toBe('Legacy');
     expect(upgraded.handoffs.listByTask('TASK-1').map((entry) => entry.whatChanged)).toEqual([

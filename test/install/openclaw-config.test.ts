@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   installOpenclawMcpConfig,
-  openclawAgentWorkspaces,
   openclawConfigInstalled,
   openclawConfigPath,
   openclawStateDir,
@@ -38,6 +37,10 @@ describe('OpenClaw configuration', () => {
     const { env, home } = fixture();
     expect(openclawStateDir(env)).toBe(join(home, '.openclaw'));
     expect(openclawConfigPath(env)).toBe(join(home, '.openclaw', 'openclaw.json'));
+    const profileHome = join(home, 'profile-home');
+    expect(
+      openclawConfigPath({ ...env, OPENCLAW_HOME: profileHome, OPENCLAW_PROFILE: 'dev' }),
+    ).toBe(join(profileHome, '.openclaw-dev', 'openclaw.json'));
     expect(openclawStateDir({ ...env, OPENCLAW_STATE_DIR: '~/state' })).toBe(join(home, 'state'));
     expect(openclawConfigPath({ ...env, OPENCLAW_STATE_DIR: join(home, 'state') })).toBe(
       join(home, 'state', 'openclaw.json'),
@@ -161,60 +164,19 @@ describe('OpenClaw configuration', () => {
   });
 });
 
-describe('OpenClaw agent workspaces', () => {
-  it('defaults to the main agent in the state workspace', () => {
-    const { env, home } = fixture();
-    expect(openclawAgentWorkspaces(env)).toEqual([
-      { agentId: 'main', workspace: join(home, '.openclaw', 'workspace') },
-    ]);
-    expect(openclawAgentWorkspaces({ ...env, OPENCLAW_WORKSPACE_DIR: join(home, 'w') })).toEqual([
-      { agentId: 'main', workspace: join(home, 'w') },
-    ]);
-  });
+it('preserves split MCP config and a customized npx entry', () => {
+  const { env, path } = fixture();
+  const included = '{ mcp: { $include: "./mcp.json5" } }';
+  writeConfig(path, included);
+  expect(() => {
+    installOpenclawMcpConfig(env);
+  }).toThrow('$include');
+  expect(read(path)).toBe(included);
 
-  it('resolves each configured agent as OpenClaw does', () => {
-    const { env, path, home } = fixture();
-    writeConfig(
-      path,
-      `{
-  agents: {
-    entries: {
-      main: { default: true },
-      research: {},
-      ops: { workspace: "~/ops-space" },
-    },
-  },
-}`,
-    );
-    expect(openclawAgentWorkspaces(env)).toEqual([
-      { agentId: 'main', workspace: join(home, '.openclaw', 'workspace') },
-      { agentId: 'research', workspace: join(home, '.openclaw', 'workspace-research') },
-      { agentId: 'ops', workspace: join(home, 'ops-space') },
-    ]);
-  });
-
-  it('nests other agents under a shared workspace root and reads the legacy list form', () => {
-    const { env, path, home } = fixture();
-    writeConfig(
-      path,
-      `{
-  agents: {
-    defaults: { workspace: "~/agents" },
-    list: [{ id: "writer" }, { id: "main" }],
-  },
-}`,
-    );
-    expect(openclawAgentWorkspaces(env)).toEqual([
-      { agentId: 'writer', workspace: join(home, 'agents', 'writer') },
-      { agentId: 'main', workspace: join(home, 'agents') },
-    ]);
-  });
-
-  it('falls back to the default agent when the config is unreadable', () => {
-    const { env, path, home } = fixture();
-    writeConfig(path, '{ agents: [');
-    expect(openclawAgentWorkspaces(env)).toEqual([
-      { agentId: 'main', workspace: join(home, '.openclaw', 'workspace') },
-    ]);
-  });
+  const own =
+    '{ mcp: { servers: { concord: { command: "npx", args: ["-y", "@concord-ai/concord-mcp", "--custom"], env: { CONCORD_AGENT_KIND: "openclaw" } } } } }';
+  writeConfig(path, own);
+  installOpenclawMcpConfig(env);
+  uninstallOpenclawConfig(env);
+  expect(read(path)).toBe(own);
 });

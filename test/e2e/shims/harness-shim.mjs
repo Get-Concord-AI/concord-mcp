@@ -14,7 +14,9 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
+import { Duplex } from 'node:stream';
+
+import { WebSocketServer } from 'ws';
 
 const VERSIONS = {
   claude: '2.1.105 (Claude Code)',
@@ -45,7 +47,18 @@ function saveGrokPlugins(plugins) {
   writeFileSync(join(shimDir, 'grok-plugins.json'), JSON.stringify(plugins));
 }
 
-/** JSONL app-server: answer every request, record the ones that deliver to a turn. */
+function messageText(data) {
+  if (typeof data === 'string') return data;
+  if (Buffer.isBuffer(data)) return data.toString('utf8');
+  if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
+  return undefined;
+}
+
+/**
+ * WebSocket app-server over stdio. `ws` answers the upgrade with
+ * Sec-WebSocket-Accept for GUID 258EAFA5-E914-47DA-95CA-C5AB0DC85B11, the
+ * same constant its client uses. Requests are still recorded as JSON lines.
+ */
 function codexAppServer() {
   const modePath = join(shimDir, 'codex-mode');
   const mode = existsSync(modePath) ? readFileSync(modePath, 'utf8').trim() : 'idle';
@@ -54,26 +67,61 @@ function codexAppServer() {
     process.exit(1);
   }
   let turn = 0;
-  const lines = createInterface({ input: process.stdin });
-  lines.on('line', (line) => {
-    if (line.trim() === '') return;
-    const frame = JSON.parse(line);
-    record('codex-app-server.jsonl', { method: frame.method, params: frame.params ?? null });
-    if (frame.id === undefined) return;
-    let result = {};
-    if (frame.method === 'turn/start') {
-      turn += 1;
-      result = { turn: { id: `turn-${String(turn)}` } };
-    }
-    if (frame.method === 'turn/steer') result = { turnId: frame.params?.expectedTurnId ?? null };
-    process.stdout.write(`${JSON.stringify({ id: frame.id, result })}\n`);
-    // A busy session has a turn in flight, so the controller steers it.
-    if (frame.method === 'thread/resume' && mode === 'busy') {
-      const started = { method: 'turn/started', params: { turn: { id: 'turn-active' } } };
-      process.stdout.write(`${JSON.stringify(started)}\n`);
-    }
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+  const duplex = new Duplex({
+    read() {
+      process.stdin.resume();
+    },
+    write(chunk, encoding, callback) {
+      process.stdout.write(chunk, encoding, callback);
+    },
   });
-  lines.on('close', () => process.exit(0));
+  let header = Buffer.alloc(0);
+  const onHeader = (chunk) => {
+    header = Buffer.concat([header, chunk]);
+    const end = header.indexOf('\r\n\r\n');
+    if (end < 0) return;
+    const text = header.subarray(0, end).toString('utf8');
+    const rest = header.subarray(end + 4);
+    process.stdin.off('data', onHeader);
+    const headers = {};
+    for (const line of text.split('\r\n').slice(1)) {
+      const colon = line.indexOf(':');
+      if (colon < 0) continue;
+      headers[line.slice(0, colon).trim().toLowerCase()] = line.slice(colon + 1).trim();
+    }
+    process.stdin.on('data', (next) => {
+      if (!duplex.push(next)) process.stdin.pause();
+    });
+    wss.handleUpgrade({ method: 'GET', httpVersion: '1.1', headers }, duplex, rest, (ws) => {
+      ws.on('message', (data) => {
+        const raw = messageText(data);
+        if (raw === undefined) return;
+        let frame;
+        try {
+          frame = JSON.parse(raw);
+        } catch {
+          return;
+        }
+        record('codex-app-server.jsonl', { method: frame.method, params: frame.params ?? null });
+        if (frame.id === undefined) return;
+        let result = {};
+        if (frame.method === 'turn/start') {
+          turn += 1;
+          result = { turn: { id: `turn-${String(turn)}` } };
+        }
+        if (frame.method === 'turn/steer')
+          result = { turnId: frame.params?.expectedTurnId ?? null };
+        ws.send(JSON.stringify({ id: frame.id, result }));
+        // A busy session has a turn in flight, so the controller steers it.
+        if (frame.method === 'thread/resume' && mode === 'busy') {
+          const started = { method: 'turn/started', params: { turn: { id: 'turn-active' } } };
+          ws.send(JSON.stringify(started));
+        }
+      });
+    });
+  };
+  process.stdin.on('data', onHeader);
 }
 
 if (args[0] === '--version') {

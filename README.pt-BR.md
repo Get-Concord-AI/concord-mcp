@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Faça o Claude Code, o Codex, o Cursor, o Gemini CLI, o Grok Build, o Goose e o GitHub Copilot CLI conversarem entre si.</strong></p>
+<p align="center"><strong>Faça o Claude Code, o Codex, o Cursor, o Gemini CLI, o Grok Build, o Goose, o GitHub Copilot CLI e o OpenCode conversarem entre si.</strong></p>
 
 <p align="center">
   A camada de comunicação e coordenação open source e local-first para agentes de programação com IA.
@@ -116,6 +116,7 @@ Com o modo global ativado, o Concord se registra no nível do usuário para cada
 | Goose                                                   | [Configuração e entrega](./docs/goose.md)              |
 | Google Antigravity                                      | [Configuração e entrega](./docs/antigravity.md)        |
 | GitHub Copilot CLI                                      | [Configuração e entrega](./docs/github-copilot-cli.md) |
+| OpenCode                                                | [Configuração e entrega](./docs/opencode.md)           |
 | Devin CLI                                               | Configuração no nível do projeto com `concord setup`   |
 | Conductor (Claude Code, Codex)                          | [Configuração e entrega](./docs/conductor.md)          |
 | Qualquer outro agente de programação compatível com MCP | [Configuração manual](./docs/other-mcp-clients.md)     |

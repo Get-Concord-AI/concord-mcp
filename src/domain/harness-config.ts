@@ -14,10 +14,14 @@ export const harnessNames = [
   'grok',
   'goose',
   'openclaw',
+  'hermes',
   'antigravity',
   'copilot-cli',
   'devin',
+  'opencode',
   'qwen',
+  'kiro',
+  'deepseek',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -220,6 +224,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
       'Concord MCP server is registered under `mcp.servers` in OpenClaw; agents pull their inbox during turns.',
     unsupportedDetail: 'OpenClaw was not detected: no `openclaw` on PATH and no state directory.',
   },
+  hermes: {
+    name: 'hermes',
+    executable: 'hermes',
+    minimumVersion: [0, 22, 5],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'A Hermes pre_llm_call hook registers each session and tells it its agent and workspace ids; messages are delivered at the start of its next turn. Approve the hook when Hermes asks, or start Hermes once with `hermes --accept-hooks`.',
+    unsupportedDetail: 'Hermes Agent must be v0.22.5 or newer.',
+  },
   antigravity: {
     name: 'antigravity',
     executable: 'agy',
@@ -275,6 +297,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail: 'Devin CLI hooks register sessions and inject inbox messages on user prompts.',
     unsupportedDetail: 'Devin CLI must be v3000.3 or newer for dedicated MCP config files.',
   },
+  opencode: {
+    name: 'opencode',
+    executable: 'opencode',
+    minimumVersion: [2, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: idleInject,
+    monitor: {
+      kind: 'managed-controller',
+      lifecycle: 'managed',
+      completion: 'controller',
+      background: true,
+      verified: true,
+    },
+    installedCapabilities: ['pull', 'inject', 'steer', 'idle', 'busy'],
+    installedDetail:
+      'Sessions started with `concord adapters opencode` are steered and woken through the OpenCode server API; sessions opened any other way are identified from OpenCode request metadata and pull messages from the inbox.',
+    unsupportedDetail: 'OpenCode must be v2.0.0 or newer for the mcp.servers config shape.',
+  },
   qwen: {
     name: 'qwen',
     executable: 'qwen',
@@ -292,6 +332,42 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'Qwen Code is registered with Concord. Idle wake-up is not verified, so messages reach it only when a turn runs.',
     unsupportedDetail: 'Qwen Code must be v0.26.4 or newer.',
+  },
+  kiro: {
+    name: 'kiro',
+    executable: 'kiro-cli',
+    minimumVersion: [3, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'steer', 'busy'],
+    installedDetail:
+      'Kiro is registered with Concord; lifecycle hooks add messages on prompt submit, and anything sent after that waits in the durable inbox until the next prompt.',
+    unsupportedDetail: 'Kiro lifecycle hooks need Kiro CLI V3 or Kiro IDE 1.0 or newer.',
+  },
+  deepseek: {
+    name: 'deepseek',
+    executable: 'dsh',
+    minimumVersion: [0, 2, 2],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'DeepSeek Harness has a native MCP registration. Use a unique CONCORD_AGENT_ID per host and register/drain its durable inbox; idle wake-up is not verified.',
+    unsupportedDetail: 'DeepSeek Harness MCP configuration was verified with 0.2.2-rc.1.',
   },
 };
 

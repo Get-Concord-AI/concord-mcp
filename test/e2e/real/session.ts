@@ -56,11 +56,16 @@ export class HarnessRun {
     sandbox: Sandbox,
     harness: RealHarness,
     model: FakeModel,
-    mode: 'headless' | 'interactive',
+    mode: 'headless' | 'interactive' | 'resume',
     prompt: string,
     extraEnv: Record<string, string> = {},
   ): HarnessRun {
-    const argv = mode === 'headless' ? harness.headless(prompt) : harness.interactive(prompt);
+    const argv =
+      mode === 'headless'
+        ? harness.headless(prompt)
+        : mode === 'resume'
+          ? (harness.resume?.(prompt) ?? [])
+          : harness.interactive(prompt);
     const log = join(sandbox.root, `${harness.name}-${mode}-${randomUUID().slice(0, 6)}.log`);
     const [command, ...args] =
       mode === 'interactive' && harness.idle === 'tui' ? ['python3', PTY_RUN, log, ...argv] : argv;
@@ -131,6 +136,20 @@ export class HarnessRun {
     }
     const where = `[screen log ${this.log}: ${screen === '' ? 'empty or missing' : `${String(screen.length)} bytes`}]\n`;
     return `${where}${this.output}${stripControls(screen)}`.slice(-4000);
+  }
+
+  /** Wait for the harness to exit on its own, as a one-turn headless run does. */
+  async exited(timeoutMs = 120_000): Promise<void> {
+    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`The harness did not exit within ${String(timeoutMs)}ms.`));
+      }, timeoutMs);
+      this.child.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   /**

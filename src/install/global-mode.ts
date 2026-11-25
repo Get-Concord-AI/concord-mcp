@@ -1,16 +1,19 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { userHome } from '../config/paths.js';
-import { devinCliSupportsDedicatedMcpConfig, executablePath, run } from './adapters/index.js';
-import { isOpenclawDetected } from './adapters/openclaw.js';
-import { HARNESS_CONFIGS } from '../domain/harness-config.js';
-import { BLOCK_START, removeBlock, upsertBlock } from './block.js';
+import {
+  devinCliSupportsDedicatedMcpConfig,
+  executablePath,
+  kiroExecutablePath,
+  run,
+} from './adapters/index.js';
+import { removeBlock, upsertBlock } from './block.js';
 import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
 import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
-import { openclawAgentWorkspaces } from './openclaw-config.js';
+import { deepseekHome } from './deepseek-config.js';
 import {
   devinMcpConfigPath,
   hasDevinMcpServer,
@@ -21,9 +24,17 @@ import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-
 import {
   ANTIGRAVITY_RULE_HEADER,
   CONCORD_GLOBAL_INSTRUCTIONS,
-  openclawGlobalInstructions,
+  KIRO_STEERING_HEADER,
 } from './instructions.js';
 import {
+  kiroHome,
+  kiroUserHooksPath,
+  kiroUserMcpPath,
+  upsertKiroHooks,
+  withoutKiroHooks,
+} from './kiro-config.js';
+import {
+  agentKindEnv,
   CONCORD_SERVER_COMMAND,
   CONCORD_SERVER_KEY,
   hasGrokMcpServer,
@@ -41,8 +52,6 @@ export interface GlobalModeReport {
   written: string[];
   warnings: string[];
   registrations: string[];
-  /** OpenClaw `AGENTS.md` files that hold a Concord block now, so a later run can find them. */
-  openclawFiles: string[];
 }
 
 /** A user-level MCP registration; `present` says whether a file already has one, anyone's. */
@@ -84,6 +93,11 @@ function isAntigravityDetected(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
+/** Kiro's CLI, its IDE launcher, or an existing `~/.kiro` directory. */
+function isKiroDetected(env: NodeJS.ProcessEnv): boolean {
+  return kiroExecutablePath(env) !== undefined || existsSync(kiroHome(env));
+}
+
 function instructionFile(
   executable: string,
   path: (env: NodeJS.ProcessEnv) => string,
@@ -115,6 +129,7 @@ const USER_FILES: readonly UserFile[] = [
   instructionFile('codex', (env) => join(codexHome(env), 'AGENTS.md')),
   instructionFile('gemini', (env) => join(userHome(env), '.gemini', 'GEMINI.md')),
   instructionFile('goose', (env) => join(dirname(gooseConfigPath(env)), '.goosehints')),
+  instructionFile('dsh', (env) => join(deepseekHome(env), 'AGENTS.md')),
   instructionFile('copilot', (env) => join(copilotHome(env), 'copilot-instructions.md')),
   instructionFile(
     'agy',
@@ -149,7 +164,7 @@ const USER_FILES: readonly UserFile[] = [
     executable: 'cursor',
     registration: { id: 'cursor', present: hasMcpServer },
     path: (env) => join(userHome(env), '.cursor', 'mcp.json'),
-    install: (existing) => upsertMcpServer(existing, undefined),
+    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('cursor')),
     uninstall: removeMcpServer,
   },
   {
@@ -167,97 +182,29 @@ const USER_FILES: readonly UserFile[] = [
     isDetected: isAntigravityDetected,
     registration: { id: 'antigravity', present: hasMcpServer },
     path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
-    install: (existing) =>
-      upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
+    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('antigravity')),
+    uninstall: removeMcpServer,
+  },
+  instructionFile(
+    'kiro',
+    (env) => join(kiroHome(env), 'steering', 'concord.md'),
+    KIRO_STEERING_HEADER,
+    isKiroDetected,
+  ),
+  {
+    isDetected: isKiroDetected,
+    path: kiroUserHooksPath,
+    install: (existing, path) => upsertKiroHooks(existing, path),
+    uninstall: withoutKiroHooks,
+  },
+  {
+    isDetected: isKiroDetected,
+    registration: { id: 'kiro', present: hasMcpServer },
+    path: kiroUserMcpPath,
+    install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('kiro')),
     uninstall: removeMcpServer,
   },
 ];
-
-/**
- * One instruction file per OpenClaw agent: each agent reads the `AGENTS.md` of its
- * own workspace, and gets a block naming its own Concord id. The MCP registration
- * is the adapter's, as for Goose. Agents that share a workspace read the same file,
- * so no single id is right for it: that file gets no identity block (an earlier one
- * is removed) and enabling reports a warning naming the agents. A file written by an
- * earlier run (`saved`) whose agent has since moved or gone loses its block too.
- */
-function openclawInstructionFiles(
-  env: NodeJS.ProcessEnv,
-  enable: boolean,
-  saved: readonly string[],
-): { files: UserFile[]; warnings: string[] } {
-  const isDetected = (env: NodeJS.ProcessEnv): boolean =>
-    isOpenclawDetected(executablePath(HARNESS_CONFIGS.openclaw.executable, env), env);
-  const byWorkspace = new Map<string, string[]>();
-  for (const { agentId, workspace } of openclawAgentWorkspaces(env)) {
-    const key = resolve(workspace);
-    byWorkspace.set(key, [...(byWorkspace.get(key) ?? []), agentId]);
-  }
-  const files: UserFile[] = [];
-  const warnings: string[] = [];
-  for (const [workspace, agentIds] of byWorkspace) {
-    const path = join(workspace, 'AGENTS.md');
-    const [agentId] = agentIds;
-    if (agentIds.length === 1 && agentId !== undefined) {
-      files.push({
-        isDetected,
-        path: () => path,
-        install: (existing) => upsertBlock(existing ?? '', openclawGlobalInstructions(agentId)),
-        uninstall: removeBlock,
-      });
-      continue;
-    }
-    if (enable && isDetected(env)) {
-      warnings.push(
-        `${path}: OpenClaw agents ${agentIds.join(', ')} share this workspace, so Concord ` +
-          'cannot name one agent id in it. Give each agent its own workspace, or set ' +
-          "CONCORD_AGENT_ID in each agent's environment.",
-      );
-    }
-    if (existsSync(path)) {
-      files.push({
-        isDetected,
-        path: () => path,
-        install: (existing) => removeBlock(existing ?? ''),
-        uninstall: removeBlock,
-      });
-    }
-  }
-  // Compare physical files: a workspace that became a symlink to an old one is the same file.
-  const current = new Set(
-    [...byWorkspace.keys()].map((workspace) => physicalPath(join(workspace, 'AGENTS.md'))),
-  );
-  const seen = new Set<string>();
-  for (const path of new Set(saved.map((saved) => resolve(saved)))) {
-    const physical = physicalPath(path);
-    if (current.has(physical) || seen.has(physical) || !existsSync(path)) continue;
-    seen.add(physical);
-    files.push({
-      isDetected,
-      path: () => path,
-      install: (existing) => removeBlock(existing ?? ''),
-      uninstall: removeBlock,
-    });
-  }
-  return { files, warnings };
-}
-
-function physicalPath(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
-
-/** A file that cannot be read now may still hold a block, so only a missing one counts as clear. */
-function hasConcordBlock(path: string): boolean {
-  try {
-    return readFileSync(path, 'utf8').includes(BLOCK_START);
-  } catch (error) {
-    return !(error instanceof Error && 'code' in error && error.code === 'ENOENT');
-  }
-}
 
 /** A registration global mode added, or a missing one, may change; the user's own never does. */
 function mayChange(
@@ -347,32 +294,15 @@ function applyClaude(
 export function applyGlobalMode(
   env: NodeJS.ProcessEnv,
   enable: boolean,
-  options: {
-    mcp?: boolean;
-    registrations?: readonly string[];
-    /** `openclawFiles` from the previous run's report. */
-    openclawFiles?: readonly string[];
-  } = {},
+  options: { mcp?: boolean; registrations?: readonly string[] } = {},
 ): GlobalModeReport {
   const owned = new Set(options.registrations);
-  const report: GlobalModeReport = {
-    written: [],
-    warnings: [],
-    registrations: [],
-    openclawFiles: [],
-  };
+  const report: GlobalModeReport = { written: [], warnings: [], registrations: [] };
   const mcp = options.mcp !== false;
-  const openclaw = openclawInstructionFiles(env, enable, options.openclawFiles ?? []);
-  report.warnings.push(...openclaw.warnings);
-  for (const file of [...USER_FILES, ...openclaw.files]) {
+  for (const file of USER_FILES) {
     if (mcp || file.registration === undefined) applyFile(env, file, enable, owned, report);
   }
   if (mcp) applyClaude(env, enable, owned, report);
   report.registrations = [...owned].sort();
-  // Every candidate still holding a block, including one a failed write left behind.
-  report.openclawFiles = openclaw.files
-    .map((file) => file.path(env))
-    .filter(hasConcordBlock)
-    .sort();
   return report;
 }

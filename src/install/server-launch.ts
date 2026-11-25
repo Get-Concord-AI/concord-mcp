@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { standaloneInstall } from '../config/install-mode.js';
 
-const NPX_SERVER_ARGS = ['-y', '@concord-ai/concord-mcp'];
+export const NPX_SERVER_ARGS = ['-y', '@concord-ai/concord-mcp'];
 
 /** How a harness that spawns its own stdio servers should launch Concord's. */
 export interface ServerLaunch {

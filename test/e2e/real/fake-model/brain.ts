@@ -58,6 +58,7 @@ export const SILENT = 'SILENT-';
 const ASK_USER = 'AskUserQuestion';
 const FRAME = /\[concord from (\S+) id=([^\s\]]+)[^\]]*\]\s*([^\n<]*)/gu;
 const AGENT_ID = /this session is agent `([^`]+)`/u;
+const WORKSPACE_ID = /this session is agent `[^`]+` in workspace `([^`]+)`/u;
 const MONITOR_ASK = /persistent `monitor`[^`]*`(concord inbox watch [^`]+)`/gu;
 
 function calledTool(conversation: Conversation, suffix: string): ToolCall[] {
@@ -68,15 +69,21 @@ function calledTool(conversation: Conversation, suffix: string): ToolCall[] {
 export function concordReachable(tools: readonly string[]): boolean {
   return (
     tools.some((tool) => tool.includes('concord') && tool.endsWith('update_work')) ||
-    tools.includes('use_tool')
+    tools.includes('use_tool') ||
+    tools.includes('tool_call')
   );
 }
 
 export function decide(conversation: Conversation): Intent {
   // A harness whose MCP server cannot see the session tells the model its id.
   const agentId = AGENT_ID.exec(conversation.text)?.[1];
-  const withId = (input: JsonObject): JsonObject =>
-    agentId === undefined ? input : { ...input, agent_id: agentId };
+  // One whose MCP server cannot see the project either (Hermes) names the workspace too.
+  const workspaceId = WORKSPACE_ID.exec(conversation.text)?.[1];
+  const withId = (input: JsonObject): JsonObject => ({
+    ...input,
+    ...(agentId === undefined ? {} : { agent_id: agentId }),
+    ...(workspaceId === undefined ? {} : { workspace_id: workspaceId }),
+  });
   const reachable = concordReachable(conversation.tools);
 
   if (!reachable && conversation.tools.includes('ToolSearch')) {

@@ -1,7 +1,12 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { delimiter, dirname, join } from 'node:path';
-import { statusQwen } from './qwen.js';
+import { dirname, join } from 'node:path';
 import { isOpenclawDetected, statusOpenclaw } from './openclaw.js';
+import { installOpenclawMcpConfig, uninstallOpenclawConfig } from '../openclaw-config.js';
+import { installHermes, statusHermes } from './hermes.js';
+import { statusKiro } from './kiro.js';
+import { statusQwen } from './qwen.js';
+import { statusDeepseek } from './deepseek.js';
+import { installDeepseekConfig, uninstallDeepseekConfig } from '../deepseek-config.js';
 
 import {
   HARNESS_CONFIGS,
@@ -10,7 +15,8 @@ import {
   type MonitorKind,
 } from '../../domain/harness-config.js';
 import { userHome } from '../../config/paths.js';
-import { spawnCommandSync } from '../spawn-command.js';
+import { installOpencode, statusOpencode } from './opencode.js';
+import { atLeast, executablePath, run, versionTuple } from './probe.js';
 import {
   devinMcpInstalled,
   installDevinMcpConfig,
@@ -23,6 +29,7 @@ import {
 } from '../devin-user-hooks.js';
 import { devinHooksInstalled } from '../devin-hooks.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
+import { uninstallHermesMcpConfig } from '../hermes-config.js';
 import {
   copilotConfigInstalled,
   copilotHooksInstalled,
@@ -35,7 +42,6 @@ import {
   installGooseMcpConfig,
   uninstallGooseConfig,
 } from '../goose-config.js';
-import { installOpenclawMcpConfig, uninstallOpenclawConfig } from '../openclaw-config.js';
 import {
   globalAntigravityHooksPath,
   hasAntigravityHooks,
@@ -43,11 +49,13 @@ import {
   uninstallGlobalAntigravityHooks,
 } from '../antigravity-hooks.js';
 import {
+  agentKindEnv,
   hasMcpServer,
   isConcordServerOwned,
   removeMcpServer,
   upsertMcpServer,
 } from '../mcp-config.js';
+import { installKiroUserConfigs, kiroDetected, uninstallKiroUserConfigs } from '../kiro-config.js';
 import {
   cursorTarget,
   hasConcordManifest,
@@ -64,6 +72,7 @@ import {
   type LinkedHarness,
 } from './links.js';
 
+export { atLeast, executablePath, run, versionTuple } from './probe.js';
 export type { HarnessName, MonitorKind } from '../../domain/harness-config.js';
 export type AdapterStatus =
   'installed' | 'not_detected' | 'action_required' | 'unsupported_version' | 'error';
@@ -80,47 +89,9 @@ export interface AdapterReport {
   link?: LinkCheck | undefined;
 }
 
-export function executablePath(name: string, env: NodeJS.ProcessEnv): string | undefined {
-  const path = env['PATH'];
-  if (path === undefined) return undefined;
-  const extensions = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
-  for (const directory of path.split(delimiter)) {
-    for (const extension of extensions) {
-      const candidate = join(directory, `${name}${extension}`);
-      if (existsSync(candidate)) return candidate;
-    }
-  }
-  return undefined;
-}
-
-export function run(
-  command: string,
-  args: readonly string[],
-  env: NodeJS.ProcessEnv,
-): {
-  ok: boolean;
-  output: string;
-} {
-  const result = spawnCommandSync(command, args, { env, timeout: 15_000 });
-  return {
-    ok: result.status === 0,
-    output: result.error?.message ?? `${result.stdout}${result.stderr}`.trim(),
-  };
-}
-
-export function versionTuple(output: string): number[] | undefined {
-  const match = /\b(\d+)\.(\d+)\.(\d+)\b/u.exec(output);
-  if (match === null) return undefined;
-  return match.slice(1).map((part) => Number.parseInt(part, 10));
-}
-
-export function atLeast(actual: readonly number[], required: readonly number[]): boolean {
-  for (let index = 0; index < required.length; index += 1) {
-    const left = actual[index] ?? 0;
-    const right = required[index] ?? 0;
-    if (left !== right) return left > right;
-  }
-  return true;
+/** Kiro's CLI (`kiro-cli`), or the `kiro` launcher an IDE-only install may have. */
+export function kiroExecutablePath(env: NodeJS.ProcessEnv): string | undefined {
+  return executablePath(HARNESS_CONFIGS.kiro.executable, env) ?? executablePath('kiro', env);
 }
 
 /** Devin introduced dedicated MCP config files in v3000.3; its CLI omits the patch sometimes. */
@@ -749,14 +720,28 @@ export function statusAdapter(
       return statusGoose(env);
     case 'openclaw':
       return statusOpenclaw(executablePath(HARNESS_CONFIGS.openclaw.executable, env), env);
+    case 'hermes': {
+      const executable = executablePath(HARNESS_CONFIGS.hermes.executable, env);
+      return statusHermes(
+        executable,
+        () => (executable === undefined ? '' : run(executable, ['--version'], env).output),
+        env,
+      );
+    }
     case 'antigravity':
       return statusAntigravity(env, repoRoot);
     case 'copilot-cli':
       return statusCopilot(env);
     case 'devin':
       return statusDevin(env, repoRoot);
+    case 'opencode':
+      return statusOpencode(env);
     case 'qwen':
       return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
+    case 'kiro':
+      return statusKiro(kiroExecutablePath(env), repoRoot, env);
+    case 'deepseek':
+      return statusDeepseek(executablePath(HARNESS_CONFIGS.deepseek.executable, env), env);
   }
 }
 
@@ -794,24 +779,31 @@ export function installAdapter(
       const existing = readFileSync(path, 'utf8');
       if (!hasMcpServer(existing)) {
         mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(
-          path,
-          upsertMcpServer(existing, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
-        );
+        writeFileSync(path, upsertMcpServer(existing, undefined, agentKindEnv('antigravity')));
       }
     } else {
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(
-        path,
-        upsertMcpServer(undefined, undefined, { CONCORD_AGENT_KIND: 'antigravity' }),
-      );
+      writeFileSync(path, upsertMcpServer(undefined, undefined, agentKindEnv('antigravity')));
     }
     installGlobalAntigravityHooks(env);
     return;
   }
+
   if (harness === 'openclaw') {
-    const executable = executablePath(HARNESS_CONFIGS.openclaw.executable, env);
-    if (isOpenclawDetected(executable, env)) installOpenclawMcpConfig(env);
+    if (isOpenclawDetected(executablePath(HARNESS_CONFIGS.openclaw.executable, env), env)) {
+      installOpenclawMcpConfig(env);
+    }
+    return;
+  }
+
+  if (harness === 'opencode') {
+    installOpencode(env);
+    return;
+  }
+
+  if (harness === 'kiro') {
+    if (!kiroDetected(kiroExecutablePath(env), undefined, env)) return;
+    installKiroUserConfigs(env);
     return;
   }
 
@@ -847,6 +839,9 @@ export function installAdapter(
       }
       return;
     }
+    case 'hermes':
+      installHermes(run(executable, ['--version'], env).output, env);
+      return;
     case 'goose': {
       const version = versionTuple(run(executable, ['--version'], env).output);
       if (version === undefined || !atLeast(version, HARNESS_CONFIGS.goose.minimumVersion)) {
@@ -874,6 +869,9 @@ export function installAdapter(
       }
       return;
     }
+    case 'deepseek':
+      installDeepseekConfig(env);
+      return;
   }
 }
 
@@ -936,7 +934,17 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   try {
     uninstallOpenclawConfig(env);
   } catch {
-    // Malformed or unreadable OpenClaw config is left untouched.
+    // Leave malformed or unreadable OpenClaw config untouched and continue cleanup.
+  }
+  try {
+    uninstallHermesMcpConfig(env);
+  } catch {
+    // Preserve malformed Hermes settings and continue independent adapter cleanup.
+  }
+  try {
+    uninstallDeepseekConfig(env);
+  } catch {
+    // Leave malformed or unreadable DeepSeek config untouched and continue cleanup.
   }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
@@ -957,6 +965,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   }
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
+  uninstallKiroUserConfigs(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

@@ -10,6 +10,8 @@ import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { renderStatusText } from '../../src/artifacts/work-state-view.js';
 import { withCopilotTranscript } from '../../src/cli/commands/copilot-hooks.js';
 import { observeHookEvent } from '../../src/cli/commands/inbox-observe.js';
+import { bindingTargetPids } from '../../src/cli/session-binding.js';
+import { CLIENT_BINDING_DEPTH, ancestorChain } from '../../src/parent-chain.js';
 import { resolveInboxOwner } from '../../src/cli/agent-identity.js';
 import { drainInbox, registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 import { monitorCapabilityFor } from '../../src/domain/delivery.js';
@@ -830,5 +832,39 @@ describe('transcripts written a moment late', () => {
     const started = Date.now();
     observeHookEvent(repos, 'beta', hook({ hook_event_name: 'Stop', transcript_path: path }));
     expect(Date.now() - started).toBeLessThan(200);
+  });
+});
+
+describe('session bindings from observed hooks', () => {
+  let repos: Repositories;
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+  });
+
+  it('records the client binding on a SessionStart observe — the plugin path', () => {
+    // The bundled plugin runs `concord inbox observe` on SessionStart; the
+    // binding it writes must land on this process's own client window.
+    observeHookEvent(
+      repos,
+      'beta',
+      hook({ hook_event_name: 'SessionStart', source: 'startup' }),
+      'claude-code',
+    );
+
+    const pids = bindingTargetPids(ancestorChain(CLIENT_BINDING_DEPTH));
+    expect(pids.length).toBeGreaterThan(0);
+    for (const pid of pids) {
+      expect(repos.sessionBindings.forClientPid(pid)?.agentId).toBe('beta');
+    }
+  });
+
+  it('does not bind without a kind, or for events that are not SessionStart', () => {
+    const pids = bindingTargetPids(ancestorChain(CLIENT_BINDING_DEPTH));
+    observeHookEvent(repos, 'beta', hook({ hook_event_name: 'SessionStart', source: 'startup' }));
+    observeHookEvent(repos, 'beta', hook({ hook_event_name: 'Stop' }), 'claude-code');
+
+    for (const pid of pids) {
+      expect(repos.sessionBindings.forClientPid(pid)).toBeUndefined();
+    }
   });
 });

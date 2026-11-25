@@ -138,10 +138,10 @@ export function handleOfferHandoff(
       status: 'success',
       detail: `handoff ${String(handoff.id)} to ${input.to_agent_id}`,
     });
-    repos.agents.touch(input.agent_id);
+    repos.agents.recordActivity(input.agent_id);
     return { task: updated, handoff, ownershipEvent };
   });
-  return transact();
+  return transact.immediate();
 }
 
 function resolveHandoff(
@@ -185,10 +185,10 @@ function resolveHandoff(
       status: 'success',
       detail: `handoff ${String(handoff.id)} ${deliveryStatus}`,
     });
-    repos.agents.touch(actorAgentId);
+    repos.agents.recordActivity(actorAgentId);
     return { task: updated, handoff: resolved, ownershipEvent };
   });
-  return transact();
+  return transact.immediate();
 }
 
 function expireHandoff(

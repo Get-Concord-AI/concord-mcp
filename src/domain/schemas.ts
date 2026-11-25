@@ -133,6 +133,17 @@ export const inspectWorkInputShape = {
         'your session.',
     ),
   message_id: z.string().min(1).optional().describe('Prompt/reply thread to inspect'),
+  query: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Search past messages you sent or received, and task findings, decisions and handoffs, ' +
+        'for this text. Results name the task_id or message_id to open next.',
+    ),
+  limit: z.number().int().min(1).max(50).optional().describe('Most search results (default 20)'),
   include_superseded: z
     .boolean()
     .optional()
@@ -176,6 +187,13 @@ export const updateWorkInputShape = {
   agent_id: agentIdField,
   to_agent_id: z.string().min(1).optional().describe('Recipient required for prompt'),
   reply_to_message_id: z.string().min(1).optional().describe('Message being answered for reply'),
+  expects_reply: z
+    .boolean()
+    .optional()
+    .describe(
+      'For prompt/reply: whether you want an answer. Defaults to true for a prompt and false ' +
+        'for a reply; set it on a reply only when you ask something back',
+    ),
   idempotency_key: z
     .string()
     .min(1)

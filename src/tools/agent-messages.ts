@@ -11,9 +11,9 @@ import {
 import {
   awaitingUserOutlook,
   deliveryOutlook,
+  endpointPromptable,
   effectiveEndpointCapabilities,
   supportsImmediateDelivery,
-  transports,
 } from '../domain/delivery.js';
 
 export class AgentMessageDeliveryError extends Error {
@@ -27,6 +27,8 @@ export class AgentMessageDeliveryError extends Error {
   }
 }
 
+export { endpointPromptable } from '../domain/delivery.js';
+
 export interface SendAgentMessageInput {
   operation: 'prompt' | 'reply';
   agentId: string;
@@ -34,6 +36,8 @@ export interface SendAgentMessageInput {
   replyToMessageId?: string | undefined;
   taskId?: string | undefined;
   content: string;
+  /** Omitted, a prompt expects an answer and a reply does not. */
+  expectsReply?: boolean | undefined;
   idempotencyKey: string;
 }
 
@@ -60,21 +64,6 @@ export interface AgentMessageDispatcher {
     endpoint: AgentEndpointRecord;
     message: AgentMessageRecord;
   }): Promise<DeliveryReceipt>;
-}
-
-/**
- * Whether a registered endpoint can still take a message. A lease that has run
- * out means the session is gone; queueing for it would strand the message.
- */
-export function endpointPromptable(
-  endpoint: AgentEndpointRecord | undefined,
-  now = Date.now(),
-): boolean {
-  return (
-    endpoint?.status === 'connected' &&
-    transports.some((transport) => endpoint.capabilities.includes(transport)) &&
-    (endpoint.expiresAt === null || Date.parse(endpoint.expiresAt) > now)
-  );
 }
 
 /** A retried send of a message that already left the queue: say where it got to. */
@@ -189,6 +178,7 @@ export function handleSendAgentMessage(
   const contextualTaskId = input.taskId ?? parent?.taskId ?? null;
   const task = contextualTaskId === null ? undefined : tasks.get(contextualTaskId);
 
+  const expectsReply = input.expectsReply ?? input.operation === 'prompt';
   const replay = repos.agentMessages.getByIdempotency(input.agentId, input.idempotencyKey);
   let message: AgentMessageRecord;
   let idempotentReplay = false;
@@ -197,7 +187,8 @@ export function handleSendAgentMessage(
       replay.recipientAgentId !== recipientAgentId ||
       replay.content !== input.content ||
       replay.replyToMessageId !== (parent?.messageId ?? null) ||
-      replay.taskId !== contextualTaskId
+      replay.taskId !== contextualTaskId ||
+      replay.expectsReply !== expectsReply
     ) {
       throw new AgentMessageDeliveryError(
         'unauthorized',
@@ -233,6 +224,7 @@ export function handleSendAgentMessage(
       recipientAgentId,
       replyToMessageId: parent?.messageId ?? null,
       content: input.content,
+      expectsReply,
       idempotencyKey: input.idempotencyKey,
     });
   }
@@ -243,7 +235,7 @@ export function handleSendAgentMessage(
   if (parent !== undefined) {
     repos.agentMessages.markReplied(parent.messageId);
   }
-  repos.agents.touch(input.agentId);
+  repos.agents.recordActivity(input.agentId);
   const activityTask =
     !idempotentReplay && task !== undefined ? tasks.touchActivity(task.taskId) : task;
   const endpoint = repos.agentEndpoints.getByAgent(recipientAgentId);
