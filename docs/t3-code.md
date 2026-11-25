@@ -149,9 +149,15 @@ Codex identity is separate from any explicit `agent_id` the model chooses. In
 the live T3 run, `start_work` with explicit `codex:t3-live-project` succeeded
 through MCP, while the hooks independently registered `codex:<hash>`; messages
 to the explicit id stayed queued even during a busy turn, while a message to
-the payload-derived id was delivered and read on the next prompt. Supplying a
-stable explicit id is still useful for task ownership, but it is not the
-inbox the Codex drain hooks empty. Send operational messages to the
+the payload-derived id was delivered and read on the next prompt.
+
+With the `SessionStart` entry removed, the model never learns that hook-derived
+id — and it cannot fall back on session-derived identity either, because Codex
+spawns its MCP servers with a scrubbed environment and passes the session id
+only to hook payloads. So treat an explicit `agent_id` as required, not
+optional: choose a unique id per thread and pass it on every workflow call.
+That explicit id is what gives the thread stable task ownership, but it is not
+the inbox the Codex drain hooks empty. Send operational messages to the
 payload-derived id when that is the identity the hooks registered, or read an
 explicit-id inbox with `inspect_work` using the same id. Never reuse one
 explicit id across threads: two threads sharing an id claim as each other.
