@@ -246,6 +246,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'harness-monitor',
+      'harness-monitor',
       'managed-controller',
       'harness-monitor',
       'managed-controller',
@@ -253,6 +254,24 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
     ]);
+  });
+
+  it('installs OpenClaw for an existing state directory without a CLI on PATH', () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-openclaw-adapter-'));
+    const env = { HOME: home, PATH: join(home, 'empty') };
+    try {
+      mkdirSync(join(home, '.openclaw'));
+      const find = (report: ReturnType<typeof statusGlobalAdapters>) =>
+        report.find((entry) => entry.harness === 'openclaw');
+      expect(find(statusGlobalAdapters(env))?.status).toBe('action_required');
+      expect(find(installGlobalAdapters(import.meta.url, env))).toMatchObject({
+        status: 'installed',
+        capabilities: ['pull', 'busy'],
+      });
+      expect(find(uninstallGlobalAdapters(env))?.status).toBe('action_required');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('accepts Gemini completion injection set in the user settings', () => {

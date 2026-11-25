@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- OpenClaw setup and diagnostics, with pull-based message delivery.
+
 ### Changed
 
 - The `concord` CLI loads only the command it runs, and the hook, inbox and

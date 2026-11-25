@@ -7,6 +7,7 @@ import {
   resolveActorId,
   resolveIdentity,
   resolveOpenCodeRequestIdentity,
+  resolveServerIdentity,
   UNRESOLVED_IDENTITY_MESSAGE,
 } from '../../src/domain/identity.js';
 
@@ -248,4 +249,15 @@ describe('liveSessionIdentity binding proof', () => {
     expect(result.identity?.agentId).toBe('operator:chosen');
     expect(result.drifted).toBe(false);
   });
+});
+
+it('keeps OpenClaw agents distinct and requires an explicit ID', () => {
+  const identity = resolveServerIdentity({
+    CONCORD_AGENT_KIND: 'openclaw',
+    CLAUDE_CODE_SESSION_ID: SESSION,
+  });
+  expect(identity).toBeUndefined();
+  expect(resolveActorId(identity, 'openclaw:main', 'openclaw')).toBe('openclaw:main');
+  expect(resolveActorId(identity, 'openclaw:research', 'openclaw')).toBe('openclaw:research');
+  expect(() => resolveActorId(identity, undefined, 'openclaw')).toThrow('Pass agent_id');
 });

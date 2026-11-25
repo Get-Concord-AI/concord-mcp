@@ -1,5 +1,7 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { isOpenclawDetected, statusOpenclaw } from './openclaw.js';
+import { installOpenclawMcpConfig, uninstallOpenclawConfig } from '../openclaw-config.js';
 import { installHermes, statusHermes } from './hermes.js';
 import { statusKiro } from './kiro.js';
 import { statusQwen } from './qwen.js';
@@ -716,6 +718,8 @@ export function statusAdapter(
       return statusGrok(env);
     case 'goose':
       return statusGoose(env);
+    case 'openclaw':
+      return statusOpenclaw(executablePath(HARNESS_CONFIGS.openclaw.executable, env), env);
     case 'hermes': {
       const executable = executablePath(HARNESS_CONFIGS.hermes.executable, env);
       return statusHermes(
@@ -782,6 +786,13 @@ export function installAdapter(
       writeFileSync(path, upsertMcpServer(undefined, undefined, agentKindEnv('antigravity')));
     }
     installGlobalAntigravityHooks(env);
+    return;
+  }
+
+  if (harness === 'openclaw') {
+    if (isOpenclawDetected(executablePath(HARNESS_CONFIGS.openclaw.executable, env), env)) {
+      installOpenclawMcpConfig(env);
+    }
     return;
   }
 
@@ -920,6 +931,11 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   if (grok !== undefined) run(grok, ['plugin', 'uninstall', 'concord-relay', '--confirm'], env);
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
+  try {
+    uninstallOpenclawConfig(env);
+  } catch {
+    // Leave malformed or unreadable OpenClaw config untouched and continue cleanup.
+  }
   try {
     uninstallHermesMcpConfig(env);
   } catch {
