@@ -22,6 +22,10 @@ import {
   type SessionBindingRepository,
 } from './repositories/session-bindings.js';
 import {
+  createSharedFileRepository,
+  type SharedFileRepository,
+} from './repositories/shared-files.js';
+import {
   createTaskUpdateRepository,
   type TaskUpdateRepository,
 } from './repositories/task-updates.js';
@@ -36,6 +40,12 @@ export type { NewHandoff, HandoffRepository } from './repositories/handoffs.js';
 export type { NewReview, ReviewRepository } from './repositories/reviews.js';
 export type { NewTaskUpdate, TaskUpdateRepository } from './repositories/task-updates.js';
 export type { NewEvent, EventRepository } from './repositories/events.js';
+export type {
+  NewSharedFile,
+  SharedFileRecord,
+  SharedFileRepository,
+  StoredSharedFile,
+} from './repositories/shared-files.js';
 export type {
   NewOwnershipEvent,
   OwnershipEventRepository,
@@ -90,6 +100,7 @@ export interface Repositories {
   sessionBindings: SessionBindingRepository;
   ownershipEvents: OwnershipEventRepository;
   search: SearchRepository;
+  sharedFiles: SharedFileRepository;
 }
 
 /** Bind all repositories to an open database; task-scoped ones see only `project`. */
@@ -111,6 +122,7 @@ export function createRepositories(
     sessionBindings: createSessionBindingRepository(db),
     ownershipEvents: createOwnershipEventRepository(db, project),
     search: createSearchRepository(db, project),
+    sharedFiles: createSharedFileRepository(db),
   };
 }
 
@@ -120,5 +132,10 @@ export function openRepositories(
   project: string = LOCAL_PROJECT,
   checkoutRoot?: string,
 ): Repositories {
-  return { ...createRepositories(openDatabase(filename), project), checkoutRoot };
+  const database = openDatabase(filename);
+  const repos = createRepositories(database, project);
+  // Retention runs whenever a writable store opens, not only when a file is next
+  // shared, so bytes from an earlier send are removed even if nothing new is sent.
+  if (!database.readonly) repos.sharedFiles.purgeExpired(new Date().toISOString());
+  return { ...repos, checkoutRoot };
 }

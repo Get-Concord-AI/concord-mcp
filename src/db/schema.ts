@@ -306,4 +306,27 @@ export const migrations: readonly string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  // 020 — files shared with a prompt or reply. The bytes live in the same
+  // database as the message they came with, and are written in the same
+  // transaction as that message's rows, so one transaction holds both and
+  // retention can clear them. message_id is a soft reference (no FK), as
+  // elsewhere: a recipient can never be handed a message whose files are not
+  // yet stored.
+  `
+  CREATE TABLE shared_files (
+    file_id          TEXT PRIMARY KEY,
+    message_id       TEXT NOT NULL,
+    sender_agent_id  TEXT NOT NULL,
+    filename         TEXT NOT NULL,
+    media_type       TEXT NOT NULL,
+    size_bytes       INTEGER NOT NULL,
+    sha256           TEXT NOT NULL,
+    content          BLOB,
+    created_at       TEXT NOT NULL,
+    expires_at       TEXT NOT NULL,
+    purged_at        TEXT
+  );
+  CREATE INDEX idx_shared_files_message ON shared_files(message_id);
+  CREATE INDEX idx_shared_files_expiry ON shared_files(purged_at, expires_at);
+  `,
 ];
