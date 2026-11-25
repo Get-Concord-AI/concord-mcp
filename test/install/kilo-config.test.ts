@@ -472,7 +472,9 @@ describe('round-3 review regressions', () => {
       home,
       'kilo.json',
       JSON.stringify({
-        mcp: { concord: { type: 'local', command: ['node', 'proxy.js', '@concord-ai/concord-mcp'] } },
+        mcp: {
+          concord: { type: 'local', command: ['node', 'proxy.js', '@concord-ai/concord-mcp'] },
+        },
       }),
     );
     expect(kiloMcpState(env).state).toBe('conflict');
@@ -518,22 +520,14 @@ describe('round-3 review regressions', () => {
 
   it('reports none for a bare enabled:false stub with no command or url', () => {
     const { home, env } = kiloEnv();
-    writeGlobalConfig(
-      home,
-      'kilo.jsonc',
-      JSON.stringify({ mcp: { concord: { enabled: false } } }),
-    );
+    writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: { enabled: false } } }));
     expect(kiloMcpState(env).state).toBe('none');
   });
 
   it('reports none after uninstall leaves a vestigial disable stub behind', () => {
     const { home, env } = kiloEnv();
     writeGlobalConfig(home, 'kilo.json', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
-    writeGlobalConfig(
-      home,
-      'kilo.jsonc',
-      JSON.stringify({ mcp: { concord: { enabled: false } } }),
-    );
+    writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: { enabled: false } } }));
 
     expect(kiloMcpState(env).state).toBe('disabled');
     uninstallKiloMcpConfig(env);
@@ -547,11 +541,7 @@ describe('round-3 review regressions', () => {
       'kilo.json',
       JSON.stringify({ mcp: { concord: { type: 'local', command: ['mine'] } } }),
     );
-    writeGlobalConfig(
-      home,
-      'kilo.jsonc',
-      JSON.stringify({ mcp: { concord: { enabled: false } } }),
-    );
+    writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: { enabled: false } } }));
     expect(kiloMcpState(env).state).toBe('conflict');
   });
 });
