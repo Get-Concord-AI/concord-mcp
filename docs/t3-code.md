@@ -42,30 +42,33 @@ Each T3 provider instance uses the vendor's own binary and config:
 - **Codex** runs `codex app-server` against `CODEX_HOME` (`~/.codex` by
   default), so `[mcp_servers.concord]` and the `[[hooks.*]]` tables in
   `config.toml` apply.
-- **OpenCode, Grok, Kiro, Cursor, Antigravity (`agy`)** run their usual CLIs
-  and read their usual user-level config.
+- **OpenCode, Grok, Kiro, and Cursor** run their usual CLIs and read their
+  usual user-level config. **Antigravity** is different: even when T3 uses a
+  manual `agy` binary, T3 manages its own Antigravity profile/sign-in, so a
+  terminal login that works for `agy models` does not by itself authenticate
+  T3's provider instance.
 
 ## Coverage by provider
 
 Coverage follows whichever vendor agent the thread runs — T3 contributes the
-launch, not the integration. The whole matrix — this table and the delivery
-table under [Message delivery](#message-delivery) — is inferred from how T3
-launches each agent and from each harness's own documentation; none of it has
-been exercised in a live T3 session. Rows marked "Unverified" are the least
-certain. Check `concord status` inside a thread before relying on a given
-provider; once real threads have been run, the verified rows can be promoted
-and #230 closed.
+launch, not the integration. Live smoke validation in T3 Code 0.1.12 has
+exercised Claude Code, Codex, and OpenCode registration through Concord MCP,
+shared workspace resolution across a T3-created git worktree, and Claude
+mid-turn hook delivery. The remaining rows and idle-wake behavior are still
+inferred from each harness's own documentation. Check `concord status` inside
+a thread before relying on a given provider; do not treat an unmarked row as
+live-verified.
 
-| T3 provider         | Concord path                                           | Delivery                                                                                            |
-| ------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| Claude Code         | MCP + `concord-relay` plugin (SDK session)             | Hooks while busy; `asyncRewake` waiter wakes idle sessions                                          |
-| Codex               | `[mcp_servers.concord]` + `[[hooks.*]]` in config.toml | Hooks while busy; managed host also attaches unless the `SessionStart` entry is removed — see below |
-| OpenCode            | `opencode.json` MCP + request-metadata identity        | Identified but not hosted — agent reads its inbox via `inspect_work`                                |
-| Grok Build          | `~/.grok/config.toml` MCP + hooks                      | Hooks while busy; agent-started monitor for idle                                                    |
-| Kiro                | `~/.kiro` user MCP + hooks                             | Next prompt only — Kiro has no mid-turn hook                                                        |
-| Cursor              | `~/.cursor/mcp.json` MCP                               | Unverified — T3 drives `cursor-agent`, not the `cursor` binary                                      |
-| Antigravity (`agy`) | `.agents/mcp_config.json` + `~/.gemini/config`         | Hooks while busy; one-shot `inbox watch` monitor can wake idle — unverified under T3                |
-| ACP agents          | Agent-dependent                                        | Unverified per agent — see below                                                                    |
+| T3 provider         | Concord path                                           | Delivery                                                                                                                                                       |
+| ------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code         | MCP + `concord-relay` plugin (SDK session)             | MCP registration and busy-turn PostToolUse delivery verified; idle `asyncRewake` wake still unverified under T3                                                |
+| Codex               | `[mcp_servers.concord]` + `[[hooks.*]]` in config.toml | MCP registration and hook-derived identity verified; payload-derived inbox delivery verified on a later prompt; managed-host risk remains inferred — see below |
+| OpenCode            | `opencode.json` MCP + request-metadata identity        | MCP registration verified; still not hosted — agent reads its inbox via `inspect_work`                                                                         |
+| Grok Build          | `~/.grok/config.toml` MCP + hooks                      | Hooks while busy; agent-started monitor for idle                                                                                                               |
+| Kiro                | `~/.kiro` user MCP + hooks                             | Next prompt only — Kiro has no mid-turn hook                                                                                                                   |
+| Cursor              | `~/.cursor/mcp.json` MCP                               | Unverified — T3 drives `cursor-agent`, not the `cursor` binary                                                                                                 |
+| Antigravity (`agy`) | `.agents/mcp_config.json` + `~/.gemini/config`         | Unverified under T3 — T3 uses its own Antigravity sign-in/profile, so local `agy` authentication is not evidence of T3 access                                  |
+| ACP agents          | Agent-dependent                                        | Unverified per agent — see below                                                                                                                               |
 
 ## Identity
 
@@ -91,23 +94,27 @@ you want shared.
 
 ## Message delivery
 
-| Harness     | Busy turn                                | Idle session                                                           |
-| ----------- | ---------------------------------------- | ---------------------------------------------------------------------- |
-| Claude Code | PostToolUse and Stop hooks               | `asyncRewake` waiter (see below)                                       |
-| Codex       | Hooks                                    | Next prompt — see below                                                |
-| OpenCode    | Agent reads its inbox via `inspect_work` | Waits until the agent checks                                           |
-| Grok Build  | Hooks                                    | Agent-started `concord inbox watch` monitor                            |
-| Kiro        | None — no mid-turn hook                  | Next prompt (`UserPromptSubmit` drain)                                 |
-| Antigravity | Hooks                                    | One-shot `inbox watch --once` monitor wakes idle — unverified under T3 |
+| Harness     | Busy turn                                | Idle session                                                                      |
+| ----------- | ---------------------------------------- | --------------------------------------------------------------------------------- |
+| Claude Code | PostToolUse and Stop hooks — verified    | `asyncRewake` waiter — not observed in live T3 smoke; treat idle as unproven      |
+| Codex       | Hook drain into payload-derived inbox    | Next prompt — verified for payload-derived id; explicit-id inboxes stay pull-only |
+| OpenCode    | Agent reads its inbox via `inspect_work` | Waits until the agent checks — registration verified, delivery unverified         |
+| Grok Build  | Hooks                                    | Agent-started `concord inbox watch` monitor                                       |
+| Kiro        | None — no mid-turn hook                  | Next prompt (`UserPromptSubmit` drain)                                            |
+| Antigravity | Hooks                                    | One-shot `inbox watch --once` monitor wakes idle — unverified under T3            |
 
 **Claude Code.** T3 Code drives Claude through the Claude Agent SDK
-(`CLAUDE_CODE_ENTRYPOINT=sdk-ts`), and the SDK never starts plugin monitors —
-the same situation Conductor creates. Concord already handles it: the
-`concord-relay` plugin's Stop hook arms `concord inbox rewake`, a Claude Code
-[`asyncRewake`](https://code.claude.com/docs/en/hooks#run-hooks-in-the-background)
-hook that waits for the agent's next message and wakes the session even when
-idle. Every turn re-arms it, so each thread has one waiter. No T3-specific
-setup is needed.
+(`CLAUDE_CODE_ENTRYPOINT=sdk-ts`). Live validation observed Claude loading
+Concord MCP, registering in a T3-created git worktree, resolving the same
+workspace as threads in the project checkout, and receiving a queued peer
+message mid-turn through the PostToolUse hook. The send operation still
+reported `queued_pull`: this is hook-mediated delivery into the active turn,
+not proof that Concord can wake an idle T3 Claude thread. The `concord-relay`
+`asyncRewake` waiter should provide idle wake-up in a normal Claude Code
+session, but live T3 smoke did not reproduce it: after the turn completed, a
+message to the registered Claude agent stayed queued, no new T3 run started,
+and no `concord inbox rewake` process was present. Treat idle Claude wake-up
+under T3 as unproven until a positive observation exists.
 
 **Codex.** T3 Code runs `codex app-server` itself and owns the thread's
 writer — but Concord cannot tell. `codexThreadHostable` only excludes
@@ -137,20 +144,20 @@ in Task Manager or `ps`/`kill`. Re-running `concord setup` — or the adapter
 self-heal path when `autoAdapters` is on — writes the full block back, so
 the host opt-out is not permanent unless you avoid those.
 
-One consequence matters: the agent id is introduced only by the
-`SessionStart` hook's output, so a thread configured this way never learns
-its id — `start_work` without an explicit `agent_id` fails. Supply a unique
-one per thread, for example `codex:t3-<thread-name>`, on every workflow call.
-Never reuse one id across threads: two threads sharing an id claim and drain
-as each other. Delivery keeps working alongside any explicit id, because the
-drains compute their recipient from the hook payload rather than from
-anything the model passes — messages addressed to the payload-derived
-`codex:<hash of the thread id>` still surface mid-turn. Messages addressed
-to your explicit id land in its own inbox instead, which the drains do not
-drain; read those with `inspect_work`, passing the same id. Keeping the two
-drain entries is therefore worth it even though part of the delivery becomes
-pull-based — and removing them as well takes the thread fully down to
-`inspect_work`-only: nothing is pushed into a busy turn at all.
+One consequence matters, and live validation reproduced it: the hook-derived
+Codex identity is separate from any explicit `agent_id` the model chooses. In
+the live T3 run, `start_work` with explicit `codex:t3-live-project` succeeded
+through MCP, while the hooks independently registered `codex:<hash>`; messages
+to the explicit id stayed queued even during a busy turn, while a message to
+the payload-derived id was delivered and read on the next prompt. Supplying a
+stable explicit id is still useful for task ownership, but it is not the
+inbox the Codex drain hooks empty. Send operational messages to the
+payload-derived id when that is the identity the hooks registered, or read an
+explicit-id inbox with `inspect_work` using the same id. Never reuse one
+explicit id across threads: two threads sharing an id claim as each other.
+Keeping the two drain entries is therefore worth it even though part of the
+delivery becomes pull-based — and removing them as well takes the thread
+fully down to `inspect_work`-only: nothing is pushed into a busy turn at all.
 
 ## Caveats
 
@@ -166,8 +173,11 @@ pull-based — and removing them as well takes the thread fully down to
 - **Managed provider runtimes.** T3 Code's "Connect with ChatGPT" Codex
   instance and managed Antigravity use T3-managed config directories, not
   `~/.codex` or `~/.gemini/config`. Concord's registrations do not reach them.
-  Use provider instances backed by your own CLI login ("Configure manually",
-  or the installed `codex`/`agy` binary) for Concord coverage.
+  Use provider instances backed by your own CLI login where T3 actually
+  reuses it ("Configure manually", or the installed `codex` binary). For
+  Antigravity, using the installed `agy` binary is not enough by itself: T3
+  still keeps its own Antigravity sign-in/profile, so complete that sign-in
+  in T3 before expecting Concord coverage.
 - **ACP agents.** Registry and local-command ACP agents (Pi, Muse Code, fx,
   `dsh --profile acp`, and others) are driven over the Agent Client Protocol.
   Which MCP servers they load is decided per agent — some take them from the
@@ -207,8 +217,14 @@ Reading it back in the receiving thread with `inspect_work` proves the shared
 workspace, registration, and the pull path — nothing more: that read succeeds
 even if every push path is broken. To verify push delivery, watch the
 receiving thread without pulling. A message sent to a thread mid-turn should
-surface in the turn on its own through the `PostToolUse` or `Stop` hook, and
-one sent to an idle Claude thread should wake the thread within seconds
-through the `asyncRewake` waiter. Until those have been observed live inside
-T3, treat the push rows in the delivery table as inferred — which is why this
-guide references rather than closes #230.
+surface in the turn on its own through the `PostToolUse` or `Stop` hook. If
+idle wake-up works, a message sent to an idle Claude thread should start a new
+turn within seconds through the `asyncRewake` waiter; if nothing starts, that
+path is not working in this embedded host. Live validation has now observed MCP
+registration, cross-worktree shared workspace resolution, Claude mid-turn hook
+delivery, and Codex payload-derived inbox delivery inside T3. It affirmatively
+did not observe Claude idle wake-up after turn completion in the smoke
+environment, and it has not observed Antigravity authenticated through T3,
+Devin as a local ACP agent, or the Codex managed host writing a hidden turn.
+Those rows remain inferred or explicitly blocked rather than verified — which
+is why this guide references rather than closes #230.
