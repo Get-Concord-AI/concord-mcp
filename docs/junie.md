@@ -126,7 +126,7 @@ The config looks like:
 1. Run `concord setup` to register the MCP server and lifecycle hooks.
 2. Start a Junie session — the `SessionStart` hook automatically registers your
    session identity with Concord, and your first prompt carries the identity
-   briefing to the model (see *How the identity reaches the model*).
+   briefing to the model (see _How the identity reaches the model_).
 3. Before each user prompt, the `UserPromptSubmit` hook drains any pending peer
    messages from other agents.
 4. Use the five Concord workflow tools (`start_work`, `inspect_work`,
