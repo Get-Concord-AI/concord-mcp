@@ -2,25 +2,23 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { devinMcpConfigPath } from './devin-config.js';
+import {
+  isJsonObject,
+  objectEnd,
+  parseJsoncObject,
+  propertyObject,
+  removeProperty,
+  uncomment,
+} from './jsonc-edit.js';
 import { jsonObjectSchema, type JsonObject, type JsonValue } from './json-value.js';
 
 const EVENTS = ['SessionStart', 'UserPromptSubmit', 'SessionEnd'] as const;
-
-interface ObjectRange {
-  key: number;
-  open: number;
-  close: number;
-}
 
 function commandFor(event: (typeof EVENTS)[number]): string {
   return `concord hook devin-${event
     .replace(/([A-Z])/gu, '-$1')
     .toLowerCase()
     .replace(/^-/, '')}`;
-}
-
-function isJsonObject(value: JsonValue): value is JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isConcordHook(value: JsonValue): boolean {
@@ -52,69 +50,6 @@ function removeConcordCommands(entry: JsonValue): {
   return { value: kept.length === 0 ? undefined : { ...entry, hooks: kept }, changed: true };
 }
 
-function uncomment(text: string): string {
-  return text.replace(
-    /("(?:\\.|[^"\\])*")|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//gu,
-    (part, quoted: string | undefined) => quoted ?? part.replace(/[^\r\n]/gu, ' '),
-  );
-}
-
-function isEscaped(text: string, index: number): boolean {
-  let backslashes = 0;
-  for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) {
-    backslashes += 1;
-  }
-  return backslashes % 2 === 1;
-}
-
-function objectEnd(clean: string, open: number, key: string): number {
-  let depth = 0;
-  let inString = false;
-  for (let index = open; index < clean.length; index += 1) {
-    const char = clean[index];
-    if (char === '"' && !isEscaped(clean, index)) inString = !inString;
-    if (inString) continue;
-    if (char === '{') depth += 1;
-    if (char === '}' && --depth === 0) return index;
-  }
-  throw new Error(`Unclosed ${key} object`);
-}
-
-/**
- * The object value of `key` directly inside the root object. A key of the same
- * name nested deeper (say a server named "hooks" under `mcpServers`) is not it.
- */
-function rootObjectRange(text: string, key: string): ObjectRange | undefined {
-  const clean = uncomment(text);
-  const rootOpen = clean.indexOf('{');
-  if (rootOpen === -1) return undefined;
-  let depth = 0;
-  for (let index = rootOpen; index < clean.length; index += 1) {
-    const char = clean[index];
-    if (char === '{' || char === '[') depth += 1;
-    else if (char === '}' || char === ']') depth -= 1;
-    else if (char === '"') {
-      let end = index + 1;
-      while (end < clean.length && !(clean[end] === '"' && !isEscaped(clean, end))) end += 1;
-      if (depth === 1 && clean.slice(index + 1, end) === key) {
-        const value = /^\s*:\s*\{/u.exec(clean.slice(end + 1));
-        if (value !== null) {
-          const open = end + value[0].length;
-          return { key: index, open, close: objectEnd(clean, open, key) };
-        }
-      }
-      index = end;
-    }
-    if (depth === 0) return undefined;
-  }
-  return undefined;
-}
-
-function parsedObject(text: string): JsonObject {
-  const value: unknown = JSON.parse(uncomment(text));
-  return jsonObjectSchema.parse(value);
-}
-
 function commentsIn(text: string): string[] {
   const tokens = text.match(/"(?:\\.|[^"\\])*"|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//gu) ?? [];
   return tokens.filter((token) => token.startsWith('//') || token.startsWith('/*'));
@@ -133,36 +68,9 @@ function userConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(dirname(devinMcpConfigPath(env)), 'config.json');
 }
 
-function directCommas(text: string, range: Pick<ObjectRange, 'open' | 'close'>): number[] {
-  const clean = uncomment(text);
-  const commas: number[] = [];
-  let objectDepth = 0;
-  let arrayDepth = 0;
-  let inString = false;
-  for (let index = range.open + 1; index < range.close; index += 1) {
-    const char = clean[index];
-    if (char === '"' && !isEscaped(clean, index)) inString = !inString;
-    if (inString) continue;
-    if (char === '{') objectDepth += 1;
-    else if (char === '}') objectDepth -= 1;
-    else if (char === '[') arrayDepth += 1;
-    else if (char === ']') arrayDepth -= 1;
-    else if (char === ',' && objectDepth === 0 && arrayDepth === 0) commas.push(index);
-  }
-  return commas;
-}
-
-function removeObjectProperty(text: string, parent: ObjectRange, property: ObjectRange): string {
-  const commas = directCommas(text, parent);
-  const nextComma = commas.find((comma) => comma > property.close);
-  if (nextComma !== undefined) return `${text.slice(0, property.key)}${text.slice(nextComma + 1)}`;
-  const previousComma = commas.filter((comma) => comma < property.key).at(-1);
-  return `${text.slice(0, previousComma ?? property.key)}${text.slice(property.close + 1)}`;
-}
-
 export function upsertDevinUserHooksConfig(existing: string | undefined): string {
   const source = existing ?? '{}';
-  const config = parsedObject(source);
+  const config = parseJsoncObject(source);
   const previous = config['hooks'];
   if (
     previous !== undefined &&
@@ -182,7 +90,7 @@ export function upsertDevinUserHooksConfig(existing: string | undefined): string
   }
   if (JSON.stringify(nextHooks) === JSON.stringify(hooks)) return source;
 
-  const range = rootObjectRange(source, 'hooks');
+  const range = propertyObject(source, 'hooks');
   const next = formatNestedObject(
     nextHooks,
     range === undefined ? [] : commentsIn(source.slice(range.open, range.close + 1)),
@@ -191,13 +99,13 @@ export function upsertDevinUserHooksConfig(existing: string | undefined): string
     return `${source.slice(0, range.open)}${next}${source.slice(range.close + 1)}`;
   const clean = uncomment(source);
   const rootOpen = clean.indexOf('{');
-  const close = objectEnd(clean, rootOpen, 'root');
+  const close = objectEnd(clean, rootOpen);
   const hasEntries = Object.keys(config).length > 0;
   return `${source.slice(0, close)}${hasEntries ? ',' : ''}\n  "hooks": ${next}\n${source.slice(close)}`;
 }
 
 export function removeDevinUserHooksConfig(existing: string): string {
-  const config = parsedObject(existing);
+  const config = parseJsoncObject(existing);
   const current = config['hooks'];
   if (current === undefined || !isJsonObject(current)) return existing;
   const hooks = current;
@@ -214,7 +122,7 @@ export function removeDevinUserHooksConfig(existing: string): string {
     else nextHooks[event] = kept;
   }
   if (!changed) return existing;
-  const range = rootObjectRange(existing, 'hooks');
+  const range = propertyObject(existing, 'hooks');
   if (range === undefined) return existing;
   if (Object.keys(nextHooks).length > 0) {
     const formatted = formatNestedObject(
@@ -225,15 +133,8 @@ export function removeDevinUserHooksConfig(existing: string): string {
   }
   const clean = uncomment(existing);
   const rootOpen = clean.indexOf('{');
-  return removeObjectProperty(
-    existing,
-    {
-      key: rootOpen,
-      open: rootOpen,
-      close: objectEnd(clean, rootOpen, 'root'),
-    },
-    range,
-  );
+  const rootClose = objectEnd(clean, rootOpen);
+  return removeProperty(existing, { open: rootOpen, close: rootClose }, range);
 }
 
 export function installDevinUserHooks(env: NodeJS.ProcessEnv = process.env): string {
@@ -261,7 +162,7 @@ export function devinUserHooksInstalled(env: NodeJS.ProcessEnv = process.env): b
   const path = userConfigPath(env);
   if (!existsSync(path)) return false;
   try {
-    const config = parsedObject(readFileSync(path, 'utf8'));
+    const config = parseJsoncObject(readFileSync(path, 'utf8'));
     const hooks = config['hooks'];
     if (hooks === undefined || !isJsonObject(hooks)) return false;
     return EVENTS.every((event) => {

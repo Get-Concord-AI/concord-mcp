@@ -24,6 +24,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   advisory in `pnpm audit --prod`. A `pnpm.overrides` entry keeps the
   standalone install from pulling it in as Ink's peer.
 
+### Fixed
+
+- Devin setup and uninstall no longer write invalid JSON into
+  `mcp_config.json` when a comment before the edited entry contains an emoji
+  or other character outside the Basic Multilingual Plane, or when another
+  server's settings contain a key named `concord`. Only `concord` directly
+  under `mcpServers` is treated as Concord's entry.
+
 ## [0.24.0] - 2026-11-23
 
 ### Added
