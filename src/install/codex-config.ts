@@ -303,37 +303,40 @@ function concordHookLines(lines: readonly TomlLine[]): {
   return { removed, carried, spot };
 }
 
+/** User lines from after Concord's end markers that will share one table, and where they go. */
+interface CarriedGroup {
+  at: number;
+  lines: TomlLine[];
+}
+
 /**
- * `source` without Concord's hooks and comment lines, where its first hook was,
- * and the user's lines that sat after its end marker, with where they sat.
+ * `source` without Concord's hooks and comment lines, and where its first hook
+ * was. `carried` holds the user's lines from after its end markers, grouped by
+ * the table each would join once the hooks are gone.
  */
 function stripConcordHooks(source: string): {
   lines: string[];
   spot: number | undefined;
-  carried: string[];
-  carriedAt: number | undefined;
+  carried: CarriedGroup[];
 } {
   const lines = [...tomlLines(source)];
   const found = concordHookLines(lines);
   const kept: TomlLine[] = [];
-  const carried: TomlLine[] = [];
+  const carried = new Map<number, CarriedGroup>();
+  let tables = 0;
   let spot: number | undefined;
-  let carriedAt: number | undefined;
   for (const [index, line] of lines.entries()) {
     if (index === found.spot) spot = kept.length;
     if (found.carried.has(index)) {
-      carriedAt ??= kept.length;
-      carried.push(line);
+      const group = carried.get(tables) ?? { at: kept.length, lines: [] };
+      group.lines.push(line);
+      carried.set(tables, group);
     } else if (!found.removed.has(index) && !isConcordComment(line)) {
+      if (isHeader(line)) tables += 1;
       keepLine(kept, line);
     }
   }
-  return {
-    lines: kept.map((line) => line.text),
-    spot,
-    carried: mergeCarried(carried),
-    carriedAt,
-  };
+  return { lines: kept.map((line) => line.text), spot, carried: [...carried.values()] };
 }
 
 /** `lines` joined, without blank lines at either end. */
@@ -359,10 +362,11 @@ export function upsertCodexHooks(existing: string | undefined): string {
 function addHooksBlock(source: string): string {
   const { lines, spot, carried } = stripConcordHooks(source);
   const at = spot ?? lines.length;
-  // Lines that sat after the end marker stay after it, where TOML read them.
+  // Lines that sat after an end marker stay after it, where TOML read them.
+  const after = mergeCarried(carried.flatMap((group) => group.lines));
   const parts = [
     joinTrimmed(lines.slice(0, at)),
-    [CONCORD_HOOKS_BLOCK, ...carried].join('\n'),
+    [CONCORD_HOOKS_BLOCK, ...after].join('\n'),
     joinTrimmed(lines.slice(at)),
   ];
   return `${parts.filter((part) => part !== '').join('\n\n')}\n`;
@@ -432,10 +436,11 @@ export function uninstallCodexConfig(env: NodeJS.ProcessEnv = process.env): stri
   const fullPath = codexConfigFile(env);
   if (!existsSync(fullPath)) return undefined;
   const uninstalled = inLineEnding(readFileSync(fullPath, 'utf8'), (text) => {
-    const { lines, carried, carriedAt } = stripConcordHooks(removeServerTables(text));
-    const at = carriedAt ?? lines.length;
-    const kept = [...lines.slice(0, at), ...carried, ...lines.slice(at)].join('\n');
-    const trimmed = kept.replace(/^\n+/u, '').replace(/\n*$/u, '');
+    const { lines, carried } = stripConcordHooks(removeServerTables(text));
+    // Lines that sat after an end marker stay where they were, merged per table.
+    const kept = [...lines];
+    for (const group of carried.reverse()) kept.splice(group.at, 0, ...mergeCarried(group.lines));
+    const trimmed = kept.join('\n').replace(/^\n+/u, '').replace(/\n*$/u, '');
     return trimmed === '' ? '' : `${trimmed}\n`;
   });
   writeFileSync(fullPath, uninstalled);

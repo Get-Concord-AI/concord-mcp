@@ -312,6 +312,35 @@ approval_mode = "approve"
 
     expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('model = "o3"\n');
   });
+
+  it('keeps the lines after each end marker in their own table', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    const config = [
+      `[tui]\nalt_screen = true`,
+      `${block}\nmodel = "o3"`,
+      `[desktop]\nq = 1`,
+      `${block}\nalt_screen = false`,
+    ].join('\n\n');
+    writeFileSync(codexConfigFile(env), `${config}\n`);
+
+    uninstallCodexConfig(env);
+
+    const [tui = '', desktop = ''] = readFileSync(codexConfigFile(env), 'utf8').split('[desktop]');
+    expect(tui.match(/alt_screen/gu)).toHaveLength(1);
+    expect(desktop).toContain('alt_screen = false');
+  });
+
+  it('merges the lines after repeated blocks that share a table', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    const config = `[tui]\nx = 1\n\n${block}\nmodel = "o3"\n\n${block}\nmodel = "o3"\n`;
+    writeFileSync(codexConfigFile(env), config);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('[tui]\nx = 1\n\nmodel = "o3"\n');
+  });
 });
 
 describe('removeCodexMcpServer', () => {
