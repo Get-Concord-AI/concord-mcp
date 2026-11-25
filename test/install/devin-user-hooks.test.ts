@@ -89,3 +89,21 @@ describe('Devin user hooks config', () => {
     expect(JSON.parse(removeDevinUserHooksConfig(merged))).toEqual(JSON.parse(both));
   });
 });
+
+describe('emoji comments', () => {
+  it('keeps valid JSON when a comment holds characters outside the BMP', () => {
+    const original = `{
+  // user note 😀🚀
+  "theme_mode": "dark"
+}
+`;
+    const installed = upsertDevinUserHooksConfig(original);
+    expect(() => {
+      JSON.parse(installed.replace(/\/\/[^\r\n]*/gu, ''));
+    }).not.toThrow();
+    expect(installed).toContain('😀');
+    const removed = removeDevinUserHooksConfig(installed);
+    expect(removed).toContain('😀');
+    expect(removed).not.toContain('concord hook');
+  });
+});

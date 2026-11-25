@@ -119,5 +119,11 @@ export function removeProperty(
   }
   const previousComma = commas.filter((comma) => comma < property.key).at(-1);
   const start = previousComma ?? property.key;
-  return `${text.slice(0, start)}${text.slice(property.close + 1)}`;
+  // Comments leading the property — a section note between the preceding
+  // comma and the key — are not part of the value being removed: keep them,
+  // the way comments after a middle property are kept.
+  const lead = text.slice(start, property.key);
+  const leadComments = lead.match(/\/\/[^\r\n]*|\/\*[\s\S]*?\*\//gu) ?? [];
+  const retained = leadComments.length === 0 ? '' : `${leadComments.join('\n')}\n`;
+  return `${text.slice(0, start)}${retained}${text.slice(property.close + 1)}`;
 }

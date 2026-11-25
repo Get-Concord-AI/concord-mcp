@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Removing the last property of a JSONC object no longer drops a comment
+  sitting between the preceding comma and that property — a section note is
+  kept the way comments after a middle property already were.
+- Regression coverage for the Devin config writers: comments (including ones
+  holding emoji or other characters outside the BMP) survive `mcp_config.json`
+  and user-hooks install and uninstall end to end, and the hooks uninstall
+  path preserves user comments — a behavior the 0.25.0 entry only described
+  for the install path.
+
 ## [0.25.0] - 2026-11-25
 
 ### Added

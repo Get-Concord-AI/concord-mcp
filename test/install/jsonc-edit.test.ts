@@ -127,3 +127,25 @@ describe('removeProperty', () => {
     expect(() => parseJsoncObject(result)).not.toThrow();
   });
 });
+
+describe('removeProperty orphan comments', () => {
+  function span(text: string, key: string) {
+    const found = propertyObject(text, key);
+    if (found === undefined) throw new Error(`missing ${key}`);
+    return found;
+  }
+
+  it('keeps a leading comment when removing the last property', () => {
+    const text = `{
+  "a": 1,
+  // section note
+  "b": { "x": 2 }
+}
+`;
+    const result = removeProperty(text, { open: 0, close: objectEnd(text, 0) }, span(text, 'b'));
+    expect(result).toContain('"a": 1');
+    expect(result).not.toContain('"b"');
+    expect(result).toContain('// section note');
+    expect(() => parseJsoncObject(result)).not.toThrow();
+  });
+});
