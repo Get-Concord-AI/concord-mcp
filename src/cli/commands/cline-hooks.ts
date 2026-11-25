@@ -19,7 +19,12 @@ import {
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { openContext } from '../context.js';
 import { cloudRoster } from './cloud-hooks.js';
-import { cloudAccess, drainFromCloudCapped, HOOK_TIMEOUT_MS, registerInCloud } from './cloud-inbox.js';
+import {
+  cloudAccess,
+  drainFromCloudCapped,
+  HOOK_TIMEOUT_MS,
+  registerInCloud,
+} from './cloud-inbox.js';
 import { registerPullEndpoint } from './inbox.js';
 import { clineSessionStartMessage, type RosterLine } from './session-start-message.js';
 

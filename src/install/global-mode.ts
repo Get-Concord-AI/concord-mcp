@@ -68,6 +68,14 @@ export interface GlobalModeReport {
 interface Registration {
   readonly id: string;
   readonly present: (existing: string) => boolean;
+  /**
+   * Re-verified against the current file before a disable removes anything:
+   * remembered ownership is stale the moment the user rewrites the entry.
+   * MCP-style JSON registrations use isConcordServerOwned; harnesses with
+   * their own ownership shape (Grok's TOML markers) leave it unset, and the
+   * remembered flag is trusted as before.
+   */
+  readonly owned?: (existing: string) => boolean;
 }
 
 /** A user-level file global mode owns part of, for one harness. */
@@ -158,7 +166,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     executable: 'devin',
-    registration: { id: 'devin', present: hasDevinMcpServer },
+    registration: { id: 'devin', present: hasDevinMcpServer, owned: isConcordServerOwned },
     supported: devinCliSupportsDedicatedMcpConfig,
     path: devinMcpConfigPath,
     install: (existing) => upsertDevinMcpConfig(existing),
@@ -166,7 +174,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     executable: 'gemini',
-    registration: { id: 'gemini', present: hasMcpServer },
+    registration: { id: 'gemini', present: hasMcpServer, owned: isConcordServerOwned },
     path: (env) => join(userHome(env), '.gemini', 'settings.json'),
     install: (existing) => upsertGeminiSettings(existing, undefined),
     // Only the server goes: the shell settings may serve other tools by now.
@@ -174,7 +182,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     executable: 'cursor',
-    registration: { id: 'cursor', present: hasMcpServer },
+    registration: { id: 'cursor', present: hasMcpServer, owned: isConcordServerOwned },
     path: (env) => join(userHome(env), '.cursor', 'mcp.json'),
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('cursor')),
     uninstall: removeMcpServer,
@@ -192,7 +200,7 @@ const USER_FILES: readonly UserFile[] = [
   {
     executable: 'agy',
     isDetected: isAntigravityDetected,
-    registration: { id: 'antigravity', present: hasMcpServer },
+    registration: { id: 'antigravity', present: hasMcpServer, owned: isConcordServerOwned },
     path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('antigravity')),
     uninstall: removeMcpServer,
@@ -211,7 +219,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     isDetected: isKiroDetected,
-    registration: { id: 'kiro', present: hasMcpServer },
+    registration: { id: 'kiro', present: hasMcpServer, owned: isConcordServerOwned },
     path: kiroUserMcpPath,
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('kiro')),
     uninstall: removeMcpServer,
@@ -227,7 +235,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     isDetected: clineDetected,
-    registration: { id: 'cline', present: hasMcpServer },
+    registration: { id: 'cline', present: hasMcpServer, owned: isConcordServerOwned },
     path: clineMcpSettingsPath,
     install: (existing) => upsertMcpServer(existing, undefined, clineManagedEnv()),
     uninstall: removeMcpServer,
@@ -245,7 +253,7 @@ function mayChange(
     // Ownership is only remembered state: the user may have replaced our
     // entry with a hand-written `concord` server since. Removing on disable
     // is safe only while the file still carries the entry Concord wrote.
-    if (!enable) return existing !== undefined && isConcordServerOwned(existing);
+    if (!enable) return existing !== undefined && (registration.owned?.(existing) ?? true);
     return true;
   }
   return enable && (existing === undefined || !registration.present(existing));

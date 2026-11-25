@@ -470,3 +470,28 @@ describe('runSetup with global mode', () => {
     expect(present(repo)).toEqual(REPO_FILES);
   });
 });
+
+describe('hand-written replacements', () => {
+  it('does not remove a user-rewritten concord entry when global mode is declined', () => {
+    const env = machine(['cursor']);
+    applyGlobalMode(env, true);
+    const path = join(env.HOME, '.cursor', 'mcp.json');
+    expect(readFileSync(path, 'utf8')).toContain('concord');
+
+    // The user replaces the managed registration with a hand-written one:
+    // same server key, no Concord ownership marker in the entry.
+    writeFileSync(
+      path,
+      JSON.stringify(
+        { mcpServers: { concord: { command: 'concord-mcp', args: ['--user-tuned'] } } },
+        null,
+        2,
+      ),
+    );
+
+    applyGlobalMode(env, false);
+    const after = readFileSync(path, 'utf8');
+    expect(after).toContain('--user-tuned');
+    expect(existsSync(path)).toBe(true);
+  });
+});
