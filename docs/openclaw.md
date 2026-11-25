@@ -22,6 +22,11 @@ that defines `mcp.servers`, using this entry for an npm install:
 
 ## Agent identity and delivery
 
+Run `concord setup --global` to add identity instructions to each agent's
+workspace. Concord uses `openclaw agents list --json` to find the workspaces
+OpenClaw actually uses. Give each agent a separate workspace for automatic
+identity instructions. `concord setup --no-global` removes the managed blocks.
+
 Give every OpenClaw agent its own stable Concord ID. In its workspace
 `AGENTS.md`, tell it to pass `agent_id: "openclaw:<id>"` on workflow writes,
 where `<id>` is its OpenClaw agent ID (`main` by default). On `start_work`, use
