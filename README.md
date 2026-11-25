@@ -117,7 +117,8 @@ above needs neither.
 for Claude, Cursor, Gemini, Grok, and Codex (`.mcp.json`, `.cursor/mcp.json`,
 `.gemini/settings.json`, `.grok/config.toml`, and `~/.codex/config.toml`).
 For [Goose](./docs/goose.md), it registers the `concord-relay` extension in
-Goose's `config.yaml` when detected. For [DeepSeek Harness](./docs/deepseek.md),
+Goose's `config.yaml` when detected. For [OpenClaw](./docs/openclaw.md),
+it registers Concord under `mcp.servers` in OpenClaw's user config. For [DeepSeek Harness](./docs/deepseek.md),
 it adds a native MCP plugin to `$DSH_HOME/cordis.patch.yml` when `dsh` is detected.
 For
 [Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
@@ -195,6 +196,7 @@ path.
 | Gemini CLI                         | [Setup and delivery](./docs/gemini-cli.md)         |
 | Grok Build                         | [Setup and delivery](./docs/grok-build.md)         |
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
+| OpenClaw                           | [Setup and delivery](./docs/openclaw.md)           |
 | DeepSeek Harness                   | [Setup and delivery](./docs/deepseek.md)           |
 | Kilo Code                          | [Setup and delivery](./docs/kilo.md)               |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
