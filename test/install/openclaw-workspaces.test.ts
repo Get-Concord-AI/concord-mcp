@@ -86,6 +86,23 @@ describe('OpenClaw global workspace instructions', () => {
     expect(existsSync(file)).toBe(false);
   });
 
+  it('groups aliases of a workspace that has not been created yet', () => {
+    const { home, env, roster } = fixture();
+    const real = join(home, 'real');
+    const alias = join(home, 'alias');
+    mkdirSync(real);
+    symlinkSync(real, alias, 'junction');
+
+    roster([
+      { id: 'main', workspace: join(real, 'new', 'workspace') },
+      { id: 'research', workspace: join(alias, 'new', 'workspace') },
+    ]);
+    const report = applyGlobalMode(env, true);
+    expect(report.warnings).toEqual([expect.stringContaining('main, research share a workspace')]);
+    expect(report.openclawFiles).toEqual([]);
+    expect(existsSync(join(real, 'new'))).toBe(false);
+  });
+
   it('retains a path that could not be read so cleanup can retry it', () => {
     const { home, env } = fixture();
     const path = join(home, 'workspace', 'AGENTS.md');

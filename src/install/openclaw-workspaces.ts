@@ -27,17 +27,16 @@ interface OpenclawWorkspaceReport {
   warnings: string[];
 }
 
-function realPathOr(path: string, fallback = path): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return fallback;
-  }
-}
-
 function physicalFile(path: string): string {
   const absolute = resolve(path);
-  return realPathOr(absolute, join(realPathOr(dirname(absolute)), basename(absolute)));
+  try {
+    return realpathSync(absolute);
+  } catch {
+    // The workspace may not exist yet. Resolve its nearest existing ancestor
+    // so two paths through the same symlink are grouped before either is created.
+    const parent = dirname(absolute);
+    return parent === absolute ? absolute : join(physicalFile(parent), basename(absolute));
+  }
 }
 
 function readInstructions(path: string): string | undefined {
