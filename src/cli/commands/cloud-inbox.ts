@@ -186,13 +186,15 @@ export function drainFromCloud(
 }
 
 /**
- * The ids a capped drain already rendered for this batch, kept next to the
- * drain tickets: the batch replays under its key until every message in it
- * has been shown, so the record is what keeps already-seen messages from
- * rendering twice. It resets when the batch is finally consumed.
+ * The ids a capped drain already rendered for this batch: the batch replays
+ * under its key until every message in it has been shown, so the record is
+ * what keeps already-seen messages from rendering twice. It resets when the
+ * batch is finally consumed. The file must live outside the `.drains` ticket
+ * directory — everything in there is scanned as a drain ticket, and a stray
+ * name would be adopted as one, replaying the batch under a garbage key.
  */
 function shownIdsPath(runtime: CloudRuntime, agentKey: string): string {
-  return join(agentCachePath(runtime.repoRoot, agentKey).replace(/\.json$/, '.drains'), 'shown');
+  return agentCachePath(runtime.repoRoot, agentKey).replace(/\.json$/, '.shown');
 }
 
 function readShownIds(path: string): ReadonlySet<string> {

@@ -54,6 +54,7 @@ import {
   upsertGrokMcpServer,
   upsertMcpServer,
   isConcordServerOwned,
+  isGrokConcordServerOwned,
 } from './mcp-config.js';
 
 /** What turning global mode on or off changed, and what it could not. */
@@ -189,7 +190,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     executable: 'grok',
-    registration: { id: 'grok', present: hasGrokMcpServer },
+    registration: { id: 'grok', present: hasGrokMcpServer, owned: isGrokConcordServerOwned },
     path: (env) => join(grokHome(env), 'config.toml'),
     install: (existing, path) => upsertGrokMcpServer(existing, undefined, path),
     uninstall: (existing) => {
@@ -253,7 +254,7 @@ function mayChange(
     // Ownership is only remembered state: the user may have replaced our
     // entry with a hand-written `concord` server since. Removing on disable
     // is safe only while the file still carries the entry Concord wrote.
-    if (!enable) return existing !== undefined && (registration.owned?.(existing) ?? true);
+    if (!enable) return existing !== undefined && (registration.owned?.(existing) ?? false);
     return true;
   }
   return enable && (existing === undefined || !registration.present(existing));

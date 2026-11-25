@@ -324,6 +324,20 @@ export function hasUserGrokMcpServer(existing: string): boolean {
   return false;
 }
 
+/**
+ * Whether Grok TOML's concord server is the one Concord wrote — present and
+ * nothing about it is the user's. Global mode checks this before removal:
+ * remembered ownership is only state, and a hand-written replacement must
+ * survive a disable.
+ */
+export function isGrokConcordServerOwned(existing: string): boolean {
+  try {
+    return hasGrokMcpServer(existing) && !hasUserGrokMcpServer(existing);
+  } catch {
+    return false;
+  }
+}
+
 function writeMcpConfig(repoRoot: string, relPath: string): string {
   const fullPath = join(repoRoot, relPath);
   const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
@@ -413,9 +427,15 @@ export function isConcordWrittenEntry(entry: unknown): boolean {
     const isRunner = parsed.data.args.some((arg) => isPackageSpec(arg, CONCORD_PACKAGE_NAME));
     if (!isRunner) return false;
   }
-  // If the user specified custom environment variables (other than CONCORD_REPO_ROOT or CONCORD_AGENT_KIND), it is custom.
+  // If the user specified custom environment variables it is a custom entry;
+  // CONCORD_REPO_ROOT, CONCORD_AGENT_KIND and Concord's own managed marker
+  // (CONCORD_MANAGED, which Cline entries carry) are the only keys Concord writes.
   const envKeys = Object.keys(parsed.data.env ?? {});
-  if (envKeys.some((key) => key !== 'CONCORD_REPO_ROOT' && key !== AGENT_KIND_ENV)) {
+  if (
+    envKeys.some(
+      (key) => key !== 'CONCORD_REPO_ROOT' && key !== AGENT_KIND_ENV && key !== 'CONCORD_MANAGED',
+    )
+  ) {
     return false;
   }
   if (parsed.data.command === CONCORD_SERVER_COMMAND) return true;
