@@ -21,12 +21,19 @@ own precedence order (later files win). When `KILO_CONFIG_DIR` is set, the
 files inside that directory (`kilo.jsonc`, `kilo.json`, `opencode.jsonc`,
 `opencode.json`) are checked too and outrank the global directory, matching
 where `kilo mcp add` writes. `kilo mcp add` itself always writes `kilo.jsonc`.
+When `KILO_CONFIG` is set, that single file is checked last and outranks
+everything else, matching the override Kilo itself loads on top of every
+other source — an `enabled: false` there disables Concord no matter what the
+config directories say.
 
 ## Supported surfaces
 
 The adapter covers the **Kilo CLI** (`kilo` on `PATH`, verified with 7.8.x on
-Windows; any 7.x release that still ships the `kilo mcp` subcommand). The VS
-Code and JetBrains extensions are separate surfaces: they share Kilo's config
+Windows). Version 7.0.0 is the floor, and setup probes the installed binary
+at runtime: it must answer `kilo mcp --help` with the subcommand present and
+`kilo mcp add --help` with the non-interactive `--env` flag, so releases that
+renamed or dropped either one are reported as unsupported rather than
+half-configured. The VS Code and JetBrains extensions are separate surfaces: they share Kilo's config
 format, but Concord has not verified how they spawn MCP servers or whether
 they honor a global `kilo.jsonc` registration, so no live-delivery claim is
 made for them. If your extension picks up the same global config, the five

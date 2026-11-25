@@ -420,3 +420,138 @@ describe('uninstallKiloMcpConfig', () => {
     expect(next).toContain('// tail comment');
   });
 });
+
+describe('round-3 review regressions', () => {
+  it('uninstall removes the root mcp.concord, not a nested provider one', () => {
+    const { home, env } = kiloEnv();
+    const path = writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      `{
+  "provider": {
+    "custom": {
+      "options": {
+        "mcp": {
+          "concord": { "type": "local", "command": ["concord-mcp"] }
+        }
+      }
+    }
+  },
+  "mcp": {
+    "concord": { "type": "local", "command": ["concord-mcp"] },
+    "keep": { "command": ["x"] }
+  }
+}
+`,
+    );
+
+    expect(kiloMcpState(env)).toEqual({ state: 'installed' });
+    uninstallKiloMcpConfig(env);
+
+    const next = readFileSync(path, 'utf8');
+    // The nested provider entry survives untouched …
+    expect(next).toContain('"provider"');
+    const nestedSchema = z.object({
+      provider: z.object({
+        custom: z.object({
+          options: z.object({ mcp: z.record(z.string(), z.unknown()) }),
+        }),
+      }),
+      mcp: z.record(z.string(), z.unknown()).optional(),
+    });
+    const parsed = nestedSchema.parse(JSON.parse(next));
+    expect(parsed.provider.custom.options.mcp['concord']).toBeDefined();
+    // … and the root registration is the one removed.
+    expect(parsed.mcp?.['concord']).toBeUndefined();
+    expect(parsed.mcp?.['keep']).toBeDefined();
+  });
+
+  it('does not own a package spec carried inside a user wrapper', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(
+      home,
+      'kilo.json',
+      JSON.stringify({
+        mcp: { concord: { type: 'local', command: ['node', 'proxy.js', '@concord-ai/concord-mcp'] } },
+      }),
+    );
+    expect(kiloMcpState(env).state).toBe('conflict');
+  });
+
+  it('does not own an npx invocation whose arguments go beyond the runner shape', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(
+      home,
+      'kilo.json',
+      JSON.stringify({
+        mcp: {
+          concord: {
+            type: 'local',
+            command: ['npx', '-y', '@concord-ai/concord-mcp', '--user-flag'],
+          },
+        },
+      }),
+    );
+    expect(kiloMcpState(env).state).toBe('conflict');
+  });
+
+  it('appends the KILO_CONFIG override file after every other source', () => {
+    const { home, env } = kiloEnv();
+    const override = join(home, 'custom-kilo.json');
+    const paths = kiloConfigPaths({ ...env, KILO_CONFIG: override });
+    expect(paths.at(-1)).toBe(override);
+  });
+
+  it('lets KILO_CONFIG disable an entry every other file enables', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+    const override = writeConfigDirConfig(
+      join(home, 'elsewhere'),
+      'override.json',
+      JSON.stringify({ mcp: { concord: { enabled: false } } }),
+    );
+
+    const state = kiloMcpState({ ...env, KILO_CONFIG: override });
+    expect(state.state).toBe('disabled');
+    expect(state.path).toBe(override);
+  });
+
+  it('reports none for a bare enabled:false stub with no command or url', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      JSON.stringify({ mcp: { concord: { enabled: false } } }),
+    );
+    expect(kiloMcpState(env).state).toBe('none');
+  });
+
+  it('reports none after uninstall leaves a vestigial disable stub behind', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(home, 'kilo.json', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+    writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      JSON.stringify({ mcp: { concord: { enabled: false } } }),
+    );
+
+    expect(kiloMcpState(env).state).toBe('disabled');
+    uninstallKiloMcpConfig(env);
+    expect(kiloMcpState(env).state).toBe('none');
+  });
+
+  it('still reports conflict when a foreign server hides under the toggle', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(
+      home,
+      'kilo.json',
+      JSON.stringify({ mcp: { concord: { type: 'local', command: ['mine'] } } }),
+    );
+    writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      JSON.stringify({ mcp: { concord: { enabled: false } } }),
+    );
+    expect(kiloMcpState(env).state).toBe('conflict');
+  });
+});

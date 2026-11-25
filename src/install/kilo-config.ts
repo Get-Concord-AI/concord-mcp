@@ -19,6 +19,7 @@ import {
   CONCORD_SERVER_KEY,
   isPackageSpec,
 } from './mcp-config.js';
+import { NPX_SERVER_ARGS } from './server-launch.js';
 import { spawnCommandSync } from './spawn-command.js';
 
 /**
@@ -29,16 +30,17 @@ import { spawnCommandSync } from './spawn-command.js';
  * `kilo.json`, `kilo.jsonc`, `opencode.json`, `opencode.jsonc`, lowest to
  * highest precedence) plus every file `KILO_CONFIG_DIR` points at
  * (`kilo.jsonc`, `kilo.json`, `opencode.jsonc`, `opencode.json`), which
- * outranks the global directory. `kilo mcp add` writes its own file, so
- * registration goes through the harness; status and removal read the same
- * file set and let the highest-precedence `mcp.concord` win, mirroring Kilo's
- * deep merge, because `kilo mcp` has no remove command.
+ * outranks the global directory. `KILO_CONFIG` points at one extra file Kilo
+ * loads as an override on top of everything else. `kilo mcp add` writes its
+ * own file, so registration goes through the harness; status and removal read
+ * the same file set and let the highest-precedence `mcp.concord` win,
+ * mirroring Kilo's deep merge, because `kilo mcp` has no remove command.
  *
  * The entry pins only the harness kind. Kilo passes no session id to MCP
  * servers — not in request metadata and not in the child environment — so a
  * session resolves its identity the way other session-less harnesses do:
- * `CONCORD_AGENT_ID` in the server's `environment`, or an id the caller
- * supplies. See docs/kilo.md.
+ * `CONCORD_AGENT_ID` exported before launching Kilo, which the MCP server
+ * process inherits, or an id the caller supplies. See docs/kilo.md.
  */
 
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -109,9 +111,25 @@ const GLOBAL_CONFIG_FILES = [
 const CONFIG_DIR_FILES = ['kilo.jsonc', 'kilo.json', 'opencode.jsonc', 'opencode.json'] as const;
 
 /**
+ * Kilo's `KILO_CONFIG` override — one config file Kilo loads on top of every
+ * other source, so an entry there outranks both config directories. The same
+ * `~` prefixes Kilo accepts are expanded.
+ */
+export function kiloConfigFileOverride(env: NodeJS.ProcessEnv): string | undefined {
+  const configured = env['KILO_CONFIG']?.trim();
+  if (configured === undefined || configured === '') return undefined;
+  if (configured === '~') return userHome(env);
+  if (configured.startsWith('~/') || configured.startsWith('~\\')) {
+    return resolve(userHome(env), configured.slice(2));
+  }
+  return resolve(configured);
+}
+
+/**
  * Every config file that can carry `mcp.concord`, ordered the way Kilo merges
  * them: the whole global directory first, then the whole `KILO_CONFIG_DIR`
- * directory. The last file defining the entry decides the effective one.
+ * directory, then the single `KILO_CONFIG` override file. The last file
+ * defining the entry decides the effective one.
  */
 export function kiloConfigPaths(env: NodeJS.ProcessEnv): string[] {
   const paths = GLOBAL_CONFIG_FILES.map((name) => join(kiloConfigHome(env), name));
@@ -119,6 +137,8 @@ export function kiloConfigPaths(env: NodeJS.ProcessEnv): string[] {
   if (dir !== undefined) {
     for (const name of CONFIG_DIR_FILES) paths.push(join(dir, name));
   }
+  const override = kiloConfigFileOverride(env);
+  if (override !== undefined) paths.push(override);
   return paths;
 }
 
@@ -166,19 +186,35 @@ function parseKiloConfig(text: string): KiloConfig {
 }
 
 /**
+ * Whether a command array is one Concord itself would write: exactly
+ * `concord-mcp`, the shape `kilo mcp add … -- concord-mcp` produces, or the
+ * `npx -y <package>` runner form older package-runner installs used. The
+ * executable decides: a package spec appearing later in some other wrapper —
+ * `node proxy.js @concord-ai/concord-mcp`, say — is the user's own entry.
+ */
+function isOwnedKiloCommand(command: readonly string[]): boolean {
+  const [executable, ...args] = command;
+  if (executable === undefined) return false;
+  if (args.length === 0) return executable === CONCORD_SERVER_COMMAND;
+  if (executable !== 'npx') return false;
+  if (args.length !== NPX_SERVER_ARGS.length) return false;
+  return NPX_SERVER_ARGS.every((expected, index) => {
+    const actual = args[index];
+    if (actual === undefined) return false;
+    return index === NPX_SERVER_ARGS.length - 1
+      ? isPackageSpec(actual, CONCORD_PACKAGE_NAME)
+      : actual === expected;
+  });
+}
+
+/**
  * Whether a `mcp.concord` entry is one Concord wrote and may therefore manage.
  * The shape must be the one `kilo mcp add` produces: `concord-mcp` alone as the
- * command, or a runner invocation carrying the published package spec — a
- * `concord-mcp` argument buried in a user's own wrapper does not count — and
- * only Concord's own environment keys under either `environment` or Kilo's
- * `env` alias.
+ * command, or the runner invocation above, and only Concord's own environment
+ * keys under either `environment` or Kilo's `env` alias.
  */
 function isKiloConcordEntry(entry: KiloServer): boolean {
-  const command = entry.command ?? [];
-  const launchesConcord =
-    (command.length === 1 && command[0] === CONCORD_SERVER_COMMAND) ||
-    command.some((arg) => isPackageSpec(arg, CONCORD_PACKAGE_NAME));
-  if (!launchesConcord) return false;
+  if (!isOwnedKiloCommand(entry.command ?? [])) return false;
   const envKeys = [...Object.keys(entry.environment ?? {}), ...Object.keys(entry.env ?? {})];
   return envKeys.every((key) => CONCORD_ENV_KEYS.has(key));
 }
@@ -252,6 +288,12 @@ export function kiloMcpState(env: NodeJS.ProcessEnv): KiloMcpStatus {
   if (unreadable) return { state: 'unreadable' };
   if (effective === undefined) return { state: 'none' };
   const server = parseKiloServer(effective);
+  // An entry with neither command nor url is no server at all — typically a
+  // bare `enabled: false` toggle in a higher-precedence file whose target was
+  // already removed — so there is nothing to report or conflict with.
+  if (server !== undefined && server.command === undefined && server.url === undefined) {
+    return { state: 'none' };
+  }
   if (server === undefined || !isKiloConcordEntry(server)) {
     return lastPath === undefined ? { state: 'conflict' } : { state: 'conflict', path: lastPath };
   }

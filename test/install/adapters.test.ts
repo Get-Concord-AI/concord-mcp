@@ -18,7 +18,7 @@ import { z } from 'zod';
 import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
 import { writeFakeKilo } from '../helpers/fake-kilo.js';
 import { recordedInvocations, writeFakeOpencode } from '../helpers/fake-opencode.js';
-import type { JsonObject } from '../../src/install/json-value.js';
+import { jsonValueSchema, type JsonObject } from '../../src/install/json-value.js';
 
 import {
   devinSupportsDedicatedMcpConfig,
@@ -549,7 +549,7 @@ describe('global harness adapters', () => {
       const raw: unknown = JSON.parse(
         readFileSync(join(home, '.config', 'kilo', 'kilo.jsonc'), 'utf8'),
       );
-      const config = z.object({ mcp: z.record(z.string(), z.unknown()) }).parse(raw);
+      const config = z.object({ mcp: z.record(z.string(), jsonValueSchema) }).parse(raw);
       expect(config.mcp['concord']).toBeUndefined();
       expect(config.mcp['probe']).toBeDefined();
       expect(kiloReport(env)).toMatchObject({ status: 'action_required' });
