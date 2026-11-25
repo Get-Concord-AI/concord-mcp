@@ -260,7 +260,7 @@ describe('SessionEnd waiter supersede', () => {
     expect(waiter.superseded()).toBe(true);
   });
 
-  it('keeps the waiter when the conversation clears but the process stays', () => {
+  it('supersedes the waiter when the conversation clears, since the post-clear session is a new agent', () => {
     const repos = createRepositories(openDatabase(':memory:'));
     repos.agents.upsert({
       agentId: 'beta',
@@ -285,6 +285,6 @@ describe('SessionEnd waiter supersede', () => {
       env,
     );
 
-    expect(waiter.superseded()).toBe(false);
+    expect(waiter.superseded()).toBe(true);
   });
 });

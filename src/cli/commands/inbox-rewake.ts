@@ -126,8 +126,22 @@ export function claimWaiter(
   }
   writeFileSync(path, token);
   return {
-    superseded: () => readClaim(path) !== token,
+    superseded: () => {
+      const current = readClaim(path);
+      if (current === token) return false;
+      if (current !== undefined) return true;
+      // A missing file is not proof on its own: another waiter's release
+      // rename+restore leaves the path empty for a few microseconds, and a
+      // newer waiter checking inside that window would otherwise stand down
+      // alongside the older one — both gone, nobody watching. Only an absence
+      // outliving that window means the claim is really gone.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+      return readClaim(path) !== token;
+    },
     release: () => {
+      // Cheap pre-check: the common exits are an already-superseded or
+      // already-released claim, and neither should touch the path at all.
+      if (readClaim(path) !== token) return;
       // Compare-and-delete, atomically: reading the token and unlinking as
       // separate steps would let a newer waiter's claim, written in between,
       // be removed by this older one. The rename freezes whatever claim the

@@ -263,10 +263,11 @@ export function observeHookEvent(
       // heartbeat for up to a day — looking live while its stderr wakes
       // nobody — and the next message would be marked delivered into the
       // void. Taking and releasing a fresh claim supersedes it, and it
-      // stands down within a second. `/clear` keeps it: the process — and
-      // the session the waiter would wake — is still there.
-      if (hook.reason !== 'clear')
-        claimWaiter(agentId, randomUUID(), defaultWaiterDir(env)).release();
+      // stands down within a second. `/clear` ends it too: the waiter is
+      // pinned to the pre-clear agent id, and the post-clear session is a
+      // new agent with its own waiter — the old one would drain an inbox
+      // no live session reads anymore.
+      claimWaiter(agentId, randomUUID(), defaultWaiterDir(env)).release();
       break;
     }
     case undefined:

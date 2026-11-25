@@ -36,6 +36,7 @@ import { codexThreadHostable } from '../embedding-host.js';
 import { isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
 import {
   claimWaiter,
+  defaultWaiterDir,
   hostsRewake,
   renderRewake,
   REWAKE_EXIT_CODE,
@@ -649,14 +650,26 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     .action(async (options) => {
       // Seen-tracking lives in the local store; Concord Cloud keeps its own
       // delivery record. Prints nothing: UserPromptSubmit output becomes context.
+      const payload = readHookPayload() ?? '';
+      const agentId = resolveAgentId(options.agent, process.env, {
+        kind: options.provider,
+        hookPayload: payload,
+      });
+      // The waiter claim is plain local state, so SessionEnd cleanup runs for
+      // cloud sessions too — before the access check below would return. An
+      // ended cloud session's waiter would otherwise keep renewing its lease
+      // and drain batches into stderr nothing reads.
+      const earlyHook = parseObservedHook(payload);
+      if (earlyHook?.hook_event_name === 'SessionEnd') {
+        try {
+          claimWaiter(agentId, randomUUID(), defaultWaiterDir(process.env)).release();
+        } catch {
+          // A claim that cannot be released costs nothing here: it expires.
+        }
+      }
       const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
       if (access.kind !== 'local' || !workspaceExists(process.cwd())) return;
       try {
-        const payload = readHookPayload() ?? '';
-        const agentId = resolveAgentId(options.agent, process.env, {
-          kind: options.provider,
-          hookPayload: payload,
-        });
         const context = await import('../context.js');
         observeHookEvent(
           context.openContext(process.cwd()).repos,
