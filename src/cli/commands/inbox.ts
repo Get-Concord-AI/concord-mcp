@@ -250,7 +250,7 @@ export function readHookPayload(): string | undefined {
  * workspace it registered in, and pinning would drain and acknowledge the
  * wrong inbox. Kiro and Hermes pin inside their own hook handlers instead.
  */
-function payloadPinnedEnv(
+export function payloadPinnedEnv(
   hookPayload: string | undefined,
   provider: string,
 ): NodeJS.ProcessEnv {

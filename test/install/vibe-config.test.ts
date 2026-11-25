@@ -392,3 +392,67 @@ describe('vibeMcpConfigPath and install', () => {
     expect(uninstallVibeMcpConfig(env)).toBeUndefined();
   });
 });
+
+describe('round-3 review regressions', () => {
+  it('does not append [[mcp_servers]] when [mcp_servers.env] follows an unrelated table', () => {
+    const src = [
+      '[other]',
+      'x = 1',
+      '',
+      '[mcp_servers.env]',
+      'FOO = "bar"',
+      '',
+    ].join('\n');
+    // Appending an array-of-tables here would redefine a table TOML already
+    // has, so the file must be left exactly as it is.
+    expect(upsertVibeMcpConfig(src)).toBe(src);
+  });
+
+  it('still appends when unrelated tables exist but no mcp_servers table does', () => {
+    const src = ['[other]', 'x = 1', ''].join('\n');
+    const next = upsertVibeMcpConfig(src);
+    expect(next).toContain('[[mcp_servers]]');
+    expect(next).toContain('[other]');
+  });
+
+  it('treats a block with an unnameable assignment line as user-owned', () => {
+    const src = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      'env = { CONCORD_AGENT_KIND = "vibe" }',
+      'weird."key" = 1',
+      '',
+    ].join('\n');
+    expect(upsertVibeMcpConfig(src)).toBe(src);
+  });
+
+  it('treats a block whose key carries TOML escapes as user-owned', () => {
+    // A bare-key shape the scanner cannot capture must never cost the entry.
+    const src = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      'env = { CONCORD_AGENT_KIND = "vibe" }',
+      '"enabled".extra = true',
+      '',
+    ].join('\n');
+    expect(upsertVibeMcpConfig(src)).toBe(src);
+  });
+
+  it('still owns and rewrites the exact shape Concord writes', () => {
+    const src = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      'env = { CONCORD_AGENT_KIND = "vibe" }',
+      '',
+    ].join('\n');
+    const next = upsertVibeMcpConfig(src);
+    expect(next).toContain('command = "concord-mcp"');
+    expect(next.match(/\[\[mcp_servers\]\]/gu)).toHaveLength(1);
+  });
+});

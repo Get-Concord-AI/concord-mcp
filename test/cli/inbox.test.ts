@@ -13,6 +13,7 @@ import {
 import { CONCORD_SERVER_INSTRUCTIONS } from '../../src/install/instructions.js';
 import {
   drainInbox,
+  payloadPinnedEnv,
   registeredLine,
   registerPullEndpoint,
   watchInbox,
@@ -411,5 +412,26 @@ describe('registeredLine', () => {
 
   it('names no monitor for a harness without a monitor command', () => {
     expect(registeredLine('claude-code:4f2a91c7', 'claude-code')).not.toContain('inbox watch');
+  });
+});
+
+describe('payloadPinnedEnv provider scoping', () => {
+  const payload = JSON.stringify({ session_id: 's1', cwd: '/elsewhere' });
+
+  it('pins CONCORD_REPO_ROOT from the payload cwd for vibe', () => {
+    const env = payloadPinnedEnv(payload, 'vibe');
+    expect(env['CONCORD_REPO_ROOT']).toBe('/elsewhere');
+  });
+
+  it('never pins for other providers, so a cd elsewhere keeps the session workspace', () => {
+    for (const provider of ['claude-code', 'codex', 'cursor', 'kiro', 'hermes']) {
+      const env = payloadPinnedEnv(payload, provider);
+      expect(env['CONCORD_REPO_ROOT']).toBe(process.env['CONCORD_REPO_ROOT']);
+    }
+  });
+
+  it('leaves the environment untouched when the payload has no cwd', () => {
+    const env = payloadPinnedEnv(JSON.stringify({ session_id: 's1' }), 'vibe');
+    expect(env['CONCORD_REPO_ROOT']).toBe(process.env['CONCORD_REPO_ROOT']);
   });
 });

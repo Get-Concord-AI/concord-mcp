@@ -246,20 +246,28 @@ export function bareTomlTableValue(
   const assignment = new RegExp(`^\\s*${seg}\\s*=`, 'u');
   const dotted = new RegExp(`^\\s*${seg}\\s*\\.`, 'u');
   const emptyArray = new RegExp(`^\\s*${seg}\\s*=\\s*\\[\\s*\\]\\s*(?:#.*)?$`, 'u');
-  // A single-bracket `[table]`/`[table.child]` header (quoted segments
-  // included) makes `table` a TOML table, which `[[table]]` entries cannot
-  // coexist with — the file must be left alone.
-  const tableHeader = new RegExp(`^\\s*\\[\\s*${seg}\\s*(?:\\.|\\])`, 'u');
+  // A single-bracket `[table]` header (quoted segments included) makes
+  // `table` a TOML table, which `[[table]]` entries cannot coexist with.
+  const exactTableHeader = new RegExp(`^\\s*\\[\\s*${seg}\\s*\\]\\s*(?:#.*)?$`, 'u');
+  // `[table.child]` makes `table` a table too — unless a `[[table]]` array
+  // element precedes it, in which case the child legitimately belongs to that
+  // element and array entries coexist with it fine.
+  const childTableHeader = new RegExp(`^\\s*\\[\\s*${seg}\\s*\\.`, 'u');
+  const arrayHeader = new RegExp(`^\\s*\\[\\[\\s*${seg}\\s*\\]\\]`, 'u');
   let index = 0;
   let pastHeaders = false;
+  let sawArray = false;
   for (const { text, inString } of tomlLines(source)) {
     if (!inString) {
       if (/^\s*\[/u.test(text)) {
         pastHeaders = true;
-        // Any `[table]`/`[table.child]` header anywhere in the file — after
-        // unrelated tables included — makes `table` a TOML table, which
-        // `[[table]]` entries cannot coexist with.
-        if (tableHeader.test(text)) return { index, empty: false };
+        if (arrayHeader.test(text)) {
+          sawArray = true;
+        } else if (exactTableHeader.test(text)) {
+          return { index, empty: false };
+        } else if (childTableHeader.test(text) && !sawArray) {
+          return { index, empty: false };
+        }
       } else if (!pastHeaders) {
         // Bare and dotted keys only mean `table` before the first header;
         // afterwards they belong to whichever table is open.

@@ -40,6 +40,11 @@ export const CONCORD_SERVER_ONLY =
 export interface ExplicitSessionIdentity {
   readonly harnessLabel: string;
   readonly provider: string;
+  /**
+   * How live messages reach this harness, when the default "on your next user
+   * prompt" undersells it — Vibe also drains while tools run mid-turn.
+   */
+  readonly deliveryNote?: string;
 }
 
 export const DEVIN_SESSION_IDENTITY: ExplicitSessionIdentity = {
@@ -50,6 +55,9 @@ export const DEVIN_SESSION_IDENTITY: ExplicitSessionIdentity = {
 export const VIBE_SESSION_IDENTITY: ExplicitSessionIdentity = {
   harnessLabel: 'Vibe',
   provider: 'vibe',
+  deliveryNote:
+    "Other agents' messages are delivered when you send your next user prompt, and " +
+    'mid-turn as your tools run (the post-tool hook drains them). ',
 };
 
 /** What a session is told at start: who it is, and who else is here. */
@@ -72,7 +80,8 @@ export function sessionStartMessage(
     explicit === undefined
       ? 'You can receive live messages from other agents in this workspace; they arrive on their own ' +
         'as relayed context, so you never need to poll for them.'
-      : `Other agents' messages are delivered when you send your next user prompt. ` +
+      : (explicit.deliveryNote ??
+          "Other agents' messages are delivered when you send your next user prompt. ") +
         `To check sooner, run \`concord inbox drain --agent ${agentId} --provider ${explicit.provider}\` from this repository.`,
     ...rosterLines(others),
   ].join('\n');

@@ -8,7 +8,7 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { cloudRoster } from './cloud-hooks.js';
 import { cloudAccess, registerInCloud, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
 import { isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
-import { registerPullEndpoint } from './inbox.js';
+import { registerPullEndpoint, workspaceExists } from './inbox.js';
 import {
   sessionStartMessage,
   VIBE_SESSION_IDENTITY,
@@ -143,6 +143,9 @@ export async function runVibeHook(
     return NO_OUTPUT;
   }
   if (access.kind === 'local') {
+    // User-level hooks fire wherever `vibe` runs; merely having them installed
+    // must never litter an unrelated project with `.concord/` state.
+    if (!workspaceExists(repoRoot, projectEnv)) return NO_OUTPUT;
     const { openContext } = await import('../context.js');
     return handleLocalVibeHook(
       openContext(repoRoot, projectEnv).repos,
