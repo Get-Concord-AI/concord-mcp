@@ -14,18 +14,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   everything but `command`/`args`/`env`. Command, args, and env are still
   always rewritten, which is how older package-runner installs migrate.
 
+## [0.25.0] - 2026-11-25
+
+### Added
+
+- OpenClaw support ([docs/openclaw.md](./docs/openclaw.md)). `concord setup`
+  registers Concord under `mcp.servers` in OpenClaw's config (#340), and
+  `concord setup --global` adds identity instructions to each OpenClaw agent's
+  workspace, found through `openclaw agents list` (#413).
+- Live messages for OpenClaw. Run `concord adapters openclaw --agent <id>`
+  beside the OpenClaw Gateway: each message starts a Gateway turn that reads
+  the Concord inbox, and OpenClaw queues the turn when the agent is busy. It
+  works with local Concord and Concord Cloud. Receivers for the same agent in
+  other projects or OpenClaw profiles don't replace each other (#414).
+- An Aider guide ([docs/aider.md](./docs/aider.md)) for coordinating Aider
+  through the `concord work` shell path (#397).
+
 ### Changed
 
 - The `concord` CLI loads only the command it runs, and the hook, inbox and
   check paths no longer import the Ink dashboard or the MCP SDK. Agent hooks,
   which start the CLI on every tool call, start 2-4 times faster (e.g.
   `concord check` 3.7 s to 0.9 s in a container). Help and `--version` are
-  unchanged.
+  unchanged (#398).
 - `react-devtools-core` is no longer installed. It was a runtime dependency
   that nothing imports (Ink treats it as an optional peer, loaded only with
   `DEV=true`), and it brought in `shell-quote` 1.10.0, the only critical
   advisory in `pnpm audit --prod`. A `pnpm.overrides` entry keeps the
-  standalone install from pulling it in as Ink's peer.
+  standalone install from pulling it in as Ink's peer (#399).
+
+### Fixed
+
+- Devin setup and uninstall no longer write invalid JSON into
+  `mcp_config.json` when a comment before the edited entry contains an emoji
+  or other character outside the Basic Multilingual Plane, or when another
+  server's settings contain a key named `concord`. Only `concord` directly
+  under `mcpServers` is treated as Concord's entry.
+  Removing Concord's Devin hooks also keeps the file's comments (#403).
 
 ## [0.24.0] - 2026-11-23
 
@@ -1010,7 +1035,8 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.21.1...v0.22.0
