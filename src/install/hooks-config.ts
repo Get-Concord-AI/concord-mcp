@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import { uncomment } from './jsonc-edit.js';
 import { jsonObjectSchema, type JsonObject, type JsonValue } from './json-value.js';
 
 const EVENTS = ['SessionStart', 'UserPromptSubmit', 'SessionEnd'] as const;
@@ -63,13 +64,6 @@ function removeConcordCommands(
   const kept = hooks.filter((hook) => !isConcordHook(hook, prefix));
   if (kept.length === hooks.length) return { value: entry, changed: false };
   return { value: kept.length === 0 ? undefined : { ...entry, hooks: kept }, changed: true };
-}
-
-function uncomment(text: string): string {
-  return text.replace(
-    /("(?:\\.|[^"\\])*")|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//gu,
-    (part, quoted: string | undefined) => quoted ?? part.replace(/[^\r\n]/gu, ' '),
-  );
 }
 
 function isEscaped(text: string, index: number): boolean {

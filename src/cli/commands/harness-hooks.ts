@@ -122,19 +122,27 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
    * resumed session keeps its context and is not briefed again, while a new
    * session id — `/clear`, a fresh start — briefs once more.
    */
-  function takeFirstPromptBriefing(agentId: string): boolean {
-    if (spec.briefOnFirstPrompt !== true) return false;
+  function firstPromptBriefingMarker(agentId: string): string | undefined {
+    if (spec.briefOnFirstPrompt !== true) return undefined;
     const hash = createHash('sha256').update(agentId).digest('hex').slice(0, 24);
     const markerDir = process.env['CONCORD_HOOK_MARKER_DIR'] ?? tmpdir();
-    const marker = join(markerDir, `concord-${spec.kind}-briefed-${hash}`);
-    if (existsSync(marker)) return false;
+    return join(markerDir, `concord-${spec.kind}-briefed-${hash}`);
+  }
+
+  function hasFirstPromptBriefing(agentId: string): boolean {
+    const marker = firstPromptBriefingMarker(agentId);
+    return marker !== undefined && !existsSync(marker);
+  }
+
+  function markFirstPromptBriefing(agentId: string): void {
+    const marker = firstPromptBriefingMarker(agentId);
+    if (marker === undefined) return;
     try {
       writeFileSync(marker, agentId, { flag: 'wx' });
     } catch {
       // A lost race or an unwritable temp dir only costs the once-only
       // guarantee — the briefing still reaches the model this once.
     }
-    return true;
   }
 
   function endSession(repos: Repositories, agentId: string): void {
@@ -160,14 +168,16 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
         );
       case events.promptSubmit: {
         const drained = drainInbox(repos, identity.agentId, spec.kind);
-        if (takeFirstPromptBriefing(identity.agentId)) {
-          return briefedPromptSubmitOutput(
+        if (hasFirstPromptBriefing(identity.agentId)) {
+          const output = briefedPromptSubmitOutput(
             identity.agentId,
             buildRoster(repos.agents.list(), Date.now()).filter(
               (peer) => peer.agentId !== identity.agentId,
             ),
             drained,
           );
+          markFirstPromptBriefing(identity.agentId);
+          return output;
         }
         return promptSubmitOutput(drained);
       }
@@ -195,14 +205,16 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
         await registerInCloud(runtime, identity.agentId, spec.kind, cwd);
         return sessionStartOutput(identity.agentId, await cloudRoster(runtime, identity.agentId));
       case events.promptSubmit: {
-        const drained = await drainFromCloud(runtime, identity.agentId, spec.kind);
-        if (takeFirstPromptBriefing(identity.agentId)) {
-          return briefedPromptSubmitOutput(
-            identity.agentId,
-            await cloudRoster(runtime, identity.agentId),
-            drained,
-          );
+        // Roster first: it is the one piece that can fail, and draining or
+        // marking before it would lose the batch and the briefing together.
+        if (hasFirstPromptBriefing(identity.agentId)) {
+          const roster = await cloudRoster(runtime, identity.agentId);
+          const drainedFirst = await drainFromCloud(runtime, identity.agentId, spec.kind);
+          const briefed = briefedPromptSubmitOutput(identity.agentId, roster, drainedFirst);
+          markFirstPromptBriefing(identity.agentId);
+          return briefed;
         }
+        const drained = await drainFromCloud(runtime, identity.agentId, spec.kind);
         return promptSubmitOutput(drained);
       }
       case events.sessionEnd:
