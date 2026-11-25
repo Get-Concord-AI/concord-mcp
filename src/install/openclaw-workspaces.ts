@@ -48,6 +48,16 @@ function readInstructions(path: string): string | undefined {
   }
 }
 
+export function listOpenclawAgents(executable: string, env: NodeJS.ProcessEnv) {
+  // OpenClaw resolves profiles, includes and implicit workspace paths itself.
+  const result = spawnCommandSync(executable, ['agents', 'list', '--json'], {
+    env,
+    timeout: 15_000,
+  });
+  if (result.status !== 0) throw new Error('Could not list OpenClaw agents.');
+  return rosterSchema.parse(JSON.parse(result.stdout));
+}
+
 function workspaceRoster(
   env: NodeJS.ProcessEnv,
   warnings: string[],
@@ -58,13 +68,7 @@ function workspaceRoster(
 
   try {
     if (executable === undefined) throw new Error('OpenClaw CLI is missing');
-    // OpenClaw resolves profiles, includes and implicit workspace paths itself.
-    const result = spawnCommandSync(executable, ['agents', 'list', '--json'], {
-      env,
-      timeout: 15_000,
-    });
-    if (result.status !== 0) throw new Error('OpenClaw agent listing failed');
-    for (const { id, workspace } of rosterSchema.parse(JSON.parse(result.stdout))) {
+    for (const { id, workspace } of listOpenclawAgents(executable, env)) {
       const path = physicalFile(join(workspace, 'AGENTS.md'));
       const agents = byFile.get(path) ?? new Set<string>();
       agents.add(id);

@@ -20,7 +20,21 @@ that defines `mcp.servers`, using this entry for an npm install:
 }
 ```
 
-## Agent identity and delivery
+## Receive live messages
+
+With the Gateway running, start a receiver from your project:
+
+```sh
+concord adapters openclaw --agent main
+```
+
+Keep it running to receive messages in local Concord or Concord Cloud. Replace
+`main` with the OpenClaw agent ID you want to reach. Start one receiver per
+agent. A message starts a Gateway turn that reads the Concord inbox. If a turn
+is in progress, OpenClaw queues the new turn. The receiver works with the
+existing Gateway configuration and stops when the Gateway becomes unavailable.
+
+## Agent identity
 
 Run `concord setup --global` to add identity instructions to each agent's
 workspace. Concord uses `openclaw agents list --json` to find the workspaces

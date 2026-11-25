@@ -8,7 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- OpenClaw setup and diagnostics, with pull-based message delivery.
+- OpenClaw setup and live inbox delivery through a running OpenClaw Gateway.
+  Start a receiver with `concord adapters openclaw --agent <id>`.
 
 ### Changed
 
