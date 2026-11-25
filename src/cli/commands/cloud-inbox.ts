@@ -1,5 +1,4 @@
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { cloudSessionFor } from '../../cloud/session.js';
