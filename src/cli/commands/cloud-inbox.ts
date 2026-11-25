@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { cloudSessionFor } from '../../cloud/proxy.js';
+import { cloudSessionFor } from '../../cloud/session.js';
 import {
   asCloudAgent,
   CloudApiError,
@@ -56,7 +56,12 @@ export function cloudAccess(
       undefined,
       resolveCheckoutRoot(cwd, env),
     );
-    if (session === undefined) return { kind: 'local' };
+    if (session === undefined) {
+      return {
+        kind: 'unusable',
+        reason: 'No Concord Cloud workspace could be resolved for this repository.',
+      };
+    }
     const deadline =
       options.timeoutMs === undefined ? {} : { deadline: Date.now() + options.timeoutMs };
     return { kind: 'cloud', runtime: { ...session, fetch, ...deadline } };
@@ -196,6 +201,7 @@ export async function watchCloud(
    * receiver leaves the lease alone on the way out: it is the newer one's now.
    */
   replaced: () => boolean = () => false,
+  signal?: AbortSignal,
 ): Promise<void> {
   const stop = new AbortController();
   const stopped = (): boolean => stop.signal.aborted;
@@ -204,6 +210,8 @@ export async function watchCloud(
   };
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
   for (const name of signals) process.once(name, stopWatching);
+  signal?.addEventListener('abort', stopWatching, { once: true });
+  if (signal?.aborted === true) stopWatching();
   let agent: CloudAgentRef | undefined;
   try {
     while (!stopped()) {
@@ -223,6 +231,7 @@ export async function watchCloud(
       }
     }
   } finally {
+    signal?.removeEventListener('abort', stopWatching);
     for (const name of signals) process.off(name, stopWatching);
     if (!replaced()) {
       updateAgentState(runtime, agentKey, { watchingUntil: undefined });

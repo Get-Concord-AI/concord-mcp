@@ -30,7 +30,6 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { resolveAgentId, resolveInboxOwner } from '../agent-identity.js';
 import { resolveStore } from '../../workspaces/store.js';
-import { openContext } from '../context.js';
 import { launchDetachedConcord } from '../detached-host.js';
 import { codexThreadHostable } from '../embedding-host.js';
 import { isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
@@ -60,7 +59,7 @@ function receiverExpiry(interval: number, now = Date.now()): string {
   return new Date(now + Math.max(MIN_RECEIVER_TTL_MS, interval * 3)).toISOString();
 }
 
-function heartbeatReceiver(repos: Repositories, agentId: string, interval: number): void {
+export function heartbeatReceiver(repos: Repositories, agentId: string, interval: number): void {
   const endpoint = repos.agentEndpoints.getByAgent(agentId);
   if (endpoint === undefined) throw new Error(`Agent ${agentId} has no registered endpoint.`);
   repos.agentEndpoints.heartbeatReceiver(endpoint.endpointId, receiverExpiry(interval));
@@ -130,7 +129,7 @@ export function currentSession(provider: string, hookPayload: string | undefined
   return raw === undefined ? null : sessionKey(raw);
 }
 
-function isSqliteBusy(error: unknown): boolean {
+export function isSqliteBusy(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const code: unknown = Reflect.get(error, 'code');
   return typeof code === 'string' && code.startsWith('SQLITE_BUSY');
@@ -441,13 +440,17 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         process.stdout.write(registeredLine(agentId, options.provider));
         return;
       }
-      const context = openContext(process.cwd());
+      const context = await import('../context.js').then((module) =>
+        module.openContext(process.cwd()),
+      );
       const existing =
         options.provider === 'codex' ? context.repos.agentEndpoints.getByAgent(agentId) : undefined;
       registerPullEndpoint(context.repos, agentId, options.provider);
       // A SessionStart payload says whether this is a fresh session, which
       // takes back what an earlier session was handed but never read.
-      if (hookPayload !== undefined) observeHookEvent(context.repos, agentId, hookPayload);
+      if (hookPayload !== undefined) {
+        observeHookEvent(context.repos, agentId, hookPayload, options.provider);
+      }
       const alreadyHosted =
         existing?.transport === 'local-ipc' &&
         existing.status === 'connected' &&
@@ -533,11 +536,15 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       // whichever subagent ran a tool, and its activity proves nothing about
       // what the parent's model saw (#216).
       if (hookPayload !== undefined && isSubagentHook(parseObservedHook(hookPayload))) return;
-      const context = openContext(process.cwd());
+      const context = await import('../context.js').then((module) =>
+        module.openContext(process.cwd()),
+      );
       const isMonitor = options.format === 'monitor';
       // Read evidence first, so this invocation never marks read a message it
       // is itself about to deliver.
-      if (hookPayload !== undefined) observeHookEvent(context.repos, agentId, hookPayload);
+      if (hookPayload !== undefined) {
+        observeHookEvent(context.repos, agentId, hookPayload, options.provider);
+      }
       const messages = drainInbox(
         context.repos,
         agentId,
@@ -567,7 +574,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     .description('Record what a session hook saw: messages shown to the agent, or a fresh start')
     .option('--agent <id>', 'Agent id; defaults to CONCORD_AGENT_ID, then to the hook payload')
     .option('--provider <name>', 'Client the agent runs in', 'claude-code')
-    .action((options) => {
+    .action(async (options) => {
       // Seen-tracking lives in the local store; Concord Cloud keeps its own
       // delivery record. Prints nothing: UserPromptSubmit output becomes context.
       const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
@@ -578,7 +585,13 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
           kind: options.provider,
           hookPayload: payload,
         });
-        observeHookEvent(openContext(process.cwd()).repos, agentId, payload);
+        const context = await import('../context.js');
+        observeHookEvent(
+          context.openContext(process.cwd()).repos,
+          agentId,
+          payload,
+          options.provider,
+        );
       } catch (error) {
         // Never fail the hook: a missed observation only leaves a message unseen.
         process.stderr.write(
@@ -620,7 +633,9 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
           await watchCloud(access.runtime, agentId, 'claude-code', true, wake, claim.superseded);
           return;
         }
-        const context = openContext(process.cwd());
+        const context = await import('../context.js').then((module) =>
+          module.openContext(process.cwd()),
+        );
         await watchInbox(
           context.repos,
           agentId,
@@ -674,7 +689,9 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         );
         return;
       }
-      const context = openContext(process.cwd());
+      const context = await import('../context.js').then((module) =>
+        module.openContext(process.cwd()),
+      );
       const parsedInterval = Number.parseInt(options.interval, 10);
       if (!Number.isFinite(parsedInterval) || parsedInterval < 250) {
         throw new Error('--interval must be at least 250 milliseconds.');

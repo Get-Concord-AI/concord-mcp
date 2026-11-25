@@ -1,7 +1,19 @@
 import { existsSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { isOpenclawDetected, statusOpenclaw } from './openclaw.js';
+import { installOpenclawMcpConfig, uninstallOpenclawConfig } from '../openclaw-config.js';
 import { installHermes, statusHermes } from './hermes.js';
+import { statusKiro } from './kiro.js';
 import { statusQwen } from './qwen.js';
+import { statusDeepseek } from './deepseek.js';
+import { installDeepseekConfig, uninstallDeepseekConfig } from '../deepseek-config.js';
+import {
+  cursorHookInstalled,
+  installCursorHooks,
+  isRecord,
+  readJsonObject,
+  uninstallCursorHooks,
+} from '../cursor-hooks.js';
 
 import {
   HARNESS_CONFIGS,
@@ -50,6 +62,7 @@ import {
   removeMcpServer,
   upsertMcpServer,
 } from '../mcp-config.js';
+import { installKiroUserConfigs, kiroDetected, uninstallKiroUserConfigs } from '../kiro-config.js';
 import {
   cursorTarget,
   hasConcordManifest,
@@ -81,6 +94,11 @@ export interface AdapterReport {
   installedPath?: string | undefined;
   /** Present when the adapter link points somewhere other than this package. */
   link?: LinkCheck | undefined;
+}
+
+/** Kiro's CLI (`kiro-cli`), or the `kiro` launcher an IDE-only install may have. */
+export function kiroExecutablePath(env: NodeJS.ProcessEnv): string | undefined {
+  return executablePath(HARNESS_CONFIGS.kiro.executable, env) ?? executablePath('kiro', env);
 }
 
 /** Devin introduced dedicated MCP config files in v3000.3; its CLI omits the patch sometimes. */
@@ -239,97 +257,6 @@ function statusCodex(env: NodeJS.ProcessEnv): AdapterReport {
       ? config.installedDetail
       : 'Global hooks are installed, but the managed app-server daemon is not ready.',
   };
-}
-
-const CURSOR_HOOKS = {
-  sessionStart: {
-    command:
-      'node "$HOME/.cursor/extensions/get-concord-ai.concord-relay/cursor-hook.mjs" session-start',
-    timeout: 15,
-  },
-  stop: {
-    command: 'node "$HOME/.cursor/extensions/get-concord-ai.concord-relay/cursor-hook.mjs" stop',
-    timeout: 15,
-    loop_limit: 25,
-  },
-  sessionEnd: {
-    command:
-      'node "$HOME/.cursor/extensions/get-concord-ai.concord-relay/cursor-hook.mjs" session-end',
-    timeout: 15,
-  },
-} as const;
-
-function cursorHooksPath(env: NodeJS.ProcessEnv): string {
-  return join(userHome(env), '.cursor', 'hooks.json');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function readJsonObject(path: string): Record<string, unknown> {
-  if (!existsSync(path)) return {};
-  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-  if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object.`);
-  return parsed;
-}
-
-function cursorHookInstalled(env: NodeJS.ProcessEnv): boolean {
-  try {
-    const config = readJsonObject(cursorHooksPath(env));
-    const hooks = config['hooks'];
-    if (!isRecord(hooks)) return false;
-    return Object.entries(CURSOR_HOOKS).every(([event, expected]) => {
-      const definitions = hooks[event];
-      return (
-        Array.isArray(definitions) &&
-        definitions.some(
-          (definition) => isRecord(definition) && definition['command'] === expected.command,
-        )
-      );
-    });
-  } catch {
-    return false;
-  }
-}
-
-function installCursorHooks(env: NodeJS.ProcessEnv): void {
-  const path = cursorHooksPath(env);
-  const config = readJsonObject(path);
-  const currentHooks = isRecord(config['hooks']) ? config['hooks'] : {};
-  const nextHooks: Record<string, unknown> = { ...currentHooks };
-  for (const [event, expected] of Object.entries(CURSOR_HOOKS)) {
-    const currentValue: unknown = currentHooks[event];
-    const current: unknown[] = Array.isArray(currentValue) ? currentValue : [];
-    const retained = current.filter(
-      (definition) => !isRecord(definition) || definition['command'] !== expected.command,
-    );
-    nextHooks[event] = [...retained, expected];
-  }
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ ...config, version: 1, hooks: nextHooks }, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  if (process.platform !== 'win32') chmodSync(path, 0o600);
-}
-
-function uninstallCursorHooks(env: NodeJS.ProcessEnv): void {
-  const path = cursorHooksPath(env);
-  if (!existsSync(path)) return;
-  const config = readJsonObject(path);
-  const currentHooks = config['hooks'];
-  if (!isRecord(currentHooks)) return;
-  const nextHooks: Record<string, unknown> = { ...currentHooks };
-  for (const [event, expected] of Object.entries(CURSOR_HOOKS)) {
-    const current = currentHooks[event];
-    if (!Array.isArray(current)) continue;
-    nextHooks[event] = current.filter(
-      (definition) => !isRecord(definition) || definition['command'] !== expected.command,
-    );
-  }
-  writeFileSync(path, `${JSON.stringify({ ...config, hooks: nextHooks }, null, 2)}\n`, {
-    mode: 0o600,
-  });
 }
 
 function geminiSettingsInjectReady(settingsPath: string): boolean {
@@ -707,6 +634,8 @@ export function statusAdapter(
       return statusGrok(env);
     case 'goose':
       return statusGoose(env);
+    case 'openclaw':
+      return statusOpenclaw(executablePath(HARNESS_CONFIGS.openclaw.executable, env), env);
     case 'hermes': {
       const executable = executablePath(HARNESS_CONFIGS.hermes.executable, env);
       return statusHermes(
@@ -725,6 +654,10 @@ export function statusAdapter(
       return statusOpencode(env);
     case 'qwen':
       return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
+    case 'kiro':
+      return statusKiro(kiroExecutablePath(env), repoRoot, env);
+    case 'deepseek':
+      return statusDeepseek(executablePath(HARNESS_CONFIGS.deepseek.executable, env), env);
   }
 }
 
@@ -772,8 +705,21 @@ export function installAdapter(
     return;
   }
 
+  if (harness === 'openclaw') {
+    if (isOpenclawDetected(executablePath(HARNESS_CONFIGS.openclaw.executable, env), env)) {
+      installOpenclawMcpConfig(env);
+    }
+    return;
+  }
+
   if (harness === 'opencode') {
     installOpencode(env);
+    return;
+  }
+
+  if (harness === 'kiro') {
+    if (!kiroDetected(kiroExecutablePath(env), undefined, env)) return;
+    installKiroUserConfigs(env);
     return;
   }
 
@@ -839,6 +785,9 @@ export function installAdapter(
       }
       return;
     }
+    case 'deepseek':
+      installDeepseekConfig(env);
+      return;
   }
 }
 
@@ -899,9 +848,19 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   uninstallCodexConfig(env);
   uninstallGooseConfig(env);
   try {
+    uninstallOpenclawConfig(env);
+  } catch {
+    // Leave malformed or unreadable OpenClaw config untouched and continue cleanup.
+  }
+  try {
     uninstallHermesMcpConfig(env);
   } catch {
     // Preserve malformed Hermes settings and continue independent adapter cleanup.
+  }
+  try {
+    uninstallDeepseekConfig(env);
+  } catch {
+    // Leave malformed or unreadable DeepSeek config untouched and continue cleanup.
   }
   uninstallCopilotConfig(env);
   const antigravityMcp = join(userHome(env), '.gemini', 'config', 'mcp_config.json');
@@ -922,6 +881,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   }
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
+  uninstallKiroUserConfigs(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

@@ -148,7 +148,7 @@ function executeTransition(repos: Repositories, request: TransitionRequest): Tas
 
 function applyTransition(repos: Repositories, request: TransitionRequest): TaskLifecycleResult {
   const transact = repos.db.transaction(() => executeTransition(repos, request));
-  return transact();
+  return transact.immediate();
 }
 
 export function handleAssignTask(

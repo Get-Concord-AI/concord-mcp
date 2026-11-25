@@ -37,6 +37,21 @@ function machine(harnesses: readonly string[] = HARNESSES): NodeJS.ProcessEnv & 
 const read = (path: string): string => readFileSync(path, 'utf8');
 
 describe('applyGlobalMode', () => {
+  it('preserves DeepSeek user instructions under DSH_HOME when global mode changes', () => {
+    const env = machine(['dsh']);
+    env['DSH_HOME'] = join(env.HOME, 'custom-dsh');
+    const path = join(env['DSH_HOME'], 'AGENTS.md');
+    mkdirSync(env['DSH_HOME']);
+    writeFileSync(path, '# My DeepSeek instructions\n');
+    applyGlobalMode(env, true);
+    const installed = read(path);
+    expect(installed).toContain('# My DeepSeek instructions');
+    expect(installed).toContain('start_work');
+    applyGlobalMode(env, true);
+    expect(read(path)).toBe(installed);
+    applyGlobalMode(env, false);
+    expect(read(path)).toBe('# My DeepSeek instructions\n');
+  });
   it('installs and removes Devin user MCP config and instructions', () => {
     const env = machine(['devin']);
     const on = applyGlobalMode(env, true);
@@ -84,6 +99,40 @@ describe('applyGlobalMode', () => {
 
     expect(report.registrations).toEqual([]);
     expect(existsSync(join(env.HOME, '.config', 'devin', 'mcp_config.json'))).toBe(false);
+  });
+
+  it('installs and removes Kiro user MCP config, steering, and hooks', () => {
+    const env = machine(['kiro']);
+    const hooks = join(env.HOME, '.kiro', 'hooks', 'concord.json');
+    mkdirSync(join(env.HOME, '.kiro', 'hooks'), { recursive: true });
+    writeFileSync(
+      hooks,
+      `${JSON.stringify({
+        version: 'v1',
+        hooks: [
+          {
+            name: 'my-lint',
+            trigger: 'PostFileSave',
+            action: { type: 'command', command: 'lint' },
+          },
+        ],
+      })}\n`,
+    );
+
+    const on = applyGlobalMode(env, true);
+    expect(on.registrations).toEqual(['kiro']);
+    expect(read(join(env.HOME, '.kiro', 'steering', 'concord.md'))).toContain('start_work');
+    expect(read(join(env.HOME, '.kiro', 'settings', 'mcp.json'))).toContain('"CONCORD_AGENT_KIND"');
+    const installed = read(hooks);
+    expect(installed).toContain('my-lint');
+    expect(installed).toContain('concord hook kiro-session-start');
+
+    applyGlobalMode(env, false, { registrations: on.registrations });
+    expect(existsSync(join(env.HOME, '.kiro', 'steering', 'concord.md'))).toBe(false);
+    expect(read(join(env.HOME, '.kiro', 'settings', 'mcp.json'))).not.toContain('concord-mcp');
+    const remaining = read(hooks);
+    expect(remaining).toContain('my-lint');
+    expect(remaining).not.toContain('concord hook kiro-');
   });
 
   it('registers and instructs each installed harness, then removes only its own additions', () => {
@@ -312,51 +361,60 @@ describe('runSetup with global mode', () => {
   const present = (repo: string): string[] =>
     REPO_FILES.filter((relPath) => existsSync(join(repo, relPath)));
 
-  it('saves the choice and sets the repository up locally without writing repository files', () => {
+  it('saves the choice and sets the repository up locally without writing repository files', async () => {
     const env = machine([]);
     const repo = repository();
 
-    const result = runSetup(repo, {
+    const result = await runSetup(repo, {
       env: { ...env, CONCORD_REPO_ROOT: repo },
       global: true,
     });
 
-    expect(readUserConfig(env)).toEqual({ globalMode: true, globalRegistrations: [] });
-    expect(result.globalMode).toEqual({ written: [], warnings: [], registrations: [] });
+    expect(readUserConfig(env)).toEqual({
+      globalMode: true,
+      globalRegistrations: [],
+      globalOpenclawFiles: [],
+    });
+    expect(result.globalMode).toEqual({
+      written: [],
+      warnings: [],
+      registrations: [],
+      openclawFiles: [],
+    });
     expect(result.repoFilesSkipped).toBe(true);
     expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(true);
     expect(present(repo)).toEqual([]);
     expect(result.written.filter((path) => !path.startsWith(env.HOME))).toEqual([]);
   });
 
-  it('skips the repository files when global mode was saved earlier', () => {
+  it('skips the repository files when global mode was saved earlier', async () => {
     const env = machine([]);
     writeUserConfig(env, { globalMode: true });
     const repo = repository();
 
-    const result = runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo } });
+    const result = await runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo } });
 
     expect(result.repoFilesSkipped).toBe(true);
     expect(present(repo)).toEqual([]);
   });
 
-  it('skips the repository files with --no-mcp too, and leaves existing ones alone', () => {
+  it('skips the repository files with --no-mcp too, and leaves existing ones alone', async () => {
     const env = machine([]);
     const repo = repository();
     const existing = upsertBlock('# Mine\n', 'old instructions');
     writeFileSync(join(repo, 'CLAUDE.md'), existing);
 
-    runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, mcp: false, global: true });
+    await runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, mcp: false, global: true });
 
     expect(read(join(repo, 'CLAUDE.md'))).toBe(existing);
     expect(present(repo)).toEqual(['CLAUDE.md']);
   });
 
-  it('writes the repository files when asked with repoFiles', () => {
+  it('writes the repository files when asked with repoFiles', async () => {
     const env = machine([]);
     const repo = repository();
 
-    const result = runSetup(repo, {
+    const result = await runSetup(repo, {
       env: { ...env, CONCORD_REPO_ROOT: repo },
       global: true,
       repoFiles: true,
@@ -367,21 +425,21 @@ describe('runSetup with global mode', () => {
     expect(read(join(repo, 'CLAUDE.md'))).toContain(BLOCK_START);
   });
 
-  it('writes the repository files when global mode is off or was never chosen', () => {
+  it('writes the repository files when global mode is off or was never chosen', async () => {
     const env = machine([]);
     const turnedOff = repository();
-    runSetup(turnedOff, { env: { ...env, CONCORD_REPO_ROOT: turnedOff }, global: false });
+    await runSetup(turnedOff, { env: { ...env, CONCORD_REPO_ROOT: turnedOff }, global: false });
     expect(present(turnedOff)).toEqual(REPO_FILES);
 
     const neverChosen = repository();
-    const result = runSetup(neverChosen, {
+    const result = await runSetup(neverChosen, {
       env: { ...machine([]), CONCORD_REPO_ROOT: neverChosen },
     });
     expect(result.repoFilesSkipped).toBe(false);
     expect(present(neverChosen)).toEqual(REPO_FILES);
   });
 
-  it('judges Gemini by the settings global mode writes, so a first --require-adapters run passes', () => {
+  it('judges Gemini by the settings global mode writes, so a first --require-adapters run passes', async () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-global-home-'));
     const bin = join(home, 'bin');
     mkdirSync(bin);
@@ -389,7 +447,7 @@ describe('runSetup with global mode', () => {
     const env = { HOME: home, PATH: bin, CODEX_HOME: join(home, '.codex') };
     const repo = repository();
 
-    const result = runSetup(repo, {
+    const result = await runSetup(repo, {
       env: { ...env, CONCORD_REPO_ROOT: repo },
       global: true,
       adapters: true,
@@ -402,12 +460,12 @@ describe('runSetup with global mode', () => {
     expect(present(repo)).toEqual([]);
   });
 
-  it('writes the repository files when saved global mode is turned off in the same run', () => {
+  it('writes the repository files when saved global mode is turned off in the same run', async () => {
     const env = machine([]);
     writeUserConfig(env, { globalMode: true });
     const repo = repository();
 
-    runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, global: false });
+    await runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, global: false });
 
     expect(present(repo)).toEqual(REPO_FILES);
   });
