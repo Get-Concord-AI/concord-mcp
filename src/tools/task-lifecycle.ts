@@ -15,7 +15,7 @@ import type {
   ReopenTaskInput,
 } from '../domain/operations.js';
 import { CLAIMED_STATUSES } from '../domain/overlap.js';
-import { deriveLiveness } from '../domain/presence.js';
+import { deriveLiveness, isLeaseExpired } from '../domain/presence.js';
 
 export interface TaskLifecycleResult {
   task: TaskRecord;
@@ -71,7 +71,7 @@ export function hasPresentHolder(repos: Repositories, task: TaskRecord, now: num
   if (task.agentId !== null && isAgentPresent(repos, task.agentId, now)) {
     return true;
   }
-  const leaseExpired = task.leaseExpiresAt !== null && Date.parse(task.leaseExpiresAt) <= now;
+  const leaseExpired = isLeaseExpired(task.leaseExpiresAt, now);
   if (
     (task.status === 'assigned' || task.status === 'handoff_offered') &&
     !leaseExpired &&
@@ -95,57 +95,59 @@ function leaseDeadline(leaseSeconds: number | undefined, now: number): string | 
   return leaseSeconds === undefined ? null : new Date(now + leaseSeconds * 1000).toISOString();
 }
 
-function applyTransition(repos: Repositories, request: TransitionRequest): TaskLifecycleResult {
-  const transact = repos.db.transaction(() => {
-    const updated = repos.tasks.transition({
-      taskId: request.task.taskId,
-      expectedVersion: request.task.version,
-      status: request.status,
-      agentId: request.agentId,
-      assignedAgentId: request.assignedAgentId,
-      leaseExpiresAt: request.leaseExpiresAt,
-    });
-    if (updated === undefined) {
-      const current = repos.tasks.get(request.task.taskId);
-      throw new Error(
-        `Task ${request.task.taskId} version conflict: expected ${String(request.task.version)}, current ${String(current?.version ?? 'missing')}.`,
-      );
-    }
-    const displacedHandoff =
-      request.status === 'handoff_offered'
-        ? undefined
-        : repos.handoffs.pendingForTask(request.task.taskId);
-    if (displacedHandoff !== undefined) {
-      repos.handoffs.resolve(
-        displacedHandoff.id,
-        'expired',
-        request.reason ?? `superseded by ${request.transition}`,
-      );
-    }
-    const ownershipEvent = repos.ownershipEvents.record({
-      taskId: request.task.taskId,
-      transition: request.transition,
-      actorAgentId: request.actorAgentId,
-      fromAgentId: request.task.agentId,
-      toAgentId:
-        request.eventToAgentId === undefined
-          ? (updated.agentId ?? updated.assignedAgentId)
-          : request.eventToAgentId,
-      fromStatus: request.task.status,
-      toStatus: updated.status,
-      fromVersion: request.task.version,
-      toVersion: updated.version,
-      reason: request.reason,
-    });
-    repos.events.record({
-      taskId: request.task.taskId,
-      tool: request.tool,
-      status: 'success',
-      detail: `${String(request.task.version)} -> ${String(updated.version)}`,
-    });
-    repos.agents.recordActivity(request.actorAgentId);
-    return { task: updated, ownershipEvent };
+function executeTransition(repos: Repositories, request: TransitionRequest): TaskLifecycleResult {
+  const updated = repos.tasks.transition({
+    taskId: request.task.taskId,
+    expectedVersion: request.task.version,
+    status: request.status,
+    agentId: request.agentId,
+    assignedAgentId: request.assignedAgentId,
+    leaseExpiresAt: request.leaseExpiresAt,
   });
+  if (updated === undefined) {
+    const current = repos.tasks.get(request.task.taskId);
+    throw new Error(
+      `Task ${request.task.taskId} version conflict: expected ${String(request.task.version)}, current ${String(current?.version ?? 'missing')}.`,
+    );
+  }
+  const displacedHandoff =
+    request.status === 'handoff_offered'
+      ? undefined
+      : repos.handoffs.pendingForTask(request.task.taskId);
+  if (displacedHandoff !== undefined) {
+    repos.handoffs.resolve(
+      displacedHandoff.id,
+      'expired',
+      request.reason ?? `superseded by ${request.transition}`,
+    );
+  }
+  const ownershipEvent = repos.ownershipEvents.record({
+    taskId: request.task.taskId,
+    transition: request.transition,
+    actorAgentId: request.actorAgentId,
+    fromAgentId: request.task.agentId,
+    toAgentId:
+      request.eventToAgentId === undefined
+        ? (updated.agentId ?? updated.assignedAgentId)
+        : request.eventToAgentId,
+    fromStatus: request.task.status,
+    toStatus: updated.status,
+    fromVersion: request.task.version,
+    toVersion: updated.version,
+    reason: request.reason,
+  });
+  repos.events.record({
+    taskId: request.task.taskId,
+    tool: request.tool,
+    status: 'success',
+    detail: `${String(request.task.version)} -> ${String(updated.version)}`,
+  });
+  repos.agents.recordActivity(request.actorAgentId);
+  return { task: updated, ownershipEvent };
+}
+
+function applyTransition(repos: Repositories, request: TransitionRequest): TaskLifecycleResult {
+  const transact = repos.db.transaction(() => executeTransition(repos, request));
   return transact();
 }
 
@@ -187,7 +189,7 @@ export function handleAcceptTask(
   if (task.status !== 'assigned' || task.assignedAgentId !== actor.agentId) {
     throw new Error(`Task ${task.taskId} is not assigned to ${actor.agentId}.`);
   }
-  if (task.leaseExpiresAt !== null && Date.parse(task.leaseExpiresAt) <= now) {
+  if (task.leaseExpiresAt !== null && isLeaseExpired(task.leaseExpiresAt, now)) {
     return applyTransition(repos, {
       task,
       transition: 'expire_assignment',
@@ -239,57 +241,72 @@ export function handleReleaseTask(
 export function handleReassignTask(
   repos: Repositories,
   input: ReassignTaskInput,
-  now: number = Date.now(),
+  now?: number,
 ): TaskLifecycleResult {
-  const actor = registeredAgent(repos, input.agent_id);
-  registeredAgent(repos, input.to_agent_id);
-  const task = taskAtVersion(repos, input.task_id, input.expected_version);
-  if (task.status === 'closed' || task.status === 'complete') {
-    throw new Error(`Task ${task.taskId} is ${task.status}; reopen it before reassignment.`);
-  }
-  if (task.agentId !== actor.agentId) {
-    const unfinishedClaimed = CLAIMED_STATUSES.has(task.status);
-    const staleUnowned =
-      task.owner === null && unfinishedClaimed && !hasPresentHolder(repos, task, now);
-    const canForce = isHumanSupervisor(actor, task) || staleUnowned;
-    if (input.force !== true || !canForce) {
-      if (task.owner === null && !unfinishedClaimed && task.status !== 'proposed') {
-        throw new Error(
-          `Task ${task.taskId} is ${task.status}; only unfinished claimed work can be force-reassigned without a human owner.`,
-        );
-      }
-      if (task.owner === null && unfinishedClaimed && !staleUnowned) {
-        const holder =
-          task.agentId !== null && isAgentPresent(repos, task.agentId, now)
-            ? task.agentId
-            : (task.assignedAgentId ?? task.agentId ?? 'unassigned');
-        throw new Error(
-          `Only the current owner (${holder}) can reassign ${task.taskId} while its session is still active.`,
-        );
-      }
-      const hint =
-        input.force === true ? '' : " Use transfer_work with action: 'reassign' and force: true.";
-      const authority =
-        task.owner === null
-          ? 'a registered agent once the current owner is inactive'
-          : `a registered agent for human owner ${task.owner}`;
-      throw new Error(
-        `Only the current owner or ${authority} can force-reassign ${task.taskId}.${hint}`,
-      );
+  const transact = repos.db.transaction(() => {
+    // Run validation, liveness checks, and the ownership update in one IMMEDIATE
+    // write transaction so the holder cannot record progress (which does not bump
+    // task.version) between the liveness check and the reassignment.
+    const checkNow = now ?? Date.now();
+    const actor = registeredAgent(repos, input.agent_id);
+    registeredAgent(repos, input.to_agent_id);
+    const task = taskAtVersion(repos, input.task_id, input.expected_version);
+    if (task.status === 'closed' || task.status === 'complete') {
+      throw new Error(`Task ${task.taskId} is ${task.status}; reopen it before reassignment.`);
     }
-  }
-  return applyTransition(repos, {
-    task,
-    transition: input.force === true ? 'force_reassign' : 'reassign',
-    tool: 'reassign_task',
-    actorAgentId: actor.agentId,
-    status: 'assigned',
-    agentId: task.agentId,
-    assignedAgentId: input.to_agent_id,
-    leaseExpiresAt: leaseDeadline(input.lease_seconds, now),
-    reason: input.reason,
-    eventToAgentId: input.to_agent_id,
+    if (task.agentId !== actor.agentId) {
+      const unfinishedClaimed = CLAIMED_STATUSES.has(task.status);
+      const staleUnowned =
+        task.owner === null && unfinishedClaimed && !hasPresentHolder(repos, task, checkNow);
+      const canForce = isHumanSupervisor(actor, task) || staleUnowned;
+      if (input.force !== true || !canForce) {
+        if (task.owner === null && task.status === 'proposed') {
+          throw new Error(
+            `Task ${task.taskId} is proposed and has no owner; use start_work or transfer_work with action: 'assign' instead.`,
+          );
+        }
+        if (task.owner === null && !unfinishedClaimed) {
+          throw new Error(
+            `Task ${task.taskId} is ${task.status}; only unfinished claimed work can be force-reassigned without a human owner.`,
+          );
+        }
+        if (task.owner === null && unfinishedClaimed && !staleUnowned) {
+          if (task.agentId !== null && isAgentPresent(repos, task.agentId, checkNow)) {
+            throw new Error(
+              `Only the current owner (${task.agentId}) can reassign ${task.taskId} while its session is still active.`,
+            );
+          }
+          const pendingKind = task.status === 'handoff_offered' ? 'handoff' : 'assignment';
+          const recipient = task.assignedAgentId ?? 'the pending recipient';
+          throw new Error(
+            `Task ${task.taskId} has a pending ${pendingKind} for active agent ${recipient}; ${recipient} must accept it with transfer_work (action: 'accept', expected_version: ${String(task.version)}) while its session is still active.`,
+          );
+        }
+        const hint =
+          input.force === true ? '' : " Use transfer_work with action: 'reassign' and force: true.";
+        const authority =
+          task.owner === null
+            ? 'a registered agent once the current owner is inactive'
+            : `a registered agent for human owner ${task.owner}`;
+        throw new Error(
+          `Only the current owner or ${authority} can force-reassign ${task.taskId}.${hint}`,
+        );
+      }
+    }
+    return executeTransition(repos, {
+      task,
+      transition: input.force === true ? 'force_reassign' : 'reassign',
+      tool: 'reassign_task',
+      actorAgentId: actor.agentId,
+      status: 'assigned',
+      agentId: task.agentId,
+      assignedAgentId: input.to_agent_id,
+      leaseExpiresAt: leaseDeadline(input.lease_seconds, checkNow),
+      reason: input.reason,
+      eventToAgentId: input.to_agent_id,
+    });
   });
+  return transact.immediate();
 }
 
 export function handleCloseTask(repos: Repositories, input: CloseTaskInput): TaskLifecycleResult {

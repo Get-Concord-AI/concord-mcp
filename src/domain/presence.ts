@@ -73,6 +73,11 @@ export function deriveLiveness(
   return 'live';
 }
 
+/** True when an optional ISO lease deadline has elapsed at or before `now`. */
+export function isLeaseExpired(leaseExpiresAt: string | null, now: number): boolean {
+  return leaseExpiresAt !== null && Date.parse(leaseExpiresAt) <= now;
+}
+
 const LIVENESS_ORDER: Record<Liveness, number> = { live: 0, idle: 1, away: 2, archived: 3 };
 
 function ageSecondsOf(lastSeen: string, now: number): number {
@@ -149,7 +154,7 @@ function staleAssignment(
     };
   }
   const waitedMs = now - Date.parse(assignedAt);
-  const leaseExpired = task.leaseExpiresAt !== null && Date.parse(task.leaseExpiresAt) <= now;
+  const leaseExpired = isLeaseExpired(task.leaseExpiresAt, now);
   if (
     leaseExpired ||
     waitedMs >= thresholds.assignmentAcceptAfterMs ||

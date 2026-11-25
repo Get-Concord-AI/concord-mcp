@@ -1,5 +1,5 @@
 import { CLAIMED_STATUSES } from '../domain/overlap.js';
-import { deriveLiveness } from '../domain/presence.js';
+import { deriveLiveness, isLeaseExpired } from '../domain/presence.js';
 import type { Repositories, TaskRecord, TaskUpdateRecord } from '../db/index.js';
 import type { UpdateTaskInput } from '../domain/operations.js';
 import { hasPresentHolder } from './task-lifecycle.js';
@@ -21,7 +21,7 @@ function recoveryGuidance(
   const ownerInactive =
     liveness === 'away' || liveness === 'archived' || liveness === 'unregistered';
 
-  const leaseExpired = task.leaseExpiresAt !== null && Date.parse(task.leaseExpiresAt) <= now;
+  const leaseExpired = isLeaseExpired(task.leaseExpiresAt, now);
   const pendingKind =
     task.status === 'handoff_offered'
       ? 'handoff'
