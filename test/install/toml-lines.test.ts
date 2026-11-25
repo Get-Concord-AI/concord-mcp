@@ -19,6 +19,13 @@ describe('tomlLines', () => {
       expect(insideStrings(`${line}\n[x]`)).toEqual([]);
     }
   });
+
+  it('marks the inside of multi-line arrays, so their elements are never headers', () => {
+    const source = 'a = [\n  ["x"],\n  # note\n  "[y]",\n  ["z"]\n]\n[t]\nb = [1, [2]] # ]';
+    const inValue = [...tomlLines(source)].filter((line) => line.inValue).map((line) => line.text);
+
+    expect(inValue).toEqual(['  ["x"],', '  # note', '  "[y]",', '  ["z"]', ']']);
+  });
 });
 
 describe('inlineTableKeys', () => {

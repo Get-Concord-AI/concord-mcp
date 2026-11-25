@@ -375,13 +375,14 @@ command = "my-session-hook"
   });
 
   it('moves the lines after the end marker with the block', () => {
-    // The user's Stop group below sends the block to the end of the file. TOML
-    // reads the lines after the end marker as part of Concord's last hook.
+    // The last entry belongs to the user's Stop group at the top, which sends the
+    // block to the end. TOML reads the lines after the end marker as Concord's.
     const after = 'model = "o3"\n# a note\neffort = "high"';
     const config = [
       '[mcp_servers.concord]\ncommand = "concord-mcp"',
-      `${BLOCK}\n${after}`,
-      `[[hooks.Stop]]\n${entry('Stop', 'user-stop')}`,
+      `[[hooks.Stop]]\n${entry('Stop', 'user-stop-1')}`,
+      `[[hooks.SessionStart]]\n${entry('SessionStart', REGISTER)}\n${END}\n${after}`,
+      entry('Stop', 'user-stop-2'),
     ].join('\n\n');
     const setup = (text: string): string => upsertCodexHooks(upsertCodexMcpServer(text));
 
@@ -389,6 +390,7 @@ command = "my-session-hook"
 
     expectConcordOnce(result);
     expect(result).toContain(`${END}\n${after}\n`);
+    expect(groupOf(result, 'Stop', 'user-stop-2')).toBe(groupOf(result, 'Stop', 'user-stop-1'));
     expect(setup(result)).toBe(result);
   });
 
@@ -446,5 +448,21 @@ command = "my-session-hook"
 
     expectConcordOnce(result);
     expect(result).not.toContain('"command" =');
+  });
+
+  it('keeps a nested array after the end marker intact', () => {
+    const matrix = 'matrix = [\n  ["a"],\n  # note\n  ["b"]\n]';
+
+    const result = upsertCodexHooks(`${BLOCK}\n${matrix}\n\n[tui]\nx = 1\n`);
+
+    expect(result).toContain(`${END}\n${matrix}\n\n[tui]`);
+    expect(upsertCodexHooks(result)).toBe(result);
+  });
+
+  it('keeps the block in place when user groups follow it', () => {
+    // Codex keys hook trust by position, so moving the block would ask again.
+    const config = `${BLOCK}\n\n[[hooks.Stop]]\n${entry('Stop', 'user-stop')}\n`;
+
+    expect(upsertCodexHooks(config)).toBe(config);
   });
 });

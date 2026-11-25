@@ -5,10 +5,14 @@
 
 type MultilineQuote = '"""' | "'''";
 
-/** One line of TOML source; `inString` lines continue a multi-line string and hold no TOML. */
+/**
+ * One line of TOML source. `inString` lines continue a multi-line string and hold
+ * no TOML; `inValue` lines continue a multi-line array, so they are never a header.
+ */
 export interface TomlLine {
   readonly text: string;
   readonly inString: boolean;
+  readonly inValue: boolean;
 }
 
 /**
@@ -55,12 +59,15 @@ function singleLineStringEnd(text: string, start: number): number {
   return text.length;
 }
 
-/** The multi-line string still open after `text`, given the one open before it. */
-function openStringAfter(
-  text: string,
-  open: MultilineQuote | undefined,
-): MultilineQuote | undefined {
-  let quote = open;
+interface LexState {
+  quote: MultilineQuote | undefined;
+  /** Brackets still open outside strings, as in a multi-line array. */
+  depth: number;
+}
+
+/** The multi-line string and brackets still open after `text`, given those open before it. */
+function stateAfter(text: string, before: LexState): LexState {
+  let { quote, depth } = before;
   let index = 0;
   while (index < text.length) {
     if (quote !== undefined) {
@@ -86,18 +93,20 @@ function openStringAfter(
     } else if (char === '"' || char === "'") {
       index = singleLineStringEnd(text, index);
     } else {
+      if (char === '[' || char === '{') depth += 1;
+      else if ((char === ']' || char === '}') && depth > 0) depth -= 1;
       index += 1;
     }
   }
-  return quote;
+  return { quote, depth };
 }
 
-/** Each line of `source`, marked when it is the inside of a multi-line string. */
+/** Each line of `source`, marked when it is the inside of a multi-line string or array. */
 export function* tomlLines(source: string): Generator<TomlLine> {
-  let open: MultilineQuote | undefined;
+  let state: LexState = { quote: undefined, depth: 0 };
   for (const text of source.split(/\r?\n/u)) {
-    yield { text, inString: open !== undefined };
-    open = openStringAfter(text, open);
+    yield { text, inString: state.quote !== undefined, inValue: state.depth > 0 };
+    state = stateAfter(text, state);
   }
 }
 

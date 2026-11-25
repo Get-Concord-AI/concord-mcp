@@ -20,17 +20,24 @@ function inLineEnding(source: string, edit: (text: string) => string): string {
   return eol === '\n' ? edited : edited.replaceAll('\n', eol);
 }
 
+/** Whether `line` starts a statement, rather than continuing a multi-line string or array. */
+function startsStatement(line: TomlLine): boolean {
+  return !line.inString && !line.inValue;
+}
+
 function isHeader(line: TomlLine): boolean {
-  return !line.inString && TABLE_HEADER.test(line.text);
+  return startsStatement(line) && TABLE_HEADER.test(line.text);
 }
 
 function isBlank(line: TomlLine | undefined): boolean {
-  return line !== undefined && !line.inString && line.text.trim() === '';
+  return line !== undefined && startsStatement(line) && line.text.trim() === '';
 }
 
 /** Blank and comment lines belong to what follows them. */
 function isDecoration(line: TomlLine | undefined): boolean {
-  return isBlank(line) || (line !== undefined && !line.inString && COMMENT_LINE.test(line.text));
+  return (
+    isBlank(line) || (line !== undefined && startsStatement(line) && COMMENT_LINE.test(line.text))
+  );
 }
 
 /** Keeps `line` unless it is a second blank line in a row; string contents always stay. */
@@ -87,7 +94,7 @@ function addServerTable(source: string): string {
 
   const lines = [...tomlLines(source)];
   const found = lines.findIndex(
-    (line) => !line.inString && line.text.trim() === CODEX_SECTION_HEADER,
+    (line) => startsStatement(line) && line.text.trim() === CODEX_SECTION_HEADER,
   );
   const start = found === -1 ? lines.length : found;
 
@@ -139,12 +146,12 @@ const CONCORD_COMMENTS = new Set(
 );
 
 function isConcordComment(line: TomlLine): boolean {
-  return !line.inString && CONCORD_COMMENTS.has(line.text.trim());
+  return startsStatement(line) && CONCORD_COMMENTS.has(line.text.trim());
 }
 
 /** The key of an array-of-tables header such as `[[ hooks.Stop ]] # note`. */
 function arrayTableKey(line: TomlLine | undefined): string | undefined {
-  if (line === undefined || line.inString) return undefined;
+  if (line === undefined || !startsStatement(line)) return undefined;
   const key = /^\[\[([^\]]+)\]\]\s*(?:#.*)?$/u.exec(line.text.trim())?.[1];
   return key === undefined ? undefined : tomlKeyPath(key);
 }
@@ -159,7 +166,7 @@ const STRING_ENTRY = new RegExp(
 
 /** The key and string value a `key = "value"` line sets, ignoring a trailing comment. */
 function stringEntry(line: TomlLine): { key: string; value: string } | undefined {
-  if (line.inString) return undefined;
+  if (!startsStatement(line)) return undefined;
   const match = STRING_ENTRY.exec(line.text.trim());
   const key = match?.[1];
   const value = match?.[2] ?? match?.[3];
@@ -193,7 +200,7 @@ function concordEntry(
 }
 
 function lineKey(line: TomlLine): string | undefined {
-  if (line.inString) return undefined;
+  if (!startsStatement(line)) return undefined;
   const key = KEY_LINE.exec(line.text)?.[1];
   return key === undefined ? undefined : tomlKeyPath(key);
 }
@@ -257,7 +264,7 @@ function concordHookLines(lines: readonly TomlLine[]): {
   const carried = new Set<number>();
   const groups: HookGroup[] = [];
   const current = new Map<string, HookGroup>();
-  const userEntries: number[] = [];
+  const userEntries: { index: number; group: number | undefined }[] = [];
   for (const [index, line] of lines.entries()) {
     const key = arrayTableKey(line);
     const hook = CONCORD_HOOKS.find(
@@ -277,7 +284,7 @@ function concordHookLines(lines: readonly TomlLine[]): {
     }
     const found = concordEntry(lines, index, hook.command);
     if (found === undefined) {
-      userEntries.push(index);
+      userEntries.push({ index, group: group?.header });
       continue;
     }
     removeRange(removed, index, found.end);
@@ -299,7 +306,10 @@ function concordHookLines(lines: readonly TomlLine[]): {
     spot ??= group.header;
   }
   const first = spot;
-  if (first !== undefined && userEntries.some((entry) => entry > first)) spot = undefined;
+  // The block would steal a later user entry whose group sits above it, or that has none.
+  const steals = (entry: { index: number; group: number | undefined }): boolean =>
+    first !== undefined && entry.index > first && (entry.group ?? -1) < first;
+  if (userEntries.some(steals)) spot = undefined;
   return { removed, carried, spot };
 }
 
@@ -411,8 +421,10 @@ export function removeCodexMcpServer(source: string): string {
 function removeServerTables(source: string): string {
   const lines = [...tomlLines(source)];
   const removed = new Set<number>();
-  for (const [index, { text, inString }] of lines.entries()) {
-    const table = inString ? undefined : /^\s*\[\[?([^\]]+)\]\]?\s*(?:#.*)?$/u.exec(text)?.[1];
+  for (const [index, line] of lines.entries()) {
+    const table = startsStatement(line)
+      ? /^\s*\[\[?([^\]]+)\]\]?\s*(?:#.*)?$/u.exec(line.text)?.[1]
+      : undefined;
     if (table !== undefined && CONCORD_TOML_KEY.test(tomlKeyPath(table))) {
       removeRange(removed, index, tableEnd(lines, index));
     }
