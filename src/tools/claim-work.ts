@@ -50,9 +50,10 @@ function addedEntries(existing: readonly string[], incoming: readonly string[]):
 export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): ClaimWorkResult {
   // Stored as the checkout names them, so an absolute or symlinked spelling
   // claims the same file as its checkout-relative one.
-  const inputFiles = (input.expected_files ?? []).map((file) =>
-    pathFromCheckout(repos.checkoutRoot, file),
-  );
+  // Entries stored before this rule may still be absolute; they are named
+  // the same way whenever they are compared or merged.
+  const fromCheckout = (file: string): string => pathFromCheckout(repos.checkoutRoot, file);
+  const inputFiles = (input.expected_files ?? []).map(fromCheckout);
   const inputModules = input.modules ?? [];
   const inputDomains = input.domains ?? [];
   const inputRiskTags = input.risk_tags ?? [];
@@ -77,7 +78,9 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
 
   // Effective scope: the merged surface for an existing claim, else the input.
   const scope = {
-    expectedFiles: existing ? mergeUnique(existing.expectedFiles, inputFiles) : inputFiles,
+    expectedFiles: existing
+      ? mergeUnique(existing.expectedFiles.map(fromCheckout), inputFiles)
+      : inputFiles,
     modules: existing ? mergeUnique(existing.modules, inputModules) : inputModules,
     domains: existing ? mergeUnique(existing.domains, inputDomains) : inputDomains,
     riskTags: existing ? mergeUnique(existing.riskTags, inputRiskTags) : inputRiskTags,
@@ -85,7 +88,8 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
 
   const activeOthers = repos.tasks
     .list()
-    .filter((task) => task.taskId !== input.task_id && CLAIMED_STATUSES.has(task.status));
+    .filter((task) => task.taskId !== input.task_id && CLAIMED_STATUSES.has(task.status))
+    .map((task) => ({ ...task, expectedFiles: task.expectedFiles.map(fromCheckout) }));
   const pathsFromCheckout = resolvePathsFromCheckout(repos.checkoutRoot, [
     scope.expectedFiles,
     ...activeOthers.map((task) => task.expectedFiles),
@@ -100,7 +104,9 @@ export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): Cla
 
   const scopeAdded = existing
     ? [
-        ...addedEntries(existing.expectedFiles, inputFiles).map((value) => `file: ${value}`),
+        ...addedEntries(existing.expectedFiles.map(fromCheckout), inputFiles).map(
+          (value) => `file: ${value}`,
+        ),
         ...addedEntries(existing.modules, inputModules).map((value) => `module: ${value}`),
         ...addedEntries(existing.domains, inputDomains).map((value) => `domain: ${value}`),
         ...addedEntries(existing.riskTags, inputRiskTags).map((value) => `risk tag: ${value}`),

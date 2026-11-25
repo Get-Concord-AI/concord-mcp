@@ -184,6 +184,36 @@ describe('decidePreToolUse', () => {
     }
   });
 
+  it('still blocks an edit against a claim stored with an absolute path', () => {
+    const workspace = realpathSync.native(mkdtempSync(join(tmpdir(), 'concord-hook-old-abs-')));
+    try {
+      mkdirSync(join(workspace, '.git'));
+      const context = openContext(workspace, {});
+      try {
+        // A claim stored before claims were named checkout-relative.
+        // Without a checkout root the path is stored as given, as it was before.
+        handleClaimWork(
+          { ...context.repos, checkoutRoot: undefined },
+          {
+            task_id: 'OLD',
+            title: 'Old absolute claim',
+            expected_files: [join(workspace, 'src', 'app.ts')],
+          },
+        );
+        expect(context.repos.tasks.get('OLD')?.expectedFiles).toEqual([
+          join(workspace, 'src', 'app.ts'),
+        ]);
+        for (const edit of [join(workspace, 'src', 'app.ts'), 'src/app.ts']) {
+          expect(decidePreToolUse(context.repos, preToolUse(edit), 'MINE').result).toBe('blocked');
+        }
+      } finally {
+        context.repos.db.close();
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('keeps one name for a file claimed through a symlinked folder before it exists', () => {
     const workspace = realpathSync.native(mkdtempSync(join(tmpdir(), 'concord-hook-newfile-')));
     try {

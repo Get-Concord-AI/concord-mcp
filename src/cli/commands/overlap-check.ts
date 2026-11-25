@@ -38,9 +38,15 @@ export function checkFileOverlaps(
     if (file !== '' && !byKey.has(key)) byKey.set(key, file);
   }
   const wanted = [...byKey.values()];
+  // Claims stored before this naming rule may still be absolute, so name
+  // stored entries the same way before comparing.
   const otherClaims = repos.tasks
     .list()
-    .filter((task) => CLAIMED_STATUSES.has(task.status) && task.taskId !== selfTaskId);
+    .filter((task) => CLAIMED_STATUSES.has(task.status) && task.taskId !== selfTaskId)
+    .map((task) => ({
+      ...task,
+      expectedFiles: task.expectedFiles.map((entry) => pathFromCheckout(repos.checkoutRoot, entry)),
+    }));
   const pathsFromCheckout = resolvePathsFromCheckout(
     repos.checkoutRoot,
     otherClaims.map((task) => task.expectedFiles),
