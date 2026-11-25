@@ -119,7 +119,7 @@ describe('kiloMcpState', () => {
       `{
         // user comment
         "mcp": {
-          "concord": { "type": "local", "command": ["concord-mcp"], },
+          "concord": { "type": "local", "command": ["concord-mcp"], "environment": { "CONCORD_AGENT_KIND": "kilo" }, },
         },
       }
       /* trailing comment */
@@ -256,7 +256,11 @@ describe('kiloMcpState', () => {
       'kilo.json',
       JSON.stringify({
         mcp: {
-          concord: { type: 'local', command: ['npx', '-y', '@concord-ai/concord-mcp@1.2.3'] },
+          concord: {
+            type: 'local',
+            command: ['npx', '-y', '@concord-ai/concord-mcp@1.2.3'],
+            environment: { CONCORD_AGENT_KIND: 'kilo' },
+          },
         },
       }),
     );
@@ -374,7 +378,7 @@ describe('uninstallKiloMcpConfig', () => {
       'kilo.jsonc',
       `{
   "mcp": {
-    "concord": { "type": "local", "command": ["concord-mcp"], },
+    "concord": { "type": "local", "command": ["concord-mcp"], "environment": { "CONCORD_AGENT_KIND": "kilo" }, },
     "keep": { "command": ["x"] }
   }
 }
@@ -438,7 +442,7 @@ describe('round-3 review regressions', () => {
     }
   },
   "mcp": {
-    "concord": { "type": "local", "command": ["concord-mcp"] },
+    "concord": { "type": "local", "command": ["concord-mcp"], "environment": { "CONCORD_AGENT_KIND": "kilo" } },
     "keep": { "command": ["x"] }
   }
 }
@@ -543,5 +547,52 @@ describe('round-3 review regressions', () => {
     );
     writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: { enabled: false } } }));
     expect(kiloMcpState(env).state).toBe('conflict');
+  });
+});
+
+describe('round-4 review regressions', () => {
+  it('does not report installed when the entry lacks the kilo kind pin', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      JSON.stringify({
+        mcp: { concord: { type: 'local', command: ['concord-mcp'] } },
+      }),
+    );
+    expect(kiloMcpState(env).state).not.toBe('installed');
+  });
+
+  it('does not report installed when the pin names another harness', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      JSON.stringify({
+        mcp: {
+          concord: {
+            type: 'local',
+            command: ['concord-mcp'],
+            environment: { CONCORD_AGENT_KIND: 'claude' },
+          },
+        },
+      }),
+    );
+    expect(kiloMcpState(env).state).not.toBe('installed');
+  });
+
+  it('still uninstalls an unpinned legacy entry', () => {
+    const { home, env } = kiloEnv();
+    const path = writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      JSON.stringify({
+        mcp: { concord: { type: 'local', command: ['concord-mcp'] }, keep: { command: ['x'] } },
+      }),
+    );
+    uninstallKiloMcpConfig(env);
+    const parsed = serversSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    expect(parsed.mcp?.['concord']).toBeUndefined();
+    expect(parsed.mcp?.['keep']).toBeDefined();
   });
 });

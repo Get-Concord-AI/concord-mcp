@@ -213,10 +213,20 @@ function isOwnedKiloCommand(command: readonly string[]): boolean {
  * command, or the runner invocation above, and only Concord's own environment
  * keys under either `environment` or Kilo's `env` alias.
  */
-function isKiloConcordEntry(entry: KiloServer): boolean {
+function isKiloConcordEntry(entry: KiloServer, requireKindPin = true): boolean {
   if (!isOwnedKiloCommand(entry.command ?? [])) return false;
-  const envKeys = [...Object.keys(entry.environment ?? {}), ...Object.keys(entry.env ?? {})];
-  return envKeys.every((key) => CONCORD_ENV_KEYS.has(key));
+  const environment = entry.environment ?? {};
+  const env = entry.env ?? {};
+  const envKeys = [...Object.keys(environment), ...Object.keys(env)];
+  if (!envKeys.every((key) => CONCORD_ENV_KEYS.has(key))) return false;
+  if (!requireKindPin) return true;
+  // The pin is part of ownership for install decisions: an entry Concord
+  // shaped but another harness wrote (or a hand-copied one) carries its own
+  // kind — or none — and treating it as installed would let a Kilo session
+  // inherit that foreign identity. Removal keeps the looser shape so entries
+  // from before the pin existed still uninstall cleanly.
+  const kind = env[AGENT_KIND_ENV] ?? environment[AGENT_KIND_ENV];
+  return kind === 'kilo';
 }
 
 /** The `mcp.concord` value of one parsed config when present, whatever its shape. */
@@ -351,7 +361,7 @@ export function uninstallKiloMcpConfig(env: NodeJS.ProcessEnv): void {
     let owned: boolean;
     try {
       const entry = parseKiloServer(concordValue(parseKiloConfig(text)) ?? null);
-      owned = entry !== undefined && isKiloConcordEntry(entry);
+      owned = entry !== undefined && isKiloConcordEntry(entry, false);
     } catch {
       continue;
     }
@@ -381,7 +391,7 @@ function removeConcordEntry(text: string): string | undefined {
       jsoncToJson(inner.slice(concord.open, concord.close + 1)),
     );
     const located = parseKiloServer(jsonValueSchema.parse(locatedRaw));
-    if (located === undefined || !isKiloConcordEntry(located)) return undefined;
+    if (located === undefined || !isKiloConcordEntry(located, false)) return undefined;
   } catch {
     return undefined;
   }
