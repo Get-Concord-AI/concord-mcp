@@ -2,8 +2,8 @@
 
 Run `concord setup` from the repository you want to coordinate. Setup detects
 the OpenClaw CLI or state directory and registers Concord in `mcp.servers.concord`.
-It reads `$OPENCLAW_CONFIG_PATH` when set, otherwise `openclaw.json` under
-`$OPENCLAW_STATE_DIR` or `~/.openclaw`. It preserves existing settings and
+It reads `$OPENCLAW_CONFIG_PATH` when set, otherwise `openclaw.json` in the
+OpenClaw state directory for the current profile. It preserves existing settings and
 custom Concord entries. A config change rewrites JSON5 as JSON and drops comments.
 
 Run `openclaw mcp reload` or restart the gateway, then verify the connection
@@ -28,9 +28,9 @@ where `<id>` is its OpenClaw agent ID (`main` by default). On `start_work`, use
 `kind: "openclaw"`. To read that agent's inbox, call `inspect_work` with its
 `agent_id`. Messages are pulled during turns.
 
-Use `workspace_id` to identify the repository if the gateway starts Concord
-outside it. On a machine signed in to Concord Cloud, use the repository's
-remote as the workspace ID.
+If the gateway starts Concord outside the repository, pass `workspace_id`.
+For local Concord, use the workspace ID printed by `concord setup` in that
+repository. For Concord Cloud, use the repository's Git remote.
 
 Use `concord adapters uninstall --yes` to remove Concord-managed registrations,
 including OpenClaw's.
