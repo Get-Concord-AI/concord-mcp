@@ -62,6 +62,18 @@ describe('Vibe hook payloads', () => {
     });
   }
 
+  // Vibe resolves its live conversation through CURRENT -> generations/<gen>/
+  // manifest.json -> runtime_state.chunks; only those chunks count as evidence.
+  function writeLiveManifest(dir: string, chunkNames: string[]): void {
+    const generation = '0000000000000001';
+    mkdirSync(join(dir, 'generations', generation), { recursive: true });
+    writeFileSync(
+      join(dir, 'generations', generation, 'manifest.json'),
+      JSON.stringify({ runtime_state: { chunks: chunkNames } }),
+    );
+    writeFileSync(join(dir, 'CURRENT'), JSON.stringify({ generation }));
+  }
+
   it('ignores hooks fired inside a spawned subagent (parent_session_id)', () => {
     const messageId = send(repos, 'for the main agent', 'k1');
     const delivered = drainInbox(repos, 'beta', 'vibe', undefined, {
@@ -121,6 +133,7 @@ describe('Vibe hook payloads', () => {
         },
       ]),
     );
+    writeLiveManifest(dir, ['aaa']);
 
     observeHookEvent(
       repos,
@@ -161,6 +174,7 @@ describe('Vibe hook payloads', () => {
     const newer = new Date('2024-01-02T00:00:00Z');
     utimesSync(join(chunks, 'older.json'), older, older);
     utimesSync(join(chunks, 'newer.json'), newer, newer);
+    writeLiveManifest(dir, ['older', 'newer']);
 
     observeHookEvent(
       repos,
@@ -192,6 +206,76 @@ describe('Vibe hook payloads', () => {
         },
         { message: { role: 'assistant', content: 'ok' } },
         { message: { role: 'user', content: 'x'.repeat(5 * 1024 * 1024) } },
+      ]),
+    );
+    writeLiveManifest(dir, ['big']);
+
+    observeHookEvent(
+      repos,
+      'beta',
+      vibeHook({ hook_event_name: 'post_tool', transcript_path: dir }),
+    );
+    expect(status(repos, messageId)).toBe('delivered');
+  });
+
+  it('ignores read evidence in chunks the live manifest no longer lists', () => {
+    const messageId = send(repos, 'discarded note', 'k1');
+    drainInbox(repos, 'beta', 'vibe', undefined, {
+      session: sessionKey(SESSION),
+      via: 'hook',
+    });
+    // A compacted generation leaves its chunks in the pool: the evidence is
+    // on disk but the model can no longer see it, so it must not count.
+    const dir = mkdtempSync(join(tmpdir(), 'concord-vibe-discard-'));
+    const chunks = join(dir, 'chunks');
+    mkdirSync(chunks, { recursive: true });
+    writeFileSync(
+      join(chunks, 'discarded.json'),
+      JSON.stringify([
+        {
+          message: {
+            role: 'user',
+            content: `[concord from alpha id=${messageId}]
+discarded note`,
+          },
+        },
+        { message: { role: 'assistant', content: 'got it' } },
+      ]),
+    );
+    writeFileSync(
+      join(chunks, 'live.json'),
+      JSON.stringify([{ message: { role: 'user', content: 'compacted summary' } }]),
+    );
+    writeLiveManifest(dir, ['live']);
+
+    observeHookEvent(
+      repos,
+      'beta',
+      vibeHook({ hook_event_name: 'post_tool', transcript_path: dir }),
+    );
+    expect(status(repos, messageId)).toBe('delivered');
+  });
+
+  it('reads nothing when the session has no resolvable manifest', () => {
+    const messageId = send(repos, 'orphan note', 'k1');
+    drainInbox(repos, 'beta', 'vibe', undefined, {
+      session: sessionKey(SESSION),
+      via: 'hook',
+    });
+    const dir = mkdtempSync(join(tmpdir(), 'concord-vibe-orphan-'));
+    const chunks = join(dir, 'chunks');
+    mkdirSync(chunks, { recursive: true });
+    writeFileSync(
+      join(chunks, 'orphan.json'),
+      JSON.stringify([
+        {
+          message: {
+            role: 'user',
+            content: `[concord from alpha id=${messageId}]
+orphan note`,
+          },
+        },
+        { message: { role: 'assistant', content: 'noted' } },
       ]),
     );
 

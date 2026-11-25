@@ -241,12 +241,20 @@ export function readHookPayload(): string | undefined {
 }
 
 /**
- * Env pinned to the hook payload's project dir. A harness inherits its
- * launcher's environment, which can carry a stale `CLAUDE_PROJECT_DIR` or
- * `CONCORD_REPO_ROOT` pointing at another checkout; the payload's `cwd` is
- * the session's real project, so it wins for repo-root resolution.
+ * Env pinned to the hook payload's project dir, for the providers whose
+ * generic hook path needs it. Vibe inherits its launcher's environment, which
+ * can carry a stale `CLAUDE_PROJECT_DIR` or `CONCORD_REPO_ROOT` pointing at
+ * another checkout; the payload's `cwd` is the session's real project, so it
+ * wins for repo-root resolution. Other providers must not be pinned here —
+ * a Claude Code session that `cd`s into another checkout still belongs to the
+ * workspace it registered in, and pinning would drain and acknowledge the
+ * wrong inbox. Kiro and Hermes pin inside their own hook handlers instead.
  */
-function payloadPinnedEnv(hookPayload: string | undefined): NodeJS.ProcessEnv {
+function payloadPinnedEnv(
+  hookPayload: string | undefined,
+  provider: string,
+): NodeJS.ProcessEnv {
+  if (provider !== 'vibe') return process.env;
   if (hookPayload === undefined) return process.env;
   const cwd = parseObservedHook(hookPayload)?.cwd;
   if (cwd === undefined || cwd.trim() === '') return process.env;
@@ -517,7 +525,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         HOOK_FORMATS.includes(options.format)
           ? (readHookPayload() ?? '')
           : undefined;
-      const pinnedEnv = payloadPinnedEnv(hookPayload);
+      const pinnedEnv = payloadPinnedEnv(hookPayload, options.provider);
       const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS }, pinnedEnv);
       if (access.kind === 'local' && !workspaceExists(process.cwd(), pinnedEnv)) return;
       // Checked before anything is taken: a format typo must not cost a batch.
@@ -602,7 +610,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       // delivery record. Prints nothing: UserPromptSubmit output becomes context.
       try {
         const payload = readHookPayload() ?? '';
-        const pinnedEnv = payloadPinnedEnv(payload);
+        const pinnedEnv = payloadPinnedEnv(payload, options.provider);
         const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS }, pinnedEnv);
         if (access.kind !== 'local' || !workspaceExists(process.cwd(), pinnedEnv)) return;
         const agentId = resolveAgentId(options.agent, process.env, {

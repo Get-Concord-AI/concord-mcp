@@ -176,40 +176,68 @@ function vibeChunkLine(raw: unknown): string | undefined {
 }
 
 /**
- * Vibe's `chunks/*.json` snapshots make up one ordered conversation, so they
- * are joined oldest→newest (by mtime) into a single text within the byte
- * budget: read evidence that spans two chunks — the delivered message ending
- * one file and the model's reply starting the next — only matches in the
- * joined stream.
+ * Vibe's `chunks/*.json` snapshots are content-addressed and pooled: when a
+ * generation compacts the conversation, the discarded chunks stay in the
+ * directory, and only the live manifest — `generations/<gen>/manifest.json`,
+ * with the active generation named in `CURRENT` — says which chunks still
+ * make up the conversation, in order. Scanning the pool by mtime would read
+ * replies out of discarded chunks and mark messages read the model can no
+ * longer see, suppressing the session-end requeue. When no manifest can be
+ * resolved the scanner yields nothing: a missed receipt only requeues, while
+ * a false one loses the message.
  */
-function vibeChunkTexts(dir: string): (string | undefined)[] {
-  let names: string[];
+const vibeCurrentSchema = z.object({ generation: z.string() }).loose();
+const vibeManifestSchema = z
+  .object({ runtime_state: z.object({ chunks: z.array(z.string()) }).loose() })
+  .loose();
+
+function vibeLiveChunkNames(dir: string): string[] | undefined {
   try {
-    names = readdirSync(dir).filter((name) => name.endsWith('.json'));
+    const sessionDir = dirname(dir);
+    const currentRaw: unknown = JSON.parse(readFileSync(join(sessionDir, 'CURRENT'), 'utf8'));
+    const current = vibeCurrentSchema.safeParse(currentRaw);
+    if (!current.success) return undefined;
+    const manifestRaw: unknown = JSON.parse(
+      readFileSync(
+        join(sessionDir, 'generations', current.data.generation, 'manifest.json'),
+        'utf8',
+      ),
+    );
+    const manifest = vibeManifestSchema.safeParse(manifestRaw);
+    if (!manifest.success) return undefined;
+    // Names must be plain file keys; anything else would be a path escape.
+    return manifest.data.runtime_state.chunks.filter((name) => /^[A-Za-z0-9_-]+$/u.test(name));
   } catch {
-    return [];
+    return undefined;
   }
-  const files = names
-    .flatMap((name) => {
-      try {
-        const path = join(dir, name);
-        const stat = statSync(path);
-        return [{ path, mtime: stat.mtimeMs, size: stat.size }];
-      } catch {
-        return [];
-      }
-    })
-    .sort((a, b) => b.mtime - a.mtime);
+}
+
+function vibeChunkTexts(dir: string): (string | undefined)[] {
+  const live = vibeLiveChunkNames(dir);
+  if (live === undefined) return [];
+  // The manifest lists the conversation oldest first; the budget goes to the
+  // newest chunks, then the parts emit in conversation order so read evidence
+  // spanning two chunks still matches in the joined stream.
   const parts: string[] = [];
   let budget = TRANSCRIPT_TAIL_BYTES;
-  for (const file of files) {
+  const chosen: string[] = [];
+  for (const name of [...live].reverse()) {
+    const path = join(dir, `${name}.json`);
+    try {
+      const size = statSync(path).size;
+      if (size <= budget) {
+        chosen.unshift(name);
+        budget -= size;
+      }
+    } catch {
+      // A manifest entry whose file is missing simply contributes nothing.
+    }
     if (budget <= 0) break;
-    // The budget bounds raw snapshot bytes, including fields conversion
-    // drops: a chunk larger than what remains is skipped, never loaded whole.
-    if (file.size > budget) continue;
+  }
+  for (const name of chosen) {
     let text: string | undefined;
     try {
-      const raw: unknown = JSON.parse(readFileSync(file.path, 'utf8'));
+      const raw: unknown = JSON.parse(readFileSync(join(dir, `${name}.json`), 'utf8'));
       const entries = z.array(z.unknown()).safeParse(raw);
       if (entries.success) {
         text = entries.data
@@ -221,10 +249,8 @@ function vibeChunkTexts(dir: string): (string | undefined)[] {
       text = undefined;
     }
     if (text !== undefined && text !== '') parts.push(text);
-    budget -= file.size;
   }
-  // Files were visited newest→oldest for the budget; emit oldest→newest.
-  const joined = parts.reverse().join('\n');
+  const joined = parts.join('\n');
   return joined === '' ? [] : [joined];
 }
 

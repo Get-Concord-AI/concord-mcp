@@ -47,6 +47,8 @@ export interface TomlBlock {
   readonly envKeys: readonly string[];
   /** An `env` assignment exists that `envKeys` cannot fully account for. */
   readonly envOpaque: boolean;
+  /** A `key = …` line exists in the block's own table that the scanner cannot name. */
+  readonly keysOpaque: boolean;
 }
 
 /**
@@ -91,6 +93,7 @@ export function concordTomlBlocks(
   let inChildTable = false;
   let inEnvChild = false;
   let envOpaque = false;
+  let keysOpaque = false;
   const envKeys: string[] = [];
   const assignKeys: string[] = [];
   let fields: Record<string, string> = {};
@@ -100,6 +103,7 @@ export function concordTomlBlocks(
     inChildTable = false;
     inEnvChild = false;
     envOpaque = false;
+    keysOpaque = false;
     envKeys.length = 0;
     assignKeys.length = 0;
     fields = {};
@@ -114,6 +118,7 @@ export function concordTomlBlocks(
         keys: [...assignKeys],
         envKeys: [...envKeys],
         envOpaque,
+        keysOpaque,
       };
       if (owned(block)) blocks.push(block);
     }
@@ -179,6 +184,10 @@ export function concordTomlBlocks(
       return;
     }
     if (envInlineOpen.test(text) || envAssign.test(text)) envOpaque = true;
+    // Any other assignment-shaped line this scanner cannot name — a quoted
+    // key with escapes, a dotted key, a key with whitespace — must not cost
+    // the user their setting: the block stops being one Concord can own.
+    if (assign === null && /^\s*(?!#)\S[^=]*=/u.test(text)) keysOpaque = true;
   });
   if (open !== undefined) flush(lines.length);
   return blocks;
@@ -242,15 +251,23 @@ export function bareTomlTableValue(
   // coexist with — the file must be left alone.
   const tableHeader = new RegExp(`^\\s*\\[\\s*${seg}\\s*(?:\\.|\\])`, 'u');
   let index = 0;
+  let pastHeaders = false;
   for (const { text, inString } of tomlLines(source)) {
     if (!inString) {
       if (/^\s*\[/u.test(text)) {
-        return tableHeader.test(text) ? { index, empty: false } : undefined;
+        pastHeaders = true;
+        // Any `[table]`/`[table.child]` header anywhere in the file — after
+        // unrelated tables included — makes `table` a TOML table, which
+        // `[[table]]` entries cannot coexist with.
+        if (tableHeader.test(text)) return { index, empty: false };
+      } else if (!pastHeaders) {
+        // Bare and dotted keys only mean `table` before the first header;
+        // afterwards they belong to whichever table is open.
+        if (assignment.test(text)) {
+          return { index, empty: emptyArray.test(text) };
+        }
+        if (dotted.test(text)) return { index, empty: false };
       }
-      if (assignment.test(text)) {
-        return { index, empty: emptyArray.test(text) };
-      }
-      if (dotted.test(text)) return { index, empty: false };
     }
     index += 1;
   }
@@ -287,6 +304,7 @@ function vibeMcpOwned(block: TomlBlock): boolean {
     block.fields['transport'] === 'stdio' &&
     block.fields['command'] === 'concord-mcp' &&
     !block.envOpaque &&
+    !block.keysOpaque &&
     block.envKeys.every((key) => key.startsWith('CONCORD_')) &&
     block.keys.every((key) => MCP_OWNED_KEYS.has(key))
   );
