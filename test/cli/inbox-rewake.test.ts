@@ -245,7 +245,7 @@ describe('SessionEnd waiter supersede', () => {
       summary: null,
       status: 'active',
     });
-    const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) }
+    const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) };
     const waiter = claimWaiter('beta', 'token-armed', defaultWaiterDir(env));
     expect(waiter.superseded()).toBe(false);
 
@@ -274,7 +274,7 @@ describe('SessionEnd waiter supersede', () => {
       summary: null,
       status: 'active',
     });
-    const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) }
+    const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) };
     const waiter = claimWaiter('beta', 'token-armed', defaultWaiterDir(env));
 
     observeHookEvent(
