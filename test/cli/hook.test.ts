@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -147,6 +155,98 @@ describe('decidePreToolUse', () => {
         expect(decidePreToolUse(context.repos, inside, 'MINE').result).toBe('blocked');
       } finally {
         context.repos.db.close();
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks an absolute-path edit of a file claimed by its repo-relative path', () => {
+    const workspace = realpathSync.native(mkdtempSync(join(tmpdir(), 'concord-hook-abs-')));
+    try {
+      mkdirSync(join(workspace, '.git'));
+      const context = openContext(workspace, {});
+      try {
+        handleClaimWork(context.repos, {
+          task_id: 'OTHER',
+          title: 'Owns app',
+          expected_files: ['src/app.ts'],
+        });
+        const absolute = preToolUse(join(workspace, 'src', 'app.ts'));
+        expect(decidePreToolUse(context.repos, absolute, 'MINE').result).toBe('blocked');
+        const elsewhere = preToolUse(join(workspace, 'src', 'other.ts'));
+        expect(decidePreToolUse(context.repos, elsewhere, 'MINE').result).toBe('clear');
+      } finally {
+        context.repos.db.close();
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps one name for a file claimed through a symlinked folder before it exists', () => {
+    const workspace = realpathSync.native(mkdtempSync(join(tmpdir(), 'concord-hook-newfile-')));
+    try {
+      mkdirSync(join(workspace, '.git'));
+      mkdirSync(join(workspace, 'src'));
+      symlinkSync(join(workspace, 'src'), join(workspace, 'alias'), 'junction');
+      const context = openContext(workspace, {});
+      try {
+        handleClaimWork(context.repos, {
+          task_id: 'OTHER',
+          title: 'New file',
+          expected_files: ['alias/new.ts'],
+        });
+        writeFileSync(join(workspace, 'src', 'new.ts'), '');
+        for (const edit of [join(workspace, 'alias', 'new.ts'), join(workspace, 'src', 'new.ts')]) {
+          expect(decidePreToolUse(context.repos, preToolUse(edit), 'MINE').result).toBe('blocked');
+        }
+      } finally {
+        context.repos.db.close();
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks an absolute edit in a linked worktree of a file claimed from the primary checkout', () => {
+    const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'concord-hook-wt-file-')));
+    const primary = join(base, 'primary');
+    const worktree = join(base, 'feature');
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: primary, stdio: 'ignore', timeout: 10_000 });
+    try {
+      mkdirSync(primary);
+      git('init', '-q');
+      git(
+        '-c',
+        'user.email=test@example.test',
+        '-c',
+        'user.name=Test',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'Initial commit',
+      );
+      git('worktree', 'add', '-q', worktree);
+
+      const main = openContext(primary, {});
+      try {
+        handleClaimWork(main.repos, {
+          task_id: 'OTHER',
+          title: 'Owns app',
+          expected_files: ['src/app.ts'],
+        });
+        const linked = openContext(worktree, {});
+        try {
+          const edit = preToolUse(join(worktree, 'src', 'app.ts'));
+          expect(decidePreToolUse(linked.repos, edit, 'MINE').result).toBe('blocked');
+        } finally {
+          linked.repos.db.close();
+        }
+      } finally {
+        main.repos.db.close();
       }
     } finally {
       rmSync(base, { recursive: true, force: true });

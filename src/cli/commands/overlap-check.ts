@@ -7,7 +7,7 @@ import {
   type OverlapPathOptions,
   type OverlapWarning,
 } from '../../domain/overlap.js';
-import { resolvePathsFromCheckout } from '../../workspaces/overlap-paths.js';
+import { pathFromCheckout, resolvePathsFromCheckout } from '../../workspaces/overlap-paths.js';
 
 /**
  * Collisions between the given files and OTHER active tasks' claimed paths.
@@ -30,7 +30,10 @@ export function checkFileOverlaps(
 ): OverlapWarning[] {
   const { platform } = options;
   const byKey = new Map<string, string>();
-  for (const file of files.map(normalizePath)) {
+  // Harnesses send absolute paths (Claude Code's Edit always does) while
+  // claims are checkout-relative, so name each file the way claims do.
+  const named = files.map((file) => pathFromCheckout(repos.checkoutRoot, file));
+  for (const file of named.map(normalizePath)) {
     const key = pathKey(file, platform);
     if (file !== '' && !byKey.has(key)) byKey.set(key, file);
   }

@@ -2,7 +2,7 @@ import type { Repositories, TaskRecord } from '../db/index.js';
 import { assessClaimBreadth } from '../domain/decomposition.js';
 import type { ClaimWorkInput } from '../domain/operations.js';
 import { CLAIMED_STATUSES, detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
-import { resolvePathsFromCheckout } from '../workspaces/overlap-paths.js';
+import { pathFromCheckout, resolvePathsFromCheckout } from '../workspaces/overlap-paths.js';
 
 export interface ClaimWorkResult {
   task: TaskRecord;
@@ -48,7 +48,11 @@ function addedEntries(existing: readonly string[], incoming: readonly string[]):
  * merged scope, and the additions are reported back.
  */
 export function handleClaimWork(repos: Repositories, input: ClaimWorkInput): ClaimWorkResult {
-  const inputFiles = input.expected_files ?? [];
+  // Stored as the checkout names them, so an absolute or symlinked spelling
+  // claims the same file as its checkout-relative one.
+  const inputFiles = (input.expected_files ?? []).map((file) =>
+    pathFromCheckout(repos.checkoutRoot, file),
+  );
   const inputModules = input.modules ?? [];
   const inputDomains = input.domains ?? [];
   const inputRiskTags = input.risk_tags ?? [];
