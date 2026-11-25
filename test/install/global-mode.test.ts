@@ -387,8 +387,17 @@ describe('runSetup with global mode', () => {
       global: true,
     });
 
-    expect(readUserConfig(env)).toEqual({ globalMode: true, globalRegistrations: [] });
-    expect(result.globalMode).toEqual({ written: [], warnings: [], registrations: [] });
+    expect(readUserConfig(env)).toEqual({
+      globalMode: true,
+      globalRegistrations: [],
+      globalOpenclawFiles: [],
+    });
+    expect(result.globalMode).toEqual({
+      written: [],
+      warnings: [],
+      registrations: [],
+      openclawFiles: [],
+    });
     expect(result.repoFilesSkipped).toBe(true);
     expect(existsSync(join(repo, '.concord', 'concord.db'))).toBe(true);
     expect(present(repo)).toEqual([]);

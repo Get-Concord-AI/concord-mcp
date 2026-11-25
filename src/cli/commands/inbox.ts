@@ -60,7 +60,7 @@ function receiverExpiry(interval: number, now = Date.now()): string {
   return new Date(now + Math.max(MIN_RECEIVER_TTL_MS, interval * 3)).toISOString();
 }
 
-function heartbeatReceiver(repos: Repositories, agentId: string, interval: number): void {
+export function heartbeatReceiver(repos: Repositories, agentId: string, interval: number): void {
   const endpoint = repos.agentEndpoints.getByAgent(agentId);
   if (endpoint === undefined) throw new Error(`Agent ${agentId} has no registered endpoint.`);
   repos.agentEndpoints.heartbeatReceiver(endpoint.endpointId, receiverExpiry(interval));
@@ -130,7 +130,7 @@ export function currentSession(provider: string, hookPayload: string | undefined
   return raw === undefined ? null : sessionKey(raw);
 }
 
-function isSqliteBusy(error: unknown): boolean {
+export function isSqliteBusy(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const code: unknown = Reflect.get(error, 'code');
   return typeof code === 'string' && code.startsWith('SQLITE_BUSY');

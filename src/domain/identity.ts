@@ -311,9 +311,13 @@ export const UNRESOLVED_IDENTITY_MESSAGE =
 export function resolveActorId(
   session: AgentIdentity | undefined,
   supplied: string | undefined,
+  kind?: string,
 ): string {
   if (session !== undefined) return session.agentId;
   const given = supplied?.trim();
   if (given !== undefined && given !== '') return given;
+  if (kind === 'openclaw') {
+    throw new Error('Pass agent_id: "openclaw:<your agent id>" on OpenClaw workflow calls.');
+  }
   throw new Error(UNRESOLVED_IDENTITY_MESSAGE);
 }
