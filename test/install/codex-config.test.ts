@@ -341,6 +341,22 @@ approval_mode = "approve"
 
     expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('[tui]\nx = 1\n\nmodel = "o3"\n');
   });
+
+  it.each([
+    ['a key the table sets', '[desktop]\nalt_screen = true', 'alt_screen = false', ''],
+    ['a root key', 'model = "gpt-5"', 'model = "o3"', ''],
+    ['a subtable', '[desktop]\nq = 1', 'a.x = 1', '\n\n[desktop.a]\ny = 2'],
+    ['a key, over several lines', 'model = "gpt-5"', 'model = """\no3\n"""', ''],
+  ])('drops a line after the end marker that would clash with %s', (_, table, line, rest) => {
+    // Codex ignored the line inside Concord's hook; the table's own setting stays.
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    writeFileSync(codexConfigFile(env), `${table}\n\n${block}\n${line}${rest}\n`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(`${table}${rest}\n`);
+  });
 });
 
 describe('removeCodexMcpServer', () => {
