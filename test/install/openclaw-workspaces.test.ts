@@ -96,13 +96,18 @@ describe('OpenClaw global workspace instructions', () => {
   });
 
   it('warns and avoids guessing when the OpenClaw CLI cannot resolve the roster', () => {
-    const { home, bin, env } = fixture();
+    const { home, bin, env, roster } = fixture();
+    const main = join(home, 'main');
+    roster([{ id: 'main', workspace: main }]);
+    const setup = applyGlobalMode(env, true);
+
     writeFakeCommand(bin, 'openclaw', 'process.exitCode = 1;');
-    const report = applyGlobalMode(env, true);
+    const report = applyGlobalMode(env, true, { openclawFiles: setup.openclawFiles });
     expect(report.warnings).toEqual([
       expect.stringContaining('Could not read OpenClaw agent workspaces'),
     ]);
-    expect(report.openclawFiles).toEqual([]);
+    expect(report.openclawFiles).toEqual(setup.openclawFiles);
+    expect(readFileSync(join(main, 'AGENTS.md'), 'utf8')).toContain('agent_id: "openclaw:main"');
     expect(existsSync(join(home, '.openclaw', 'workspace', 'AGENTS.md'))).toBe(false);
   });
 });

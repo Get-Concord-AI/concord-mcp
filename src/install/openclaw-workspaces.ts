@@ -49,10 +49,13 @@ function readInstructions(path: string): string | undefined {
   }
 }
 
-function workspaceRoster(env: NodeJS.ProcessEnv, warnings: string[]): Map<string, Set<string>> {
+function workspaceRoster(
+  env: NodeJS.ProcessEnv,
+  warnings: string[],
+): Map<string, Set<string>> | undefined {
   const byFile = new Map<string, Set<string>>();
   const executable = executablePath('openclaw', env);
-  if (!isOpenclawDetected(executable, env)) return byFile;
+  if (!isOpenclawDetected(executable, env)) return undefined;
 
   try {
     if (executable === undefined) throw new Error('OpenClaw CLI is missing');
@@ -72,6 +75,7 @@ function workspaceRoster(env: NodeJS.ProcessEnv, warnings: string[]): Map<string
     warnings.push(
       'Could not read OpenClaw agent workspaces. Check openclaw agents list --json, or set each agent ID in its AGENTS.md manually.',
     );
+    return undefined;
   }
   return byFile;
 }
@@ -83,6 +87,10 @@ export function applyOpenclawWorkspaces(
 ): OpenclawWorkspaceReport {
   const report: OpenclawWorkspaceReport = { files: [], written: [], warnings: [] };
   const roster = enable ? workspaceRoster(env, report.warnings) : new Map<string, Set<string>>();
+  if (roster === undefined) {
+    report.files.push(...previous);
+    return report;
+  }
   const paths = new Set([...roster.keys(), ...previous.map(physicalFile)]);
 
   for (const path of paths) {
