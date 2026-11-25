@@ -395,14 +395,7 @@ describe('vibeMcpConfigPath and install', () => {
 
 describe('round-3 review regressions', () => {
   it('does not append [[mcp_servers]] when [mcp_servers.env] follows an unrelated table', () => {
-    const src = [
-      '[other]',
-      'x = 1',
-      '',
-      '[mcp_servers.env]',
-      'FOO = "bar"',
-      '',
-    ].join('\n');
+    const src = ['[other]', 'x = 1', '', '[mcp_servers.env]', 'FOO = "bar"', ''].join('\n');
     // Appending an array-of-tables here would redefine a table TOML already
     // has, so the file must be left exactly as it is.
     expect(upsertVibeMcpConfig(src)).toBe(src);
