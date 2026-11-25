@@ -558,7 +558,11 @@ export function registerWorkflowTools(
     meta: OpenCodeRequestIdentityMetadata | undefined,
   ): WithActor<T> => ({
     ...args,
-    agent_id: resolveActorId(sessionForRequest(callRepos, meta), args.agent_id),
+    agent_id: resolveActorId(
+      sessionForRequest(callRepos, meta),
+      args.agent_id,
+      process.env['CONCORD_AGENT_KIND'],
+    ),
   });
 
   server.registerTool(

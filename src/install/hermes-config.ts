@@ -17,7 +17,7 @@ import { dirname, join, resolve } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { z } from 'zod';
 
-import { standaloneInstall } from '../config/install-mode.js';
+import { concordServerLaunch } from './server-launch.js';
 import { userHome } from '../config/paths.js';
 
 /**
@@ -52,21 +52,12 @@ type Mapping = z.infer<typeof mappingSchema>;
 const hookListSchema = z.array(yamlValueSchema);
 
 const SERVER_KEY = 'concord';
-const NPX_SERVER_ARGS = ['-y', '@concord-ai/concord-mcp'];
 const SERVER_ENV = { CONCORD_AGENT_KIND: 'hermes' };
 /** Keys earlier Concord releases wrote into the server env, which pinned `$HOME`. */
 const STALE_ENV_KEYS = new Set(['HERMES_SESSION_ID', 'CONCORD_REPO_ROOT']);
 export const HERMES_HOOK_EVENT = 'pre_llm_call';
 export const HERMES_HOOK_COMMAND = 'concord hook hermes-pre-llm-call';
 const HOOK_TIMEOUT_SECONDS = 30;
-
-/** Standalone installs launch directly: they may have neither npm nor npx on PATH. */
-function concordServerLaunch(): { command: string; args: string[] } {
-  const standalone = standaloneInstall();
-  return standalone === undefined
-    ? { command: 'npx', args: [...NPX_SERVER_ARGS] }
-    : { command: join(standalone.binDir, 'concord-mcp'), args: [] };
-}
 
 /** Hermes' data root: `HERMES_HOME` when set, else `~/.hermes`. */
 export function hermesHome(env: NodeJS.ProcessEnv = process.env): string {
