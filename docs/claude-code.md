@@ -112,9 +112,15 @@ also releases the monitor's held notification, before the question is asked
 again. Delivery is at-least-once, so a repeat is expected.
 
 A question is denied at most once. The session's next question within two
-minutes of a deny is let through untouched, so a message the transcript does not yet show as
-read, or a peer that keeps sending, can never keep the user from being asked.
-Anything still waiting arrives after the answer.
+minutes of a deny is let through untouched, so a message the transcript does not
+yet show as read, or a peer that keeps sending, can never keep the user from
+being asked. Anything still waiting arrives after the answer. The allowance is a
+time window, not strictly the next question: a retry more than two minutes after
+the deny can be denied again, and another question asked within the window
+spends the allowance.
+
+The drain is local-only. On a linked machine (after `concord cloud link`), the
+hook does nothing and messages arrive after the user answers, as before.
 
 The hook never allows with `updatedInput`: without `answers`, that skips the
 picker and the question is never shown. `additionalContext` is no use either: it
