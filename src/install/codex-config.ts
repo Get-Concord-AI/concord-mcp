@@ -149,13 +149,21 @@ function arrayTableKey(line: TomlLine | undefined): string | undefined {
   return key === undefined ? undefined : tomlKeyPath(key);
 }
 
+/** A TOML key: bare or quoted parts, dotted or not. */
+const KEY = String.raw`(?:[\w-]+|"[^"]*"|'[^']*')(?:\s*\.\s*(?:[\w-]+|"[^"]*"|'[^']*'))*`;
+const KEY_LINE = new RegExp(String.raw`^\s*(${KEY})\s*=`, 'u');
+const STRING_ENTRY = new RegExp(
+  String.raw`^(${KEY})\s*=\s*(?:"([^"\\]*)"|'([^']*)')\s*(?:#.*)?$`,
+  'u',
+);
+
 /** The key and string value a `key = "value"` line sets, ignoring a trailing comment. */
 function stringEntry(line: TomlLine): { key: string; value: string } | undefined {
   if (line.inString) return undefined;
-  const match = /^([\w-]+)\s*=\s*(?:"([^"\\]*)"|'([^']*)')\s*(?:#.*)?$/u.exec(line.text.trim());
+  const match = STRING_ENTRY.exec(line.text.trim());
   const key = match?.[1];
   const value = match?.[2] ?? match?.[3];
-  return key === undefined || value === undefined ? undefined : { key, value };
+  return key === undefined || value === undefined ? undefined : { key: tomlKeyPath(key), value };
 }
 
 /**
@@ -184,18 +192,21 @@ function concordEntry(
   return { end: marker === -1 ? tail : marker, tail };
 }
 
-const KEY_LINE = /^\s*((?:[\w-]+|"[^"]*"|'[^']*')(?:\s*\.\s*(?:[\w-]+|"[^"]*"|'[^']*'))*)\s*=/u;
-
 function lineKey(line: TomlLine): string | undefined {
   if (line.inString) return undefined;
   const key = KEY_LINE.exec(line.text)?.[1];
   return key === undefined ? undefined : tomlKeyPath(key);
 }
 
+/** Whether two keys can't share a table: the same key, or one inside the other. */
+function clashes(key: string, other: string): boolean {
+  return key === other || key.startsWith(`${other}.`) || other.startsWith(`${key}.`);
+}
+
 /**
  * Lines carried from repeated Concord blocks, merged into the one table they now
- * share: a key set twice keeps its first value. Codex ignores these keys inside a
- * hook, but a repeated key would stop it loading the file at all.
+ * share: of clashing keys, the first is kept. Codex ignores these keys inside a
+ * hook, but a clash would stop it loading the file at all.
  */
 function mergeCarried(lines: readonly TomlLine[]): string[] {
   const seen = new Set<string>();
@@ -210,8 +221,8 @@ function mergeCarried(lines: readonly TomlLine[]): string[] {
     }
     const key = lineKey(line);
     if (key !== undefined) {
-      dropping = seen.has(key);
-      seen.add(key);
+      dropping = [...seen].some((other) => clashes(key, other));
+      if (!dropping) seen.add(key);
     }
     if (!dropping) merged.push(...pending, line.text);
     pending = [];

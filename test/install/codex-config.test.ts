@@ -300,6 +300,18 @@ approval_mode = "approve"
 
     expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(tui);
   });
+
+  it('removes a hook written with quoted keys', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const quoted = upsertCodexHooks(undefined)
+      .replaceAll('type = "command"', '"type" = "command"')
+      .replaceAll('command = "concord', '"command" = "concord');
+    writeFileSync(codexConfigFile(env), `model = "o3"\n\n${quoted}`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('model = "o3"\n');
+  });
 });
 
 describe('removeCodexMcpServer', () => {

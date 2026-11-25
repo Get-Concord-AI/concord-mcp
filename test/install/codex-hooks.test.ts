@@ -415,4 +415,36 @@ command = "my-session-hook"
     expect(result.split('\n').filter((line) => /^(model|arr) =/u.test(line))).toHaveLength(1);
     expect(upsertCodexHooks(result)).toBe(result);
   });
+
+  it.each([
+    ['options = false', 'options.level = 1'],
+    ['options.level = 1', 'options = false'],
+    ['a.b = 1', 'a.b.c = 2'],
+    ['"options" = false', 'options.level = 1'],
+  ])('keeps the first of overlapping keys %s and %s', (first, second) => {
+    const result = upsertCodexHooks(`${BLOCK}\n${first}\n\n[tui]\nx = 1\n\n${BLOCK}\n${second}\n`);
+
+    expect(result).toContain(`${END}\n${first}\n`);
+    expect(result).not.toContain(second);
+  });
+
+  it('keeps sibling keys from repeated blocks', () => {
+    const result = upsertCodexHooks(
+      `${BLOCK}\noptions.a = 1\n\n[tui]\nx = 1\n\n${BLOCK}\noptions.b = 2\n`,
+    );
+
+    expect(result).toContain(`${END}\noptions.a = 1\noptions.b = 2\n`);
+  });
+
+  it('recognizes quoted keys in a hook', () => {
+    const quoted = BLOCK.replace(
+      `type = "command"\ncommand = "${STOP}"`,
+      `'type' = 'command'\n"command" = "${STOP}"`,
+    );
+
+    const result = upsertCodexHooks(`${quoted}\n`);
+
+    expectConcordOnce(result);
+    expect(result).not.toContain('"command" =');
+  });
 });
