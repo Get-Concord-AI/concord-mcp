@@ -22,7 +22,13 @@ function junieMcpPath(env: NodeJS.ProcessEnv): string {
 
 export function junieMcpInstalled(env: NodeJS.ProcessEnv): boolean {
   const mcpPath = junieMcpPath(env);
-  return existsSync(mcpPath) && hasMcpServer(readFileSync(mcpPath, 'utf8'));
+  try {
+    return existsSync(mcpPath) && hasMcpServer(readFileSync(mcpPath, 'utf8'));
+  } catch {
+    // An unreadable file — or a directory sitting at that path — means the
+    // registration state is unknown, not a crash for `concord doctor`.
+    return false;
+  }
 }
 
 export function installJunieMcpConfig(env: NodeJS.ProcessEnv): void {

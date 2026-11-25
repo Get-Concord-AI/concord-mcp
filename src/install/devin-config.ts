@@ -2,7 +2,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { userHome } from '../config/paths.js';
-import { jsonObjectSchema, type JsonObject, type JsonValue } from './json-value.js';
+import {
+  isJsonObject,
+  objectEnd,
+  parseJsoncObject,
+  propertyObject,
+  removeProperty,
+  uncomment,
+} from './jsonc-edit.js';
+import type { JsonObject } from './json-value.js';
 
 const SERVER = 'concord';
 const KIND_VAR = 'CONCORD_AGENT_KIND';
@@ -19,96 +27,6 @@ export function devinMcpConfigPath(
     : join(appData, 'devin', 'mcp_config.json');
 }
 
-function uncomment(text: string): string {
-  return text.replace(
-    /("(?:\\.|[^"\\])*")|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//gu,
-    (part, quoted: string | undefined) => quoted ?? part.replace(/[^\r\n]/gu, ' '),
-  );
-}
-
-function parsed(text: string): JsonObject {
-  const value: unknown = JSON.parse(uncomment(text));
-  return jsonObjectSchema.parse(value);
-}
-
-function isEscaped(text: string, index: number): boolean {
-  let backslashes = 0;
-  for (let cursor = index - 1; cursor >= 0 && text[cursor] === '\\'; cursor -= 1) {
-    backslashes += 1;
-  }
-  return backslashes % 2 === 1;
-}
-
-function objectEnd(text: string, open: number): number {
-  const clean = uncomment(text);
-  let depth = 0;
-  let inString = false;
-  for (let index = open; index < clean.length; index += 1) {
-    const char = clean[index];
-    if (char === '"' && !isEscaped(clean, index)) inString = !inString;
-    if (inString) continue;
-    if (char === '{') depth += 1;
-    if (char === '}' && --depth === 0) return index;
-  }
-  throw new Error('Unclosed JSON object');
-}
-
-interface PropertyObjectRange {
-  key: number;
-  open: number;
-  close: number;
-}
-
-function propertyObject(text: string, key: string): PropertyObjectRange | undefined {
-  const clean = uncomment(text);
-  const match = new RegExp(`"${key}"\\s*:\\s*\\{`, 'u').exec(clean);
-  if (match === null) return undefined;
-  const open = match.index + match[0].lastIndexOf('{');
-  return { key: match.index, open, close: objectEnd(clean, open) };
-}
-
-function directCommas(text: string, range: Pick<PropertyObjectRange, 'open' | 'close'>): number[] {
-  const clean = uncomment(text);
-  const commas: number[] = [];
-  let objectDepth = 0;
-  let arrayDepth = 0;
-  let inString = false;
-  for (let index = range.open + 1; index < range.close; index += 1) {
-    const char = clean[index];
-    if (char === '"' && !isEscaped(clean, index)) inString = !inString;
-    if (inString) continue;
-    if (char === '{') objectDepth += 1;
-    else if (char === '}') objectDepth -= 1;
-    else if (char === '[') arrayDepth += 1;
-    else if (char === ']') arrayDepth -= 1;
-    else if (char === ',' && objectDepth === 0 && arrayDepth === 0) commas.push(index);
-  }
-  return commas;
-}
-
-function removeProperty(
-  text: string,
-  parent: PropertyObjectRange,
-  property: Pick<PropertyObjectRange, 'key' | 'close'>,
-): string {
-  const clean = uncomment(text);
-  const commas = directCommas(clean, parent);
-  const nextComma = commas.find((comma) => comma > property.close);
-  if (nextComma !== undefined) {
-    const between = text.slice(property.close + 1, nextComma);
-    const comments = between.match(/\/\/[^\r\n]*|\/\*[\s\S]*?\*\//gu) ?? [];
-    const retained = comments.length === 0 ? '' : `\n${comments.join('\n')}\n`;
-    return `${text.slice(0, property.key)}${retained}${text.slice(nextComma + 1)}`;
-  }
-  const previousComma = commas.filter((comma) => comma < property.key).at(-1);
-  const start = previousComma ?? property.key;
-  return `${text.slice(0, start)}${text.slice(property.close + 1)}`;
-}
-
-function isObject(value: JsonValue | undefined): value is JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * Devin starts its MCP servers with the environment it was launched from, so a
  * Devin started inside a Claude Code terminal carries `CLAUDE_CODE_SESSION_ID`.
@@ -120,13 +38,13 @@ function concordEntry(existing: JsonObject): JsonObject {
   return {
     ...existing,
     command: 'concord-mcp',
-    env: { ...(isObject(env) ? env : {}), [KIND_VAR]: KIND },
+    env: { ...(isJsonObject(env) ? env : {}), [KIND_VAR]: KIND },
   };
 }
 
 export function upsertDevinMcpConfig(text: string | undefined): string {
   const source = text ?? '{}';
-  const config = parsed(source);
+  const config = parseJsoncObject(source);
   const servers = config['mcpServers'];
   if (
     servers !== undefined &&
@@ -141,9 +59,9 @@ export function upsertDevinMcpConfig(text: string | undefined): string {
     if (serverRange !== undefined) {
       const start = range.open + serverRange.open;
       const end = range.open + serverRange.close;
-      const old = parsed(source.slice(start, end + 1));
+      const old = parseJsoncObject(source.slice(start, end + 1));
       const env = old['env'];
-      if (old['command'] === 'concord-mcp' && isObject(env) && env[KIND_VAR] === KIND)
+      if (old['command'] === 'concord-mcp' && isJsonObject(env) && env[KIND_VAR] === KIND)
         return source;
       return `${source.slice(0, start)}${JSON.stringify(concordEntry(old))}${source.slice(end + 1)}`;
     }
@@ -160,7 +78,7 @@ export function upsertDevinMcpConfig(text: string | undefined): string {
 }
 
 export function removeDevinMcpConfig(text: string): string {
-  parsed(text);
+  parseJsoncObject(text);
   const range = propertyObject(text, 'mcpServers');
   if (range === undefined) return text;
   const child = propertyObject(text.slice(range.open, range.close + 1), SERVER);
@@ -213,7 +131,7 @@ export function uninstallDevinMcpConfig(
 
 export function hasDevinMcpServer(text: string): boolean {
   try {
-    const config = parsed(text);
+    const config = parseJsoncObject(text);
     const servers = config['mcpServers'];
     return (
       typeof servers === 'object' &&

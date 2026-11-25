@@ -59,6 +59,10 @@ const hooks = createHarnessHooks({
   kind: 'junie',
   sessionIdentity: JUNIE_SESSION_IDENTITY,
   repoRoot: (_env, rawJson) => junieRepoRoot(rawJson),
+  // Junie ignores SessionStart's additionalContext outright (documented hook
+  // limitation), so the identity briefing rides the first UserPromptSubmit —
+  // the one event whose context always reaches the model.
+  briefOnFirstPrompt: true,
 });
 
 export function isJunieHookEvent(event: string): event is JunieHookEvent {

@@ -46,7 +46,7 @@ export function statusJunie(env: NodeJS.ProcessEnv): AdapterReport {
     monitor: config.monitor.kind,
     capabilities: installed ? [...config.installedCapabilities] : ['pull', 'busy'],
     detail: installed
-      ? config.installedDetail
+      ? `Concord MCP server and lifecycle hooks are registered with Junie (${junieConfigPath(env)}). Idle wake-up is not verified, so messages reach it only when a turn runs.`
       : `Junie needs repair: ${missing.join(' and ')}. Run \`concord setup\` to install both.`,
   };
 }

@@ -1,3 +1,8 @@
+import { createHash } from 'node:crypto';
+import { existsSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import type { CloudRuntime } from '../../cloud/runtime.js';
 import type { Repositories } from '../../db/index.js';
 import { resolveIdentity, type AgentIdentity } from '../../domain/identity.js';
@@ -27,6 +32,15 @@ export interface HarnessHookSpec {
   readonly sessionIdentity: ExplicitSessionIdentity;
   /** Repository root for one hook invocation. */
   readonly repoRoot: (env: NodeJS.ProcessEnv, rawJson: string) => string;
+  /**
+   * When the harness drops SessionStart's additionalContext (Junie does, per
+   * its documented hook limitations), deliver the identity briefing on the
+   * session's first UserPromptSubmit instead — the one hook whose context
+   * always reaches the model. Delivery is marked per agent id in the machine
+   * temp dir, so a resumed session is not briefed twice and `/clear` (a new
+   * session id) is.
+   */
+  readonly briefOnFirstPrompt?: boolean;
 }
 
 export interface HarnessHooks {
@@ -80,6 +94,49 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
     });
   }
 
+  /**
+   * Prompt-submit context that leads with the session briefing: the same
+   * identity text SessionStart would have carried, followed by whatever the
+   * inbox drained. Used by harnesses whose SessionStart context never reaches
+   * the model (see `briefOnFirstPrompt`).
+   */
+  function briefedPromptSubmitOutput(
+    agentId: string,
+    others: readonly RosterLine[],
+    messages: readonly DeliverableMessage[],
+  ): string {
+    const briefing = sessionStartMessage(agentId, others, spec.sessionIdentity);
+    const body = messages.length === 0 ? '' : `\n\n${renderInboxBody(messages)}`;
+    return JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: `${briefing}${body}`,
+      },
+    });
+  }
+
+  /**
+   * Whether this is the session's first prompt submit, for harnesses briefing
+   * there. The receipt is a marker file in the machine temp dir keyed by the
+   * agent id's hash (ids carry colons, which Windows filenames forbid): a
+   * resumed session keeps its context and is not briefed again, while a new
+   * session id — `/clear`, a fresh start — briefs once more.
+   */
+  function takeFirstPromptBriefing(agentId: string): boolean {
+    if (spec.briefOnFirstPrompt !== true) return false;
+    const hash = createHash('sha256').update(agentId).digest('hex').slice(0, 24);
+    const markerDir = process.env['CONCORD_HOOK_MARKER_DIR'] ?? tmpdir();
+    const marker = join(markerDir, `concord-${spec.kind}-briefed-${hash}`);
+    if (existsSync(marker)) return false;
+    try {
+      writeFileSync(marker, agentId, { flag: 'wx' });
+    } catch {
+      // A lost race or an unwritable temp dir only costs the once-only
+      // guarantee — the briefing still reaches the model this once.
+    }
+    return true;
+  }
+
   function endSession(repos: Repositories, agentId: string): void {
     const endpoint = repos.agentEndpoints.getByAgent(agentId);
     if (endpoint !== undefined) repos.agentEndpoints.disconnect(endpoint.endpointId);
@@ -101,8 +158,19 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
             (peer) => peer.agentId !== identity.agentId,
           ),
         );
-      case events.promptSubmit:
-        return promptSubmitOutput(drainInbox(repos, identity.agentId, spec.kind));
+      case events.promptSubmit: {
+        const drained = drainInbox(repos, identity.agentId, spec.kind);
+        if (takeFirstPromptBriefing(identity.agentId)) {
+          return briefedPromptSubmitOutput(
+            identity.agentId,
+            buildRoster(repos.agents.list(), Date.now()).filter(
+              (peer) => peer.agentId !== identity.agentId,
+            ),
+            drained,
+          );
+        }
+        return promptSubmitOutput(drained);
+      }
       case events.sessionEnd:
         endSession(repos, identity.agentId);
         return NO_OUTPUT;
@@ -126,8 +194,17 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
       case events.sessionStart:
         await registerInCloud(runtime, identity.agentId, spec.kind, cwd);
         return sessionStartOutput(identity.agentId, await cloudRoster(runtime, identity.agentId));
-      case events.promptSubmit:
-        return promptSubmitOutput(await drainFromCloud(runtime, identity.agentId, spec.kind));
+      case events.promptSubmit: {
+        const drained = await drainFromCloud(runtime, identity.agentId, spec.kind);
+        if (takeFirstPromptBriefing(identity.agentId)) {
+          return briefedPromptSubmitOutput(
+            identity.agentId,
+            await cloudRoster(runtime, identity.agentId),
+            drained,
+          );
+        }
+        return promptSubmitOutput(drained);
+      }
       case events.sessionEnd:
         return NO_OUTPUT;
       default:

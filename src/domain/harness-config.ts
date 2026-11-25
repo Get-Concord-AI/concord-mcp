@@ -13,6 +13,7 @@ export const harnessNames = [
   'gemini',
   'grok',
   'goose',
+  'openclaw',
   'hermes',
   'antigravity',
   'copilot-cli',
@@ -206,6 +207,28 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
       'Concord MCP server is registered with Goose; durable inbox delivery is available.',
     unsupportedDetail: 'Goose does not meet the verified MCP baseline (1.52.0).',
   },
+  openclaw: {
+    name: 'openclaw',
+    executable: 'openclaw',
+    minimumVersion: [0, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: {
+      transport: 'pull',
+      reach: ['busy', 'idle'],
+      operations: ['pull', 'inject'],
+    },
+    monitor: {
+      kind: 'managed-controller',
+      lifecycle: 'managed',
+      completion: 'controller',
+      background: false,
+      verified: true,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Concord MCP is registered. Run concord adapters openclaw --agent <id> for live delivery through the Gateway.',
+    unsupportedDetail: 'OpenClaw was not detected: no `openclaw` on PATH and no state directory.',
+  },
   hermes: {
     name: 'hermes',
     executable: 'hermes',
@@ -332,7 +355,7 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     },
     installedCapabilities: ['pull', 'busy'],
     installedDetail:
-      'Concord MCP server and lifecycle hooks are registered with Junie (~/.junie/config.json). Idle wake-up is not verified, so messages reach it only when a turn runs.',
+      'Concord MCP server and lifecycle hooks are registered with Junie. Idle wake-up is not verified, so messages reach it only when a turn runs.',
     unsupportedDetail: 'Junie does not meet the verified MCP baseline (26.11.0).',
   },
   kiro: {

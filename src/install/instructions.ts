@@ -10,6 +10,7 @@ export const CONCORD_SERVER_INSTRUCTIONS = `Concord coordinates coding agents th
 - Use inspect_work to read workspace, task, agent, or message context, or with query to search past messages, findings, and handoffs. Use update_work for durable progress or to prompt/reply to another promptable workspace agent, including while that agent is busy.
 - Use transfer_work for assignment, acceptance, decline, release, reassignment, evidence-bearing handoff offers, and reopening.
 - Call finish_work before finishing, review, or closure with changed files, tests, assumptions, decisions, risks, and provenance.
+- In OpenClaw, pass your configured agent id as \`agent_id: "openclaw:<id>"\` on workflow writes and \`kind: "openclaw"\` to \`start_work\`.
 Keep claims small and resolve reported overlaps before editing.
 ${RELAYED_MESSAGE_GUIDANCE}`;
 
@@ -23,7 +24,9 @@ This project uses Concord MCP. Keep coordination to the five workflow tools:
 - **Before editing**, call \`start_work\` with the task, your agent kind, and
   expected files or modules. It registers presence, accepts assigned work when
   appropriate, claims the scope, and returns overlap warnings. Concord derives
-  your \`agent_id\` from your session — omit it unless your client told you one.
+  your \`agent_id\` from your session. In OpenClaw, pass your own
+  \`agent_id: "openclaw:<id>"\` on workflow writes and \`kind: "openclaw"\` to
+  \`start_work\`. Otherwise omit \`agent_id\` unless your client told you one.
 - Use \`inspect_work\` to read the workspace, one task, one agent, or one message
   thread. Use \`update_work\` for durable progress and for live prompts/replies
   to another promptable workspace agent, including while that agent is busy.

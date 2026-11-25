@@ -215,3 +215,57 @@ describe('runJunieHook', () => {
     );
   });
 });
+
+describe('first-prompt identity briefing (SessionStart context is dropped by Junie)', () => {
+  let repos: Repositories;
+  let markerDir: string;
+
+  beforeEach(() => {
+    repos = createRepositories(openDatabase(':memory:'));
+    markerDir = mkdtempSync(join(tmpdir(), 'concord-junie-markers-'));
+    process.env['CONCORD_HOOK_MARKER_DIR'] = markerDir;
+    return () => {
+      delete process.env['CONCORD_HOOK_MARKER_DIR'];
+    };
+  });
+
+  it('briefs the session on its first prompt submit even when the inbox is empty', () => {
+    handleLocalJunieHook(repos, JUNIE, '/repo', 'junie-session-start');
+
+    const first = context(handleLocalJunieHook(repos, JUNIE, '/repo', 'junie-user-prompt-submit'));
+
+    expect(first).toContain(`agent_id: "${JUNIE.agentId}"`);
+    expect(first).toContain("Junie's MCP server cannot see the hook session payload");
+  });
+
+  it('briefs once per session: the second prompt submit carries no identity text', () => {
+    handleLocalJunieHook(repos, JUNIE, '/repo', 'junie-session-start');
+    handleLocalJunieHook(repos, JUNIE, '/repo', 'junie-user-prompt-submit');
+
+    expect(handleLocalJunieHook(repos, JUNIE, '/repo', 'junie-user-prompt-submit')).toBe('{}');
+  });
+
+  it('leads with the briefing and appends drained messages on the same first prompt', () => {
+    handleLocalJunieHook(repos, JUNIE, '/repo', 'junie-session-start');
+    handleRegisterAgent(repos, { agent_id: 'codex:peer0001', kind: 'codex' });
+    handleSendAgentMessage(repos, {
+      operation: 'prompt',
+      agentId: 'codex:peer0001',
+      toAgentId: JUNIE.agentId,
+      content: 'Reply with PINEAPPLE-42.',
+      idempotencyKey: 'k-brief',
+    });
+
+    const first = context(handleLocalJunieHook(repos, JUNIE, '/repo', 'junie-user-prompt-submit'));
+
+    expect(first).toContain(`agent_id: "${JUNIE.agentId}"`);
+    expect(first).toContain('PINEAPPLE-42');
+    expect(first.indexOf('agent_id')).toBeLessThan(first.indexOf('PINEAPPLE-42'));
+  });
+
+  it('does not brief harnesses without the flag even on a first prompt', () => {
+    // devin shares the runner but its SessionStart context lands fine.
+    const output = juniePromptSubmitOutput([]);
+    expect(output).toBe('{}');
+  });
+});
