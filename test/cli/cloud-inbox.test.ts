@@ -149,6 +149,26 @@ describe('cloud inbox', () => {
     expect(JSON.stringify(endpoint?.body)).toContain('idle');
   });
 
+  it('leaves the lease and watching state alone when another receiver took over', async () => {
+    const cloud = fakeCloud([
+      ...registering,
+      ['PUT /v1/agents/a-uuid/endpoint/receiver', () => ok({ receiverExpiresAt: NOW })],
+      ['DELETE /v1/agents/a-uuid/endpoint/receiver', () => ({ status: 204, json: {} })],
+      ['POST /v1/messages/drain', () => ok({ messages: [message('wake up')] })],
+    ]);
+    const runtime = runtimeWith(cloud.fetch);
+
+    await watchCloud(runtime, AGENT, 'claude-code', true, () => {
+      // The session's monitor started while this fallback was draining: the
+      // lease already changed hands before the fallback's teardown runs.
+      updateAgentState(runtime, AGENT, { receiverOwner: 'monitor-token' });
+    });
+
+    const calls = cloud.requests.map((request) => `${request.method} ${request.path}`);
+    expect(calls).not.toContain('DELETE /v1/agents/a-uuid/endpoint/receiver');
+    expect(readAgentState(runtime, AGENT)?.receiverOwner).toBe('monitor-token');
+  });
+
   it('runs a fallback waiter without advertising it as the monitor', async () => {
     const cloud = fakeCloud([
       ...registering,

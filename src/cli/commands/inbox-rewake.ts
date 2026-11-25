@@ -1,5 +1,13 @@
-import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 import { userConcordDir } from '../../config/user-config.js';
@@ -120,7 +128,27 @@ export function claimWaiter(
   return {
     superseded: () => readClaim(path) !== token,
     release: () => {
-      if (readClaim(path) === token) rmSync(path, { force: true });
+      // Compare-and-delete, atomically: reading the token and unlinking as
+      // separate steps would let a newer waiter's claim, written in between,
+      // be removed by this older one. The rename freezes whatever claim the
+      // path held; a hard link puts a newer claim back without clobbering an
+      // even newer one, since linkSync fails rather than overwrite.
+      const trash = `${path}.trash-${String(process.pid)}-${randomUUID()}`;
+      try {
+        renameSync(path, trash);
+      } catch {
+        return;
+      }
+      if (readClaim(trash) === token) {
+        rmSync(trash, { force: true });
+        return;
+      }
+      try {
+        linkSync(trash, path);
+      } catch {
+        // A newer claim already sits at the path: it wins, as it should.
+      }
+      rmSync(trash, { force: true });
     },
   };
 }

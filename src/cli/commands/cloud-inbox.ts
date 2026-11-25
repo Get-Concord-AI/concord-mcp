@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { cloudSessionFor } from '../../cloud/session.js';
@@ -73,6 +74,7 @@ export function cloudAccess(
 }
 
 /** How long the receiver lease lasts; renewed well within it each round. */
+const PAUSED_ROUND_MS = 1_000;
 const RECEIVER_TTL_SECONDS = 90;
 /** Pause after a failed round, so an outage is not met with a request storm. */
 const RETRY_DELAY_MS = 5_000;
@@ -210,10 +212,23 @@ export async function watchCloud(
      * once this waiter is superseded.
      */
     monitor?: boolean;
+    /** Aborted by the caller to end the watch early (the OpenClaw receiver). */
+    signal?: AbortSignal;
+    /**
+     * Checked before each drain round: while it holds the receiver neither
+     * drains nor renews the lease but keeps watching. A rewake fallback uses
+     * it to stay dormant beside a healthy monitor — and to take over the
+     * moment the monitor's lease actually lapses.
+     */
+    pauseWhile?: () => boolean;
   } = {},
 ): Promise<void> {
   const replaced = options.replaced ?? (() => false);
   const monitor = options.monitor ?? true;
+  const signal = options.signal;
+  // This receiver's ownership token for the cloud lease: renewed into the
+  // agent state every round, checked again before teardown touches anything.
+  const receiverOwner = randomUUID();
   const stop = new AbortController();
   const stopped = (): boolean => stop.signal.aborted;
   const stopWatching = (): void => {
@@ -221,12 +236,19 @@ export async function watchCloud(
   };
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
   for (const name of signals) process.once(name, stopWatching);
+  signal?.addEventListener('abort', stopWatching, { once: true });
+  if (signal?.aborted === true) stopWatching();
   let agent: CloudAgentRef | undefined;
   try {
     while (!stopped()) {
+      if (options.pauseWhile?.() === true) {
+        await delay(PAUSED_ROUND_MS, undefined, { signal: stop.signal }).catch(() => undefined);
+        continue;
+      }
       try {
         agent ??= await registerInCloud(runtime, agentKey, provider, process.cwd(), monitor);
         await renewReceiver(runtime, agent, RECEIVER_TTL_SECONDS);
+        updateAgentState(runtime, agentKey, { receiverOwner });
         if (monitor) {
           updateAgentState(runtime, agentKey, {
             watchingUntil: Date.now() + RECEIVER_TTL_SECONDS * 1000,
@@ -242,10 +264,19 @@ export async function watchCloud(
       }
     }
   } finally {
+    signal?.removeEventListener('abort', stopWatching);
     for (const name of signals) process.off(name, stopWatching);
     if (!replaced()) {
-      updateAgentState(runtime, agentKey, { watchingUntil: undefined });
-      if (agent !== undefined) await releaseReceiver(runtime, agent).catch(() => undefined);
+      // The lease may have been taken over by another receiver since — the
+      // session's real monitor starting while this fallback was draining,
+      // for one. Clear watchingUntil only when this receiver set it, and
+      // release the lease only while it is still this one's.
+      const state = readAgentState(runtime, agentKey);
+      const leaseIsOurs = state?.receiverOwner === receiverOwner;
+      if (monitor && leaseIsOurs) updateAgentState(runtime, agentKey, { watchingUntil: undefined });
+      if (leaseIsOurs && agent !== undefined)
+        await releaseReceiver(runtime, agent).catch(() => undefined);
+      if (leaseIsOurs) updateAgentState(runtime, agentKey, { receiverOwner: undefined });
     }
   }
 }

@@ -197,6 +197,34 @@ describe('pull-transport inbox', () => {
     );
   });
 
+  it('stays dormant while pauseWhile holds and drains once it lifts', async () => {
+    registerPullEndpoint(repos, 'beta', 'claude-code');
+    const messageId = send(repos, 'held then delivered', 'pause-1');
+    let paused = true;
+    const delivered: string[] = [];
+
+    const watching = watchInbox(
+      repos,
+      'beta',
+      'claude-code',
+      50,
+      true,
+      (messages) => {
+        delivered.push(...messages.map((message) => message.content));
+      },
+      { pauseWhile: () => paused },
+    );
+
+    // Several rounds pass with the pause in force: nothing is drained or claimed.
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    expect(delivered).toEqual([]);
+    expect(repos.agentMessages.get(messageId)?.status).toBe('sent');
+
+    paused = false;
+    await watching;
+    expect(delivered).toEqual(['held then delivered']);
+  });
+
   it('leaves the receiver to the watcher that replaced it', async () => {
     registerPullEndpoint(repos, 'beta', 'claude-code');
     send(repos, 'for the newer watcher', 'replaced-1');

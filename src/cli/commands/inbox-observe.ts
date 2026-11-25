@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
@@ -7,6 +8,7 @@ import type { Repositories } from '../../db/index.js';
 import { hookSessionId } from '../../domain/identity.js';
 import { idsInPrompt, scanTranscript, sessionKey } from '../../domain/receipts.js';
 import { recordClientBinding } from '../session-binding.js';
+import { claimWaiter, defaultWaiterDir } from './inbox-rewake.js';
 
 /**
  * What a session's own hooks reveal about the messages it was handed.
@@ -217,6 +219,7 @@ export function observeHookEvent(
   agentId: string,
   rawJson: string,
   kind?: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): Observation {
   const hook = parseObservedHook(rawJson);
   if (hook === undefined || isSubagentHook(hook)) return { read: [], requeued: [] };
@@ -245,7 +248,7 @@ export function observeHookEvent(
           .map((message) => message.messageId);
       }
       break;
-    case 'SessionEnd':
+    case 'SessionEnd': {
       // A session that ended will never read what it was handed but did not
       // show. Requeued, it reaches this agent's next session or expires.
       // `/clear` ends the conversation but not the process: its monitor keeps
@@ -255,7 +258,17 @@ export function observeHookEvent(
           .requeueSession(agentId, session)
           .map((message) => message.messageId);
       }
+      // An armed rewake waiter belongs to the session that just ended. Left
+      // alone it would keep refreshing the endpoint lease and the agent's
+      // heartbeat for up to a day — looking live while its stderr wakes
+      // nobody — and the next message would be marked delivered into the
+      // void. Taking and releasing a fresh claim supersedes it, and it
+      // stands down within a second. `/clear` keeps it: the process — and
+      // the session the waiter would wake — is still there.
+      if (hook.reason !== 'clear')
+        claimWaiter(agentId, randomUUID(), defaultWaiterDir(env)).release();
       break;
+    }
     case undefined:
       break;
     default:

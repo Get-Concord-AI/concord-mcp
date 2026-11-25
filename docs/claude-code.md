@@ -100,18 +100,24 @@ Concord works around both halves of that:
   session's inbox instead of the abandoned one. On a machine linked to
   Concord Cloud (`concord cloud link`), identity stays environment-based —
   session bindings are local — so this correction does not apply there.
-- **Reachability.** While no receiver heartbeat is live, the Stop hook's
-  `asyncRewake` waiter steps in and wakes the idle session with the next
-  message, then stands down once a monitor is back. A monitor that exits
+- **Reachability.** The Stop hook arms an `asyncRewake` waiter at every
+  Stop, even beside a live monitor: while the receiver heartbeat is fresh
+  the waiter stays dormant — it neither drains nor beats — and it takes
+  over the moment the lease actually lapses. It exits only when a newer
+  Stop's waiter supersedes it, so while the session is idle both processes
+  poll (the waiter's dormant rounds are cheap reads). A monitor that exits
   cleanly drops its heartbeat at once (`concord inbox release`), so the
-  fallback can arm without waiting out the lease; only a killed monitor
-  leaves it to expire on its own (~10s).
+  fallback starts draining without waiting out the lease; only a killed
+  monitor leaves it to expire on its own (~10s).
 
 One gap remains: a session that lands at the prompt right after a `/resume`
 with no live monitor gets no waiter until its first turn ends — SessionStart
 only registers and observes, and the fallback arms at Stop. A message sent in
-that window waits for the user's first turn (or a manual
-`concord inbox drain --provider claude-code`).
+that window waits for the user's first turn, or a manual drain — note that
+`concord inbox drain --provider claude-code` derives the agent id from
+`CLAUDE_CODE_SESSION_ID`, which only exists inside the session's own hooks;
+from a normal terminal pass the id explicitly:
+`concord inbox drain --agent <agent_id> --provider claude-code`.
 
 If messages still do not arrive, check `concord inbox status` from the repo:
 a workspace that is not Concord-enabled exits the monitor silently by design.

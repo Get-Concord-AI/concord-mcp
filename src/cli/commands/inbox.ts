@@ -61,7 +61,7 @@ function receiverExpiry(interval: number, now = Date.now()): string {
   return new Date(now + Math.max(MIN_RECEIVER_TTL_MS, interval * 3)).toISOString();
 }
 
-function heartbeatReceiver(
+export function heartbeatReceiver(
   repos: Repositories,
   agentId: string,
   interval: number,
@@ -136,7 +136,7 @@ export function currentSession(provider: string, hookPayload: string | undefined
   return raw === undefined ? null : sessionKey(raw);
 }
 
-function isSqliteBusy(error: unknown): boolean {
+export function isSqliteBusy(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const code: unknown = Reflect.get(error, 'code');
   return typeof code === 'string' && code.startsWith('SQLITE_BUSY');
@@ -159,6 +159,14 @@ export interface WatchOptions {
    * Stop see a live receiver and stand down into a delivery gap.
    */
   receiverHeartbeat?: boolean;
+  /**
+   * Checked before each poll round: while it holds, the watcher neither
+   * drains nor heartbeats but keeps polling. A rewake fallback armed beside
+   * a live monitor uses it to stay dormant until the monitor's lease
+   * actually expires — a crash right before Stop leaves a fresh lease
+   * behind, and without the recheck nothing would ever take over.
+   */
+  pauseWhile?: () => boolean;
 }
 
 /**
@@ -211,6 +219,10 @@ export async function watchInbox(
       else reject(error instanceof Error ? error : new Error('Inbox monitor failed.'));
     };
     const poll = (): void => {
+      if (options.pauseWhile?.() === true) {
+        timer = setTimeout(poll, interval);
+        return;
+      }
       let messages: DeliverableMessage[];
       try {
         const target = options.resolveTarget?.() ?? {
@@ -698,16 +710,28 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       // Interactive sessions are reached by their plugin monitor, which beats
       // the receiver heartbeat every poll; the check below arms the waiter
       // only when that beat is missing — the gap #180 tracks.
-      const receiverAlive = sdkHost
-        ? undefined
-        : access.kind === 'cloud'
-          ? watching(access.runtime, agentId)
-          : receiverActive((await localContext()).repos.agentEndpoints.getByAgent(agentId));
+      // Arm at every Stop, even while a receiver lease is fresh: a monitor
+      // crashing just before this Stop leaves an unexpired lease behind, and
+      // if the waiter never armed, nothing would recheck once it expired.
+      // The waiter stays dormant instead — pauseWhile skips its drain rounds
+      // for as long as a receiver is actually beating — so a healthy monitor
+      // is never raced, and the fallback takes over the moment the lease
+      // lapses. SDK hosts have no monitor ever; nothing pauses there.
+      const dormant = (): boolean => {
+        if (sdkHost) return false;
+        try {
+          return access.kind === 'cloud'
+            ? watching(access.runtime, agentId)
+            : receiverActive(context?.repos.agentEndpoints.getByAgent(agentId));
+        } catch {
+          return false;
+        }
+      };
       // Claim first, then decide: a fresh claim supersedes any older fallback
-      // waiter still polling, so a Stop that sees a live receiver must not
-      // return without taking its place down with it.
+      // waiter still polling, so a Stop that must not wait still takes its
+      // place down with it.
       const claim = claimWaiter(agentId, randomUUID());
-      if (!rewakeWaits(process.env, receiverAlive)) {
+      if (!rewakeWaits(process.env, undefined)) {
         claim.release();
         return;
       }
@@ -728,6 +752,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
           await watchCloud(access.runtime, agentId, 'claude-code', true, wake, {
             replaced: claim.superseded,
             monitor: false,
+            pauseWhile: dormant,
           });
           return;
         }
@@ -748,6 +773,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
             // an interactive fallback must not, or the next Stop would see a
             // live receiver and stand down into a delivery gap.
             receiverHeartbeat: sdkHost,
+            pauseWhile: dormant,
           },
         );
       } finally {

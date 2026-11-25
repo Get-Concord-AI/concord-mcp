@@ -229,3 +229,62 @@ describe('relay plugin hooks', () => {
     ).toBe(true);
   });
 });
+
+describe('SessionEnd waiter supersede', () => {
+  it('stands an armed waiter down when the session ends', () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    repos.agents.upsert({
+      agentId: 'beta',
+      kind: 'claude-code',
+      owner: null,
+      model: null,
+      pid: null,
+      cwd: null,
+      worktree: null,
+      branch: null,
+      summary: null,
+      status: 'active',
+    });
+    const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) }
+    const waiter = claimWaiter('beta', 'token-armed', defaultWaiterDir(env));
+    expect(waiter.superseded()).toBe(false);
+
+    observeHookEvent(
+      repos,
+      'beta',
+      JSON.stringify({ session_id: 's-1', hook_event_name: 'SessionEnd', reason: 'other' }),
+      undefined,
+      env,
+    );
+
+    expect(waiter.superseded()).toBe(true);
+  });
+
+  it('keeps the waiter when the conversation clears but the process stays', () => {
+    const repos = createRepositories(openDatabase(':memory:'));
+    repos.agents.upsert({
+      agentId: 'beta',
+      kind: 'claude-code',
+      owner: null,
+      model: null,
+      pid: null,
+      cwd: null,
+      worktree: null,
+      branch: null,
+      summary: null,
+      status: 'active',
+    });
+    const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) }
+    const waiter = claimWaiter('beta', 'token-armed', defaultWaiterDir(env));
+
+    observeHookEvent(
+      repos,
+      'beta',
+      JSON.stringify({ session_id: 's-1', hook_event_name: 'SessionEnd', reason: 'clear' }),
+      undefined,
+      env,
+    );
+
+    expect(waiter.superseded()).toBe(false);
+  });
+});
