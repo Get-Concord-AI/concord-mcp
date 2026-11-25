@@ -201,6 +201,7 @@ export async function watchCloud(
    * receiver leaves the lease alone on the way out: it is the newer one's now.
    */
   replaced: () => boolean = () => false,
+  signal?: AbortSignal,
 ): Promise<void> {
   const stop = new AbortController();
   const stopped = (): boolean => stop.signal.aborted;
@@ -209,6 +210,8 @@ export async function watchCloud(
   };
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
   for (const name of signals) process.once(name, stopWatching);
+  signal?.addEventListener('abort', stopWatching, { once: true });
+  if (signal?.aborted === true) stopWatching();
   let agent: CloudAgentRef | undefined;
   try {
     while (!stopped()) {
@@ -228,6 +231,7 @@ export async function watchCloud(
       }
     }
   } finally {
+    signal?.removeEventListener('abort', stopWatching);
     for (const name of signals) process.off(name, stopWatching);
     if (!replaced()) {
       updateAgentState(runtime, agentKey, { watchingUntil: undefined });

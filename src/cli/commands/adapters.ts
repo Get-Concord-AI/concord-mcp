@@ -276,6 +276,14 @@ export function registerAdaptersCommand(program: Command): void {
       await launchOpencode(args);
     });
   adapters
+    .command('openclaw')
+    .description('Receive live Concord messages through a running OpenClaw Gateway')
+    .requiredOption('--agent <id>', 'OpenClaw agent ID, for example main')
+    .action(async ({ agent }) => {
+      const { launchOpenclaw } = await import('./openclaw-adapter.js');
+      await launchOpenclaw(agent, repoRoot());
+    });
+  adapters
     .command('gemini')
     .description('Launch Gemini CLI with its Concord inbox monitor started on the first turn')
     .argument('[args...]', 'Arguments forwarded to Gemini CLI')
