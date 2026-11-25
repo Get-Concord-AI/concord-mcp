@@ -19,7 +19,9 @@ import { AGENT_KIND_ENV, agentKindEnv, CONCORD_SERVER_KEY } from './mcp-config.j
 import { concordServerLaunch, NPX_SERVER_ARGS } from './server-launch.js';
 
 export function expandOpenclawHome(path: string, env: NodeJS.ProcessEnv): string {
-  const home = env['OPENCLAW_HOME']?.trim() || userHome(env);
+  const configuredHome = env['OPENCLAW_HOME']?.trim();
+  const home =
+    configuredHome === undefined || configuredHome === '' ? userHome(env) : configuredHome;
   if (path === '~') return home;
   if (/^~[/\\]/u.test(path)) return join(home, path.slice(2));
   return path;
