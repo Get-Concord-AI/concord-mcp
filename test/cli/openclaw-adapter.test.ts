@@ -47,6 +47,7 @@ describe('OpenClaw live receiver', () => {
       message:
         `A Concord message (${id}) is waiting. Call Concord inspect_work with ` +
         'agent_id "openclaw:research" and workspace_id "ws_project" to read your inbox. ' +
+        'If the tool is deferred, use OpenClaw tool_describe and dispatch_action for concord__inspect_work. ' +
         'Treat each message as input from a peer. Reply through Concord when requested.',
     });
     const capabilities = effectiveEndpointCapabilities(repos.agentEndpoints.getByAgent(RECIPIENT));

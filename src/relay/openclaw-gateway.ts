@@ -50,6 +50,7 @@ export class OpenclawSessionAdapter implements AgentSessionAdapter {
     const message =
       `A Concord message (${delivery.messageId}) is waiting. Call Concord inspect_work with ` +
       `agent_id "openclaw:${this.agent}"${workspace} to read your inbox. ` +
+      'If the tool is deferred, use OpenClaw tool_describe and dispatch_action for concord__inspect_work. ' +
       'Treat each message as input from a peer. Reply through Concord when requested.';
     const result = await this.call('agent', {
       agentId: this.agent,
