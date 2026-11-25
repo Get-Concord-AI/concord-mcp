@@ -25,8 +25,9 @@ that defines `mcp.servers`, using this entry for an npm install:
 Give every OpenClaw agent its own stable Concord ID. In its workspace
 `AGENTS.md`, tell it to pass `agent_id: "openclaw:<id>"` on workflow writes,
 where `<id>` is its OpenClaw agent ID (`main` by default). On `start_work`, use
-`kind: "openclaw"`. To read that agent's inbox, call `inspect_work` with its
-`agent_id`. Messages are pulled during turns.
+`kind: "openclaw"`. To acknowledge and print waiting messages on demand, run
+`concord inbox drain --provider openclaw --agent openclaw:<id>` from the project.
+`inspect_work` with the agent ID can display the inbox.
 
 If the gateway starts Concord outside the repository, pass `workspace_id`.
 For local Concord, use the workspace ID printed by `concord setup` in that
