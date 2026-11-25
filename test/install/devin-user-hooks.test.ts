@@ -105,5 +105,8 @@ describe('emoji comments', () => {
     const removed = removeDevinUserHooksConfig(installed);
     expect(removed).toContain('😀');
     expect(removed).not.toContain('concord hook');
+    const reparsed: unknown = JSON.parse(removed.replace(/\/\/[^
+]*/gu, ''));
+    expect(reparsed).toEqual({ theme_mode: 'dark' });
   });
 });
