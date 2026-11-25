@@ -211,17 +211,21 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     executable: 'openclaw',
     minimumVersion: [0, 0, 0],
     defaultCapability: busyPull,
-    monitorCapability: busyPull,
+    monitorCapability: {
+      transport: 'pull',
+      reach: ['busy', 'idle'],
+      operations: ['pull', 'inject'],
+    },
     monitor: {
-      kind: 'harness-monitor',
-      lifecycle: 'one-shot',
-      completion: 'native',
+      kind: 'managed-controller',
+      lifecycle: 'managed',
+      completion: 'controller',
       background: false,
-      verified: false,
+      verified: true,
     },
     installedCapabilities: ['pull', 'busy'],
     installedDetail:
-      'Concord MCP server is registered under `mcp.servers` in OpenClaw; agents pull their inbox during turns.',
+      'Concord MCP is registered. Run concord adapters openclaw --agent <id> for live delivery through the Gateway.',
     unsupportedDetail: 'OpenClaw was not detected: no `openclaw` on PATH and no state directory.',
   },
   hermes: {
