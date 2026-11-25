@@ -8,6 +8,7 @@ import {
   kiroExecutablePath,
   run,
 } from './adapters/index.js';
+import { applyOpenclawWorkspaces } from './openclaw-workspaces.js';
 import { removeBlock, upsertBlock } from './block.js';
 import { claudeConfigDir } from './claude-plugin.js';
 import { codexHome } from './codex-config.js';
@@ -52,6 +53,7 @@ export interface GlobalModeReport {
   written: string[];
   warnings: string[];
   registrations: string[];
+  openclawFiles: string[];
 }
 
 /** A user-level MCP registration; `present` says whether a file already has one, anyone's. */
@@ -294,10 +296,20 @@ function applyClaude(
 export function applyGlobalMode(
   env: NodeJS.ProcessEnv,
   enable: boolean,
-  options: { mcp?: boolean; registrations?: readonly string[] } = {},
+  options: {
+    mcp?: boolean;
+    registrations?: readonly string[];
+    openclawFiles?: readonly string[];
+  } = {},
 ): GlobalModeReport {
   const owned = new Set(options.registrations);
-  const report: GlobalModeReport = { written: [], warnings: [], registrations: [] };
+  const openclaw = applyOpenclawWorkspaces(env, enable, options.openclawFiles ?? []);
+  const report: GlobalModeReport = {
+    written: openclaw.written,
+    warnings: openclaw.warnings,
+    registrations: [],
+    openclawFiles: openclaw.files,
+  };
   const mcp = options.mcp !== false;
   for (const file of USER_FILES) {
     if (mcp || file.registration === undefined) applyFile(env, file, enable, owned, report);
