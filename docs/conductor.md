@@ -4,7 +4,8 @@
 coding agents at once, each in its own git worktree. Concord works inside local
 Conductor workspaces for Claude Code and Codex chats. No Conductor-specific
 setup is needed: Conductor loads each harness's own configuration, so the
-global setup you already have carries over.
+global setup you already have carries over. For the same kind of app on any
+platform, see [Using Concord with T3 Code](./t3-code.md).
 
 ## Set up
 
@@ -78,7 +79,7 @@ to a session, covers cloud workspaces only.
 
 - **Cloud workspaces.** These run on Conductor's machines, not yours.
 - **Cursor chats.** These run through the Cursor API, not a local process.
-- **OpenCode chats.** Concord has no OpenCode adapter yet.
+- **OpenCode chats.** Not covered inside Conductor.
 
 ## Check it
 
