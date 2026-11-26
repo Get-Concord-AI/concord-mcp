@@ -9,9 +9,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - A rewake waiter no longer outlives its session: `SessionEnd` supersedes the
-  armed waiter's claim (except on `/clear`, where the process stays), so the
-  agent stops looking live — and messages stop being "delivered" to a stderr
-  nobody reads — within a second of the session ending.
+  armed waiter's claim, so the agent stops looking live — and messages stop
+  being "delivered" to a stderr nobody reads — within a second of the session
+  ending.
 - The cloud rewake fallback no longer clears a healthy monitor's receiver
   lease or watching state on teardown: receivers record an ownership token in
   the agent state and only release what is still theirs.
@@ -20,9 +20,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   crashing just before Stop no longer leaves messages queued until the next
   Stop.
 - A superseded rewake waiter's exit can no longer delete the newer waiter's
-  claim: release is now an atomic compare-and-delete.
+  claim: claim writes and releases are serialized per agent.
 - The OpenClaw live receiver heartbeats and clears its receiver lease under
   its own owner token, matching the owner-scoped lease discipline.
+- Removing the last property of a JSONC object no longer drops a comment
+  sitting between the preceding comma and that property — a section note is
+  kept the way comments after a middle property already were.
+- Devin uninstall keeps user comments in the hooks config.
+- Re-running `concord setup` (or any installer path that rewrites the
+  `concord` entry in an MCP config) now preserves the entry's other fields
+  — `disabled`, timeouts, client-specific options — instead of dropping
+  everything but `command`/`args`/`env`. Command, args, and env are still
+  always rewritten, which is how older package-runner installs migrate. In
+  particular, a `disabled: true` entry now stays disabled across setup instead
+  of being silently re-enabled.
 
 ## [0.25.0] - 2026-11-25
 

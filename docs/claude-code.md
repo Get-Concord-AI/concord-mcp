@@ -85,6 +85,53 @@ not be read until the user responds. Dismissing a prompt with Esc or Deny fires
 no hook, so the flag clears at the session's next prompt, tool call, or turn
 end; it is advisory and never holds delivery.
 
+### What reaches a session blocked on its user
+
+While a picker or permission prompt is open, nothing reaches the model, from
+Concord or from Claude Code itself. Tested with Claude Code v2.1.308:
+
+| Blocked on                 | Concord monitor     | Claude Code's own `SendMessage` |
+| -------------------------- | ------------------- | ------------------------------- |
+| `AskUserQuestion` picker   | held until answered | held until answered             |
+| Bash permission prompt     | held until approved | held until approved             |
+| MCP tool permission prompt | held until approved | held until approved             |
+
+As soon as the user responds, Claude Code shows the held notification before the
+model's next call, so no extra hook is needed after the wait.
+
+**Just before a question.** Claude Code delivers a monitor notification only
+between tool calls, so a message that arrives while the agent is writing its
+question would otherwise be held through the whole picker. The plugin's
+PreToolUse hook on `AskUserQuestion` runs
+`concord inbox drain --format pre-tool-use`: if the session has messages it has
+not been shown, still queued or held by the monitor, it denies the question with
+them as the reason. The model reads them and asks again, adjusted if they change
+anything. With nothing to show, it prints nothing and the picker opens. This
+costs one extra round trip when it fires; Claude Code labels the deny a "hook
+error"; and the model sees the message twice, because the denied call ending
+also releases the monitor's held notification, before the question is asked
+again. Delivery is at-least-once, so a repeat is expected.
+
+A question is denied at most once. The session's next question within two
+minutes of a deny is let through untouched, so a message the transcript does not
+yet show as read, or a peer that keeps sending, can never keep the user from
+being asked. Anything still waiting arrives after the answer. The allowance is a
+time window, not strictly the next question: a retry more than two minutes after
+the deny can be denied again, and another question asked within the window
+spends the allowance.
+
+The drain is local-only. On a linked machine (after `concord cloud link`), the
+hook does nothing and messages arrive after the user answers, as before.
+
+The hook never allows with `updatedInput`: without `answers`, that skips the
+picker and the question is never shown. `additionalContext` is no use either: it
+arrives with the tool result, after the answer.
+
+**Just before a permission prompt, not covered.** `PermissionRequest` runs while
+the dialog is already on screen. A fast deny closes the prompt in front of the
+user and a slow one is ignored, so Concord does not hook it. A message that
+arrives just before a permission prompt is seen after the user responds.
+
 ## Troubleshooting: messages stop arriving after `claude --resume`
 
 Claude Code can fail to re-arm a plugin monitor within the same process —

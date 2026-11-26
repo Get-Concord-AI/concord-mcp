@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { eventually } from '../support/messages.js';
 import { Sandbox } from '../support/sandbox.js';
 import { nonce } from '../support/scenario.js';
-import { isShell, SILENT } from './fake-model/brain.js';
+import { ASK_DENIED, isShell, SILENT } from './fake-model/brain.js';
 import { FakeModel } from './fake-model/server.js';
 import { hostBinaryDir, REAL_HARNESSES, type RealHarness } from './harnesses.js';
 import { recordReceipt } from './receipt-report.js';
@@ -375,6 +375,66 @@ for (const harness of REAL_HARNESSES) {
         );
         await untilModelSaw(model, sent.message_id);
         expect(['prompt', 'transcript']).toContain(read.readEvidence);
+      },
+      240_000,
+    );
+
+    it.skipIf(harness.name !== 'claude-code')(
+      'shows a message that arrived while the agent wrote its question before asking (#208)',
+      async () => {
+        const { model, probe } = ready();
+        const held = model.holdNextAsk();
+        const run = launch('interactive', 'begin, then ask the user');
+        const agentId = await probe.sessionOf(harness.name);
+        await held.composing;
+
+        // The model is still writing its question: the monitor takes the
+        // message, and Claude Code holds its notification until a tool call ends.
+        const sent = await probe.send(agentId, nonce(`${SILENT}${harness.name}-before-ask`));
+        const row = {
+          harness: harness.name,
+          scenario: 'arrived while writing a question',
+          atSend: sent.status,
+        };
+        await receiptReaching(probe, row, sent.message_id, ['delivered']);
+        expect(modelSaw(model, sent.message_id)).toBe(false);
+
+        held.release();
+        // The drain denies the question with the message, so the model sees it
+        // before the user is asked, and asks again.
+        await untilModelSaw(model, sent.message_id);
+        const denied = model.turns.find((turn) => turn.conversation.text.includes(ASK_DENIED));
+        expect(denied?.conversation.text).toContain(`id=${sent.message_id}`);
+        await eventually(
+          () =>
+            model.turns.filter(
+              (turn) => turn.step.kind === 'tool' && turn.step.name === 'AskUserQuestion',
+            ).length === 2
+              ? true
+              : undefined,
+          'the model to ask its question again',
+          60_000,
+        );
+        // At most one deny per question: the second ask opens the picker.
+        await run.untilScreen('Enter to select', 'the second question picker to open');
+        const read = await receiptReaching(
+          probe,
+          { ...row, notes: 'before the user was asked' },
+          sent.message_id,
+          ['read'],
+          60_000,
+        );
+        // Ending the denied call also releases the monitor's held notification,
+        // so the read can be proved by that prompt or by the deny in the transcript.
+        expect(['prompt', 'transcript']).toContain(read.readEvidence);
+
+        run.type('\r');
+        await untilTurnEnds(model, 3_000);
+        expect(
+          model.turns.filter(
+            (turn) => turn.step.kind === 'tool' && turn.step.name === 'AskUserQuestion',
+          ),
+        ).toHaveLength(2);
       },
       240_000,
     );

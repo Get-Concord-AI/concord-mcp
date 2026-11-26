@@ -18,9 +18,18 @@ export interface ModelTurn {
  * pointed at. It speaks the Anthropic Messages and OpenAI Responses APIs,
  * decides each step with the scripted brain, and records every turn.
  */
+/** A model reply held back, as if the model were still writing it. */
+export interface HeldAsk {
+  /** Resolves once the model has decided to ask and is holding its reply. */
+  composing: Promise<void>;
+  /** Sends the held reply. */
+  release: () => void;
+}
+
 export class FakeModel {
   readonly turns: ModelTurn[] = [];
   private counter = 0;
+  private heldAsk: { reached: () => void; released: Promise<void> } | undefined;
 
   private constructor(private readonly server: Server) {}
 
@@ -49,6 +58,23 @@ export class FakeModel {
   /** Base URL without `/v1`, for clients that append it themselves. */
   get origin(): string {
     return this.baseUrl.replace(/\/v1$/u, '');
+  }
+
+  /**
+   * Hold the next `AskUserQuestion` reply until `release` is called, so a test
+   * can deliver a message while the model is still writing its question.
+   */
+  holdNextAsk(): HeldAsk {
+    let reached = (): void => undefined;
+    let release = (): void => undefined;
+    const composing = new Promise<void>((resolvePromise) => {
+      reached = resolvePromise;
+    });
+    const released = new Promise<void>((resolvePromise) => {
+      release = resolvePromise;
+    });
+    this.heldAsk = { reached, released };
+    return { composing, release };
   }
 
   /** Concord tool calls the model made, e.g. `update_work`, in order. */
@@ -95,8 +121,18 @@ export class FakeModel {
       const step = resolve(decide(conversation), conversation.tools);
       this.turns.push({ dialect: 'anthropic', conversation, step });
       const { contentType, body } = anthropicResponse(parsed, step, id);
-      response.writeHead(200, { 'content-type': contentType });
-      response.end(body);
+      const send = (): void => {
+        response.writeHead(200, { 'content-type': contentType });
+        response.end(body);
+      };
+      const held = this.heldAsk;
+      if (held !== undefined && step.kind === 'tool' && step.name === 'AskUserQuestion') {
+        this.heldAsk = undefined;
+        held.reached();
+        void held.released.then(send);
+        return;
+      }
+      send();
       return;
     }
     if (url.includes('/responses')) {

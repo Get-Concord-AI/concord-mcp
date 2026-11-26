@@ -6,6 +6,7 @@ import {
   DEFAULT_PRESENCE_THRESHOLDS,
   detectStaleClaims,
   deriveLiveness,
+  isLeaseExpired,
 } from '../../src/domain/presence.js';
 
 const NOW = Date.parse('2026-07-24T12:00:00.000Z');
@@ -73,6 +74,22 @@ describe('deriveLiveness', () => {
         archiveAfterMs: 9000,
       }),
     ).toBe('idle');
+  });
+});
+
+describe('isLeaseExpired', () => {
+  it('returns false when no lease deadline is set', () => {
+    expect(isLeaseExpired(null, NOW)).toBe(false);
+  });
+
+  it('returns false before the deadline and true at or after it', () => {
+    expect(isLeaseExpired(new Date(NOW + 1).toISOString(), NOW)).toBe(false);
+    expect(isLeaseExpired(new Date(NOW).toISOString(), NOW)).toBe(true);
+    expect(isLeaseExpired(ago(1000), NOW)).toBe(true);
+  });
+
+  it('returns false for an unparseable lease timestamp', () => {
+    expect(isLeaseExpired('not-a-date', NOW)).toBe(false);
   });
 });
 

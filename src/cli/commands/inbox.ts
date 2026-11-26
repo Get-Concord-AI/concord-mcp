@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 import type { Command } from '@commander-js/extra-typings';
 
@@ -30,19 +30,22 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { resolveAgentId, resolveInboxOwner } from '../agent-identity.js';
 import { monitorInstanceId, resolveLiveAgent } from '../live-identity.js';
-import { resolveStore } from '../../workspaces/store.js';
+import { resolveStore, workspaceExists } from '../../workspaces/store.js';
 import { launchDetachedConcord } from '../detached-host.js';
 import { codexThreadHostable } from '../embedding-host.js';
-import { eventName, isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
+import {
+  isSubagentHook,
+  observeHookEvent,
+  observeInboxHook,
+  parseObservedHook,
+} from './inbox-observe.js';
 import {
   claimWaiter,
-  defaultWaiterDir,
   hostsRewake,
   renderRewake,
   REWAKE_EXIT_CODE,
   rewakeWaits,
   standDownWhenSuperseded,
-  supersedeWaiter,
 } from './inbox-rewake.js';
 import { CONCORD_SERVER_ONLY } from './session-start-message.js';
 import {
@@ -127,6 +130,80 @@ export function drainInbox(
   const claimed = repos.agentMessages.claimPendingForRecipient(agentId, provider, options);
   repos.agents.heartbeat(agentId);
   return claimed.map(toDeliverable);
+}
+
+/** What a session should be shown before it blocks on its user. */
+export interface BeforeUserWait {
+  /** Handed to this session by a monitor whose notification the harness is still holding. */
+  held: DeliverableMessage[];
+  /** Still queued, claimed now for this session. */
+  claimed: DeliverableMessage[];
+}
+
+/**
+ * How long after a deny the next question is let through without draining.
+ * Long enough for the model to read the messages and ask again.
+ */
+export const USER_WAIT_DENY_WINDOW_MS = 2 * 60 * 1000;
+
+const NOTHING_TO_SHOW: BeforeUserWait = { held: [], claimed: [] };
+
+/** Whether a deny recorded at `deniedAt` still covers a question asked at `now`. */
+function deniedRecently(deniedAt: string, now: Date): boolean {
+  const elapsed = now.getTime() - Date.parse(deniedAt);
+  return elapsed >= 0 && elapsed < USER_WAIT_DENY_WINDOW_MS;
+}
+
+/**
+ * Everything `agentId`'s session has not been shown, just before it blocks on
+ * a question. Claude Code holds a monitor notification until the user answers,
+ * so a message the monitor already took counts here too: delivered to this
+ * session, with no read evidence yet. Run read observation first, so a message
+ * the model has already seen is left out.
+ *
+ * When there is anything to show, the hook denies the call and the user is
+ * not asked yet, so the waiting-on-user flag is cleared.
+ *
+ * At most one deny per question: the question the same session asks right
+ * after a deny is let through untouched, so a message the transcript does not
+ * show as read yet, or a peer that keeps sending, can never keep the user from
+ * being asked. Anything still waiting reaches the model after the answer, as it
+ * would without this hook. Another session of the same agent, or a fresh one,
+ * never spends that allowance.
+ *
+ * Runs as one immediate transaction: the monitor, in another process, cannot
+ * claim a message between listing what it holds and claiming what is queued,
+ * which would leave a message in neither list.
+ */
+export function drainBeforeUserWait(
+  repos: Repositories,
+  agentId: string,
+  provider: string,
+  session: string | null,
+  now: Date = new Date(),
+): BeforeUserWait {
+  const drain = repos.db.transaction((): BeforeUserWait => {
+    // Spent either way: one deny earns this session one question let through.
+    const grantedAt = repos.agentEndpoints.takeUserWaitAllowance(agentId, session);
+    if (grantedAt !== undefined && deniedRecently(grantedAt, now)) return NOTHING_TO_SHOW;
+    // Listed before claiming, so a message claimed below is not also counted as held.
+    const held = repos.agentMessages.listUnreadForSession(agentId, session).map(toDeliverable);
+    const claimed = drainInbox(repos, agentId, provider, capabilityFor(provider), {
+      session,
+      via: 'hook',
+    });
+    if (held.length > 0 || claimed.length > 0) {
+      repos.agentEndpoints.setAwaitingUser(agentId, null);
+      repos.agentEndpoints.grantUserWaitAllowance(
+        agentId,
+        session,
+        now.toISOString(),
+        new Date(now.getTime() - USER_WAIT_DENY_WINDOW_MS).toISOString(),
+      );
+    }
+    return { held, claimed };
+  });
+  return drain.immediate();
 }
 
 /** The opaque key of the session this command runs for, when it can tell. */
@@ -319,20 +396,6 @@ export function workspaceStatus(cwd: string, env: NodeJS.ProcessEnv): Record<str
   };
 }
 
-/**
- * Whether hooks here have a workspace to serve. A repository's own store must
- * already exist; the machine-wide store counts as soon as global mode chooses
- * it, since a session's first hook can run before its MCP server creates it.
- */
-export function workspaceExists(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  try {
-    const store = resolveStore(resolveRepoRoot(cwd, env), env);
-    return store.kind === 'global' || existsSync(store.databasePath);
-  } catch {
-    return false;
-  }
-}
-
 function launchCodexAdapterHost(repoRoot: string, agentId: string, threadId: string): void {
   launchDetachedConcord(repoRoot, [
     'adapters',
@@ -366,6 +429,7 @@ function recordDeliveredMessages(
 const HOOK_FORMATS: readonly string[] = [
   'post-tool-use',
   'stop',
+  'pre-tool-use',
   'gemini-after-tool',
   'gemini-after-agent',
 ];
@@ -377,6 +441,7 @@ const DRAIN_FORMATS: readonly string[] = [
   'gemini-after-agent',
   'post-tool-use',
   'stop',
+  'pre-tool-use',
 ];
 
 /** Writes drained messages in a hook's or a monitor's format. */
@@ -397,7 +462,7 @@ function writeMessages(format: string, messages: readonly DeliverableMessage[]):
     process.stdout.write(renderGeminiAfterAgent(messages));
     return;
   }
-  if (format === 'post-tool-use' || format === 'stop') {
+  if (format === 'post-tool-use' || format === 'stop' || format === 'pre-tool-use') {
     process.stdout.write(renderHookPayload(format, messages));
     return;
   }
@@ -412,58 +477,6 @@ function writeMonitorNudge(reason: string): void {
 /** A cloud failure in a hook: said once on stderr, never failing the session's turn. */
 function reportCloudFailure(detail: string): void {
   process.stderr.write(`Concord Cloud could not be reached: ${detail}\n`);
-}
-
-/**
- * What `inbox observe` does with the hook payload already read — apart from
- * stdin so tests can drive it. The plugin runs this on SessionStart,
- * UserPromptSubmit, PreToolUse, Notification and SessionEnd in every
- * repository once installed, so nothing here may ever fail the hook: an
- * identity that does not resolve or a store that cannot open is logged at
- * most, never thrown.
- */
-export async function observeInboxHook(
-  payload: string,
-  options: { readonly agent?: string | undefined; readonly provider: string },
-  env: NodeJS.ProcessEnv = process.env,
-  cwd: string = process.cwd(),
-): Promise<void> {
-  // The waiter claim is plain local state, so SessionEnd cleanup runs for
-  // cloud sessions too — before the access check below would return. An
-  // ended cloud session's waiter would otherwise keep renewing its lease
-  // and drain batches into stderr nothing reads. Only the session's own end
-  // counts: a subagent's says nothing about the session's waiter.
-  const earlyHook = parseObservedHook(payload);
-  if (
-    earlyHook !== undefined &&
-    eventName(earlyHook) === 'SessionEnd' &&
-    !isSubagentHook(earlyHook)
-  ) {
-    try {
-      const agentId = resolveAgentId(options.agent, env, {
-        kind: options.provider,
-        hookPayload: payload,
-      });
-      supersedeWaiter(agentId, defaultWaiterDir(env));
-    } catch {
-      // Never fail the hook: a waiter left armed expires with its lease.
-    }
-  }
-  const access = cloudAccess(cwd, { timeoutMs: HOOK_TIMEOUT_MS }, env);
-  if (access.kind !== 'local' || !workspaceExists(cwd, env)) return;
-  try {
-    const agentId = resolveAgentId(options.agent, env, {
-      kind: options.provider,
-      hookPayload: payload,
-    });
-    const context = await import('../context.js');
-    observeHookEvent(context.openContext(cwd, env).repos, agentId, payload, options.provider);
-  } catch (error) {
-    // Never fail the hook: a missed observation only leaves a message unseen.
-    process.stderr.write(
-      `Concord: could not record hook event: ${error instanceof Error ? error.message : String(error)}\n`,
-    );
-  }
 }
 
 export function registerInboxCommand(program: Command, telemetry?: TelemetryRecorder): void {
@@ -584,7 +597,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     )
     .option(
       '--format <format>',
-      'post-tool-use and stop emit hook JSON; monitor emits one line per message; json emits raw records',
+      'post-tool-use, stop and pre-tool-use emit hook JSON; monitor emits one line per message; json emits raw records',
       'json',
     )
     .action(async (options) => {
@@ -594,6 +607,11 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       if (!DRAIN_FORMATS.includes(options.format)) {
         throw new Error(`Unknown --format: ${options.format}`);
       }
+      // The pre-question drain is local-only for now (#208): on a linked
+      // machine it could only see still-queued messages, could not keep its
+      // one-deny allowance, and would cost every question a remote round trip.
+      // Messages arrive after the user answers, as they did before the drain.
+      if (access.kind !== 'local' && options.format === 'pre-tool-use') return;
       if (access.kind === 'unusable') {
         reportCloudFailure(access.reason);
         return;
@@ -669,6 +687,21 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         );
         agentId = live.agentId;
         drifted = live.drifted;
+      }
+      // Runs just before the session blocks on its user's question.
+      if (options.format === 'pre-tool-use') {
+        const { held, claimed } = drainBeforeUserWait(
+          context.repos,
+          agentId,
+          options.provider,
+          currentSession(options.provider, hookPayload),
+        );
+        // Held messages were counted when the monitor took them.
+        recordDeliveredMessages(telemetry, claimed);
+        if (held.length > 0 || claimed.length > 0) {
+          writeMessages(options.format, [...held, ...claimed]);
+        }
+        return;
       }
       const messages = drainInbox(
         context.repos,

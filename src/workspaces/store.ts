@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { concordDir, databasePath } from '../config/paths.js';
+import { concordDir, databasePath, resolveRepoRoot } from '../config/paths.js';
 import { globalDatabasePath, readUserConfig, userConcordDir } from '../config/user-config.js';
 import { LOCAL_PROJECT } from '../db/project-scope-migration.js';
 import { normalizeProjectKey } from '../domain/project-key.js';
@@ -110,4 +110,18 @@ export function resolveStore(
     concordPath: join(userConcordDir(env), 'projects', artifactDirName(project)),
     project,
   };
+}
+
+/**
+ * Whether hooks here have a workspace to serve. A repository's own store must
+ * already exist; the machine-wide store counts as soon as global mode chooses
+ * it, since a session's first hook can run before its MCP server creates it.
+ */
+export function workspaceExists(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  try {
+    const store = resolveStore(resolveRepoRoot(cwd, env), env);
+    return store.kind === 'global' || existsSync(store.databasePath);
+  } catch {
+    return false;
+  }
 }

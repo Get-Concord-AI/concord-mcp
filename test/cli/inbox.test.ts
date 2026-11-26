@@ -12,11 +12,11 @@ import {
 import { CONCORD_SERVER_INSTRUCTIONS } from '../../src/install/instructions.js';
 import {
   drainInbox,
-  observeInboxHook,
   registeredLine,
   registerPullEndpoint,
   watchInbox,
 } from '../../src/cli/commands/inbox.js';
+import { observeInboxHook } from '../../src/cli/commands/inbox-observe.js';
 import { claimWaiter, defaultWaiterDir } from '../../src/cli/commands/inbox-rewake.js';
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { existsSync, mkdtempSync } from 'node:fs';

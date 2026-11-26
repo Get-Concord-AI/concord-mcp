@@ -15,7 +15,8 @@ import { describe, expect, it } from 'vitest';
 
 import { readUserConfig, writeUserConfig } from '../../src/config/user-config.js';
 import { createRepositories, openDatabase, openRepositories } from '../../src/db/index.js';
-import { registerPullEndpoint, workspaceExists } from '../../src/cli/commands/inbox.js';
+import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
+import { workspaceExists } from '../../src/workspaces/store.js';
 import { watchedDirectory } from '../../src/cli/commands/watch.js';
 import { openContext } from '../../src/cli/context.js';
 import { handleSendAgentMessage } from '../../src/tools/agent-messages.js';

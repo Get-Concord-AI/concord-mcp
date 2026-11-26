@@ -73,6 +73,11 @@ export function deriveLiveness(
   return 'live';
 }
 
+/** True when an optional ISO lease deadline has elapsed at or before `now`. */
+export function isLeaseExpired(leaseExpiresAt: string | null, now: number): boolean {
+  return leaseExpiresAt !== null && Date.parse(leaseExpiresAt) <= now;
+}
+
 const LIVENESS_ORDER: Record<Liveness, number> = { live: 0, idle: 1, away: 2, archived: 3 };
 
 function ageSecondsOf(lastSeen: string, now: number): number {
@@ -124,7 +129,12 @@ export interface StaleClaim {
 
 const OWNED_STATUSES: readonly string[] = ['active', 'blocked', 'handoff_offered'];
 
-function isPresent(agent: AgentRecord, now: number, thresholds: PresenceThresholds): boolean {
+/** True when the agent is `live` or `idle` (not yet `away` or `archived`). */
+export function isPresent(
+  agent: AgentRecord,
+  now: number,
+  thresholds: PresenceThresholds = DEFAULT_PRESENCE_THRESHOLDS,
+): boolean {
   return LIVENESS_ORDER[deriveLiveness(agent.lastSeen, now, thresholds)] < LIVENESS_ORDER.away;
 }
 
@@ -149,7 +159,7 @@ function staleAssignment(
     };
   }
   const waitedMs = now - Date.parse(assignedAt);
-  const leaseExpired = task.leaseExpiresAt !== null && Date.parse(task.leaseExpiresAt) <= now;
+  const leaseExpired = isLeaseExpired(task.leaseExpiresAt, now);
   if (
     leaseExpired ||
     waitedMs >= thresholds.assignmentAcceptAfterMs ||
