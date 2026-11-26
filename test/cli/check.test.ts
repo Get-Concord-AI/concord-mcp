@@ -4,6 +4,7 @@ import { checkFileOverlaps, renderCheck } from '../../src/cli/commands/check.js'
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
+import { ROOT_CLAIMS } from '../helpers/root-claims.js';
 
 describe('concord check', () => {
   let repos: Repositories;
@@ -85,7 +86,7 @@ describe('concord check', () => {
     expect(checkFileOverlaps(repos, ['src/application/page.tsx'])).toEqual([]);
   });
 
-  it.each(['.', './', '/'])('flags files covered by root claim %j', (root) => {
+  it.each(ROOT_CLAIMS)('flags files covered by root claim %j', (root) => {
     handleClaimWork(repos, { task_id: 'T1', title: 'Owns repo', expected_files: [root] });
 
     expect(checkFileOverlaps(repos, ['src/app/page.tsx', 'README.md'])).toEqual([

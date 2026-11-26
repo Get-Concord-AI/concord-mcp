@@ -6,10 +6,12 @@ import type { TaskRecord } from '../../src/db/index.js';
 import {
   detectOverlaps,
   entryCoversFile,
+  isRootClaim,
   normalizePath,
   pathKey,
   type OverlapSurface,
 } from '../../src/domain/overlap.js';
+import { ROOT_CLAIMS } from '../helpers/root-claims.js';
 
 function task(partial: Partial<TaskRecord> & { taskId: string }): TaskRecord {
   return {
@@ -384,7 +386,7 @@ describe('detectOverlaps', () => {
     expect(reverse.map((warning) => warning.taskId)).toEqual(['D2']);
   });
 
-  it.each(['.', './', '/'])('flags root claim %j in both directions', (root) => {
+  it.each(ROOT_CLAIMS)('flags root claim %j in both directions', (root) => {
     const rootClaim = task({ taskId: 'ROOT', expectedFiles: [root] });
     const fileClaim = task({ taskId: 'FILE', expectedFiles: ['src/app/page.tsx'] });
     const reasons = ['directory claim covers file(s): . -> src/app/page.tsx'];
@@ -395,6 +397,10 @@ describe('detectOverlaps', () => {
     expect(detectOverlaps(fileClaim, [rootClaim])).toEqual([
       { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
     ]);
+  });
+
+  it.each(['', '  ', '..', '../x', 'src'])('does not treat %j as a root claim', (entry) => {
+    expect(isRootClaim(entry)).toBe(false);
   });
 
   it.each([
