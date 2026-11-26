@@ -1,7 +1,18 @@
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -14,6 +25,7 @@ import {
   REWAKE_HEADER,
   rewakeWaits,
   standDownWhenSuperseded,
+  supersedeWaiter,
 } from '../../src/cli/commands/inbox-rewake.js';
 import { codexThreadHostable, embeddingHost } from '../../src/cli/embedding-host.js';
 import { observeHookEvent } from '../../src/cli/commands/inbox-observe.js';
@@ -230,61 +242,157 @@ describe('relay plugin hooks', () => {
   });
 });
 
-describe('SessionEnd waiter supersede', () => {
-  it('stands an armed waiter down when the session ends', () => {
-    const repos = createRepositories(openDatabase(':memory:'));
-    repos.agents.upsert({
-      agentId: 'beta',
-      kind: 'claude-code',
-      owner: null,
-      model: null,
-      pid: null,
-      cwd: null,
-      worktree: null,
-      branch: null,
-      summary: null,
-      status: 'active',
-    });
+describe('supersedeWaiter', () => {
+  it('stands an armed waiter down within a superseded check', () => {
     const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) };
-    const waiter = claimWaiter('beta', 'token-armed', defaultWaiterDir(env));
+    const dir = defaultWaiterDir(env);
+    const waiter = claimWaiter('claude-code:aaaa0000', 'token-armed', dir);
     expect(waiter.superseded()).toBe(false);
 
-    observeHookEvent(
-      repos,
-      'beta',
-      JSON.stringify({ session_id: 's-1', hook_event_name: 'SessionEnd', reason: 'other' }),
-      undefined,
-      env,
-    );
+    supersedeWaiter('claude-code:aaaa0000', dir);
 
     expect(waiter.superseded()).toBe(true);
   });
 
-  it('supersedes the waiter when the conversation clears, since the post-clear session is a new agent', () => {
-    const repos = createRepositories(openDatabase(':memory:'));
-    repos.agents.upsert({
-      agentId: 'beta',
-      kind: 'claude-code',
-      owner: null,
-      model: null,
-      pid: null,
-      cwd: null,
-      worktree: null,
-      branch: null,
-      summary: null,
-      status: 'active',
-    });
+  it('creates nothing when no waiter is armed — a foreign repository stays clean', () => {
     const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) };
-    const waiter = claimWaiter('beta', 'token-armed', defaultWaiterDir(env));
+    const dir = defaultWaiterDir(env);
 
-    observeHookEvent(
-      repos,
-      'beta',
-      JSON.stringify({ session_id: 's-1', hook_event_name: 'SessionEnd', reason: 'clear' }),
-      undefined,
-      env,
+    supersedeWaiter('claude-code:aaaa0000', dir);
+
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('leaves the waiter of a different agent alone', () => {
+    const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-home-')) };
+    const dir = defaultWaiterDir(env);
+    const other = claimWaiter('claude-code:bbbb1111', 'token-other', dir);
+
+    supersedeWaiter('claude-code:aaaa0000', dir);
+
+    expect(other.superseded()).toBe(false);
+  });
+});
+
+describe('waiter claim serialization', () => {
+  function claimFile(dir: string, agentId: string): string {
+    const key = createHash('sha256').update(agentId).digest('hex').slice(0, 16);
+    return join(dir, `${key}.waiter`);
+  }
+
+  it('leaves the newer claim untouched when a superseded waiter releases', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'concord-rewake-'));
+    const agent = 'claude-code:aaaa0000';
+    const first = claimWaiter(agent, 'token-old', dir);
+    claimWaiter(agent, 'token-new', dir);
+
+    // The pre-check: an already-superseded waiter's release must not touch
+    // the newer claim's path or contents at all.
+    first.release();
+
+    expect(readFileSync(claimFile(dir, agent), 'utf8').trim()).toBe('token-new');
+  });
+
+  it('waits for a lock another process holds instead of writing over it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'concord-rewake-'));
+    const agent = 'claude-code:aaaa0000';
+    const lock = `${claimFile(dir, agent)}.lock`;
+    // The lock is held before the child starts, so no startup race: the child
+    // only lifts it 800ms in, and the claim must wait out most of that.
+    writeFileSync(lock, 'held');
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        `setTimeout(() => require('node:fs').rmSync(${JSON.stringify(lock)}, { force: true }), 800)`,
+      ],
+      { stdio: 'ignore' },
     );
+    try {
+      const started = Date.now();
+      claimWaiter(agent, 'token-1', dir);
+      const elapsed = Date.now() - started;
 
+      expect(elapsed).toBeGreaterThanOrEqual(400);
+      // Below the staleness floor: the wait ended because the child lifted
+      // the lock, not because it was broken as a dead process's residue.
+      expect(elapsed).toBeLessThan(1_900);
+      expect(readFileSync(claimFile(dir, agent), 'utf8').trim()).toBe('token-1');
+    } finally {
+      child.kill();
+    }
+  });
+
+  it('breaks a lock a dead process left behind instead of waiting it out', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'concord-rewake-'));
+    const agent = 'claude-code:aaaa0000';
+    const lock = `${claimFile(dir, agent)}.lock`;
+    writeFileSync(lock, 'dead');
+    // Older than the staleness floor: a live holder never yields mid-section,
+    // so this can only be a crashed process's residue.
+    const stale = new Date(Date.now() - 10_000);
+    utimesSync(lock, stale, stale);
+
+    const started = Date.now();
+    claimWaiter(agent, 'token-1', dir);
+
+    expect(Date.now() - started).toBeLessThan(1_500);
+    expect(readFileSync(claimFile(dir, agent), 'utf8').trim()).toBe('token-1');
+  });
+
+  it('leaves no lock residue once the claim is written', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'concord-rewake-'));
+    const agent = 'claude-code:aaaa0000';
+    const waiter = claimWaiter(agent, 'token-1', dir);
+
+    expect(existsSync(`${claimFile(dir, agent)}.lock`)).toBe(false);
+    waiter.release();
+    expect(existsSync(claimFile(dir, agent))).toBe(false);
+  });
+});
+
+describe('superseded settle window', () => {
+  function claimFile(dir: string, agentId: string): string {
+    const key = createHash('sha256').update(agentId).digest('hex').slice(0, 16);
+    return join(dir, `${key}.waiter`);
+  }
+
+  it('is not superseded when the claim file reappears within the settle window', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'concord-rewake-'));
+    const agent = 'claude-code:aaaa0000';
+    const waiter = claimWaiter(agent, 'token-1', dir);
+    const path = claimFile(dir, agent);
+    // Rewrite the same token a few times over the next hundreds of ms, so one
+    // of the writes lands inside the 150ms settle however slow the worker is
+    // to start: the absence was a writer mid-flight, not a lost claim.
+    const worker = new Worker(
+      `const fs = require('node:fs');
+       const path = ${JSON.stringify(path)};
+       let writes = 0;
+       const timer = setInterval(() => {
+         fs.writeFileSync(path, 'token-1');
+         if (++writes === 20) clearInterval(timer);
+       }, 30);`,
+      { eval: true },
+    );
+    try {
+      rmSync(path);
+      expect(waiter.superseded()).toBe(false);
+    } finally {
+      await worker.terminate();
+    }
+  });
+
+  it('is superseded when the claim file stays missing beyond the settle window', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'concord-rewake-'));
+    const agent = 'claude-code:aaaa0000';
+    const waiter = claimWaiter(agent, 'token-1', dir);
+    rmSync(claimFile(dir, agent));
+
+    const started = Date.now();
     expect(waiter.superseded()).toBe(true);
+    // The settle wait really happened: instant answers cannot tell a slow
+    // writer from a lost claim.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(140);
   });
 });

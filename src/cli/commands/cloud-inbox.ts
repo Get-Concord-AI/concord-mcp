@@ -247,8 +247,13 @@ export async function watchCloud(
       }
       try {
         agent ??= await registerInCloud(runtime, agentKey, provider, process.cwd(), monitor);
-        await renewReceiver(runtime, agent, RECEIVER_TTL_SECONDS);
+        // Ownership is recorded before the lease is taken, not after: a
+        // teardown that reads the state then already sees the lease as
+        // someone else's, instead of releasing it just as the new owner
+        // renews. A round that fails before this point simply writes again
+        // next time.
         updateAgentState(runtime, agentKey, { receiverOwner });
+        await renewReceiver(runtime, agent, RECEIVER_TTL_SECONDS);
         if (monitor) {
           updateAgentState(runtime, agentKey, {
             watchingUntil: Date.now() + RECEIVER_TTL_SECONDS * 1000,
@@ -269,14 +274,25 @@ export async function watchCloud(
     if (!replaced()) {
       // The lease may have been taken over by another receiver since — the
       // session's real monitor starting while this fallback was draining,
-      // for one. Clear watchingUntil only when this receiver set it, and
-      // release the lease only while it is still this one's.
+      // for one. The server-side lease has no owner, so a DELETE cannot be
+      // made conditional: while a live monitor is being served the lease is
+      // left to expire on its own rather than risking a DELETE that lands
+      // after the monitor's renewal, and the replacement's state is never
+      // this receiver's to clear.
       const state = readAgentState(runtime, agentKey);
       const leaseIsOurs = state?.receiverOwner === receiverOwner;
-      if (monitor && leaseIsOurs) updateAgentState(runtime, agentKey, { watchingUntil: undefined });
-      if (leaseIsOurs && agent !== undefined)
+      const overlap = !monitor && watching(runtime, agentKey);
+      if (leaseIsOurs && agent !== undefined && !overlap) {
         await releaseReceiver(runtime, agent).catch(() => undefined);
-      if (leaseIsOurs) updateAgentState(runtime, agentKey, { receiverOwner: undefined });
+      }
+      // Re-read after the DELETE round-trip: ownership changing hands while
+      // it was in flight must not cost the replacement its recorded owner or
+      // watching state.
+      const after = readAgentState(runtime, agentKey);
+      if (after?.receiverOwner === receiverOwner) {
+        updateAgentState(runtime, agentKey, { receiverOwner: undefined });
+        if (monitor) updateAgentState(runtime, agentKey, { watchingUntil: undefined });
+      }
     }
   }
 }

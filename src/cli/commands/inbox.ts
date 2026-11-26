@@ -33,7 +33,7 @@ import { monitorInstanceId, resolveLiveAgent } from '../live-identity.js';
 import { resolveStore } from '../../workspaces/store.js';
 import { launchDetachedConcord } from '../detached-host.js';
 import { codexThreadHostable } from '../embedding-host.js';
-import { isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
+import { eventName, isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
 import {
   claimWaiter,
   defaultWaiterDir,
@@ -42,6 +42,7 @@ import {
   REWAKE_EXIT_CODE,
   rewakeWaits,
   standDownWhenSuperseded,
+  supersedeWaiter,
 } from './inbox-rewake.js';
 import { CONCORD_SERVER_ONLY } from './session-start-message.js';
 import {
@@ -413,6 +414,58 @@ function reportCloudFailure(detail: string): void {
   process.stderr.write(`Concord Cloud could not be reached: ${detail}\n`);
 }
 
+/**
+ * What `inbox observe` does with the hook payload already read — apart from
+ * stdin so tests can drive it. The plugin runs this on SessionStart,
+ * UserPromptSubmit, PreToolUse, Notification and SessionEnd in every
+ * repository once installed, so nothing here may ever fail the hook: an
+ * identity that does not resolve or a store that cannot open is logged at
+ * most, never thrown.
+ */
+export async function observeInboxHook(
+  payload: string,
+  options: { readonly agent?: string | undefined; readonly provider: string },
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): Promise<void> {
+  // The waiter claim is plain local state, so SessionEnd cleanup runs for
+  // cloud sessions too — before the access check below would return. An
+  // ended cloud session's waiter would otherwise keep renewing its lease
+  // and drain batches into stderr nothing reads. Only the session's own end
+  // counts: a subagent's says nothing about the session's waiter.
+  const earlyHook = parseObservedHook(payload);
+  if (
+    earlyHook !== undefined &&
+    eventName(earlyHook) === 'SessionEnd' &&
+    !isSubagentHook(earlyHook)
+  ) {
+    try {
+      const agentId = resolveAgentId(options.agent, env, {
+        kind: options.provider,
+        hookPayload: payload,
+      });
+      supersedeWaiter(agentId, defaultWaiterDir(env));
+    } catch {
+      // Never fail the hook: a waiter left armed expires with its lease.
+    }
+  }
+  const access = cloudAccess(cwd, { timeoutMs: HOOK_TIMEOUT_MS }, env);
+  if (access.kind !== 'local' || !workspaceExists(cwd, env)) return;
+  try {
+    const agentId = resolveAgentId(options.agent, env, {
+      kind: options.provider,
+      hookPayload: payload,
+    });
+    const context = await import('../context.js');
+    observeHookEvent(context.openContext(cwd, env).repos, agentId, payload, options.provider);
+  } catch (error) {
+    // Never fail the hook: a missed observation only leaves a message unseen.
+    process.stderr.write(
+      `Concord: could not record hook event: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  }
+}
+
 export function registerInboxCommand(program: Command, telemetry?: TelemetryRecorder): void {
   const inbox = program
     .command('inbox')
@@ -650,39 +703,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     .action(async (options) => {
       // Seen-tracking lives in the local store; Concord Cloud keeps its own
       // delivery record. Prints nothing: UserPromptSubmit output becomes context.
-      const payload = readHookPayload() ?? '';
-      const agentId = resolveAgentId(options.agent, process.env, {
-        kind: options.provider,
-        hookPayload: payload,
-      });
-      // The waiter claim is plain local state, so SessionEnd cleanup runs for
-      // cloud sessions too — before the access check below would return. An
-      // ended cloud session's waiter would otherwise keep renewing its lease
-      // and drain batches into stderr nothing reads.
-      const earlyHook = parseObservedHook(payload);
-      if (earlyHook?.hook_event_name === 'SessionEnd') {
-        try {
-          claimWaiter(agentId, randomUUID(), defaultWaiterDir(process.env)).release();
-        } catch {
-          // A claim that cannot be released costs nothing here: it expires.
-        }
-      }
-      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
-      if (access.kind !== 'local' || !workspaceExists(process.cwd())) return;
-      try {
-        const context = await import('../context.js');
-        observeHookEvent(
-          context.openContext(process.cwd()).repos,
-          agentId,
-          payload,
-          options.provider,
-        );
-      } catch (error) {
-        // Never fail the hook: a missed observation only leaves a message unseen.
-        process.stderr.write(
-          `Concord: could not record hook event: ${error instanceof Error ? error.message : String(error)}\n`,
-        );
-      }
+      await observeInboxHook(readHookPayload() ?? '', options);
     });
 
   inbox

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
@@ -167,6 +167,76 @@ describe('cloud inbox', () => {
     const calls = cloud.requests.map((request) => `${request.method} ${request.path}`);
     expect(calls).not.toContain('DELETE /v1/agents/a-uuid/endpoint/receiver');
     expect(readAgentState(runtime, AGENT)?.receiverOwner).toBe('monitor-token');
+  });
+
+  it('keeps the state of the replacement when ownership changes while the DELETE is in flight', async () => {
+    const cloud = fakeCloud([
+      ...registering,
+      ['PUT /v1/agents/a-uuid/endpoint/receiver', () => ok({ receiverExpiresAt: NOW })],
+      ['DELETE /v1/agents/a-uuid/endpoint/receiver', () => ({ status: 204, json: {} })],
+      ['POST /v1/messages/drain', () => ok({ messages: [message('wake up')] })],
+    ]);
+    // Hold the DELETE back until the test lets it land: the window in which
+    // the real monitor renews the lease and rewrites its ownership.
+    let deleteStarted = false;
+    let answerDelete: (response: Response) => void = () => undefined;
+    const heldFetch: CloudRuntime['fetch'] = (input, init) => {
+      if ((init?.method ?? 'GET') === 'DELETE') {
+        deleteStarted = true;
+        return new Promise<Response>((resolve) => {
+          answerDelete = resolve;
+        });
+      }
+      return cloud.fetch(input, init);
+    };
+    const runtime = runtimeWith(heldFetch);
+    const watchingUntil = Date.now() + 60_000;
+
+    const watch = watchCloud(runtime, AGENT, 'claude-code', true, () => undefined);
+    await vi.waitFor(() => {
+      expect(deleteStarted).toBe(true);
+    });
+    // The monitor's renewal lands while the fallback's DELETE is in flight.
+    updateAgentState(runtime, AGENT, { receiverOwner: 'monitor-token', watchingUntil });
+    answerDelete(new Response(null, { status: 204 }));
+    await watch;
+
+    // The DELETE could not be called back, but the replacement's ownership
+    // and watching state are not the falling back receiver's to erase.
+    const state = readAgentState(runtime, AGENT);
+    expect(state?.receiverOwner).toBe('monitor-token');
+    expect(state?.watchingUntil).toBe(watchingUntil);
+  });
+
+  it('lets the lease expire rather than releasing it under a live monitor', async () => {
+    const cloud = fakeCloud([
+      ...registering,
+      ['PUT /v1/agents/a-uuid/endpoint/receiver', () => ok({ receiverExpiresAt: NOW })],
+      ['DELETE /v1/agents/a-uuid/endpoint/receiver', () => ({ status: 204, json: {} })],
+      ['POST /v1/messages/drain', () => ok({ messages: [message('wake up')] })],
+    ]);
+    const runtime = runtimeWith(cloud.fetch);
+    const watchingUntil = Date.now() + 60_000;
+
+    await watchCloud(
+      runtime,
+      AGENT,
+      'claude-code',
+      true,
+      () => {
+        // A monitor is alive — it wrote watchingUntil — but the owner entry
+        // still reads as this fallback, the interleaving a clobbered cache
+        // write or a mixed-version fleet can leave behind. The server-side
+        // lease has no owner, so the fallback's DELETE could land after the
+        // monitor's renewal and strip it: safer to let the lease expire.
+        updateAgentState(runtime, AGENT, { watchingUntil });
+      },
+      { monitor: false },
+    );
+
+    const calls = cloud.requests.map((request) => `${request.method} ${request.path}`);
+    expect(calls).not.toContain('DELETE /v1/agents/a-uuid/endpoint/receiver');
+    expect(readAgentState(runtime, AGENT)?.watchingUntil).toBe(watchingUntil);
   });
 
   it('runs a fallback waiter without advertising it as the monitor', async () => {

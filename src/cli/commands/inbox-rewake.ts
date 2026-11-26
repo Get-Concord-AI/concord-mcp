@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  linkSync,
+  closeSync,
+  existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
-  renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -97,6 +99,58 @@ function readClaim(path: string): string | undefined {
   }
 }
 
+/** How long a waiter waits for the claim lock between tries. */
+const LOCK_SPIN_MS = 5;
+/**
+ * A lock this old is a dead process's: every critical section is synchronous
+ * and microseconds long, so a live holder never yields while it keeps one.
+ */
+const LOCK_STALE_MS = 2_000;
+/**
+ * How long a waiter spins before proceeding without the lock. Unreachable in
+ * practice — a stale lock is broken within LOCK_STALE_MS — but a hook must
+ * never hang: running unlocked degrades to the pre-lock behaviour, it never
+ * blocks delivery.
+ */
+const LOCK_WAIT_MS = 10_000;
+
+/**
+ * Runs `work` holding the per-claim lock, so a claim write and a release can
+ * never interleave. Without serialization an exiting waiter's compare-and-delete
+ * can move a newer claim aside — however briefly — and the newer waiter reads
+ * the missing file as its own supersession: both waiters stop, nobody watches.
+ * The lock is an exclusive-create file; spinning is synchronous because every
+ * critical section is, so a live holder never keeps it longer than microseconds.
+ */
+function withClaimLock<T>(path: string, work: () => T): T {
+  const lockPath = `${path}.lock`;
+  const started = Date.now();
+  let acquired = false;
+  for (;;) {
+    try {
+      closeSync(openSync(lockPath, 'wx'));
+      acquired = true;
+      break;
+    } catch {
+      // Held by another process, or the filesystem refused — retry either way.
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
+          rmSync(lockPath, { force: true });
+        }
+      } catch {
+        // Already released: the next create succeeds.
+      }
+      if (Date.now() - started > LOCK_WAIT_MS) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_SPIN_MS);
+    }
+  }
+  try {
+    return work();
+  } finally {
+    if (acquired) rmSync(lockPath, { force: true });
+  }
+}
+
 export interface WaiterClaim {
   /** Whether a newer waiter has taken this agent's place since this one began. */
   readonly superseded: () => boolean;
@@ -116,55 +170,55 @@ export function claimWaiter(
 ): WaiterClaim {
   mkdirSync(dir, { recursive: true });
   const path = claimPath(agentId, dir);
-  try {
-    // Never write through a planted symlink: drop the link itself and claim
-    // the name fresh. readClaim/release only ever remove the link, never its
-    // target.
-    if (lstatSync(path).isSymbolicLink()) rmSync(path);
-  } catch {
-    // Absent or unreadable: writeFileSync below reports the real failure.
-  }
-  writeFileSync(path, token);
+  withClaimLock(path, () => {
+    try {
+      // Never write through a planted symlink: drop the link itself and claim
+      // the name fresh. readClaim/release only ever remove the link, never its
+      // target.
+      if (lstatSync(path).isSymbolicLink()) rmSync(path);
+    } catch {
+      // Absent or unreadable: writeFileSync below reports the real failure.
+    }
+    writeFileSync(path, token);
+  });
   return {
     superseded: () => {
       const current = readClaim(path);
       if (current === token) return false;
       if (current !== undefined) return true;
-      // A missing file is not proof on its own: another waiter's release
-      // rename+restore leaves the path empty for a few microseconds, and a
-      // newer waiter checking inside that window would otherwise stand down
+      // A missing file is not proof on its own: a writer paused mid-write or
+      // a release in flight can leave the path empty for moments, and a newer
+      // waiter checking inside that window would otherwise stand down
       // alongside the older one — both gone, nobody watching. Only an absence
       // outliving that window means the claim is really gone.
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
       return readClaim(path) !== token;
     },
     release: () => {
-      // Cheap pre-check: the common exits are an already-superseded or
-      // already-released claim, and neither should touch the path at all.
-      if (readClaim(path) !== token) return;
-      // Compare-and-delete, atomically: reading the token and unlinking as
-      // separate steps would let a newer waiter's claim, written in between,
-      // be removed by this older one. The rename freezes whatever claim the
-      // path held; a hard link puts a newer claim back without clobbering an
-      // even newer one, since linkSync fails rather than overwrite.
-      const trash = `${path}.trash-${String(process.pid)}-${randomUUID()}`;
-      try {
-        renameSync(path, trash);
-      } catch {
-        return;
-      }
-      if (readClaim(trash) === token) {
-        rmSync(trash, { force: true });
-        return;
-      }
-      try {
-        linkSync(trash, path);
-      } catch {
-        // A newer claim already sits at the path: it wins, as it should.
-      }
-      rmSync(trash, { force: true });
+      withClaimLock(path, () => {
+        // Compare-and-delete, serialized: every writer holds this lock, so a
+        // token match here is still this waiter's claim when it is removed —
+        // a newer waiter's claim can never be moved aside, not even briefly.
+        if (readClaim(path) !== token) return;
+        rmSync(path, { force: true });
+      });
     },
   };
+}
+
+/**
+ * Stands down the waiter `agentId` has armed, if there is one: a fresh claim
+ * the waiter does not hold supersedes it, and it stops within a second. A
+ * no-op when nothing is armed — a SessionEnd hook fires in every repository
+ * once the plugin is installed, and one that has nothing to do with Concord
+ * must not have the waiter directory created for it.
+ */
+export function supersedeWaiter(
+  agentId: string,
+  dir: string = defaultWaiterDir(process.env),
+): void {
+  if (!existsSync(claimPath(agentId, dir))) return;
+  claimWaiter(agentId, randomUUID(), dir).release();
 }
 
 /**

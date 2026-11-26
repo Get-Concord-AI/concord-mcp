@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
@@ -8,7 +7,6 @@ import type { Repositories } from '../../db/index.js';
 import { hookSessionId } from '../../domain/identity.js';
 import { idsInPrompt, scanTranscript, sessionKey } from '../../domain/receipts.js';
 import { recordClientBinding } from '../session-binding.js';
-import { claimWaiter, defaultWaiterDir } from './inbox-rewake.js';
 
 /**
  * What a session's own hooks reveal about the messages it was handed.
@@ -61,7 +59,8 @@ const EVENT_NAMES: Readonly<Record<string, string>> = {
   session_end: 'SessionEnd',
 };
 
-function eventName(hook: ObservedHook): string | undefined {
+/** The hook's event in Claude Code's spelling, whichever form the harness used. */
+export function eventName(hook: ObservedHook): string | undefined {
   const name = hook.hook_event_name ?? hook.hookEventName;
   return name === undefined ? undefined : (EVENT_NAMES[name] ?? name);
 }
@@ -219,7 +218,6 @@ export function observeHookEvent(
   agentId: string,
   rawJson: string,
   kind?: string,
-  env: NodeJS.ProcessEnv = process.env,
 ): Observation {
   const hook = parseObservedHook(rawJson);
   if (hook === undefined || isSubagentHook(hook)) return { read: [], requeued: [] };
@@ -258,16 +256,9 @@ export function observeHookEvent(
           .requeueSession(agentId, session)
           .map((message) => message.messageId);
       }
-      // An armed rewake waiter belongs to the session that just ended. Left
-      // alone it would keep refreshing the endpoint lease and the agent's
-      // heartbeat for up to a day — looking live while its stderr wakes
-      // nobody — and the next message would be marked delivered into the
-      // void. Taking and releasing a fresh claim supersedes it, and it
-      // stands down within a second. `/clear` ends it too: the waiter is
-      // pinned to the pre-clear agent id, and the post-clear session is a
-      // new agent with its own waiter — the old one would drain an inbox
-      // no live session reads anymore.
-      claimWaiter(agentId, randomUUID(), defaultWaiterDir(env)).release();
+      // The armed rewake waiter of the session that just ended is superseded
+      // by the `inbox observe` command, which runs before this local-store
+      // path so cloud sessions are covered too — keeping one place for it.
       break;
     }
     case undefined:

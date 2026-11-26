@@ -65,8 +65,8 @@ Apps that drive Claude Code through the Claude Agent SDK, such as
 (`CLAUDE_CODE_ENTRYPOINT` is `sdk-ts` or `sdk-py`), the plugin's Stop hook arms
 `concord inbox rewake`, an `asyncRewake` hook. It waits for the next message
 and exits with code 2, which wakes the idle session with it. In interactive
-sessions the same hook stays quiet while the plugin monitor is alive; it only
-waits when no monitor is beating, covering the gap below.
+sessions the same hook arms a dormant fallback at every Stop that only drains
+when no monitor is beating, covering the gap below.
 
 Claude Code holds a monitor notification while the agent is blocked on its user
 (an `AskUserQuestion` picker or a permission prompt), so a message the monitor
