@@ -11,6 +11,7 @@ import { openclawGateway, OpenclawSessionAdapter } from '../../relay/openclaw-ga
 import { RELAY_PROTOCOL_VERSION } from '../../relay/protocol.js';
 import { deliverToSession } from './cloud-codex.js';
 import { cloudAccess, watchCloud } from './cloud-inbox.js';
+import { monitorInstanceId } from '../live-identity.js';
 import { claimWaiter, standDownWhenSuperseded } from './inbox-rewake.js';
 import { heartbeatReceiver, isSqliteBusy, registerPullEndpoint } from './inbox.js';
 
@@ -34,14 +35,15 @@ export async function deliverOpenclawInbox(
   agentId: string,
   adapter: OpenclawSessionAdapter,
   stop: AbortSignal,
+  receiverOwner: string,
 ): Promise<void> {
   registerPullEndpoint(repos, agentId, KIND, Date.now(), monitorCapabilityFor(KIND));
-  heartbeatReceiver(repos, agentId, POLL_MS);
+  heartbeatReceiver(repos, agentId, POLL_MS, receiverOwner);
   repos.agents.heartbeat(agentId);
   repos.agentMessages.sweepStale();
   for (const message of repos.agentMessages.listPendingForRecipient(agentId)) {
     if (stop.aborted) return;
-    heartbeatReceiver(repos, agentId, POLL_MS);
+    heartbeatReceiver(repos, agentId, POLL_MS, receiverOwner);
     const runId = await adapter.inject({
       version: RELAY_PROTOCOL_VERSION,
       type: 'deliver',
@@ -71,11 +73,12 @@ async function watchLocal(
   adapter: OpenclawSessionAdapter,
   stop: AbortSignal,
   superseded: () => boolean,
+  receiverOwner: string,
 ): Promise<void> {
   try {
     while (!stop.aborted) {
       try {
-        await deliverOpenclawInbox(repos, agentId, adapter, stop);
+        await deliverOpenclawInbox(repos, agentId, adapter, stop, receiverOwner);
       } catch (error) {
         if (!isSqliteBusy(error)) throw error;
       }
@@ -84,7 +87,7 @@ async function watchLocal(
   } finally {
     const endpoint = repos.agentEndpoints.getByAgent(agentId);
     if (endpoint !== undefined && !superseded())
-      repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+      repos.agentEndpoints.clearReceiver(endpoint.endpointId, receiverOwner);
   }
 }
 
@@ -146,14 +149,20 @@ export async function launchOpenclaw(rawAgent: string, cwd: string = process.cwd
         KIND,
         false,
         (messages, signal) => deliverToSession(access.runtime, agentId, adapter, messages, signal),
-        claim.superseded,
-        stop.signal,
+        { replaced: claim.superseded, signal: stop.signal },
       );
       return;
     }
     if (context === undefined) return;
     const adapter = new OpenclawSessionAdapter(agent, context.workspaceId, call);
-    await watchLocal(context.repos, agentId, adapter, stop.signal, claim.superseded);
+    await watchLocal(
+      context.repos,
+      agentId,
+      adapter,
+      stop.signal,
+      claim.superseded,
+      monitorInstanceId(env),
+    );
   } finally {
     clearInterval(health);
     cancel();

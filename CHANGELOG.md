@@ -8,6 +8,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A rewake waiter no longer outlives its session: `SessionEnd` supersedes the
+  armed waiter's claim, so the agent stops looking live — and messages stop
+  being "delivered" to a stderr nobody reads — within a second of the session
+  ending.
+- The cloud rewake fallback no longer clears a healthy monitor's receiver
+  lease or watching state on teardown: receivers record an ownership token in
+  the agent state and only release what is still theirs.
+- The fallback waiter now arms at every Stop and stays dormant while a
+  receiver beats, taking over the moment the lease actually lapses — a monitor
+  crashing just before Stop no longer leaves messages queued until the next
+  Stop.
+- A superseded rewake waiter's exit can no longer delete the newer waiter's
+  claim: claim writes and releases are serialized per agent.
+- The OpenClaw live receiver heartbeats and clears its receiver lease under
+  its own owner token, matching the owner-scoped lease discipline.
 - Removing the last property of a JSONC object no longer drops a comment
   sitting between the preceding comma and that property — a section note is
   kept the way comments after a middle property already were.

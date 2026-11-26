@@ -90,6 +90,10 @@ function runMonitor(
     cwd: directory,
     encoding: 'utf8',
     timeout: timeoutMs,
+    // SIGKILL, not the default SIGTERM: the script traps TERM to release its
+    // receiver and exit 0, which would look like a clean exit here. A kill
+    // that cannot be trapped is what "still polling at the deadline" means.
+    killSignal: 'SIGKILL',
     env,
   });
   const lines = (file: string | undefined): string[] =>

@@ -6,7 +6,11 @@ import { z } from 'zod';
 import type { Repositories } from '../../db/index.js';
 import { hookSessionId } from '../../domain/identity.js';
 import { idsInPrompt, scanTranscript, sessionKey } from '../../domain/receipts.js';
+import { workspaceExists } from '../../workspaces/store.js';
+import { resolveAgentId } from '../agent-identity.js';
 import { recordClientBinding } from '../session-binding.js';
+import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
+import { defaultWaiterDir, supersedeWaiter } from './inbox-rewake.js';
 
 /**
  * What a session's own hooks reveal about the messages it was handed.
@@ -59,7 +63,8 @@ const EVENT_NAMES: Readonly<Record<string, string>> = {
   session_end: 'SessionEnd',
 };
 
-function eventName(hook: ObservedHook): string | undefined {
+/** The hook's event in Claude Code's spelling, whichever form the harness used. */
+export function eventName(hook: ObservedHook): string | undefined {
   const name = hook.hook_event_name ?? hook.hookEventName;
   return name === undefined ? undefined : (EVENT_NAMES[name] ?? name);
 }
@@ -245,7 +250,7 @@ export function observeHookEvent(
           .map((message) => message.messageId);
       }
       break;
-    case 'SessionEnd':
+    case 'SessionEnd': {
       // A session that ended will never read what it was handed but did not
       // show. Requeued, it reaches this agent's next session or expires.
       // `/clear` ends the conversation but not the process: its monitor keeps
@@ -255,7 +260,11 @@ export function observeHookEvent(
           .requeueSession(agentId, session)
           .map((message) => message.messageId);
       }
+      // The armed rewake waiter of the session that just ended is superseded
+      // by the `inbox observe` command, which runs before this local-store
+      // path so cloud sessions are covered too — keeping one place for it.
       break;
+    }
     case undefined:
       break;
     default:
@@ -269,4 +278,56 @@ export function observeHookEvent(
 
 function awaitUser(repos: Repositories, agentId: string): void {
   repos.agentEndpoints.setAwaitingUser(agentId, new Date().toISOString());
+}
+
+/**
+ * What `inbox observe` does with the hook payload already read — apart from
+ * stdin so tests can drive it. The plugin runs this on SessionStart,
+ * UserPromptSubmit, PreToolUse, Notification and SessionEnd in every
+ * repository once installed, so nothing here may ever fail the hook: an
+ * identity that does not resolve or a store that cannot open is logged at
+ * most, never thrown.
+ */
+export async function observeInboxHook(
+  payload: string,
+  options: { readonly agent?: string | undefined; readonly provider: string },
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): Promise<void> {
+  // The waiter claim is plain local state, so SessionEnd cleanup runs for
+  // cloud sessions too — before the access check below would return. An
+  // ended cloud session's waiter would otherwise keep renewing its lease
+  // and drain batches into stderr nothing reads. Only the session's own end
+  // counts: a subagent's says nothing about the session's waiter.
+  const earlyHook = parseObservedHook(payload);
+  if (
+    earlyHook !== undefined &&
+    eventName(earlyHook) === 'SessionEnd' &&
+    !isSubagentHook(earlyHook)
+  ) {
+    try {
+      const agentId = resolveAgentId(options.agent, env, {
+        kind: options.provider,
+        hookPayload: payload,
+      });
+      supersedeWaiter(agentId, defaultWaiterDir(env));
+    } catch {
+      // Never fail the hook: a waiter left armed expires with its lease.
+    }
+  }
+  const access = cloudAccess(cwd, { timeoutMs: HOOK_TIMEOUT_MS }, env);
+  if (access.kind !== 'local' || !workspaceExists(cwd, env)) return;
+  try {
+    const agentId = resolveAgentId(options.agent, env, {
+      kind: options.provider,
+      hookPayload: payload,
+    });
+    const context = await import('../context.js');
+    observeHookEvent(context.openContext(cwd, env).repos, agentId, payload, options.provider);
+  } catch (error) {
+    // Never fail the hook: a missed observation only leaves a message unseen.
+    process.stderr.write(
+      `Concord: could not record hook event: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  }
 }

@@ -65,7 +65,8 @@ Apps that drive Claude Code through the Claude Agent SDK, such as
 (`CLAUDE_CODE_ENTRYPOINT` is `sdk-ts` or `sdk-py`), the plugin's Stop hook arms
 `concord inbox rewake`, an `asyncRewake` hook. It waits for the next message
 and exits with code 2, which wakes the idle session with it. In interactive
-sessions it exits at once and leaves delivery to the monitor.
+sessions the same hook arms a dormant fallback at every Stop that only drains
+when no monitor is beating, covering the gap below.
 
 Claude Code holds a monitor notification while the agent is blocked on its user
 (an `AskUserQuestion` picker or a permission prompt), so a message the monitor
@@ -130,3 +131,40 @@ arrives with the tool result, after the answer.
 the dialog is already on screen. A fast deny closes the prompt in front of the
 user and a slow one is ignored, so Concord does not hook it. A message that
 arrives just before a permission prompt is seen after the user responds.
+
+## Troubleshooting: messages stop arriving after `claude --resume`
+
+Claude Code can fail to re-arm a plugin monitor within the same process —
+upstream bug [anthropics/claude-code#111286](https://github.com/anthropics/claude-code/issues/111286).
+The monitor that was running keeps its old session identity, and no replacement
+starts, so an idle resumed session used to hear nothing.
+
+Concord works around both halves of that:
+
+- **Identity.** Every SessionStart hook records which agent the client now
+  hosts (`session_bindings`). The monitor consults it on each poll, so a
+  monitor that survives a `/resume` or `/clear` keeps draining the _live_
+  session's inbox instead of the abandoned one. On a machine linked to
+  Concord Cloud (`concord cloud link`), identity stays environment-based —
+  session bindings are local — so this correction does not apply there.
+- **Reachability.** The Stop hook arms an `asyncRewake` waiter at every
+  Stop, even beside a live monitor: while the receiver heartbeat is fresh
+  the waiter stays dormant — it neither drains nor beats — and it takes
+  over the moment the lease actually lapses. It exits only when a newer
+  Stop's waiter supersedes it, so while the session is idle both processes
+  poll (the waiter's dormant rounds are cheap reads). A monitor that exits
+  cleanly drops its heartbeat at once (`concord inbox release`), so the
+  fallback starts draining without waiting out the lease; only a killed
+  monitor leaves it to expire on its own (~10s).
+
+One gap remains: a session that lands at the prompt right after a `/resume`
+with no live monitor gets no waiter until its first turn ends — SessionStart
+only registers and observes, and the fallback arms at Stop. A message sent in
+that window waits for the user's first turn, or a manual drain — note that
+`concord inbox drain --provider claude-code` derives the agent id from
+`CLAUDE_CODE_SESSION_ID`, which only exists inside the session's own hooks;
+from a normal terminal pass the id explicitly:
+`concord inbox drain --agent <agent_id> --provider claude-code`.
+
+If messages still do not arrive, check `concord inbox status` from the repo:
+a workspace that is not Concord-enabled exits the monitor silently by design.

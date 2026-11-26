@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { cloudSessionFor } from '../../cloud/session.js';
@@ -73,6 +74,7 @@ export function cloudAccess(
 }
 
 /** How long the receiver lease lasts; renewed well within it each round. */
+const PAUSED_ROUND_MS = 1_000;
 const RECEIVER_TTL_SECONDS = 90;
 /** Pause after a failed round, so an outage is not met with a request storm. */
 const RETRY_DELAY_MS = 5_000;
@@ -196,13 +198,37 @@ export async function watchCloud(
   once: boolean,
   /** Awaited before the next round, so a slow handoff never overlaps the next batch. */
   emit: (messages: readonly DeliverableMessage[], stop: AbortSignal) => Promise<void> | void,
-  /**
-   * Whether a newer receiver for this agent has replaced this one. A replaced
-   * receiver leaves the lease alone on the way out: it is the newer one's now.
-   */
-  replaced: () => boolean = () => false,
-  signal?: AbortSignal,
+  options: {
+    /**
+     * Whether a newer receiver for this agent has replaced this one. A replaced
+     * receiver leaves the lease alone on the way out: it is the newer one's now.
+     */
+    replaced?: () => boolean;
+    /**
+     * Whether this receiver is the agent's monitor. A fallback waiter — the
+     * rewake hook's cloud stand-in — still drains, but must not advertise the
+     * monitor capability or heartbeat `watchingUntil`: the next Stop would
+     * read that as a live receiver, stand down, and leave the agent with none
+     * once this waiter is superseded.
+     */
+    monitor?: boolean;
+    /** Aborted by the caller to end the watch early (the OpenClaw receiver). */
+    signal?: AbortSignal;
+    /**
+     * Checked before each drain round: while it holds the receiver neither
+     * drains nor renews the lease but keeps watching. A rewake fallback uses
+     * it to stay dormant beside a healthy monitor — and to take over the
+     * moment the monitor's lease actually lapses.
+     */
+    pauseWhile?: () => boolean;
+  } = {},
 ): Promise<void> {
+  const replaced = options.replaced ?? (() => false);
+  const monitor = options.monitor ?? true;
+  const signal = options.signal;
+  // This receiver's ownership token for the cloud lease: renewed into the
+  // agent state every round, checked again before teardown touches anything.
+  const receiverOwner = randomUUID();
   const stop = new AbortController();
   const stopped = (): boolean => stop.signal.aborted;
   const stopWatching = (): void => {
@@ -215,12 +241,24 @@ export async function watchCloud(
   let agent: CloudAgentRef | undefined;
   try {
     while (!stopped()) {
+      if (options.pauseWhile?.() === true) {
+        await delay(PAUSED_ROUND_MS, undefined, { signal: stop.signal }).catch(() => undefined);
+        continue;
+      }
       try {
-        agent ??= await registerInCloud(runtime, agentKey, provider, process.cwd(), true);
+        agent ??= await registerInCloud(runtime, agentKey, provider, process.cwd(), monitor);
+        // Ownership is recorded before the lease is taken, not after: a
+        // teardown that reads the state then already sees the lease as
+        // someone else's, instead of releasing it just as the new owner
+        // renews. A round that fails before this point simply writes again
+        // next time.
+        updateAgentState(runtime, agentKey, { receiverOwner });
         await renewReceiver(runtime, agent, RECEIVER_TTL_SECONDS);
-        updateAgentState(runtime, agentKey, {
-          watchingUntil: Date.now() + RECEIVER_TTL_SECONDS * 1000,
-        });
+        if (monitor) {
+          updateAgentState(runtime, agentKey, {
+            watchingUntil: Date.now() + RECEIVER_TTL_SECONDS * 1000,
+          });
+        }
         const messages = await drainOnce(runtime, agent, agentKey, MAX_WAIT_SECONDS, stop.signal);
         if (messages.length > 0) await emit(messages, stop.signal);
         if (once && messages.length > 0) return;
@@ -234,8 +272,27 @@ export async function watchCloud(
     signal?.removeEventListener('abort', stopWatching);
     for (const name of signals) process.off(name, stopWatching);
     if (!replaced()) {
-      updateAgentState(runtime, agentKey, { watchingUntil: undefined });
-      if (agent !== undefined) await releaseReceiver(runtime, agent).catch(() => undefined);
+      // The lease may have been taken over by another receiver since — the
+      // session's real monitor starting while this fallback was draining,
+      // for one. The server-side lease has no owner, so a DELETE cannot be
+      // made conditional: while a live monitor is being served the lease is
+      // left to expire on its own rather than risking a DELETE that lands
+      // after the monitor's renewal, and the replacement's state is never
+      // this receiver's to clear.
+      const state = readAgentState(runtime, agentKey);
+      const leaseIsOurs = state?.receiverOwner === receiverOwner;
+      const overlap = !monitor && watching(runtime, agentKey);
+      if (leaseIsOurs && agent !== undefined && !overlap) {
+        await releaseReceiver(runtime, agent).catch(() => undefined);
+      }
+      // Re-read after the DELETE round-trip: ownership changing hands while
+      // it was in flight must not cost the replacement its recorded owner or
+      // watching state.
+      const after = readAgentState(runtime, agentKey);
+      if (after?.receiverOwner === receiverOwner) {
+        updateAgentState(runtime, agentKey, { receiverOwner: undefined });
+        if (monitor) updateAgentState(runtime, agentKey, { watchingUntil: undefined });
+      }
     }
   }
 }

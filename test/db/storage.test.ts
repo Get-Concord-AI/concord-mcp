@@ -6,6 +6,7 @@ import { z } from 'zod';
 
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, openRepositories, type Repositories } from '../../src/db/index.js';
+import { migrations } from '../../src/db/schema.js';
 
 function newRepos(): Repositories {
   return createRepositories(openDatabase(':memory:'));
@@ -62,7 +63,7 @@ describe('migrations', () => {
   it('is idempotent when reopening (user_version already at head)', () => {
     const { db } = newRepos();
     const version: unknown = db.pragma('user_version', { simple: true });
-    expect(version).toBe(20);
+    expect(version).toBe(migrations.length);
   });
 });
 

@@ -114,6 +114,13 @@ const cacheSchema = cachedAgent.extend({
   machineKey: z.string(),
   /** Until when a running `inbox watch` holds this agent's receiver, in ms. */
   watchingUntil: z.number().optional(),
+  /**
+   * Token of the receiver process that last renewed the cloud lease. The
+   * lease itself lives server-side with no owner, so a receiver tearing down
+   * checks here first: another receiver may have taken the lease over, and
+   * releasing it then would strip a healthy receiver.
+   */
+  receiverOwner: z.string().optional(),
 });
 export type CloudAgentState = z.infer<typeof cacheSchema>;
 

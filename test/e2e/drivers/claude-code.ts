@@ -5,7 +5,7 @@ import { z } from 'zod';
 import {
   claudeHooks,
   claudeMonitorCommand,
-  hookCommands,
+  hookEntries,
   mcpServerFromJson,
   type McpServerSpec,
 } from '../support/installed.js';
@@ -51,9 +51,10 @@ export class ClaudeCodeSession extends HarnessSession {
 
   async start(): Promise<void> {
     const results = await this.runHooks(
-      hookCommands(claudeHooks(this.sandbox.home), 'SessionStart'),
+      hookEntries(claudeHooks(this.sandbox.home), 'SessionStart'),
       this.payload('SessionStart', { source: 'startup' }),
       this.env(),
+      (text) => this.monitorOutput.push(text),
     );
     const agentId = results.map((result) => registeredAgentId(result.stdout)).find(Boolean);
     if (agentId === undefined) throw new Error('Claude SessionStart named no agent id.');
@@ -62,13 +63,14 @@ export class ClaudeCodeSession extends HarnessSession {
 
   async receiveBusy(): Promise<Delivered[]> {
     const results = await this.runHooks(
-      hookCommands(claudeHooks(this.sandbox.home), 'PostToolUse'),
+      hookEntries(claudeHooks(this.sandbox.home), 'PostToolUse'),
       this.payload('PostToolUse', {
         tool_name: 'Bash',
         tool_input: { command: 'ls' },
         tool_response: { stdout: '', stderr: '' },
       }),
       this.env(),
+      (text) => this.monitorOutput.push(text),
     );
     return deliveredFrom(
       results,
@@ -79,9 +81,10 @@ export class ClaudeCodeSession extends HarnessSession {
 
   async endTurn(): Promise<EndTurn> {
     const results = await this.runHooks(
-      hookCommands(claudeHooks(this.sandbox.home), 'Stop'),
+      hookEntries(claudeHooks(this.sandbox.home), 'Stop'),
       this.payload('Stop', { stop_hook_active: false }),
       this.env(),
+      (text) => this.monitorOutput.push(text),
     );
     const messages = deliveredFrom(
       results,

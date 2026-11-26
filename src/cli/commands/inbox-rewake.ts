@@ -1,8 +1,18 @@
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
+import { userConcordDir } from '../../config/user-config.js';
 import { renderMonitorLines, type DeliverableMessage } from '../../domain/pull-inbox.js';
 
 /**
@@ -41,6 +51,21 @@ export function hostsRewake(env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
+ * Whether an `inbox rewake` invocation should keep waiting for a message once
+ * it has proven it runs inside a real hook. SDK hosts have no plugin monitor,
+ * so they always wait; interactive sessions wait only when no receiver is
+ * beating — the monitor that should do it failed to (re)arm, the gap #180
+ * tracks after a `/resume`. `-p` one-shot runs never wait: Claude Code kills
+ * their async hooks at teardown, and `receiverAlive` is only consulted for
+ * interactive sessions, so callers pass `undefined` for SDK hosts.
+ */
+export function rewakeWaits(env: NodeJS.ProcessEnv, receiverAlive: boolean | undefined): boolean {
+  if (env['CLAUDE_CODE_ENTRYPOINT']?.trim() === 'sdk-cli') return false;
+  if (hostsRewake(env)) return true;
+  return receiverAlive !== true;
+}
+
+/**
  * Claude Code shows a rewake as "Stop hook blocking error from command …", so
  * the first line says what actually happened before the framed messages.
  */
@@ -57,11 +82,72 @@ function claimPath(agentId: string, dir: string): string {
   return join(dir, `${key}.waiter`);
 }
 
+/**
+ * Where waiter claims live. Under the user Concord dir rather than the shared
+ * temp dir: the file name is a predictable hash of the agent id, and a shared
+ * directory would let another local account plant a symlink there.
+ */
+export function defaultWaiterDir(env: NodeJS.ProcessEnv): string {
+  return join(userConcordDir(env), 'concord-rewake');
+}
+
 function readClaim(path: string): string | undefined {
   try {
     return readFileSync(path, 'utf8').trim();
   } catch {
     return undefined;
+  }
+}
+
+/** How long a waiter waits for the claim lock between tries. */
+const LOCK_SPIN_MS = 5;
+/**
+ * A lock this old is a dead process's: every critical section is synchronous
+ * and microseconds long, so a live holder never yields while it keeps one.
+ */
+const LOCK_STALE_MS = 2_000;
+/**
+ * How long a waiter spins before proceeding without the lock. Unreachable in
+ * practice — a stale lock is broken within LOCK_STALE_MS — but a hook must
+ * never hang: running unlocked degrades to the pre-lock behaviour, it never
+ * blocks delivery.
+ */
+const LOCK_WAIT_MS = 10_000;
+
+/**
+ * Runs `work` holding the per-claim lock, so a claim write and a release can
+ * never interleave. Without serialization an exiting waiter's compare-and-delete
+ * can move a newer claim aside — however briefly — and the newer waiter reads
+ * the missing file as its own supersession: both waiters stop, nobody watches.
+ * The lock is an exclusive-create file; spinning is synchronous because every
+ * critical section is, so a live holder never keeps it longer than microseconds.
+ */
+function withClaimLock<T>(path: string, work: () => T): T {
+  const lockPath = `${path}.lock`;
+  const started = Date.now();
+  let acquired = false;
+  for (;;) {
+    try {
+      closeSync(openSync(lockPath, 'wx'));
+      acquired = true;
+      break;
+    } catch {
+      // Held by another process, or the filesystem refused — retry either way.
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
+          rmSync(lockPath, { force: true });
+        }
+      } catch {
+        // Already released: the next create succeeds.
+      }
+      if (Date.now() - started > LOCK_WAIT_MS) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_SPIN_MS);
+    }
+  }
+  try {
+    return work();
+  } finally {
+    if (acquired) rmSync(lockPath, { force: true });
   }
 }
 
@@ -80,17 +166,59 @@ export interface WaiterClaim {
 export function claimWaiter(
   agentId: string,
   token: string,
-  dir: string = join(tmpdir(), 'concord-rewake'),
+  dir: string = defaultWaiterDir(process.env),
 ): WaiterClaim {
   mkdirSync(dir, { recursive: true });
   const path = claimPath(agentId, dir);
-  writeFileSync(path, token);
+  withClaimLock(path, () => {
+    try {
+      // Never write through a planted symlink: drop the link itself and claim
+      // the name fresh. readClaim/release only ever remove the link, never its
+      // target.
+      if (lstatSync(path).isSymbolicLink()) rmSync(path);
+    } catch {
+      // Absent or unreadable: writeFileSync below reports the real failure.
+    }
+    writeFileSync(path, token);
+  });
   return {
-    superseded: () => readClaim(path) !== token,
+    superseded: () => {
+      const current = readClaim(path);
+      if (current === token) return false;
+      if (current !== undefined) return true;
+      // A missing file is not proof on its own: a writer paused mid-write or
+      // a release in flight can leave the path empty for moments, and a newer
+      // waiter checking inside that window would otherwise stand down
+      // alongside the older one — both gone, nobody watching. Only an absence
+      // outliving that window means the claim is really gone.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+      return readClaim(path) !== token;
+    },
     release: () => {
-      if (readClaim(path) === token) rmSync(path, { force: true });
+      withClaimLock(path, () => {
+        // Compare-and-delete, serialized: every writer holds this lock, so a
+        // token match here is still this waiter's claim when it is removed —
+        // a newer waiter's claim can never be moved aside, not even briefly.
+        if (readClaim(path) !== token) return;
+        rmSync(path, { force: true });
+      });
     },
   };
+}
+
+/**
+ * Stands down the waiter `agentId` has armed, if there is one: a fresh claim
+ * the waiter does not hold supersedes it, and it stops within a second. A
+ * no-op when nothing is armed — a SessionEnd hook fires in every repository
+ * once the plugin is installed, and one that has nothing to do with Concord
+ * must not have the waiter directory created for it.
+ */
+export function supersedeWaiter(
+  agentId: string,
+  dir: string = defaultWaiterDir(process.env),
+): void {
+  if (!existsSync(claimPath(agentId, dir))) return;
+  claimWaiter(agentId, randomUUID(), dir).release();
 }
 
 /**

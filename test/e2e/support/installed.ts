@@ -18,6 +18,16 @@ export interface McpServerSpec {
 /** Hook commands by harness event name, in the order the harness runs them. */
 export type HookTable = Map<string, string[]>;
 
+/** A plugin hook: its command, plus how the harness schedules it. */
+export interface HookEntry {
+  command: string;
+  /**
+   * Claude Code's `asyncRewake`: the hook runs detached and, on exit code 2,
+   * its stderr wakes the model. It must never be awaited like a sync hook.
+   */
+  asyncRewake: boolean;
+}
+
 const mcpServerSchema = z.object({
   command: z.string(),
   args: z.array(z.string()).optional(),
@@ -37,20 +47,29 @@ export function mcpServerFromJson(path: string): McpServerSpec {
   return { command: server.command, args: server.args ?? [], env: server.env ?? {} };
 }
 
-const commandHookSchema = z.object({ type: z.string().optional(), command: z.string() }).loose();
+const commandHookSchema = z.object({
+  type: z.string().optional(),
+  command: z.string(),
+  asyncRewake: z.boolean().optional(),
+});
 const pluginHooksSchema = z.object({
   hooks: z.record(z.string(), z.array(z.object({ hooks: z.array(commandHookSchema) }).loose())),
 });
 
 /** A Claude Code plugin's `hooks/hooks.json`. */
-function pluginHooks(pluginRoot: string): HookTable {
+function pluginHooks(pluginRoot: string): Map<string, HookEntry[]> {
   const parsed = pluginHooksSchema.parse(
     JSON.parse(readJson(join(pluginRoot, 'hooks', 'hooks.json'))),
   );
   return new Map(
     Object.entries(parsed.hooks).map(([event, groups]) => [
       event,
-      groups.flatMap((group) => group.hooks.map((hook) => hook.command)),
+      groups.flatMap((group) =>
+        group.hooks.map((hook) => ({
+          command: hook.command,
+          asyncRewake: hook.asyncRewake === true,
+        })),
+      ),
     ]),
   );
 }
@@ -60,8 +79,15 @@ export function claudePluginRoot(home: string): string {
   return realpathSync(join(home, '.claude', 'skills', 'concord-relay'));
 }
 
-export function claudeHooks(home: string): HookTable {
+export function claudeHooks(home: string): Map<string, HookEntry[]> {
   return pluginHooks(claudePluginRoot(home));
+}
+
+/** Entries for one event, failing loudly when the harness would run none. */
+export function hookEntries(table: Map<string, HookEntry[]>, event: string): HookEntry[] {
+  const entries = table.get(event) ?? [];
+  if (entries.length === 0) throw new Error(`No ${event} hook is installed.`);
+  return entries;
 }
 
 const monitorsSchema = z.array(z.object({ name: z.string(), command: z.string() }).loose());

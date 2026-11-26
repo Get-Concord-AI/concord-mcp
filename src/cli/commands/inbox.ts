@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 import type { Command } from '@commander-js/extra-typings';
 
@@ -29,15 +29,22 @@ import {
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import type { TelemetryRecorder } from '../../telemetry/events.js';
 import { resolveAgentId, resolveInboxOwner } from '../agent-identity.js';
-import { resolveStore } from '../../workspaces/store.js';
+import { monitorInstanceId, resolveLiveAgent } from '../live-identity.js';
+import { resolveStore, workspaceExists } from '../../workspaces/store.js';
 import { launchDetachedConcord } from '../detached-host.js';
 import { codexThreadHostable } from '../embedding-host.js';
-import { isSubagentHook, observeHookEvent, parseObservedHook } from './inbox-observe.js';
+import {
+  isSubagentHook,
+  observeHookEvent,
+  observeInboxHook,
+  parseObservedHook,
+} from './inbox-observe.js';
 import {
   claimWaiter,
   hostsRewake,
   renderRewake,
   REWAKE_EXIT_CODE,
+  rewakeWaits,
   standDownWhenSuperseded,
 } from './inbox-rewake.js';
 import { CONCORD_SERVER_ONLY } from './session-start-message.js';
@@ -59,10 +66,15 @@ function receiverExpiry(interval: number, now = Date.now()): string {
   return new Date(now + Math.max(MIN_RECEIVER_TTL_MS, interval * 3)).toISOString();
 }
 
-export function heartbeatReceiver(repos: Repositories, agentId: string, interval: number): void {
+export function heartbeatReceiver(
+  repos: Repositories,
+  agentId: string,
+  interval: number,
+  owner: string,
+): void {
   const endpoint = repos.agentEndpoints.getByAgent(agentId);
   if (endpoint === undefined) throw new Error(`Agent ${agentId} has no registered endpoint.`);
-  repos.agentEndpoints.heartbeatReceiver(endpoint.endpointId, receiverExpiry(interval));
+  repos.agentEndpoints.heartbeatReceiver(endpoint.endpointId, receiverExpiry(interval), owner);
 }
 
 /**
@@ -214,6 +226,26 @@ export interface WatchOptions {
   hookPayload?: string;
   /** Whether a newer watcher for this agent has replaced this one. */
   replaced?: () => boolean;
+  /**
+   * Re-resolve who this watcher serves on every poll. A monitor that survives
+   * a `/resume` keeps its spawn-time session id while the session's live
+   * binding moves; resolving per poll lets the watcher follow it (#180).
+   */
+  resolveTarget?: () => { agentId: string; session: string | null };
+  /**
+   * Whether polls mark the receiver heartbeat. A waiter that only covers a
+   * missing monitor must not beat one: its own heartbeat would make the next
+   * Stop see a live receiver and stand down into a delivery gap.
+   */
+  receiverHeartbeat?: boolean;
+  /**
+   * Checked before each poll round: while it holds, the watcher neither
+   * drains nor heartbeats but keeps polling. A rewake fallback armed beside
+   * a live monitor uses it to stay dormant until the monitor's lease
+   * actually expires — a crash right before Stop leaves a fresh lease
+   * behind, and without the recheck nothing would ever take over.
+   */
+  pauseWhile?: () => boolean;
 }
 
 /**
@@ -234,6 +266,13 @@ export async function watchInbox(
   const monitorCapability = monitorCapabilityFor(provider);
   const session = currentSession(provider, options.hookPayload);
   const replaced = options.replaced ?? (() => false);
+  // The lease owner: only this watcher may clear what it heartbeats, so a
+  // stale watcher's teardown cannot drop a replacement monitor's receiver.
+  const receiverOwner = monitorInstanceId(process.env);
+  // The agent and session stamped on each delivery follow resolveTarget when
+  // present; finish() unwinds the endpoint of whoever was served last.
+  let servedAgentId = agentId;
+  let servedSession = session;
   await new Promise<void>((resolve, reject) => {
     let timer: NodeJS.Timeout | undefined;
     let finished = false;
@@ -244,11 +283,13 @@ export async function watchInbox(
       process.off('SIGINT', stopWatching);
       process.off('SIGTERM', stopWatching);
       try {
-        registerPullEndpoint(repos, agentId, provider);
-        const endpoint = repos.agentEndpoints.getByAgent(agentId);
-        // A replaced watcher leaves the receiver to the one that replaced it.
+        registerPullEndpoint(repos, servedAgentId, provider);
+        const endpoint = repos.agentEndpoints.getByAgent(servedAgentId);
+        // A replaced watcher leaves the receiver to the one that replaced it;
+        // an owner-token check keeps a stale teardown from clearing a lease
+        // this process never held.
         if (endpoint !== undefined && !replaced()) {
-          repos.agentEndpoints.clearReceiver(endpoint.endpointId);
+          repos.agentEndpoints.clearReceiver(endpoint.endpointId, receiverOwner);
         }
       } catch (registrationError) {
         if (error === undefined) error = registrationError;
@@ -257,13 +298,25 @@ export async function watchInbox(
       else reject(error instanceof Error ? error : new Error('Inbox monitor failed.'));
     };
     const poll = (): void => {
+      if (options.pauseWhile?.() === true) {
+        timer = setTimeout(poll, interval);
+        return;
+      }
       let messages: DeliverableMessage[];
       try {
-        messages = drainInbox(repos, agentId, provider, monitorCapability, {
-          session,
+        const target = options.resolveTarget?.() ?? {
+          agentId: servedAgentId,
+          session: servedSession,
+        };
+        servedAgentId = target.agentId;
+        servedSession = target.session;
+        messages = drainInbox(repos, target.agentId, provider, monitorCapability, {
+          session: target.session,
           via: 'monitor',
         });
-        heartbeatReceiver(repos, agentId, interval);
+        if (options.receiverHeartbeat !== false) {
+          heartbeatReceiver(repos, target.agentId, interval, receiverOwner);
+        }
       } catch (error) {
         // A monitor is the session's live receive endpoint. Transient SQLite
         // contention must delay a poll, never tear that endpoint down.
@@ -341,20 +394,6 @@ export function workspaceStatus(cwd: string, env: NodeJS.ProcessEnv): Record<str
       ? { project: store.project, instructions: CONCORD_GLOBAL_INSTRUCTIONS }
       : {}),
   };
-}
-
-/**
- * Whether hooks here have a workspace to serve. A repository's own store must
- * already exist; the machine-wide store counts as soon as global mode chooses
- * it, since a session's first hook can run before its MCP server creates it.
- */
-export function workspaceExists(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  try {
-    const store = resolveStore(resolveRepoRoot(cwd, env), env);
-    return store.kind === 'global' || existsSync(store.databasePath);
-  } catch {
-    return false;
-  }
 }
 
 function launchCodexAdapterHost(repoRoot: string, agentId: string, threadId: string): void {
@@ -587,16 +626,18 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         HOOK_FORMATS.includes(options.format)
           ? (readHookPayload() ?? '')
           : undefined;
-      const agentId = resolveInboxOwner(options.agent, process.env, {
+      const identityOptions = {
         kind: options.provider,
         ...(options.fromHook === true ? { hookPayload } : {}),
-      });
+      };
       // The receiver lookup runs only on a Grok Stop, never on the per-tool-call hook path.
-      const monitorNudge = (receiverIsActive: () => boolean): string | undefined =>
+      const monitorNudge = (agent: string, receiverIsActive: () => boolean): string | undefined =>
         grokStop && hookPayload !== undefined
-          ? grokMonitorNudge(hookPayload, agentId, receiverIsActive())
+          ? grokMonitorNudge(hookPayload, agent, receiverIsActive())
           : undefined;
       if (access.kind === 'cloud') {
+        // Cloud identity stays environment-based: session bindings are local.
+        const agentId = resolveInboxOwner(options.agent, process.env, identityOptions);
         let messages: DeliverableMessage[];
         try {
           messages = await drainFromCloud(access.runtime, agentId, options.provider);
@@ -607,7 +648,7 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         if (messages.length > 0) {
           writeMessages(options.format, messages);
         } else {
-          const nudge = monitorNudge(() => watching(access.runtime, agentId));
+          const nudge = monitorNudge(agentId, () => watching(access.runtime, agentId));
           if (nudge !== undefined) writeMonitorNudge(nudge);
         }
         return;
@@ -621,10 +662,31 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         module.openContext(process.cwd()),
       );
       const isMonitor = options.format === 'monitor';
-      // Read evidence first, so this invocation never marks read a message it
-      // is itself about to deliver.
+      let agentId: string;
+      let drifted = false;
       if (hookPayload !== undefined) {
+        // A hook invocation already knows its live session — from the payload
+        // with --from-hook, or from the fresh environment otherwise.
+        agentId = resolveInboxOwner(options.agent, process.env, identityOptions);
+        // Read evidence first, so this invocation never marks read a message it
+        // is itself about to deliver.
         observeHookEvent(context.repos, agentId, hookPayload, options.provider);
+      } else {
+        // Payload-less drains — the plugin monitor's per-poll spawn and manual
+        // drains — carry the session id frozen at spawn. The binding the
+        // session's hooks recorded for this client corrects it after a
+        // /resume (#180). On drift the monitor cannot know the new session id
+        // (it is keyed by it), so receipts are recorded under no session
+        // rather than the abandoned one.
+        const live = resolveLiveAgent(
+          context.repos,
+          options.agent,
+          process.env,
+          context.repoRoot,
+          identityOptions,
+        );
+        agentId = live.agentId;
+        drifted = live.drifted;
       }
       // Runs just before the session blocks on its user's question.
       if (options.format === 'pre-tool-use') {
@@ -647,15 +709,16 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         options.provider,
         isMonitor ? monitorCapabilityFor(options.provider) : capabilityFor(options.provider),
         {
-          session: currentSession(options.provider, hookPayload),
+          session: drifted ? null : currentSession(options.provider, hookPayload),
           via: isMonitor ? 'monitor' : 'hook',
         },
       );
-      if (isMonitor) heartbeatReceiver(context.repos, agentId, 2_000);
+      if (isMonitor)
+        heartbeatReceiver(context.repos, agentId, 2_000, monitorInstanceId(process.env));
       // Silence matters: a hook that prints on an empty inbox would inject
       // noise into the session on every single tool call.
       if (messages.length === 0) {
-        const nudge = monitorNudge(() =>
+        const nudge = monitorNudge(agentId, () =>
           receiverActive(context.repos.agentEndpoints.getByAgent(agentId)),
         );
         if (nudge !== undefined) writeMonitorNudge(nudge);
@@ -673,48 +736,72 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     .action(async (options) => {
       // Seen-tracking lives in the local store; Concord Cloud keeps its own
       // delivery record. Prints nothing: UserPromptSubmit output becomes context.
-      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
-      if (access.kind !== 'local' || !workspaceExists(process.cwd())) return;
-      try {
-        const payload = readHookPayload() ?? '';
-        const agentId = resolveAgentId(options.agent, process.env, {
-          kind: options.provider,
-          hookPayload: payload,
-        });
-        const context = await import('../context.js');
-        observeHookEvent(
-          context.openContext(process.cwd()).repos,
-          agentId,
-          payload,
-          options.provider,
-        );
-      } catch (error) {
-        // Never fail the hook: a missed observation only leaves a message unseen.
-        process.stderr.write(
-          `Concord: could not record hook event: ${error instanceof Error ? error.message : String(error)}\n`,
-        );
-      }
+      await observeInboxHook(readHookPayload() ?? '', options);
     });
 
   inbox
     .command('rewake')
     .description(
-      'Wait in an asyncRewake hook for the next message, then wake an SDK-hosted Claude session',
+      'Wait in an asyncRewake hook for the next message, then wake an idle Claude session',
     )
     .action(async () => {
-      // Interactive sessions have the plugin monitor; only SDK hosts need this.
-      if (!hostsRewake(process.env)) return;
+      const entrypoint = process.env['CLAUDE_CODE_ENTRYPOINT']?.trim();
+      // `-p` runs are one-shot and Claude Code kills their async hooks at
+      // teardown; there is no idle session to wake, and stdin may never close.
+      if (entrypoint === 'sdk-cli') return;
+      const sdkHost = hostsRewake(process.env);
       const access = cloudAccess(process.cwd());
       if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
       if (access.kind === 'unusable') return;
       const hookPayload = readHookPayload() ?? '';
       const parsedHook = parseObservedHook(hookPayload);
       if (parsedHook !== undefined && isSubagentHook(parsedHook)) return;
+      // A waiter only makes sense inside a real hook invocation: a manual run
+      // has no session to wake.
+      if (!sdkHost && hookPayload.trim() === '') return;
       const agentId = resolveInboxOwner(undefined, process.env, {
         kind: 'claude-code',
         hookPayload,
       });
+      // The context opens lazily: SDK hosts skip the receiver check — they
+      // have no monitor — and only pay for it when the watch itself starts.
+      let context: import('../context.js').CliContext | undefined;
+      const localContext = async (): Promise<import('../context.js').CliContext> => {
+        if (context !== undefined) return context;
+        const opened = await import('../context.js').then((module) =>
+          module.openContext(process.cwd()),
+        );
+        context = opened;
+        return opened;
+      };
+      // Interactive sessions are reached by their plugin monitor, which beats
+      // the receiver heartbeat every poll; the check below arms the waiter
+      // only when that beat is missing — the gap #180 tracks.
+      // Arm at every Stop, even while a receiver lease is fresh: a monitor
+      // crashing just before this Stop leaves an unexpired lease behind, and
+      // if the waiter never armed, nothing would recheck once it expired.
+      // The waiter stays dormant instead — pauseWhile skips its drain rounds
+      // for as long as a receiver is actually beating — so a healthy monitor
+      // is never raced, and the fallback takes over the moment the lease
+      // lapses. SDK hosts have no monitor ever; nothing pauses there.
+      const dormant = (): boolean => {
+        if (sdkHost) return false;
+        try {
+          return access.kind === 'cloud'
+            ? watching(access.runtime, agentId)
+            : receiverActive(context?.repos.agentEndpoints.getByAgent(agentId));
+        } catch {
+          return false;
+        }
+      };
+      // Claim first, then decide: a fresh claim supersedes any older fallback
+      // waiter still polling, so a Stop that must not wait still takes its
+      // place down with it.
       const claim = claimWaiter(agentId, randomUUID());
+      if (!rewakeWaits(process.env, undefined)) {
+        claim.release();
+        return;
+      }
       const cancel = standDownWhenSuperseded(claim, () => {
         process.emit('SIGTERM', 'SIGTERM');
       });
@@ -726,14 +813,18 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       };
       try {
         if (access.kind === 'cloud') {
-          await watchCloud(access.runtime, agentId, 'claude-code', true, wake, claim.superseded);
+          // The fallback drains like a monitor but is not one: advertising
+          // watchingUntil would make the next Stop stand down into a gap once
+          // this waiter is superseded, matching receiverHeartbeat: sdkHost.
+          await watchCloud(access.runtime, agentId, 'claude-code', true, wake, {
+            replaced: claim.superseded,
+            monitor: false,
+            pauseWhile: dormant,
+          });
           return;
         }
-        const context = await import('../context.js').then((module) =>
-          module.openContext(process.cwd()),
-        );
         await watchInbox(
-          context.repos,
+          (await localContext()).repos,
           agentId,
           'claude-code',
           1000,
@@ -742,7 +833,15 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
             recordDeliveredMessages(telemetry, messages);
             wake(messages);
           },
-          { hookPayload, replaced: claim.superseded },
+          {
+            hookPayload,
+            replaced: claim.superseded,
+            // An SDK waiter is the session's only receiver and keeps beating;
+            // an interactive fallback must not, or the next Stop would see a
+            // live receiver and stand down into a delivery gap.
+            receiverHeartbeat: sdkHost,
+            pauseWhile: dormant,
+          },
         );
       } finally {
         cancel();
@@ -764,15 +863,17 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
       if (access.kind === 'unusable') throw new Error(`Concord Cloud: ${access.reason}`);
       const hookPayload = options.fromHook === true ? (readHookPayload() ?? '') : undefined;
-      const agentId = resolveInboxOwner(options.agent, process.env, {
+      const identityOptions = {
         kind: options.provider,
         ...(hookPayload === undefined ? {} : { hookPayload }),
-      });
+      };
       if (options.format !== 'monitor' && options.format !== 'stop') {
         throw new Error(`Unknown --format: ${options.format}`);
       }
       const format = options.format;
       if (access.kind === 'cloud') {
+        // Cloud keeps environment identity: session bindings are local.
+        const agentId = resolveInboxOwner(options.agent, process.env, identityOptions);
         // Long-polls the cloud, so --interval does not apply.
         await watchCloud(
           access.runtime,
@@ -792,9 +893,33 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       if (!Number.isFinite(parsedInterval) || parsedInterval < 250) {
         throw new Error('--interval must be at least 250 milliseconds.');
       }
+      // A watcher that outlives a `/resume` keeps its spawn-time session id;
+      // resolving the live binding on every poll lets it follow the session
+      // the hooks now report (#180). With a hook payload the session is
+      // already named, so identity stays static.
+      const resolveTarget = (): { agentId: string; session: string | null } => {
+        if (hookPayload !== undefined) {
+          return {
+            agentId: resolveInboxOwner(options.agent, process.env, identityOptions),
+            session: currentSession(options.provider, hookPayload),
+          };
+        }
+        const live = resolveLiveAgent(
+          context.repos,
+          options.agent,
+          process.env,
+          context.repoRoot,
+          identityOptions,
+        );
+        return {
+          agentId: live.agentId,
+          session: live.drifted ? null : currentSession(options.provider, hookPayload),
+        };
+      };
+      const first = resolveTarget();
       await watchInbox(
         context.repos,
-        agentId,
+        first.agentId,
         options.provider,
         parsedInterval,
         options.once === true,
@@ -802,6 +927,41 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
           recordDeliveredMessages(telemetry, messages);
           writeMessages(format, messages);
         },
+        {
+          ...(hookPayload === undefined ? {} : { hookPayload }),
+          resolveTarget,
+        },
       );
+    });
+
+  inbox
+    .command('release')
+    .description("Drop this session's idle receiver lease, so hooks stop seeing a live monitor")
+    .option('--agent <id>', 'Agent id; defaults to CONCORD_AGENT_ID, then to the current session')
+    .option('--provider <name>', 'Client the agent runs in', 'claude-code')
+    .action(async (options) => {
+      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
+      if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
+      if (access.kind === 'unusable') return;
+      // Cloud receivers release themselves when their watch exits.
+      if (access.kind === 'cloud') return;
+      const context = await import('../context.js').then((module) =>
+        module.openContext(process.cwd()),
+      );
+      // The lease lives on the agent the monitor serves now — after a /resume
+      // drift that is the live binding's agent, not the spawn-time env's.
+      const live = resolveLiveAgent(context.repos, options.agent, process.env, context.repoRoot, {
+        kind: options.provider,
+      });
+      const endpoint = context.repos.agentEndpoints.getByAgent(live.agentId);
+      if (endpoint !== undefined) {
+        // Only the monitor instance that holds the lease may drop it: after a
+        // /resume swap this process can resolve to an agent a replacement
+        // monitor now serves, and clearing blindly would strand its receiver.
+        context.repos.agentEndpoints.clearReceiver(
+          endpoint.endpointId,
+          monitorInstanceId(process.env),
+        );
+      }
     });
 }

@@ -38,8 +38,8 @@ describe('OpenClaw live receiver', () => {
     const gateway = vi.fn().mockResolvedValue('{"runId":"run-1","status":"accepted"}');
     const adapter = new OpenclawSessionAdapter('research', 'ws_project', gateway);
     const stop = new AbortController().signal;
-    await deliverOpenclawInbox(repos, RECIPIENT, adapter, stop);
-    await deliverOpenclawInbox(repos, RECIPIENT, adapter, stop);
+    await deliverOpenclawInbox(repos, RECIPIENT, adapter, stop, 'test-owner');
+    await deliverOpenclawInbox(repos, RECIPIENT, adapter, stop, 'test-owner');
     expect(gateway).toHaveBeenCalledExactlyOnceWith('agent', {
       agentId: 'research',
       idempotencyKey: `concord:${id}`,
@@ -65,7 +65,7 @@ describe('OpenClaw live receiver', () => {
     const gateway = vi.fn().mockRejectedValue(new Error('Gateway offline'));
     const adapter = new OpenclawSessionAdapter('research', undefined, gateway);
     await expect(
-      deliverOpenclawInbox(repos, RECIPIENT, adapter, new AbortController().signal),
+      deliverOpenclawInbox(repos, RECIPIENT, adapter, new AbortController().signal, 'test-owner'),
     ).rejects.toThrow('Gateway offline');
     expect(repos.agentMessages.get(id)?.status).toBe('sent');
   });

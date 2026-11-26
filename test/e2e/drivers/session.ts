@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
-import type { McpServerSpec } from '../support/installed.js';
+import type { HookEntry, McpServerSpec } from '../support/installed.js';
 import { McpSession, type JsonObject } from '../support/mcp.js';
 import { eventually, parseDelivered, type Channel, type Delivered } from '../support/messages.js';
 import { runShell, type CommandResult, type Sandbox } from '../support/sandbox.js';
@@ -118,27 +118,70 @@ export abstract class HarnessSession {
     );
   }
 
-  /** Run installed hook commands in order with this session's payload. */
+  /**
+   * Run installed hook commands in order with this session's payload. Entries
+   * marked `asyncRewake` are started detached — the harness never waits on
+   * them — and their exit-2 stderr goes to `onAsyncWake`.
+   */
   protected async runHooks(
-    commands: readonly string[],
+    commands: readonly (string | HookEntry)[],
     payload: JsonObject,
     env: NodeJS.ProcessEnv,
+    onAsyncWake?: (text: string) => void,
   ): Promise<CommandResult[]> {
     const results: CommandResult[] = [];
+    const input = JSON.stringify(payload);
     for (const command of commands) {
-      const result = await runShell(command, {
+      if (typeof command !== 'string' && command.asyncRewake) {
+        this.spawnAsyncHook(command.command, env, input, onAsyncWake ?? (() => undefined));
+        continue;
+      }
+      const line = typeof command === 'string' ? command : command.command;
+      const result = await runShell(line, {
         cwd: this.sandbox.repo,
         env,
-        input: JSON.stringify(payload),
+        input,
       });
       if (result.status !== 0 && result.status !== 2) {
         throw new Error(
-          `${this.harness} hook failed (${String(result.status)}): ${command}\n${result.stderr}`,
+          `${this.harness} hook failed (${String(result.status)}): ${line}\n${result.stderr}`,
         );
       }
       results.push(result);
     }
     return results;
+  }
+
+  /**
+   * Run a hook the way an `asyncRewake` hook runs: detached, fed the payload
+   * on stdin, never awaited. On exit code 2 its stderr is what the harness
+   * shows the model, so that text goes to `onWake`.
+   */
+  protected spawnAsyncHook(
+    command: string,
+    env: NodeJS.ProcessEnv,
+    input: string,
+    onWake: (text: string) => void,
+  ): void {
+    const child = spawn('/bin/sh', ['-c', command], {
+      cwd: this.sandbox.repo,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
+    });
+    let stderr = '';
+    child.stdout.resume();
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.stdin.once('error', () => undefined);
+    child.once('error', () => undefined);
+    child.once('close', (code) => {
+      if (code === 2 && stderr.trim() !== '') onWake(stderr);
+    });
+    this.children.add(child);
+    child.once('exit', () => this.children.delete(child));
+    child.stdin.end(input);
   }
 
   /** Start a long-lived process the way a harness starts a monitor; collects stdout. */
