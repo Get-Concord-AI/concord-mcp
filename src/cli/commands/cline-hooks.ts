@@ -25,7 +25,7 @@ import {
   HOOK_TIMEOUT_MS,
   registerInCloud,
 } from './cloud-inbox.js';
-import { registerPullEndpoint } from './inbox.js';
+import { registerPullEndpoint, workspaceExists } from './inbox.js';
 import { clineSessionStartMessage, type RosterLine } from './session-start-message.js';
 
 /**
@@ -325,6 +325,7 @@ export async function runClineHook(
   }
   if (access.kind === 'local') {
     try {
+      if (!workspaceExists(repoRoot, projectEnv)) return hookOutput(undefined);
       const context = openContext(repoRoot, projectEnv);
       return handleLocalClineHook(
         context.repos,

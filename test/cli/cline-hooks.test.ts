@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,7 @@ import {
   isClineHookEvent,
   runClineHook,
 } from '../../src/cli/commands/cline-hooks.js';
+import { openContext } from '../../src/cli/context.js';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { agentIdForSession, type AgentIdentity } from '../../src/domain/identity.js';
@@ -212,6 +213,23 @@ describe('local Cline hooks', () => {
 });
 
 describe('runClineHook end to end', () => {
+  it('leaves a checkout that never ran setup untouched', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'concord-cline-hook-new-'));
+    const workspace = mkdtempSync(join(tmpdir(), 'concord-cline-hook-new-ws-'));
+    mkdirSync(join(workspace, '.git'), { recursive: true });
+    const env = { HOME: home, USERPROFILE: home };
+    const payload = JSON.stringify({
+      task_id: 'task-new',
+      hook_name: 'TaskStart',
+      workspace_roots: [workspace],
+    });
+
+    const output = await runClineHook('cline-task-start', payload, env);
+
+    expect(output).toBe('{"cancel":false}');
+    expect(existsSync(join(workspace, '.concord'))).toBe(false);
+  });
+
   it('derives the cline identity from task_id and resolves the payload workspace', async () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-cline-hook-home-'));
     const workspace = mkdtempSync(join(tmpdir(), 'concord-cline-hook-ws-'));
@@ -222,6 +240,8 @@ describe('runClineHook end to end', () => {
       hook_name: 'agent_start',
       workspace_roots: [workspace],
     });
+    const context = openContext(workspace, env);
+    context.repos.db.close();
 
     const output = await runClineHook('cline-task-start', payload, env);
     const control = z
@@ -243,6 +263,8 @@ describe('runClineHook end to end', () => {
       hookName: 'TaskStart',
       workspaceRoots: [workspace],
     });
+    const context = openContext(workspace, env);
+    context.repos.db.close();
 
     const output = await runClineHook('cline-task-start', payload, env);
     expect(output).toContain('cline:operator');
