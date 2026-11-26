@@ -66,7 +66,7 @@ describe('files shared with agent messages', () => {
       'init',
     ]);
     git(alpha, ['worktree', 'add', '-q', '-b', 'beta', beta]);
-    workspaceRoot = realpathSync(alpha);
+    workspaceRoot = realpathSync.native(alpha);
     repos = createRepositories(openDatabase(':memory:'));
     handleRegisterAgent(repos, {
       agent_id: 'agent-alpha',
@@ -487,12 +487,10 @@ describe('files shared with agent messages', () => {
     expect(readAtMost(join(workspaceRoot, 'long.txt'), 200, workspaceRoot)).toHaveLength(100);
   });
 
-  it('accepts attachments through update_work over MCP and refuses files outside the worktree', async () => {
+  it('refuses attachments over MCP when the server does not know its workspace root', async () => {
     write(join(alpha, 'run.log'), 'data');
-    write(join(scratch, 'secret.txt'), 'outside');
     const server = createServer(repos, {
       identity: { agentId: 'agent-alpha', kind: 'claude-code', origin: 'operator' },
-      workspaceRoot,
     });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: 'shared-files-test', version: '0.0.0' });
@@ -508,27 +506,13 @@ describe('files shared with agent messages', () => {
           attachments: ['run.log'],
         },
       });
-      expect(sent.isError).not.toBe(true);
-      expect(JSON.stringify(sent.content)).toContain('Attached 1 file(s)');
-
-      const refused = await client.callTool({
-        name: 'update_work',
-        arguments: {
-          operation: 'prompt',
-          to_agent_id: 'agent-beta',
-          content: 'And this',
-          idempotency_key: 'mcp-2',
-          attachments: ['../secret.txt'],
-        },
-      });
-      expect(refused.isError).toBe(true);
-      expect(JSON.stringify(refused.content)).toContain('outside your worktree');
+      expect(sent.isError).toBe(true);
+      expect(JSON.stringify(sent.content)).toContain('does not know its workspace root');
     } finally {
       await client.close();
       await server.close();
     }
   });
-
   it('refuses a registered worktree that is not a checkout of this repository', () => {
     const stray = join(scratch, 'stray');
     mkdirSync(stray);
@@ -544,5 +528,38 @@ describe('files shared with agent messages', () => {
       stageAttachments(repos, 'agent-stray', ['id_ed25519'], 'key-stray', workspaceRoot),
     ).toThrow('is not a checkout of this repository');
     expect(storedCount()).toBe(0);
+  });
+
+  it('a retry after the source file is gone returns the stored message and files', async () => {
+    write(join(alpha, 'run.log'), 'data');
+    const first = await send(['run.log']);
+    const fileId = fileIdOf(first.message.messageId);
+    rmSync(join(alpha, 'run.log'));
+
+    const retry = await send(['run.log']);
+
+    expect(retry.idempotentReplay).toBe(true);
+    expect(retry.message.messageId).toBe(first.message.messageId);
+    expect(retry.message.content).toContain(fileId);
+    expect(storedCount()).toBe(1);
+  });
+
+  it('a retry that names different files is refused as a different message', async () => {
+    write(join(alpha, 'run.log'), 'data');
+    await send(['run.log']);
+    write(join(alpha, 'other.log'), 'data');
+
+    await expect(send(['other.log'])).rejects.toThrow('already used for a different message');
+  });
+
+  it('a retry of a two-file send replays the same files in the same order', async () => {
+    write(join(alpha, 'a.log'), 'a');
+    write(join(alpha, 'b.log'), 'b');
+    const first = await send(['b.log', 'a.log']);
+
+    const retry = await send(['b.log', 'a.log']);
+
+    expect(retry.idempotentReplay).toBe(true);
+    expect(retry.message.messageId).toBe(first.message.messageId);
   });
 });

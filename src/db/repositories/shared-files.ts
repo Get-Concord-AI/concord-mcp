@@ -102,7 +102,7 @@ export function createSharedFileRepository(db: ConcordDatabase): SharedFileRepos
        AND EXISTS (SELECT 1 FROM agent_messages WHERE message_id = @message_id AND status = 'failed')`,
   );
   const listStmt = db.prepare(
-    `SELECT ${META_COLUMNS} FROM shared_files WHERE message_id = ? ORDER BY created_at, file_id`,
+    `SELECT ${META_COLUMNS} FROM shared_files WHERE message_id = ? ORDER BY rowid`,
   );
   const getStmt = db.prepare(`SELECT ${META_COLUMNS}, content FROM shared_files WHERE file_id = ?`);
   const purgeStmt = db.prepare(

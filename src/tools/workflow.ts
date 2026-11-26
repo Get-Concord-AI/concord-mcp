@@ -442,8 +442,6 @@ export function registerWorkflowTools(
   requestIdentity?: (
     meta: OpenCodeRequestIdentityMetadata | undefined,
   ) => AgentIdentity | undefined,
-  /** The workspace root for calls that select no workspace, such as a server with no manager. */
-  singleWorkspaceRoot?: string,
 ): void {
   interface WorkflowToolResponse {
     content: { type: 'text'; text: string }[];
@@ -695,7 +693,7 @@ export function registerWorkflowTools(
           callRepos,
           withActor(callRepos, args, requestMeta),
           dispatcher,
-          workspace?.repoRoot ?? singleWorkspaceRoot,
+          workspace?.repoRoot,
         );
         onWrite?.(workspace);
         if ('update' in result) {

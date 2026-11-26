@@ -26,6 +26,7 @@ import {
   retentionEnd,
 } from '../domain/shared-files.js';
 import {
+  AgentMessageDeliveryError,
   deliverAcceptedMessage,
   handleSendAgentMessage,
   handleSendAgentMessageWithDelivery,
@@ -87,13 +88,16 @@ function realWorktree(
     throw new Error(`Worktree ${registered} for ${agentId} does not exist.`);
   // Use the checkout the path is in, not the path itself. A registered "/Users/me",
   // or a folder inside .git, is not a checkout of this repo, so it cannot be the boundary.
-  const checkout = findCheckoutRoot(realpathSync(registered));
-  if (findRepoRoot(checkout) !== workspaceRoot || !isRegisteredWorktree(workspaceRoot, checkout)) {
+  const checkout = findCheckoutRoot(realpathSync.native(registered));
+  if (
+    !samePath(findRepoRoot(checkout), workspaceRoot) ||
+    !isRegisteredWorktree(workspaceRoot, checkout)
+  ) {
     throw new Error(
       `Worktree ${registered} for ${agentId} is not a checkout of this repository, so files cannot be shared from it.`,
     );
   }
-  return { checkout, cwd: realpathSync(registered) };
+  return { checkout, cwd: realpathSync.native(registered) };
 }
 
 /** Concord's own folder and git's folder: file sharing never reads from or writes into them. */
@@ -108,22 +112,36 @@ function isReserved(root: string, real: string): boolean {
 }
 
 /**
+ * A path in the form two paths are compared by: the native realpath, which expands
+ * 8.3 short names such as RUNNER~1, and case-folded on Windows.
+ */
+function canonical(path: string): string {
+  const real = realpathSync.native(path);
+  return process.platform === 'win32' ? real.toLowerCase() : real;
+}
+
+function samePath(a: string, b: string): boolean {
+  return canonical(a) === canonical(b);
+}
+
+/**
  * Whether git itself lists `checkout` as a worktree of `repoRoot`. A `.git` file that
  * points at this repository's metadata is not enough: git has to know the checkout.
  */
 function isRegisteredWorktree(repoRoot: string, checkout: string): boolean {
   let listing: string;
   try {
-    listing = execFileSync('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain'], {
+    // -z ends every line with NUL, so a path with a newline or a trailing space stays whole.
+    listing = execFileSync('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain', '-z'], {
       encoding: 'utf8',
     });
   } catch {
     return false;
   }
-  return listing.split('\n').some((line) => {
+  return listing.split('\0').some((line) => {
     if (!line.startsWith('worktree ')) return false;
-    const listed = line.slice('worktree '.length).trim();
-    return existsSync(listed) && realpathSync(listed) === checkout;
+    const listed = line.slice('worktree '.length);
+    return existsSync(listed) && samePath(listed, checkout);
   });
 }
 
@@ -145,7 +163,7 @@ function assertShareable(checkout: string, real: string, path: string): void {
 function sharedSource(checkout: string, base: string, path: string): string {
   const candidate = isAbsolute(path) ? resolve(path) : resolve(base, path);
   if (!existsSync(candidate)) throw new Error(`${path} does not exist.`);
-  const real = realpathSync(candidate);
+  const real = realpathSync.native(candidate);
   assertShareable(checkout, real, path);
   return real;
 }
@@ -174,7 +192,7 @@ export function readAtMost(path: string, limit: number, checkout: string): Buffe
   const descriptor = openSync(path, constants.O_RDONLY | noFollow);
   try {
     const opened = fstatSync(descriptor);
-    const where = descriptorPath(descriptor) ?? realpathSync(path);
+    const where = descriptorPath(descriptor) ?? realpathSync.native(path);
     assertShareable(checkout, where, path);
     const current = statSync(where);
     if (current.dev !== opened.dev || current.ino !== opened.ino) {
@@ -231,6 +249,29 @@ export function stageAttachments(
   });
 }
 
+/**
+ * The files a retry gets back, as stored with the first send. The retry must name the
+ * same files, by name and in the same order, or it is a different message.
+ */
+function storedReferences(
+  repos: Repositories,
+  messageId: string,
+  attachments: readonly string[],
+): AttachmentReference[] {
+  const stored = repos.sharedFiles.listByMessage(messageId);
+  const named = attachments.map((path) => displayFilename(basename(path)));
+  const same =
+    stored.length === named.length && stored.every((file, index) => file.filename === named[index]);
+  if (!same) {
+    throw new AgentMessageDeliveryError(
+      'unauthorized',
+      messageId,
+      'idempotency_key was already used for a different message.',
+    );
+  }
+  return stored;
+}
+
 export interface SendWithFilesInput extends SendAgentMessageInput {
   attachments?: readonly string[] | undefined;
   /** The repository root of this workspace. Files can be shared only when it is known. */
@@ -256,13 +297,17 @@ export async function handleSendWithAttachments(
     throw new Error('Files cannot be shared here: this server does not know its workspace root.');
   }
   repos.sharedFiles.purgeExpired(new Date().toISOString());
-  const staged = stageAttachments(
-    repos,
-    send.agentId,
-    attachments,
-    send.idempotencyKey,
-    workspaceRoot,
-  );
+  // A retry of a send that already went through is answered from what was stored. Its
+  // source files are not read again, since they may have been deleted or changed.
+  const earlier = repos.agentMessages.getByIdempotency(send.agentId, send.idempotencyKey);
+  let fresh: StagedFile[] | undefined;
+  let references: readonly AttachmentReference[];
+  if (earlier === undefined) {
+    fresh = stageAttachments(repos, send.agentId, attachments, send.idempotencyKey, workspaceRoot);
+    references = fresh;
+  } else {
+    references = storedReferences(repos, earlier.messageId, attachments);
+  }
   const messageId = randomUUID();
   const expiresAt = retentionEnd(Date.now());
 
@@ -273,11 +318,11 @@ export async function handleSendWithAttachments(
       const result = handleSendAgentMessage(repos, {
         ...send,
         messageId,
-        content: send.content + attachmentBlock(staged),
+        content: send.content + attachmentBlock(references),
       });
-      if (!result.idempotentReplay) {
+      if (!result.idempotentReplay && fresh !== undefined) {
         repos.sharedFiles.createMany(
-          staged.map((file) => ({ ...file, messageId, senderAgentId: send.agentId, expiresAt })),
+          fresh.map((file) => ({ ...file, messageId, senderAgentId: send.agentId, expiresAt })),
         );
       }
       return result;
