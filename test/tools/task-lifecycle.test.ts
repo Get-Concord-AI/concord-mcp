@@ -633,6 +633,10 @@ describe('versioned task lifecycle', () => {
         .run(new Date(Date.now() - 40 * 60 * 1000).toISOString(), 'claude-code:stale');
 
       const betterSqlitePath = createRequire(import.meta.url).resolve('better-sqlite3');
+      // Mirrors the three writes inside handleUpdateTask (src/tools/update-task.ts) when
+      // recording progress without bumping tasks.version: taskUpdates.create (task_updates),
+      // tasks.touchActivity (tasks.updated_at), and agents.recordActivity (agents.activity_at,
+      // agents.last_seen). Kept as raw SQL so the inline worker does not require a prior build.
       const workerScript = `
         const { parentPort, workerData } = require('node:worker_threads');
         const Database = require(workerData.betterSqlitePath);

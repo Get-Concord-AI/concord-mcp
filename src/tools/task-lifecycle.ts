@@ -15,7 +15,7 @@ import type {
   ReopenTaskInput,
 } from '../domain/operations.js';
 import { CLAIMED_STATUSES } from '../domain/overlap.js';
-import { deriveLiveness, isLeaseExpired } from '../domain/presence.js';
+import { isLeaseExpired, isPresent } from '../domain/presence.js';
 
 export interface TaskLifecycleResult {
   task: TaskRecord;
@@ -62,9 +62,7 @@ function isHumanSupervisor(actor: AgentRecord, task: TaskRecord): boolean {
 
 function isAgentPresent(repos: Repositories, agentId: string, now: number): boolean {
   const agent = repos.agents.get(agentId);
-  if (agent === undefined) return false;
-  const liveness = deriveLiveness(agent.lastSeen, now);
-  return liveness === 'live' || liveness === 'idle';
+  return agent !== undefined && isPresent(agent, now);
 }
 
 export function hasPresentHolder(repos: Repositories, task: TaskRecord, now: number): boolean {

@@ -129,7 +129,12 @@ export interface StaleClaim {
 
 const OWNED_STATUSES: readonly string[] = ['active', 'blocked', 'handoff_offered'];
 
-function isPresent(agent: AgentRecord, now: number, thresholds: PresenceThresholds): boolean {
+/** True when the agent is `live` or `idle` (not yet `away` or `archived`). */
+export function isPresent(
+  agent: AgentRecord,
+  now: number,
+  thresholds: PresenceThresholds = DEFAULT_PRESENCE_THRESHOLDS,
+): boolean {
   return LIVENESS_ORDER[deriveLiveness(agent.lastSeen, now, thresholds)] < LIVENESS_ORDER.away;
 }
 
