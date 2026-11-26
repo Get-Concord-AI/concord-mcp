@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -19,6 +19,7 @@ import {
 import { ensureMachineKey, writeCredentials } from '../../src/cloud/settings.js';
 import { machineProjectKey } from '../../src/cloud/target.js';
 import { writeUserConfig } from '../../src/config/user-config.js';
+import { workspaceIdForRoot } from '../../src/config/paths.js';
 import {
   agentIdForSession,
   parseOpenCodeRequestIdentityMetadata,
@@ -149,6 +150,35 @@ function fakeCloud(): {
   return { server, requests, calls };
 }
 
+const temporaryDirectories: string[] = [];
+
+function temporaryDirectory(prefix: string): string {
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterAll(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A linked worktree of `primary` laid out the way git lays it out: `.git` is
+ * a pointer file into the primary's gitdir, whose `commondir` leads back to
+ * `primary/.git` — the metadata `findRepoRoot` follows to the primary root.
+ */
+function linkedWorktreeOf(primary: string): string {
+  const worktree = temporaryDirectory('concord-linked-');
+  const gitDir = join(primary, '.git', 'worktrees', 'linked');
+  mkdirSync(gitDir, { recursive: true });
+  writeFileSync(join(gitDir, 'commondir'), '../..\n');
+  writeFileSync(join(gitDir, 'gitdir'), `${join(worktree, '.git')}\n`);
+  writeFileSync(join(worktree, '.git'), `gitdir: ${gitDir}\n`);
+  return worktree;
+}
+
 describe('the cloud proxy', () => {
   const cloud = fakeCloud();
   let session: CloudSession;
@@ -234,6 +264,226 @@ describe('the cloud proxy', () => {
       await harness.close();
       await proxy.close();
     }
+  });
+
+  it('routes a call to the project its workspace_id names', async () => {
+    const other = temporaryDirectory('concord-other-repo-');
+    mkdirSync(join(other, '.git'));
+    const routed = createCloudProxyServer(session, (target) => connectCloud(target));
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await routed.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    try {
+      const result = await harness.callTool({
+        name: 'inspect_work',
+        arguments: {
+          workspace_id: workspaceIdForRoot(other),
+          expected_files: [join(other, 'src', 'a.ts')],
+        },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(cloud.requests.at(-1)).toMatchObject({
+        'x-concord-project': machineProjectKey('machine-1', realpathSync(other)),
+      });
+      // Paths are made relative to the routed workspace, not the server's root.
+      expect(cloud.calls.at(-1)).toMatchObject({ expected_files: ['src/a.ts'] });
+
+      // A call without workspace_id stays with the project the server started for.
+      await harness.callTool({ name: 'inspect_work', arguments: {} });
+      expect(cloud.requests.at(-1)).toMatchObject({
+        'x-concord-project': 'github.com/acme/app',
+      });
+    } finally {
+      await harness.close();
+      await routed.close();
+    }
+  });
+
+  it('keeps the session worktree root when workspace_id names its repository', async () => {
+    const primary = temporaryDirectory('concord-primary-');
+    mkdirSync(join(primary, '.git'));
+    const worktree = linkedWorktreeOf(primary);
+    const canonicalPrimary = realpathSync(primary);
+    const worktreeSession: CloudSession = {
+      ...session,
+      repoRoot: canonicalPrimary,
+      checkoutRoot: worktree,
+    };
+    const routed = createCloudProxyServer(worktreeSession, (target) => connectCloud(target), {
+      CONCORD_ALLOWED_ROOTS: primary,
+    });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await routed.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    try {
+      const result = await harness.callTool({
+        name: 'inspect_work',
+        arguments: {
+          workspace_id: workspaceIdForRoot(primary),
+          expected_files: [join(worktree, 'src', 'b.ts')],
+        },
+      });
+      expect(result.isError).toBeFalsy();
+      // The primary checkout names the project the call lands in.
+      expect(cloud.requests.at(-1)).toMatchObject({
+        'x-concord-project': machineProjectKey('machine-1', canonicalPrimary),
+      });
+      // ...while paths still relativize against the session's worktree.
+      expect(cloud.calls.at(-1)).toMatchObject({ expected_files: ['src/b.ts'] });
+
+      // The same allowlist the local workspace manager enforces applies here:
+      // a workspace outside CONCORD_ALLOWED_ROOTS is denied, not rerouted.
+      const other = temporaryDirectory('concord-other-');
+      mkdirSync(join(other, '.git'));
+      const blocked = await harness.callTool({
+        name: 'inspect_work',
+        arguments: { workspace_id: workspaceIdForRoot(other) },
+      });
+      expect(blocked.isError).toBe(true);
+      expect(JSON.stringify(blocked.content)).toContain('not allowed');
+    } finally {
+      await harness.close();
+      await routed.close();
+    }
+  });
+
+  it('routes paths inside a linked worktree the workspace_id names', async () => {
+    const primary = temporaryDirectory('concord-primary-');
+    mkdirSync(join(primary, '.git'));
+    const worktree = linkedWorktreeOf(primary);
+    const canonicalPrimary = realpathSync(primary);
+    const canonicalWorktree = realpathSync(worktree);
+    // The server started at the primary checkout; the hook named the worktree.
+    const routed = createCloudProxyServer(session, (target) => connectCloud(target), {
+      CONCORD_ALLOWED_ROOTS: primary,
+    });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await routed.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    try {
+      const result = await harness.callTool({
+        name: 'inspect_work',
+        arguments: {
+          workspace_id: workspaceIdForRoot(worktree),
+          expected_files: [join(canonicalWorktree, 'src', 'c.ts')],
+        },
+      });
+      expect(result.isError).toBeFalsy();
+      // The worktree's primary checkout names the project...
+      expect(cloud.requests.at(-1)).toMatchObject({
+        'x-concord-project': machineProjectKey('machine-1', canonicalPrimary),
+      });
+      // ...while the worktree path relativizes against the worktree itself.
+      expect(cloud.calls.at(-1)).toMatchObject({ expected_files: ['src/c.ts'] });
+    } finally {
+      await harness.close();
+      await routed.close();
+    }
+  });
+
+  it('errors when a named workspace checkout no longer exists', async () => {
+    const gone = temporaryDirectory('concord-gone-');
+    mkdirSync(join(gone, '.git'));
+    const workspaceId = workspaceIdForRoot(gone);
+    rmSync(gone, { recursive: true, force: true });
+    const routed = createCloudProxyServer(session, (target) => connectCloud(target));
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await routed.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    try {
+      const before = cloud.requests.length;
+      const result = await harness.callTool({
+        name: 'inspect_work',
+        arguments: { workspace_id: workspaceId },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain('not available');
+      // The call never silently rerouted into the startup project.
+      expect(cloud.requests.length).toBe(before);
+    } finally {
+      await harness.close();
+      await routed.close();
+    }
+  });
+
+  it('refuses a workspace_id outside CONCORD_ALLOWED_ROOTS', async () => {
+    const allowed = temporaryDirectory('concord-allowed-');
+    const other = temporaryDirectory('concord-denied-repo-');
+    mkdirSync(join(other, '.git'));
+    const routed = createCloudProxyServer(session, (target) => connectCloud(target), {
+      CONCORD_ALLOWED_ROOTS: allowed,
+    });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await routed.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    try {
+      const before = cloud.requests.length;
+      const result = await harness.callTool({
+        name: 'inspect_work',
+        arguments: { workspace_id: workspaceIdForRoot(other) },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain('not allowed');
+      // The denied call never reached the cloud.
+      expect(cloud.requests.length).toBe(before);
+
+      // Calls without workspace_id are unaffected.
+      await harness.callTool({ name: 'inspect_work', arguments: {} });
+      expect(cloud.requests.at(-1)).toMatchObject({
+        'x-concord-project': 'github.com/acme/app',
+      });
+    } finally {
+      await harness.close();
+      await routed.close();
+    }
+  });
+
+  it('closes every project client when the server closes', async () => {
+    const other = temporaryDirectory('concord-close-other-');
+    mkdirSync(join(other, '.git'));
+    const closedProjects: string[] = [];
+    const routed = createCloudProxyServer(session, async (target) => {
+      const cloudClient = await connectCloud(target);
+      const closeClient = cloudClient.close.bind(cloudClient);
+      cloudClient.close = async () => {
+        closedProjects.push(target.projectKey);
+        await closeClient();
+      };
+      return cloudClient;
+    });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await routed.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    try {
+      await harness.callTool({ name: 'inspect_work', arguments: {} });
+      await harness.callTool({
+        name: 'inspect_work',
+        arguments: { workspace_id: workspaceIdForRoot(other) },
+      });
+    } finally {
+      await harness.close();
+      await routed.close();
+    }
+
+    expect(closedProjects).toHaveLength(2);
+    expect(closedProjects).toEqual(
+      expect.arrayContaining([
+        session.projectKey,
+        machineProjectKey('machine-1', realpathSync(other)),
+      ]),
+    );
   });
 
   it('connects afresh after a call through the client fails', async () => {

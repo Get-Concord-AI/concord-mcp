@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- In a repository linked to Concord Cloud, a tool call that names
+  `workspace_id` is now routed to the cloud project that workspace belongs
+  to, with its file paths made relative to the checkout the id names —
+  including a linked worktree. This lets a globally registered `concord-mcp`
+  (Cline has no per-project MCP config) reach the project its hooks
+  registered rather than wherever the client launched the server. Calls
+  without `workspace_id` keep the startup project, ids that are not Concord
+  workspace ids are ignored, `CONCORD_ALLOWED_ROOTS` applies to routed
+  roots exactly as it does locally, and a named checkout that no longer
+  exists returns an error instead of silently rerouting. Those allowlist
+  roots are resolved when the server starts, as they are in local mode, so
+  a stale or missing `CONCORD_ALLOWED_ROOTS` entry now fails startup rather
+  than being ignored.
+
 ### Fixed
 
 - Removing the last property of a JSONC object no longer drops a comment

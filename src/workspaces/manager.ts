@@ -1,6 +1,5 @@
-import { delimiter } from 'node:path';
-
 import {
+  allowedRootsFromEnv,
   resolveExplicitRepoRoot,
   workspaceIdForRoot,
   workspaceRootFromId,
@@ -68,14 +67,7 @@ export class WorkspaceManager {
     env: NodeJS.ProcessEnv,
     options: Omit<WorkspaceManagerOptions, 'allowedRoots'> = {},
   ): WorkspaceManager {
-    const raw = env['CONCORD_ALLOWED_ROOTS'];
-    const allowedRoots =
-      raw === undefined || raw.trim() === ''
-        ? undefined
-        : raw
-            .split(delimiter)
-            .map((root) => root.trim())
-            .filter((root) => root !== '');
+    const allowedRoots = allowedRootsFromEnv(env);
     const withStore = { resolveStore: (root: string) => resolveStore(root, env), ...options };
     return new WorkspaceManager(
       initialRoot,
