@@ -22,6 +22,7 @@ export const harnessNames = [
   'qwen',
   'kiro',
   'deepseek',
+  'kilo',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -372,6 +373,24 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'DeepSeek Harness has a native MCP registration. Use a unique CONCORD_AGENT_ID per host and register/drain its durable inbox; idle wake-up is not verified.',
     unsupportedDetail: 'DeepSeek Harness MCP configuration was verified with 0.2.2-rc.1.',
+  },
+  kilo: {
+    name: 'kilo',
+    executable: 'kilo',
+    minimumVersion: [7, 0, 0],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Concord MCP server is registered with Kilo CLI. Kilo exposes no verified per-session identity or idle wake-up, so messages arrive through the durable inbox and agents need CONCORD_AGENT_ID for a stable identity.',
+    unsupportedDetail: 'Kilo CLI must be v7.0.0 or newer with the `kilo mcp` subcommand.',
   },
 };
 

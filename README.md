@@ -198,6 +198,7 @@ path.
 | Goose                              | [Setup and delivery](./docs/goose.md)              |
 | OpenClaw                           | [Setup and delivery](./docs/openclaw.md)           |
 | DeepSeek Harness                   | [Setup and delivery](./docs/deepseek.md)           |
+| Kilo Code                          | [Setup and delivery](./docs/kilo.md)               |
 | Google Antigravity                 | [Setup and delivery](./docs/antigravity.md)        |
 | GitHub Copilot CLI                 | [Setup and delivery](./docs/github-copilot-cli.md) |
 | Kiro                               | [Setup and delivery](./docs/kiro.md)               |

@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Kilo Code CLI support: `concord setup` registers the Concord MCP server
+  through `kilo mcp add` when a Kilo 7.x CLI with the non-interactive
+  `--env` form is present, pins `CONCORD_AGENT_KIND=kilo`, and reports
+  pull-only inbox delivery (`pull, busy`) since Kilo exposes no verified
+  per-session identity or idle wake-up. Status and uninstall read every
+  config file Kilo merges — the global `config.json`/`kilo.json`/
+  `kilo.jsonc`/`opencode.json`/`opencode.jsonc` plus `KILO_CONFIG_DIR`, with
+  the single `KILO_CONFIG` override file outranking them all — in Kilo's
+  precedence order, treat only the exact Concord-written entry shape
+  as owned, preserve user comments on removal, and never overwrite a
+  `concord` entry somebody else wrote. See `docs/kilo.md`.
+
 ## [0.25.0] - 2026-11-25
 
 ### Added

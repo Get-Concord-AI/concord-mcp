@@ -13,9 +13,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
+import { writeFakeKilo } from '../helpers/fake-kilo.js';
 import { recordedInvocations, writeFakeOpencode } from '../helpers/fake-opencode.js';
+import { jsonValueSchema, type JsonObject } from '../../src/install/json-value.js';
 
 import {
   devinSupportsDedicatedMcpConfig,
@@ -253,6 +256,7 @@ describe('global harness adapters', () => {
       'harness-monitor',
       'harness-monitor',
       'harness-monitor',
+      'harness-monitor',
     ]);
   });
 
@@ -384,6 +388,183 @@ describe('global harness adapters', () => {
       installGlobalAdapters(import.meta.url, env, undefined, LASTING);
 
       expect(recordedInvocations(log).filter((call) => call[0] === 'mcp')).toEqual([]);
+    });
+  });
+
+  describe('Kilo', () => {
+    function kiloEnv(version = '7.8.27') {
+      const home = mkdtempSync(join(tmpdir(), 'concord-kilo-home-'));
+      const bin = join(home, 'bin');
+      mkdirSync(bin);
+      writeFakeKilo(bin);
+      const log = join(home, 'calls.log');
+      return {
+        home,
+        log,
+        env: { HOME: home, PATH: bin, FAKE_KILO_LOG: log, FAKE_KILO_VERSION: version },
+      };
+    }
+    const kiloReport = (env: NodeJS.ProcessEnv) =>
+      statusGlobalAdapters(env, undefined, undefined, LASTING).find(
+        (entry) => entry.harness === 'kilo',
+      );
+    const writeKiloConfig = (home: string, mcp: JsonObject) => {
+      const dir = join(home, '.config', 'kilo');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'kilo.jsonc'), `${JSON.stringify({ mcp }, null, 2)}\n`);
+    };
+
+    it('is not detected without a Kilo CLI', () => {
+      const env = { HOME: mkdtempSync(join(tmpdir(), 'concord-empty-')), PATH: '' };
+
+      expect(kiloReport(env)).toMatchObject({ detected: false, status: 'not_detected' });
+    });
+
+    it('rejects Kilo releases before 7.0', () => {
+      const { env } = kiloEnv('6.9.9');
+
+      expect(kiloReport(env)).toMatchObject({
+        detected: true,
+        status: 'unsupported_version',
+        capabilities: [],
+      });
+    });
+
+    it('rejects a Kilo CLI without the mcp subcommand', () => {
+      const { env } = kiloEnv();
+
+      expect(kiloReport({ ...env, FAKE_KILO_NO_MCP: '1' })).toMatchObject({
+        detected: true,
+        status: 'unsupported_version',
+        capabilities: [],
+      });
+    });
+
+    it('needs setup until Concord is registered, then reports pull-only capabilities', () => {
+      const { home, env } = kiloEnv();
+      expect(kiloReport(env)).toMatchObject({ status: 'action_required', capabilities: [] });
+
+      writeKiloConfig(home, {
+        concord: {
+          type: 'local',
+          command: ['concord-mcp'],
+          environment: { CONCORD_AGENT_KIND: 'kilo' },
+        },
+      });
+      expect(kiloReport(env)).toMatchObject({
+        status: 'installed',
+        capabilities: ['pull', 'busy'],
+      });
+    });
+
+    it('does not count a disabled or foreign concord entry', () => {
+      const { home, env } = kiloEnv();
+      writeKiloConfig(home, {
+        concord: { type: 'local', command: ['concord-mcp'], enabled: false },
+      });
+      expect(kiloReport(env)).toMatchObject({ status: 'action_required' });
+
+      writeKiloConfig(home, { concord: { type: 'local', command: ['not-concord'] } });
+      expect(kiloReport(env)).toMatchObject({ status: 'action_required' });
+    });
+
+    it('names the conflicting config file when a foreign concord entry wins', () => {
+      const { home, env } = kiloEnv();
+      writeKiloConfig(home, { concord: { type: 'local', command: ['mine'] } });
+
+      expect(kiloReport(env)).toMatchObject({ status: 'action_required' });
+      expect(kiloReport(env)?.detail ?? '').toContain('did not write');
+    });
+
+    it('rejects a Kilo whose mcp add lacks the non-interactive --env form', () => {
+      const { env } = kiloEnv();
+
+      expect(kiloReport({ ...env, FAKE_KILO_NO_ADD_ENV: '1' })).toMatchObject({
+        detected: true,
+        status: 'unsupported_version',
+        capabilities: [],
+      });
+    });
+
+    it('does not run `kilo mcp add` when a concord entry already exists', () => {
+      const { home, env, log } = kiloEnv();
+      writeKiloConfig(home, {
+        concord: {
+          type: 'local',
+          command: ['concord-mcp'],
+          environment: { CONCORD_AGENT_KIND: 'kilo' },
+        },
+      });
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      const adds = recordedInvocations(log).filter(
+        (call) => call[0] === 'mcp' && call[1] === 'add' && call[2] !== '--help',
+      );
+      expect(adds).toEqual([]);
+    });
+
+    it('does not run `kilo mcp add` over a foreign concord entry', () => {
+      const { home, env, log } = kiloEnv();
+      writeKiloConfig(home, { concord: { type: 'local', command: ['mine'] } });
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      const adds = recordedInvocations(log).filter(
+        (call) => call[0] === 'mcp' && call[1] === 'add' && call[2] !== '--help',
+      );
+      expect(adds).toEqual([]);
+    });
+
+    it('does not run `kilo mcp add` over a bare enabled:false opt-out', () => {
+      const { home, env, log } = kiloEnv();
+      writeKiloConfig(home, { concord: { enabled: false } });
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      const adds = recordedInvocations(log).filter(
+        (call) => call[0] === 'mcp' && call[1] === 'add' && call[2] !== '--help',
+      );
+      expect(adds).toEqual([]);
+    });
+
+    it('registers Concord through `kilo mcp add` when adapters are installed', () => {
+      const { env, log } = kiloEnv();
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      expect(recordedInvocations(log)).toContainEqual([
+        'mcp',
+        'add',
+        'concord',
+        '--env',
+        'CONCORD_AGENT_KIND=kilo',
+        '--',
+        'concord-mcp',
+      ]);
+    });
+
+    it('removes the Concord entry on uninstall and leaves other servers', () => {
+      const { home, env } = kiloEnv();
+      writeKiloConfig(home, {
+        concord: {
+          type: 'local',
+          command: ['concord-mcp'],
+          environment: { CONCORD_AGENT_KIND: 'kilo' },
+        },
+        probe: { type: 'local', command: ['node', 'probe.mjs'] },
+      });
+      expect(kiloReport(env)).toMatchObject({ status: 'installed' });
+
+      uninstallGlobalAdapters(env);
+
+      const raw: unknown = JSON.parse(
+        readFileSync(join(home, '.config', 'kilo', 'kilo.jsonc'), 'utf8'),
+      );
+      const config = z.object({ mcp: z.record(z.string(), jsonValueSchema) }).parse(raw);
+      expect(config.mcp['concord']).toBeUndefined();
+      expect(config.mcp['probe']).toBeDefined();
+      expect(kiloReport(env)).toMatchObject({ status: 'action_required' });
     });
   });
 
