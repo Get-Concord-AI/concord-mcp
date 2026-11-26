@@ -60,6 +60,28 @@ describe('upsertMcpServer', () => {
   it('throws on malformed JSON rather than discarding it', () => {
     expect(() => upsertMcpServer('{ not json', '/tmp/project')).toThrow();
   });
+
+  it('keeps user fields on the Concord entry while refreshing command, args, and env', () => {
+    const existing = JSON.stringify({
+      mcpServers: {
+        concord: {
+          command: 'npx',
+          args: ['-y', '@concord-ai/concord-mcp@0.23.0'],
+          env: { CONCORD_REPO_ROOT: '/old/root' },
+          disabled: false,
+          timeout: 30,
+        },
+      },
+    });
+    const out = upsertMcpServer(existing, '/tmp/project', { CONCORD_AGENT_KIND: 'cline' });
+    expect(out).toContain('"disabled": false');
+    expect(out).toContain('"timeout": 30');
+    expect(out).toContain('"CONCORD_REPO_ROOT": "/tmp/project"');
+    expect(out).toContain('"CONCORD_AGENT_KIND": "cline"');
+    // The runner shape migrates to the bare command; args go, and env is rewritten.
+    expect(out).not.toContain('"args"');
+    expect(out).not.toContain('/old/root');
+  });
 });
 
 describe('installMcpConfigs', () => {
@@ -129,6 +151,43 @@ describe('installMcpConfigs', () => {
     expect(content).toContain('my-custom-concord');
     expect(content).toContain('--custom-flag');
     expect(content).toContain('CUSTOM_VAR');
+  });
+
+  it('keeps user fields on a Concord-written runner entry through project setup', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-mcp-config-'));
+    const runnerConfig = {
+      mcpServers: {
+        concord: {
+          command: 'npx',
+          args: ['-y', '@concord-ai/concord-mcp@0.23.0'],
+          env: { CONCORD_REPO_ROOT: '/old/root' },
+          disabled: true,
+          timeout: 30,
+        },
+      },
+    };
+    writeFileSync(join(root, '.mcp.json'), `${JSON.stringify(runnerConfig, null, 2)}\n`);
+
+    installMcpConfigs(root);
+
+    const entry = z
+      .object({
+        mcpServers: z.object({
+          concord: z.object({
+            command: z.string(),
+            args: z.array(z.string()).optional(),
+            env: z.object({ CONCORD_REPO_ROOT: z.string() }),
+            disabled: z.boolean(),
+            timeout: z.number(),
+          }),
+        }),
+      })
+      .parse(JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf8'))).mcpServers.concord;
+    expect(entry.command).toBe(CONCORD_SERVER_COMMAND);
+    expect(entry.args).toBeUndefined();
+    expect(entry.env.CONCORD_REPO_ROOT).toBe(root);
+    expect(entry.disabled).toBe(true);
+    expect(entry.timeout).toBe(30);
   });
 
   it('is idempotent and preserves an existing server', () => {
