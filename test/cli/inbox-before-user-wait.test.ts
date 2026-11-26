@@ -10,10 +10,9 @@ import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { observeHookEvent } from '../../src/cli/commands/inbox-observe.js';
 import {
   drainBeforeUserWait,
-  drainInbox,
-  registerPullEndpoint,
   USER_WAIT_DENY_WINDOW_MS,
-} from '../../src/cli/commands/inbox.js';
+} from '../../src/cli/commands/inbox-before-user-wait.js';
+import { drainInbox, registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 import { monitorCapabilityFor } from '../../src/domain/delivery.js';
 import {
   renderHookPayload,
