@@ -357,6 +357,34 @@ approval_mode = "approve"
 
     expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(`${table}${rest}\n`);
   });
+  it("keeps each table's lines through setup and uninstall", () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    const config = [
+      `[tui]\nx = 1`,
+      `${block}\nalt_screen = true`,
+      `[desktop]\ny = 2`,
+      `${block}\nalt_screen = false`,
+    ].join('\n\n');
+    writeFileSync(codexConfigFile(env), upsertCodexHooks(`${config}\n`));
+
+    uninstallCodexConfig(env);
+
+    const [tui = '', desktop = ''] = readFileSync(codexConfigFile(env), 'utf8').split('[desktop]');
+    expect(tui).toContain('alt_screen = true');
+    expect(desktop).toContain('alt_screen = false');
+    expect(desktop.match(/alt_screen/gu)).toHaveLength(1);
+  });
+
+  it('treats an escaped key as the key it spells', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    writeFileSync(codexConfigFile(env), `model = "gpt-5"\n\n${block}\n"\\u006dodel" = "o3"\n`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('model = "gpt-5"\n');
+  });
 });
 
 describe('removeCodexMcpServer', () => {

@@ -374,9 +374,9 @@ command = "my-session-hook"
     expect(upsertCodexHooks(result)).toBe(result);
   });
 
-  it('moves the lines after the end marker with the block', () => {
+  it('keeps the lines after an end marker in their own table when the block moves', () => {
     // The last entry belongs to the user's Stop group at the top, which sends the
-    // block to the end. TOML reads the lines after the end marker as Concord's.
+    // block to the end; the lines after the old end marker stay where they were.
     const after = 'model = "o3"\n# a note\neffort = "high"';
     const config = [
       '[mcp_servers.concord]\ncommand = "concord-mcp"',
@@ -389,8 +389,24 @@ command = "my-session-hook"
     const result = setup(`${config}\n`);
 
     expectConcordOnce(result);
-    expect(result).toContain(`${END}\n${after}\n`);
+    expect(result).toContain(`command = "user-stop-1"\n\n${after}\n`);
     expect(groupOf(result, 'Stop', 'user-stop-2')).toBe(groupOf(result, 'Stop', 'user-stop-1'));
+    expect(setup(result)).toBe(result);
+  });
+
+  it('keeps lines that would fall into the server table after the end marker', () => {
+    // Setup rewrites that table, so the lines stay with Concord's hook instead.
+    const config = [
+      `[[hooks.Stop]]\n${entry('Stop', 'user-stop-1')}`,
+      '[mcp_servers.concord]\ncommand = "concord-mcp"',
+      `[[hooks.SessionStart]]\n${entry('SessionStart', REGISTER)}\n${END}\nmodel = "o3"`,
+      entry('Stop', 'user-stop-2'),
+    ].join('\n\n');
+    const setup = (text: string): string => upsertCodexHooks(upsertCodexMcpServer(text));
+
+    const result = setup(`${config}\n`);
+
+    expect(result).toContain(`${END}\nmodel = "o3"\n`);
     expect(setup(result)).toBe(result);
   });
 
@@ -408,7 +424,8 @@ command = "my-session-hook"
     ['different values', 'model = "o3"', 'model = "o4"', 'model = "o3"'],
     ['the same multi-line value', 'arr = [\n  "a",\n]', 'arr = [\n  "a",\n]', 'arr = [\n  "a",\n]'],
   ])('merges repeated blocks followed by %s into one valid table', (_, first, second, kept) => {
-    const repeated = `${BLOCK}\n${first}\n\n[tui]\nalt_screen = true\n\n${BLOCK}\n${second}\n`;
+    // Back to back, so the lines after both end markers share one table.
+    const repeated = `${BLOCK}\n${first}\n\n${BLOCK}\n${second}\n`;
 
     const result = upsertCodexHooks(repeated);
 
@@ -424,16 +441,14 @@ command = "my-session-hook"
     ['a.b = 1', 'a.b.c = 2'],
     ['"options" = false', 'options.level = 1'],
   ])('keeps the first of overlapping keys %s and %s', (first, second) => {
-    const result = upsertCodexHooks(`${BLOCK}\n${first}\n\n[tui]\nx = 1\n\n${BLOCK}\n${second}\n`);
+    const result = upsertCodexHooks(`${BLOCK}\n${first}\n\n${BLOCK}\n${second}\n`);
 
     expect(result).toContain(`${END}\n${first}\n`);
     expect(result).not.toContain(second);
   });
 
   it('keeps sibling keys from repeated blocks', () => {
-    const result = upsertCodexHooks(
-      `${BLOCK}\noptions.a = 1\n\n[tui]\nx = 1\n\n${BLOCK}\noptions.b = 2\n`,
-    );
+    const result = upsertCodexHooks(`${BLOCK}\noptions.a = 1\n\n${BLOCK}\noptions.b = 2\n`);
 
     expect(result).toContain(`${END}\noptions.a = 1\noptions.b = 2\n`);
   });
@@ -464,5 +479,21 @@ command = "my-session-hook"
     const config = `${BLOCK}\n\n[[hooks.Stop]]\n${entry('Stop', 'user-stop')}\n`;
 
     expect(upsertCodexHooks(config)).toBe(config);
+  });
+
+  it('keeps the lines after each end marker in their own table', () => {
+    const config = [
+      `[tui]\nx = 1`,
+      `${BLOCK}\nalt_screen = true`,
+      `[desktop]\ny = 2`,
+      `${BLOCK}\nalt_screen = false`,
+    ].join('\n\n');
+
+    const result = upsertCodexHooks(`${config}\n`);
+
+    expectConcordOnce(result);
+    expect(result).toContain('alt_screen = true');
+    expect(result).toContain('[desktop]\ny = 2\n\nalt_screen = false');
+    expect(upsertCodexHooks(result)).toBe(result);
   });
 });

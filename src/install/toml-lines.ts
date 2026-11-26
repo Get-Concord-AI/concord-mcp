@@ -19,6 +19,26 @@ export interface TomlLine {
  * A TOML key path in one spelling: `mcp_servers . "concord"` → `mcp_servers.concord`. A part
  * that is not a bare key stays quoted, so `"concord.env"` remains one part, not two.
  */
+const ESCAPES: Readonly<Record<string, string>> = {
+  b: '\b',
+  t: '\t',
+  n: '\n',
+  f: '\f',
+  r: '\r',
+  e: '\u001b',
+  '"': '"',
+  '\\': '\\',
+};
+
+/** A basic string's content with its escapes decoded, so `"\u006dodel"` reads as `model`. */
+function decodeBasic(content: string): string {
+  return content.replace(/\\(u[\da-fA-F]{4}|U[\da-fA-F]{8}|.)/gu, (match, escape: string) => {
+    if (escape.length === 1) return ESCAPES[escape] ?? match;
+    const point = Number.parseInt(escape.slice(1), 16);
+    return point <= 0x10ffff ? String.fromCodePoint(point) : match;
+  });
+}
+
 export function tomlKeyPath(raw: string): string {
   const parts: string[] = [];
   let part = '';
@@ -27,7 +47,8 @@ export function tomlKeyPath(raw: string): string {
     const char = raw[index];
     if (char === '"' || char === "'") {
       const end = singleLineStringEnd(raw, index);
-      part += raw.slice(index + 1, end - 1);
+      const content = raw.slice(index + 1, end - 1);
+      part += char === '"' ? decodeBasic(content) : content;
       index = end;
       continue;
     }

@@ -254,7 +254,8 @@ function removeRange(removed: Set<number>, start: number, end: number): void {
 
 /**
  * Concord's entries, and each group left with nothing of the user's: no other
- * entry and no key such as `matcher`. `carried` are the user's lines that TOML
+ * entry and no key such as `matcher`. A group left with only a `matcher` stays: Codex
+ * reads its missing `hooks` array as empty. `carried` are the user's lines that TOML
  * attaches to Concord's entries. `spot` is the first removed group, unless a
  * user entry after it belongs to an earlier group that the block would steal.
  */
@@ -334,7 +335,7 @@ function headerKey(line: TomlLine): string | undefined {
  * For each table among `lines` (0 is the root), the keys it already sets,
  * including the tables nested under it: a carried line must not set them again.
  */
-function keysByTable(lines: readonly TomlLine[]): Set<string>[] {
+function keysByTable(lines: readonly TomlLine[]): { path: string; keys: Set<string> }[] {
   const paths = [''];
   const keys = [new Set<string>()];
   for (const line of lines) {
@@ -352,7 +353,7 @@ function keysByTable(lines: readonly TomlLine[]): Set<string>[] {
     const nested = paths.filter(
       (other) => other !== '' && other !== path && other.startsWith(prefix),
     );
-    return new Set([...own, ...nested.map((other) => other.slice(prefix.length))]);
+    return { path, keys: new Set([...own, ...nested.map((other) => other.slice(prefix.length))]) };
   });
 }
 
@@ -365,7 +366,7 @@ function stripConcordHooks(source: string): {
   lines: string[];
   spot: number | undefined;
   carried: CarriedGroup[];
-  taken: Set<string>[];
+  tables: { path: string; keys: Set<string> }[];
 } {
   const lines = [...tomlLines(source)];
   const found = concordHookLines(lines);
@@ -388,8 +389,15 @@ function stripConcordHooks(source: string): {
     lines: kept.map((line) => line.text),
     spot,
     carried: [...carried.values()],
-    taken: keysByTable(kept),
+    tables: keysByTable(kept),
   };
+}
+
+/** Puts `lines` back at `index`, keeping a blank line between them and what follows. */
+function insertLines(target: string[], index: number, lines: readonly string[]): void {
+  const next = target[index];
+  const gap = lines.length > 0 && next !== undefined && next.trim() !== '' ? [''] : [];
+  target.splice(index, 0, ...lines, ...gap);
 }
 
 /** `lines` joined, without blank lines at either end. */
@@ -413,14 +421,33 @@ export function upsertCodexHooks(existing: string | undefined): string {
 }
 
 function addHooksBlock(source: string): string {
-  const { lines, spot, carried } = stripConcordHooks(source);
+  const { lines, spot, carried, tables } = stripConcordHooks(source);
   const at = spot ?? lines.length;
-  // Lines that sat after an end marker stay after it, where TOML read them.
-  const after = mergeCarried(carried.flatMap((group) => group.lines));
+  const before = lines.slice(0, at);
+  const after = lines.slice(at);
+  // Lines from after an end marker stay in the table they would join. Those right
+  // below the new block, or bound for the server table setup rewrites, follow its
+  // end marker instead, where TOML read them as part of Concord's hook.
+  const behind: TomlLine[] = [];
+  for (const group of [...carried].reverse()) {
+    const table = tables[group.table];
+    const below =
+      group.at >= at &&
+      after
+        .slice(0, group.at - at)
+        .every((text) => text.trim() === '' || text.trim().startsWith('#'));
+    if (below || CONCORD_TOML_KEY.test(table?.path ?? '')) {
+      behind.unshift(...group.lines);
+    } else if (group.at < at) {
+      insertLines(before, group.at, mergeCarried(group.lines, table?.keys));
+    } else {
+      insertLines(after, group.at - at, mergeCarried(group.lines, table?.keys));
+    }
+  }
   const parts = [
-    joinTrimmed(lines.slice(0, at)),
-    [CONCORD_HOOKS_BLOCK, ...after].join('\n'),
-    joinTrimmed(lines.slice(at)),
+    joinTrimmed(before),
+    [CONCORD_HOOKS_BLOCK, ...mergeCarried(behind)].join('\n'),
+    joinTrimmed(after),
   ];
   return `${parts.filter((part) => part !== '').join('\n\n')}\n`;
 }
@@ -489,12 +516,13 @@ export function uninstallCodexConfig(env: NodeJS.ProcessEnv = process.env): stri
   const fullPath = codexConfigFile(env);
   if (!existsSync(fullPath)) return undefined;
   const uninstalled = inLineEnding(readFileSync(fullPath, 'utf8'), (text) => {
-    const { lines, carried, taken } = stripConcordHooks(removeServerTables(text));
-    // Lines that sat after an end marker stay where they were, merged per table.
+    const { lines, carried, tables } = stripConcordHooks(removeServerTables(text));
+    // Lines that sat after an end marker stay where they were, merged per table. They join
+    // the table above the removed block, e.g. `tui.model`: valid, and Codex ignored them before.
     const kept = [...lines];
     // A line that would clash with a key its new table sets is dropped: Codex ignored it.
     for (const group of carried.reverse()) {
-      kept.splice(group.at, 0, ...mergeCarried(group.lines, taken[group.table]));
+      insertLines(kept, group.at, mergeCarried(group.lines, tables[group.table]?.keys));
     }
     const trimmed = kept.join('\n').replace(/^\n+/u, '').replace(/\n*$/u, '');
     return trimmed === '' ? '' : `${trimmed}\n`;

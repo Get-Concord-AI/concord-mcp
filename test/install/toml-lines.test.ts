@@ -47,4 +47,10 @@ describe('tomlKeyPath', () => {
     expect(tomlKeyPath('mcp_servers."concord.env"')).toBe('mcp_servers."concord.env"');
     expect(tomlKeyPath('"my server"')).toBe('"my server"');
   });
+
+  it('decodes basic-string escapes, and leaves literal strings raw', () => {
+    expect(tomlKeyPath('"\\u006dodel"')).toBe('model');
+    expect(tomlKeyPath('"a\\"b"')).toBe('"a\\"b"');
+    expect(tomlKeyPath("'\\u006dodel'")).toBe('"\\\\u006dodel"');
+  });
 });
