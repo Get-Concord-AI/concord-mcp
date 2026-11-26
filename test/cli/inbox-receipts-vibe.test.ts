@@ -131,6 +131,9 @@ describe('Vibe hook payloads', () => {
           source: 'history',
           turn_index: 0,
         },
+        null,
+        42,
+        { source: 'history' },
       ]),
     );
     writeLiveManifest(dir, ['aaa']);
@@ -184,7 +187,7 @@ describe('Vibe hook payloads', () => {
     expect(status(repos, messageId)).toBe('read');
   });
 
-  it('skips history chunks larger than the read budget instead of loading them', () => {
+  it('stops at an oversized newest chunk instead of reading older evidence', () => {
     const messageId = send(repos, 'huge note', 'k1');
     drainInbox(repos, 'beta', 'vibe', undefined, {
       session: sessionKey(SESSION),
@@ -193,10 +196,8 @@ describe('Vibe hook payloads', () => {
     const dir = mkdtempSync(join(tmpdir(), 'concord-vibe-big-'));
     const chunks = join(dir, 'chunks');
     mkdirSync(chunks, { recursive: true });
-    // The snapshot holds read evidence but exceeds the 4 MiB tail budget, so
-    // the hook must skip it rather than load an arbitrarily large history.
     writeFileSync(
-      join(chunks, 'big.json'),
+      join(chunks, 'older.json'),
       JSON.stringify([
         {
           message: {
@@ -205,10 +206,15 @@ describe('Vibe hook payloads', () => {
           },
         },
         { message: { role: 'assistant', content: 'ok' } },
-        { message: { role: 'user', content: 'x'.repeat(5 * 1024 * 1024) } },
       ]),
     );
-    writeLiveManifest(dir, ['big']);
+    // The newest snapshot exceeds the 4 MiB tail budget. Falling through to
+    // older chunks could confirm a message whose latest context was never read.
+    writeFileSync(
+      join(chunks, 'big.json'),
+      JSON.stringify([{ message: { role: 'user', content: 'x'.repeat(5 * 1024 * 1024) } }]),
+    );
+    writeLiveManifest(dir, ['older', 'big']);
 
     observeHookEvent(
       repos,

@@ -158,11 +158,12 @@ const vibeChunkEntrySchema = z
       .optional(),
   })
   .loose();
+type VibeChunkEntry = z.infer<typeof vibeChunkEntrySchema>;
+const vibeChunkEntriesSchema = z.array(vibeChunkEntrySchema.catch({}));
 
 /** One Vibe history entry as a JSONL line `scanTranscript` can classify. */
-function vibeChunkLine(raw: unknown): string | undefined {
-  const parsed = vibeChunkEntrySchema.safeParse(raw);
-  const message = parsed.success ? parsed.data.message : undefined;
+function vibeChunkLine(entry: VibeChunkEntry): string | undefined {
+  const message = entry.message;
   if (message === undefined) return undefined;
   const content = message.content;
   const text =
@@ -225,10 +226,9 @@ function vibeChunkTexts(dir: string): (string | undefined)[] {
     const path = join(dir, `${name}.json`);
     try {
       const size = statSync(path).size;
-      if (size <= budget) {
-        chosen.unshift(name);
-        budget -= size;
-      }
+      if (size > budget) break;
+      chosen.unshift(name);
+      budget -= size;
     } catch {
       // A manifest entry whose file is missing simply contributes nothing.
     }
@@ -238,7 +238,7 @@ function vibeChunkTexts(dir: string): (string | undefined)[] {
     let text: string | undefined;
     try {
       const raw: unknown = JSON.parse(readFileSync(join(dir, `${name}.json`), 'utf8'));
-      const entries = z.array(z.unknown()).safeParse(raw);
+      const entries = vibeChunkEntriesSchema.safeParse(raw);
       if (entries.success) {
         text = entries.data
           .map(vibeChunkLine)
