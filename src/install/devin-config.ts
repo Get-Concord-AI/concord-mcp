@@ -71,8 +71,7 @@ export function upsertDevinMcpConfig(text: string | undefined): string {
     const insertion = `${hasEntries ? ',' : ''}\n${indent}  "${SERVER}": ${entry}\n${indent}`;
     return `${source.slice(0, range.close)}${insertion}${source.slice(range.close)}`;
   }
-  const root = propertyObject(source, '__never__');
-  const close = root?.close ?? objectEnd(source, uncomment(source).indexOf('{'));
+  const close = objectEnd(source, uncomment(source).indexOf('{'));
   const hasEntries = Object.keys(config).length > 0;
   return `${source.slice(0, close)}${hasEntries ? ',' : ''}\n  "mcpServers": {\n    "${SERVER}": ${entry}\n  }\n${source.slice(close)}`;
 }

@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Removing the last property of a JSONC object no longer drops a comment
+  sitting between the preceding comma and that property — a section note is
+  kept the way comments after a middle property already were.
+- Devin uninstall keeps user comments in the hooks config.
+- Re-running `concord setup` (or any installer path that rewrites the
+  `concord` entry in an MCP config) now preserves the entry's other fields
+  — `disabled`, timeouts, client-specific options — instead of dropping
+  everything but `command`/`args`/`env`. Command, args, and env are still
+  always rewritten, which is how older package-runner installs migrate. In
+  particular, a `disabled: true` entry now stays disabled across setup instead
+  of being silently re-enabled.
+
 ## [0.25.0] - 2026-11-25
 
 ### Added

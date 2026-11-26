@@ -6,6 +6,9 @@
  *   PostToolUse  hookSpecificOutput.additionalContext  (arrives mid-turn)
  *   Stop         decision "block" + reason             (re-opens a finished turn)
  *   monitor      one stdout line per message           (arrives even when idle)
+ *
+ * plus a deny just before the session blocks on its user (`PreToolUse` on
+ * `AskUserQuestion`).
  */
 
 export interface DeliverableMessage {
@@ -105,9 +108,16 @@ export function renderGeminiAfterAgent(messages: readonly DeliverableMessage[]):
  * The JSON a command hook prints on stdout. `Stop` must block, otherwise the
  * turn ends before the recipient can read the message; the tool-result hooks
  * only need to append context.
+ *
+ * `pre-tool-use` (on `AskUserQuestion`) runs just before the session blocks
+ * on its user, when nothing else can reach the model until the user answers.
+ * Only a deny gets the messages to the model first: `additionalContext`
+ * arrives with the tool result, after the answer. The model reads them and
+ * asks again. Never allow with `updatedInput`: that answers the question
+ * without showing it.
  */
 export function renderHookPayload(
-  channel: 'post-tool-use' | 'stop',
+  channel: 'post-tool-use' | 'stop' | 'pre-tool-use',
   messages: readonly DeliverableMessage[],
 ): string {
   const body = renderInboxBody(messages);
@@ -115,6 +125,17 @@ export function renderHookPayload(
     return JSON.stringify({
       decision: 'block',
       reason: `New Concord message(s) arrived before this turn ended.\n\n${body}`,
+    });
+  }
+  if (channel === 'pre-tool-use') {
+    return JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason:
+          `New Concord message(s) arrived before your question was shown.\n\n${body}\n\n` +
+          'Read them, then ask your question again, adjusted if they change anything.',
+      },
     });
   }
   return JSON.stringify({
