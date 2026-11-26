@@ -97,12 +97,10 @@ export function inspectAgentInbox(
           textInbox: [],
         };
       }
-      const selected = new Set(
-        inbox
-          .filter(isLiveMessage)
-          .slice(-INSPECT_MESSAGE_LIMIT)
-          .map((message) => message.messageId),
-      );
+      const live = inbox.filter(isLiveMessage);
+      const unread = live.filter((message) => message.status !== 'read');
+      const recent = (unread.length > 0 ? unread : live).slice(-INSPECT_MESSAGE_LIMIT);
+      const selected = new Set(recent.map((message) => message.messageId));
       let current = { inbox, outbox };
       if (viewer.verified && selected.size > 0) {
         repos.agentMessages.markReadByInspect(viewer.agentId, [...selected]);

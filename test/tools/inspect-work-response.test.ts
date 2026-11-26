@@ -89,6 +89,14 @@ describe('inspect_work text for clients that only display content', () => {
     expect(new Set(history.inbox.map((message) => message.messageId))).toEqual(
       new Set([...backlog, replied, failed]),
     );
+
+    const next = inspectWorkResponse(
+      handleInspectWork(repos, { agent_id: 'reader' }, 'reader'),
+      undefined,
+    );
+    const nextIds = renderedMessageIds(next.content.map((block) => block.text).join('\n'));
+    expect(new Set([...shown, ...nextIds])).toEqual(new Set(backlog));
+    expect(backlog.every((id) => repos.agentMessages.get(id)?.status === 'read')).toBe(true);
   });
 
   it('drops an expiring preview without marking an older message in its place', () => {
