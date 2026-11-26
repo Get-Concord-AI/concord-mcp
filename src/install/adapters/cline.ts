@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { HARNESS_CONFIGS } from '../../domain/harness-config.js';
 import {
   clineDetected,
+  clineExtensionDetected,
   clineGlobalHookDirs,
   clineHooksPresent,
   clineMcpSettingsPath,
@@ -51,6 +52,21 @@ function hooksState(env: NodeJS.ProcessEnv): HookState {
     : 'missing';
 }
 
+/**
+ * A pre-v3 CLI cannot drive Cline's current lifecycle hooks, but the VS Code
+ * extension can: only an old CLI with no extension evidence makes the whole
+ * harness unsupported.
+ */
+function unsupportedClineCli(executable: string | undefined, env: NodeJS.ProcessEnv): boolean {
+  if (executable === undefined) return false;
+  const version = versionTuple(run(executable, ['--version'], env).output);
+  return (
+    version !== undefined &&
+    !atLeast(version, HARNESS_CONFIGS.cline.minimumVersion) &&
+    !clineExtensionDetected(env)
+  );
+}
+
 function report(
   status: AdapterReport['status'],
   detail: string,
@@ -84,11 +100,8 @@ export function statusCline(
       'Cline was not found on PATH, in ~/.cline, in ~/Documents/Cline, or as a VS Code extension.',
     );
   }
-  if (executable !== undefined) {
-    const version = versionTuple(run(executable, ['--version'], env).output);
-    if (version !== undefined && !atLeast(version, config.minimumVersion)) {
-      return report('unsupported_version', config.unsupportedDetail);
-    }
+  if (unsupportedClineCli(executable, env)) {
+    return report('unsupported_version', config.unsupportedDetail);
   }
 
   const mcp = mcpState(env);
@@ -126,12 +139,7 @@ export function statusCline(
 export function installCline(env: NodeJS.ProcessEnv): void {
   if (!clineDetected(env)) return;
   const executable = executablePath(HARNESS_CONFIGS.cline.executable, env);
-  if (executable !== undefined) {
-    const version = versionTuple(run(executable, ['--version'], env).output);
-    if (version !== undefined && !atLeast(version, HARNESS_CONFIGS.cline.minimumVersion)) {
-      return;
-    }
-  }
+  if (unsupportedClineCli(executable, env)) return;
   installClineUserConfigs(env);
 }
 

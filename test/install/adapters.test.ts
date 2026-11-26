@@ -867,6 +867,30 @@ describe('global harness adapters', () => {
       expect(existsSync(clineMcpSettingsPath(env))).toBe(false);
     });
 
+    it('installs for the VS Code extension when an old CLI is also on PATH', () => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-cline-old-extension-'));
+      const bin = join(home, 'bin');
+      mkdirSync(bin);
+      writeFakeVersion(bin, 'cline', '2.9.9');
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: bin,
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
+      mkdirSync(
+        join(home, 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev'),
+        { recursive: true },
+      );
+
+      const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+      expect(report.find((item) => item.harness === 'cline')).toMatchObject({
+        detected: true,
+        status: 'installed',
+      });
+      expect(existsSync(clineMcpSettingsPath(env))).toBe(true);
+    });
+
     it('uninstall removes the Concord MCP entry and hook files only', () => {
       const home = mkdtempSync(join(tmpdir(), 'concord-cline-uninstall-'));
       const bin = join(home, 'bin');
