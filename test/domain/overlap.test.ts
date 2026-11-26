@@ -43,6 +43,9 @@ const candidate: OverlapSurface = {
   riskTags: ['payment-flow'],
 };
 
+/** Spellings of a whole-repo claim, including Windows separators and `..`. */
+const ROOT_CLAIMS = ['.', './', '/', '.\\', '\\', './.', 'src/..'];
+
 describe('detectOverlaps', () => {
   it('flags a shared module and directory (the plan demo case)', () => {
     const warnings = detectOverlaps(candidate, [
@@ -384,7 +387,7 @@ describe('detectOverlaps', () => {
     expect(reverse.map((warning) => warning.taskId)).toEqual(['D2']);
   });
 
-  it.each(['.', './', '/'])('flags root claim %j in both directions', (root) => {
+  it.each(ROOT_CLAIMS)('flags root claim %j in both directions', (root) => {
     const rootClaim = task({ taskId: 'ROOT', expectedFiles: [root] });
     const fileClaim = task({ taskId: 'FILE', expectedFiles: ['src/app/page.tsx'] });
     const reasons = ['directory claim covers file(s): . -> src/app/page.tsx'];
