@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
+import { parseJsoncObject } from '../../src/install/jsonc-edit.js';
 import {
   upsertJunieHooksConfig,
   removeJunieHooksConfig,
@@ -92,6 +93,32 @@ describe('junie-hooks', () => {
     const cleaned = removeJunieHooksConfig(withHooks);
     const parsed = parseConfig(cleaned);
     expect(parsed.hooks).toBeUndefined();
+  });
+
+  it('keeps emoji comments around the removed hooks object', () => {
+    const source = `{
+  // 🚀 note
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "", "hooks": [{ "type": "command", "command": "concord hook junie-session-start" }] }
+    ],
+    "UserPromptSubmit": [
+      { "matcher": "", "hooks": [{ "type": "command", "command": "concord hook junie-user-prompt-submit" }] }
+    ],
+    "SessionEnd": [
+      { "matcher": "", "hooks": [{ "type": "command", "command": "concord hook junie-session-end" }] }
+    ]
+  } /* keep 🚀 */,
+  "model": "test"
+}
+`;
+
+    const installed = upsertJunieHooksConfig(source);
+    const cleaned = removeJunieHooksConfig(installed);
+
+    expect(cleaned).toContain('// 🚀 note');
+    expect(cleaned).toContain('/* keep 🚀 */');
+    expect(parseJsoncObject(cleaned)).toEqual({ model: 'test' });
   });
 
   it('detects installed hooks via junieHooksInstalled', () => {
