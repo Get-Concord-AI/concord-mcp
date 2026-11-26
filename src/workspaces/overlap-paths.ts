@@ -22,6 +22,25 @@ function resolveExistingParents(path: string): string {
   }
 }
 
+/**
+ * A declared or edited file as the checkout names it, so the same file
+ * compares equal however it is written: an absolute path inside the checkout
+ * becomes checkout-relative, and a path through a symlink names the file it
+ * points at, including a file that does not exist yet. Root claims, paths
+ * outside the checkout, and everything without a known checkout are returned
+ * as given.
+ */
+export function pathFromCheckout(checkoutRoot: string | undefined, path: string): string {
+  if (checkoutRoot === undefined || isRootClaim(path)) return path;
+  const root = resolveExistingParents(checkoutRoot);
+  const absolute = isAbsolute(path) ? path : join(checkoutRoot, path);
+  const within = relative(root, resolveExistingParents(absolute)).replaceAll('\\', '/');
+  if (within === '' || within === '..' || within.startsWith('../') || isAbsolute(within)) {
+    return path;
+  }
+  return within;
+}
+
 /** For root claims, map normalized absolute paths to their paths from the
  * checkout. The original entries are still used for other comparisons and
  * in overlap messages. */

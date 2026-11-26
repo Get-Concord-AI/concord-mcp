@@ -7,7 +7,7 @@ import {
   type OverlapPathOptions,
   type OverlapWarning,
 } from '../../domain/overlap.js';
-import { resolvePathsFromCheckout } from '../../workspaces/overlap-paths.js';
+import { pathFromCheckout, resolvePathsFromCheckout } from '../../workspaces/overlap-paths.js';
 
 /**
  * Collisions between the given files and OTHER active tasks' claimed paths.
@@ -30,14 +30,23 @@ export function checkFileOverlaps(
 ): OverlapWarning[] {
   const { platform } = options;
   const byKey = new Map<string, string>();
-  for (const file of files.map(normalizePath)) {
+  // Harnesses send absolute paths (Claude Code's Edit always does) while
+  // claims are checkout-relative, so name each file the way claims do.
+  const named = files.map((file) => pathFromCheckout(repos.checkoutRoot, file));
+  for (const file of named.map(normalizePath)) {
     const key = pathKey(file, platform);
     if (file !== '' && !byKey.has(key)) byKey.set(key, file);
   }
   const wanted = [...byKey.values()];
+  // Claims stored before this naming rule may still be absolute, so name
+  // stored entries the same way before comparing.
   const otherClaims = repos.tasks
     .list()
-    .filter((task) => CLAIMED_STATUSES.has(task.status) && task.taskId !== selfTaskId);
+    .filter((task) => CLAIMED_STATUSES.has(task.status) && task.taskId !== selfTaskId)
+    .map((task) => ({
+      ...task,
+      expectedFiles: task.expectedFiles.map((entry) => pathFromCheckout(repos.checkoutRoot, entry)),
+    }));
   const pathsFromCheckout = resolvePathsFromCheckout(
     repos.checkoutRoot,
     otherClaims.map((task) => task.expectedFiles),
