@@ -124,6 +124,6 @@ export function removeProperty(
   // the way comments after a middle property are kept.
   const lead = text.slice(start, property.key);
   const leadComments = lead.match(/\/\/[^\r\n]*|\/\*[\s\S]*?\*\//gu) ?? [];
-  const retained = leadComments.length === 0 ? '' : `${leadComments.join('\n')}\n`;
+  const retained = leadComments.length === 0 ? '' : lead.slice(1).replace(/\s+$/u, '');
   return `${text.slice(0, start)}${retained}${text.slice(property.close + 1)}`;
 }
