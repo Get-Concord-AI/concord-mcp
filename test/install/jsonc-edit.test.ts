@@ -157,4 +157,11 @@ describe('removeProperty orphan comments', () => {
     expect(result).toBe('{\r\n  "a": 1\r\n  // section note\r\n}\r\n');
     expect(() => parseJsoncObject(result)).not.toThrow();
   });
+
+  it('keeps a retained line comment terminated when the parent closes on the same line', () => {
+    const text = '{ "a": {}, // note\n "b": {}}';
+    const result = removeProperty(text, { open: 0, close: objectEnd(text, 0) }, span(text, 'b'));
+    expect(result).toBe('{ "a": {} // note\n}');
+    expect(() => parseJsoncObject(result)).not.toThrow();
+  });
 });
