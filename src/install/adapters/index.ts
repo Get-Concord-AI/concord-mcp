@@ -35,6 +35,9 @@ import {
   removeDevinUserHooks,
 } from '../devin-user-hooks.js';
 import { devinHooksInstalled } from '../devin-hooks.js';
+import { installJunie, statusJunie } from './junie.js';
+import { removeJunieHooks } from '../junie-hooks.js';
+import { uninstallJunieMcpConfig } from '../junie-config.js';
 import { installCodexHooks, installCodexMcpConfig, uninstallCodexConfig } from '../codex-config.js';
 import { uninstallHermesMcpConfig } from '../hermes-config.js';
 import {
@@ -654,6 +657,8 @@ export function statusAdapter(
       return statusOpencode(env);
     case 'qwen':
       return statusQwen(executablePath(HARNESS_CONFIGS.qwen.executable, env), repoRoot);
+    case 'junie':
+      return statusJunie(env);
     case 'kiro':
       return statusKiro(kiroExecutablePath(env), repoRoot, env);
     case 'deepseek':
@@ -785,6 +790,9 @@ export function installAdapter(
       }
       return;
     }
+    case 'junie':
+      installJunie(run(executable, ['--version'], env).output, env);
+      return;
     case 'deepseek':
       installDeepseekConfig(env);
       return;
@@ -881,6 +889,12 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   }
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
+  uninstallJunieMcpConfig(env);
+  try {
+    removeJunieHooks(env);
+  } catch {
+    // Malformed or unreadable hooks config is left untouched.
+  }
   uninstallKiroUserConfigs(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);

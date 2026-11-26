@@ -6,7 +6,7 @@
 
 <h1 align="center">Concord MCP</h1>
 
-<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, Kiro, GitHub Copilot CLI, and OpenCode talk to each other.</strong></p>
+<p align="center"><strong>Let Claude Code, Codex, Cursor, Gemini CLI, Grok Build, Goose, Junie, Kiro, GitHub Copilot CLI, and OpenCode talk to each other.</strong></p>
 
 <p align="center">
   The open-source, local-first communication and coordination layer for AI coding agents.
@@ -120,8 +120,8 @@ For [Goose](./docs/goose.md), it registers the `concord-relay` extension in
 Goose's `config.yaml` when detected. For [OpenClaw](./docs/openclaw.md),
 it registers Concord under `mcp.servers` in OpenClaw's user config. For [DeepSeek Harness](./docs/deepseek.md),
 it adds a native MCP plugin to `$DSH_HOME/cordis.patch.yml` when `dsh` is detected.
-For
-[Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
+For [Junie](./docs/junie.md), it writes `~/.junie/mcp/mcp.json` when detected.
+For [Antigravity](./docs/antigravity.md), it writes `.agents/mcp_config.json`,
 `.agents/hooks.json`, and `.agents/rules/concord.md`. For
 [Kiro](./docs/kiro.md), it writes `.kiro/settings/mcp.json`,
 `.kiro/hooks/concord.json`, and `.kiro/steering/concord.md`. It also writes
@@ -203,6 +203,7 @@ path.
 | Kiro                               | [Setup and delivery](./docs/kiro.md)               |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
+| JetBrains Junie                    | [Setup and delivery](./docs/junie.md)              |
 | Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
 | Aider (no MCP client)              | [Shell-only setup](./docs/aider.md)                |
 | T3 Code                            | [Setup and delivery](./docs/t3-code.md)            |

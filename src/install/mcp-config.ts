@@ -16,6 +16,7 @@ const JSON_TARGETS: readonly string[] = [
   join('.cursor', 'mcp.json'),
   join('.agents', 'mcp_config.json'),
   join('.github', 'mcp.json'),
+  join('.junie', 'mcp', 'mcp.json'),
   join('.kiro', 'settings', 'mcp.json'),
 ];
 /** The variable that names the client an MCP server runs in. */
@@ -42,6 +43,7 @@ const PINNED_KINDS: ReadonlyMap<string, string> = new Map([
   [join('.agents', 'mcp_config.json'), 'antigravity'],
   [join('.github', 'mcp.json'), 'copilot-cli'],
   [join('.qwen', 'settings.json'), 'qwen'],
+  [join('.junie', 'mcp', 'mcp.json'), 'junie'],
   [join('.kiro', 'settings', 'mcp.json'), 'kiro'],
 ]);
 const GEMINI_CONFIG_PATH = join('.gemini', 'settings.json');

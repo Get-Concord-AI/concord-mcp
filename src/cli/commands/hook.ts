@@ -356,6 +356,13 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
           return;
         }
       }
+      if (event.startsWith('junie-')) {
+        const { isJunieHookEvent, runJunieHook } = await import('./junie-hooks.js');
+        if (isJunieHookEvent(event)) {
+          process.stdout.write(`${await runJunieHook(event, readStdin())}\n`);
+          return;
+        }
+      }
       if (options.client === 'copilot-cli') {
         await runCopilotClientHook(event);
         return;

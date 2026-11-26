@@ -94,6 +94,7 @@ describe('installMcpConfigs', () => {
       join('.cursor', 'mcp.json'),
       join('.agents', 'mcp_config.json'),
       join('.github', 'mcp.json'),
+      join('.junie', 'mcp', 'mcp.json'),
       join('.kiro', 'settings', 'mcp.json'),
       join('.qwen', 'settings.json'),
       join('.gemini', 'settings.json'),
