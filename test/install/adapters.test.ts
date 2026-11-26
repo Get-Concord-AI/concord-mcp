@@ -516,6 +516,18 @@ describe('global harness adapters', () => {
       expect(adds).toEqual([]);
     });
 
+    it('does not run `kilo mcp add` over a bare enabled:false opt-out', () => {
+      const { home, env, log } = kiloEnv();
+      writeKiloConfig(home, { concord: { enabled: false } });
+
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      const adds = recordedInvocations(log).filter(
+        (call) => call[0] === 'mcp' && call[1] === 'add' && call[2] !== '--help',
+      );
+      expect(adds).toEqual([]);
+    });
+
     it('registers Concord through `kilo mcp add` when adapters are installed', () => {
       const { env, log } = kiloEnv();
 

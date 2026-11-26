@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { writeFakeKilo } from '../helpers/fake-kilo.js';
+import { recordedInvocations } from '../helpers/fake-opencode.js';
+import { jsonValueSchema } from '../../src/install/json-value.js';
 import {
+  installKiloMcpConfig,
   kiloConfigDir,
   kiloConfigHome,
   kiloConfigPaths,
@@ -40,8 +44,8 @@ const CONCORD_ENTRY = {
 };
 
 const serversSchema = z.object({
-  mcp: z.record(z.string(), z.unknown()).optional(),
-  agent: z.record(z.string(), z.unknown()).optional(),
+  mcp: z.record(z.string(), jsonValueSchema).optional(),
+  agent: z.record(z.string(), jsonValueSchema).optional(),
   $schema: z.string().optional(),
 });
 
@@ -333,7 +337,7 @@ describe('uninstallKiloMcpConfig', () => {
       `{
   // servers the user relies on
   "mcp": {
-    "concord": { "type": "local", "command": ["concord-mcp"] },
+    "concord": { "type": "local", "command": ["concord-mcp"], "environment": { "CONCORD_AGENT_KIND": "kilo" } },
     // keep this probe around
     "probe": { "type": "local", "command": ["node", "probe.mjs"] },
   },
@@ -458,10 +462,10 @@ describe('round-3 review regressions', () => {
     const nestedSchema = z.object({
       provider: z.object({
         custom: z.object({
-          options: z.object({ mcp: z.record(z.string(), z.unknown()) }),
+          options: z.object({ mcp: z.record(z.string(), jsonValueSchema) }),
         }),
       }),
-      mcp: z.record(z.string(), z.unknown()).optional(),
+      mcp: z.record(z.string(), jsonValueSchema).optional(),
     });
     const parsed = nestedSchema.parse(JSON.parse(next));
     expect(parsed.provider.custom.options.mcp['concord']).toBeDefined();
@@ -484,9 +488,9 @@ describe('round-3 review regressions', () => {
     expect(kiloMcpState(env).state).toBe('conflict');
   });
 
-  it('does not own an npx invocation whose arguments go beyond the runner shape', () => {
+  it('does not own or uninstall an npx invocation whose arguments go beyond the runner shape', () => {
     const { home, env } = kiloEnv();
-    writeGlobalConfig(
+    const path = writeGlobalConfig(
       home,
       'kilo.json',
       JSON.stringify({
@@ -498,17 +502,27 @@ describe('round-3 review regressions', () => {
         },
       }),
     );
+    const before = readFileSync(path, 'utf8');
     expect(kiloMcpState(env).state).toBe('conflict');
+    uninstallKiloMcpConfig(env);
+    expect(readFileSync(path, 'utf8')).toBe(before);
   });
 
-  it('appends the KILO_CONFIG override file after every other source', () => {
+  it('places KILO_CONFIG after global files and before KILO_CONFIG_DIR files', () => {
     const { home, env } = kiloEnv();
     const override = join(home, 'custom-kilo.json');
-    const paths = kiloConfigPaths({ ...env, KILO_CONFIG: override });
-    expect(paths.at(-1)).toBe(override);
+    const dir = join(home, 'kilo-work');
+    expect(kiloConfigPaths({ ...env, KILO_CONFIG: override, KILO_CONFIG_DIR: dir })).toEqual([
+      ...kiloConfigPaths(env),
+      override,
+      join(dir, 'kilo.jsonc'),
+      join(dir, 'kilo.json'),
+      join(dir, 'opencode.jsonc'),
+      join(dir, 'opencode.json'),
+    ]);
   });
 
-  it('lets KILO_CONFIG disable an entry every other file enables', () => {
+  it('lets KILO_CONFIG disable an entry the global files enable', () => {
     const { home, env } = kiloEnv();
     writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
     const override = writeConfigDirConfig(
@@ -520,6 +534,45 @@ describe('round-3 review regressions', () => {
     const state = kiloMcpState({ ...env, KILO_CONFIG: override });
     expect(state.state).toBe('disabled');
     expect(state.path).toBe(override);
+  });
+
+  it('lets KILO_CONFIG_DIR re-enable an entry KILO_CONFIG disables', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+    const override = writeConfigDirConfig(
+      join(home, 'elsewhere'),
+      'override.json',
+      JSON.stringify({ mcp: { concord: { enabled: false } } }),
+    );
+    const dir = join(home, 'kilo-work');
+    writeConfigDirConfig(
+      dir,
+      'opencode.json',
+      JSON.stringify({ mcp: { concord: { enabled: true } } }),
+    );
+
+    const state = kiloMcpState({ ...env, KILO_CONFIG: override, KILO_CONFIG_DIR: dir });
+    expect(state.state).toBe('installed');
+  });
+
+  it('lets KILO_CONFIG_DIR disable an entry KILO_CONFIG enables', () => {
+    const { home, env } = kiloEnv();
+    writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: CONCORD_ENTRY } }));
+    const override = writeConfigDirConfig(
+      join(home, 'elsewhere'),
+      'override.json',
+      JSON.stringify({ mcp: { concord: { enabled: true } } }),
+    );
+    const dir = join(home, 'kilo-work');
+    const later = writeConfigDirConfig(
+      dir,
+      'opencode.json',
+      JSON.stringify({ mcp: { concord: { enabled: false } } }),
+    );
+
+    const state = kiloMcpState({ ...env, KILO_CONFIG: override, KILO_CONFIG_DIR: dir });
+    expect(state.state).toBe('disabled');
+    expect(state.path).toBe(later);
   });
 
   it('reports none for a bare enabled:false stub with no command or url', () => {
@@ -581,7 +634,7 @@ describe('round-4 review regressions', () => {
     expect(kiloMcpState(env).state).not.toBe('installed');
   });
 
-  it('still uninstalls an unpinned legacy entry', () => {
+  it('leaves an unpinned concord-shaped entry untouched on uninstall', () => {
     const { home, env } = kiloEnv();
     const path = writeGlobalConfig(
       home,
@@ -590,9 +643,113 @@ describe('round-4 review regressions', () => {
         mcp: { concord: { type: 'local', command: ['concord-mcp'] }, keep: { command: ['x'] } },
       }),
     );
+    const before = readFileSync(path, 'utf8');
     uninstallKiloMcpConfig(env);
-    const parsed = serversSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
-    expect(parsed.mcp?.['concord']).toBeUndefined();
-    expect(parsed.mcp?.['keep']).toBeDefined();
+    expect(readFileSync(path, 'utf8')).toBe(before);
+  });
+});
+
+describe('round-5 review regressions', () => {
+  it('leaves an entry pinned to another harness untouched on uninstall', () => {
+    const { home, env } = kiloEnv();
+    const path = writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      JSON.stringify({
+        mcp: {
+          concord: {
+            type: 'local',
+            command: ['concord-mcp'],
+            environment: { CONCORD_AGENT_KIND: 'codex' },
+          },
+        },
+      }),
+    );
+    const before = readFileSync(path, 'utf8');
+
+    expect(kiloMcpState(env).state).toBe('conflict');
+    uninstallKiloMcpConfig(env);
+    expect(readFileSync(path, 'utf8')).toBe(before);
+  });
+
+  it('rejects a remote entry even when it carries a concord command', () => {
+    const { home, env } = kiloEnv();
+    const path = writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      JSON.stringify({
+        mcp: {
+          concord: {
+            type: 'remote',
+            url: 'https://example.test/mcp',
+            command: ['concord-mcp'],
+            environment: { CONCORD_AGENT_KIND: 'kilo' },
+          },
+        },
+      }),
+    );
+    const before = readFileSync(path, 'utf8');
+
+    expect(kiloMcpState(env).state).toBe('conflict');
+    uninstallKiloMcpConfig(env);
+    expect(readFileSync(path, 'utf8')).toBe(before);
+  });
+
+  it('rejects an entry that defines a url even without a remote type', () => {
+    const { home, env } = kiloEnv();
+    const path = writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      JSON.stringify({
+        mcp: {
+          concord: {
+            type: 'local',
+            url: 'https://example.test/mcp',
+            command: ['concord-mcp'],
+            environment: { CONCORD_AGENT_KIND: 'kilo' },
+          },
+        },
+      }),
+    );
+    const before = readFileSync(path, 'utf8');
+
+    expect(kiloMcpState(env).state).toBe('conflict');
+    uninstallKiloMcpConfig(env);
+    expect(readFileSync(path, 'utf8')).toBe(before);
+  });
+
+  it('does not invoke kilo mcp add over a bare disabled toggle', () => {
+    const { home, env } = kiloEnv();
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    const executable = writeFakeKilo(bin);
+    const log = join(home, 'calls.log');
+    writeGlobalConfig(home, 'kilo.jsonc', JSON.stringify({ mcp: { concord: { enabled: false } } }));
+
+    installKiloMcpConfig(executable, { ...env, FAKE_KILO_LOG: log });
+
+    const adds = recordedInvocations(log).filter((call) => call[0] === 'mcp' && call[1] === 'add');
+    expect(adds).toEqual([]);
+  });
+
+  it('leaves a file with duplicate concord keys untouched', () => {
+    const { home, env } = kiloEnv();
+    const path = writeGlobalConfig(
+      home,
+      'kilo.jsonc',
+      `{
+  "mcp": {
+    "concord": { "type": "local", "command": ["concord-mcp"], "environment": { "CONCORD_AGENT_KIND": "kilo" } },
+    "concord": { "type": "local", "command": ["concord-mcp"], "environment": { "CONCORD_AGENT_KIND": "kilo" } },
+    "keep": { "command": ["x"] }
+  }
+}
+`,
+    );
+    const before = readFileSync(path, 'utf8');
+
+    expect(kiloMcpState(env).state).toBe('installed');
+    uninstallKiloMcpConfig(env);
+    expect(readFileSync(path, 'utf8')).toBe(before);
   });
 });

@@ -28,13 +28,16 @@ import { spawnCommandSync } from './spawn-command.js';
  * Kilo is an OpenCode fork: it merges several JSONC files — the global
  * `$XDG_CONFIG_HOME/kilo`/`~/.config/kilo` directory (`config.json`,
  * `kilo.json`, `kilo.jsonc`, `opencode.json`, `opencode.jsonc`, lowest to
- * highest precedence) plus every file `KILO_CONFIG_DIR` points at
- * (`kilo.jsonc`, `kilo.json`, `opencode.jsonc`, `opencode.json`), which
- * outranks the global directory. `KILO_CONFIG` points at one extra file Kilo
- * loads as an override on top of everything else. `kilo mcp add` writes its
- * own file, so registration goes through the harness; status and removal read
- * the same file set and let the highest-precedence `mcp.concord` win,
- * mirroring Kilo's deep merge, because `kilo mcp` has no remove command.
+ * highest precedence), then the single `KILO_CONFIG` file, then project
+ * files, and finally config directories including `KILO_CONFIG_DIR`
+ * (`kilo.jsonc`, `kilo.json`, `opencode.jsonc`, `opencode.json`). This
+ * adapter reports user-level state only: it reads the global files,
+ * `KILO_CONFIG`, and `KILO_CONFIG_DIR` in that relative order, while
+ * project-local files can still shadow the effective entry inside one
+ * project. `kilo mcp add` writes its own file, so registration goes through
+ * the harness; status and removal read the same user-level file set and let
+ * the highest-precedence `mcp.concord` win, mirroring Kilo's deep merge,
+ * because `kilo mcp` has no remove command.
  *
  * The entry pins only the harness kind. Kilo passes no session id to MCP
  * servers — not in request metadata and not in the child environment — so a
@@ -111,9 +114,11 @@ const GLOBAL_CONFIG_FILES = [
 const CONFIG_DIR_FILES = ['kilo.jsonc', 'kilo.json', 'opencode.jsonc', 'opencode.json'] as const;
 
 /**
- * Kilo's `KILO_CONFIG` override — one config file Kilo loads on top of every
- * other source, so an entry there outranks both config directories. The same
- * `~` prefixes Kilo accepts are expanded.
+ * Kilo's `KILO_CONFIG` override — one config file Kilo loads immediately
+ * after the global files and before project files and config directories. In
+ * the user-level file set Concord scans, it therefore sits before
+ * `KILO_CONFIG_DIR` rather than on top of it. The same `~` prefixes Kilo
+ * accepts are expanded.
  */
 export function kiloConfigFileOverride(env: NodeJS.ProcessEnv): string | undefined {
   const configured = env['KILO_CONFIG']?.trim();
@@ -126,19 +131,21 @@ export function kiloConfigFileOverride(env: NodeJS.ProcessEnv): string | undefin
 }
 
 /**
- * Every config file that can carry `mcp.concord`, ordered the way Kilo merges
- * them: the whole global directory first, then the whole `KILO_CONFIG_DIR`
- * directory, then the single `KILO_CONFIG` override file. The last file
- * defining the entry decides the effective one.
+ * Every user-level config file that can carry `mcp.concord`, ordered the way
+ * Kilo merges those sources: the whole global directory first, then the
+ * single `KILO_CONFIG` override file, then the whole `KILO_CONFIG_DIR`
+ * directory. The last file defining the entry decides the effective one.
+ * Project-local files can override these in a running project, but they are
+ * not part of this user-level status.
  */
 export function kiloConfigPaths(env: NodeJS.ProcessEnv): string[] {
   const paths = GLOBAL_CONFIG_FILES.map((name) => join(kiloConfigHome(env), name));
+  const override = kiloConfigFileOverride(env);
+  if (override !== undefined) paths.push(override);
   const dir = kiloConfigDir(env);
   if (dir !== undefined) {
     for (const name of CONFIG_DIR_FILES) paths.push(join(dir, name));
   }
-  const override = kiloConfigFileOverride(env);
-  if (override !== undefined) paths.push(override);
   return paths;
 }
 
@@ -211,20 +218,21 @@ function isOwnedKiloCommand(command: readonly string[]): boolean {
  * Whether a `mcp.concord` entry is one Concord wrote and may therefore manage.
  * The shape must be the one `kilo mcp add` produces: `concord-mcp` alone as the
  * command, or the runner invocation above, and only Concord's own environment
- * keys under either `environment` or Kilo's `env` alias.
+ * keys under either `environment` or Kilo's `env` alias. Remote entries are
+ * never managed, even when they happen to carry a leftover Concord command.
  */
-function isKiloConcordEntry(entry: KiloServer, requireKindPin = true): boolean {
+function isKiloConcordEntry(entry: KiloServer): boolean {
+  if (entry.type === 'remote' || entry.url !== undefined) return false;
   if (!isOwnedKiloCommand(entry.command ?? [])) return false;
   const environment = entry.environment ?? {};
   const env = entry.env ?? {};
   const envKeys = [...Object.keys(environment), ...Object.keys(env)];
   if (!envKeys.every((key) => CONCORD_ENV_KEYS.has(key))) return false;
-  if (!requireKindPin) return true;
-  // The pin is part of ownership for install decisions: an entry Concord
-  // shaped but another harness wrote (or a hand-copied one) carries its own
-  // kind — or none — and treating it as installed would let a Kilo session
-  // inherit that foreign identity. Removal keeps the looser shape so entries
-  // from before the pin existed still uninstall cleanly.
+  // The pin is part of ownership for both install and removal: an entry
+  // Concord shaped but another harness wrote (or a hand-copied one) carries
+  // its own kind — or none — and must be treated as user config. Kilo support
+  // has never shipped without the pin, so there are no legacy unpinned entries
+  // for uninstall to clean up.
   const kind = env[AGENT_KIND_ENV] ?? environment[AGENT_KIND_ENV];
   return kind === 'kilo';
 }
@@ -314,15 +322,35 @@ export function kiloMcpState(env: NodeJS.ProcessEnv): KiloMcpStatus {
 }
 
 /**
+ * Whether any parseable user-level config defines `mcp.concord`, even if the
+ * value is only a bare toggle. This is deliberately broader than the status
+ * result: status may report `none` for a vestigial `enabled: false`, but the
+ * key is still the user's opt-out and `kilo mcp add` must not replace it.
+ */
+function hasKiloConcordEntry(env: NodeJS.ProcessEnv): boolean {
+  for (const path of kiloConfigPaths(env)) {
+    if (!existsSync(path)) continue;
+    try {
+      const config = parseKiloConfig(readFileSync(path, 'utf8'));
+      if (concordValue(config) !== undefined) return true;
+    } catch {
+      // Unreadable files already keep install off through kiloMcpState.
+    }
+  }
+  return false;
+}
+
+/**
  * Register (or refresh) Concord's MCP server through `kilo mcp add`, which
- * writes the global `kilo.jsonc` itself. `kilo mcp add` replaces the whole
+ * writes the first existing config file in Kilo's active config directory (or
+ * creates `kilo.json` when none exists). `kilo mcp add` replaces the whole
  * named entry, so it only runs when no `mcp.concord` exists at all — an owned
  * entry already pins the kind, and a foreign or disabled one belongs to the
  * user. The kind is pinned so a Kilo started from another harness's shell
  * cannot inherit that harness's session source.
  */
 export function installKiloMcpConfig(executable: string, env: NodeJS.ProcessEnv): void {
-  if (kiloMcpState(env).state !== 'none') return;
+  if (kiloMcpState(env).state !== 'none' || hasKiloConcordEntry(env)) return;
   const result = spawnCommandSync(
     executable,
     [
@@ -361,7 +389,7 @@ export function uninstallKiloMcpConfig(env: NodeJS.ProcessEnv): void {
     let owned: boolean;
     try {
       const entry = parseKiloServer(concordValue(parseKiloConfig(text)) ?? null);
-      owned = entry !== undefined && isKiloConcordEntry(entry, false);
+      owned = entry !== undefined && isKiloConcordEntry(entry);
     } catch {
       continue;
     }
@@ -369,6 +397,39 @@ export function uninstallKiloMcpConfig(env: NodeJS.ProcessEnv): void {
     const next = removeConcordEntry(text);
     if (next !== undefined && next !== text) writeFileSync(path, next);
   }
+}
+
+/**
+ * Count direct `"key":` occurrences in the first object in `text`. JSON
+ * objects may contain duplicates, and JSON.parse keeps the last one while a
+ * text edit would otherwise find the first, so removal treats duplicates as
+ * ambiguous instead of editing the wrong span.
+ */
+function directPropertyKeyCount(text: string, key: string): number {
+  const clean = uncomment(text);
+  const rootOpen = clean.indexOf('{');
+  if (rootOpen === -1) return 0;
+  let depth = 0;
+  let count = 0;
+  for (let index = rootOpen; index < clean.length; index += 1) {
+    const char = clean.charAt(index);
+    if (char === '{' || char === '[') depth += 1;
+    else if (char === '}' || char === ']') depth -= 1;
+    else if (char === '"') {
+      let end = index + 1;
+      while (end < clean.length && !(clean[end] === '"' && !isEscaped(clean, end))) end += 1;
+      if (
+        depth === 1 &&
+        clean.slice(index + 1, end) === key &&
+        /^\s*:/u.test(clean.slice(end + 1))
+      ) {
+        count += 1;
+      }
+      index = end;
+    }
+    if (depth === 0) return count;
+  }
+  return count;
 }
 
 /**
@@ -381,6 +442,7 @@ function removeConcordEntry(text: string): string | undefined {
   const mcp = propertyObject(text, 'mcp');
   if (mcp === undefined) return undefined;
   const inner = text.slice(mcp.open, mcp.close + 1);
+  if (directPropertyKeyCount(inner, CONCORD_SERVER_KEY) !== 1) return undefined;
   const concord = propertyObject(inner, CONCORD_SERVER_KEY);
   if (concord === undefined) return undefined;
   // Confirm the located entry is the owned one before touching anything. The
@@ -391,7 +453,7 @@ function removeConcordEntry(text: string): string | undefined {
       jsoncToJson(inner.slice(concord.open, concord.close + 1)),
     );
     const located = parseKiloServer(jsonValueSchema.parse(locatedRaw));
-    if (located === undefined || !isKiloConcordEntry(located, false)) return undefined;
+    if (located === undefined || !isKiloConcordEntry(located)) return undefined;
   } catch {
     return undefined;
   }

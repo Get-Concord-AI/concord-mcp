@@ -9,22 +9,29 @@ Concord registers its MCP server through Kilo's own command:
 kilo mcp add concord --env CONCORD_AGENT_KIND=kilo -- concord-mcp
 ```
 
-Kilo writes its own config — `kilo.jsonc` under its config directory — so
-comments, trailing commas, other servers, and every other setting are left
-exactly as they were, and re-running is safe. Restart running Kilo sessions
-afterwards so they load the server.
+Kilo writes its own config in the active config directory (`KILO_CONFIG_DIR`
+when set, otherwise the global directory), so comments, trailing commas,
+other servers, and every other setting are left exactly as they were, and
+re-running is safe. It uses the first existing file among `kilo.jsonc`,
+`kilo.json`, `opencode.jsonc`, and `opencode.json`, and creates `kilo.json`
+when none of them exists. Restart running Kilo sessions afterwards so they
+load the server.
 
-Concord finds Kilo's config at `$XDG_CONFIG_HOME/kilo` when set, else
-`~/.config/kilo`, and checks every filename Kilo merges there — `config.json`,
-`kilo.json`, `kilo.jsonc`, `opencode.json`, and `opencode.jsonc` — in Kilo's
-own precedence order (later files win). When `KILO_CONFIG_DIR` is set, the
+Concord finds Kilo's user-level config at `$XDG_CONFIG_HOME/kilo` when set,
+else `~/.config/kilo`, and checks every filename Kilo merges there —
+`config.json`, `kilo.json`, `kilo.jsonc`, `opencode.json`, and
+`opencode.jsonc` — in Kilo's own precedence order (later files win). When
+`KILO_CONFIG` is set, that single file is checked immediately after the
+global files, matching Kilo's merge order. When `KILO_CONFIG_DIR` is set, the
 files inside that directory (`kilo.jsonc`, `kilo.json`, `opencode.jsonc`,
-`opencode.json`) are checked too and outrank the global directory, matching
-where `kilo mcp add` writes. `kilo mcp add` itself always writes `kilo.jsonc`.
-When `KILO_CONFIG` is set, that single file is checked last and outranks
-everything else, matching the override Kilo itself loads on top of every
-other source — an `enabled: false` there disables Concord no matter what the
-config directories say.
+`opencode.json`) are checked after `KILO_CONFIG` and outrank it, also
+matching Kilo and matching where `kilo mcp add` writes.
+
+This status is user-level only. Kilo also merges project-local `kilo` and
+`opencode` config files after `KILO_CONFIG`, so a project can shadow the
+effective `mcp.concord` entry even when the user-level status says
+`installed` or `disabled`. Concord does not manage those project-local
+entries through the global adapter install/status path.
 
 ## Supported surfaces
 
@@ -101,16 +108,19 @@ rather than treated as absent, as is a `concord` entry Concord did not write
 false`.
 
 `concord adapters install` runs `kilo mcp add` only when no `mcp.concord`
-entry exists at all: the command replaces the whole named entry, so an
-existing owned entry is left alone (preserving tweaks such as `enabled` or a
-custom `timeout`) and a foreign one is never clobbered. `concord adapters
-uninstall` removes the `mcp.concord` entry from every Kilo config file that
-has one **Concord owns** — an entry is owned when its command is exactly
-`concord-mcp` or a runner carrying the published package spec, and its
-environment (under `environment` or the `env` alias) holds only Concord's own
-keys. Removal edits the file in place, so comments, formatting, and key order
-survive; a `concord` server somebody else wrote, and every unrelated server
-or setting, is preserved.
+key exists at all: the command replaces the whole named entry, so an existing
+owned entry is left alone (preserving tweaks such as `enabled` or a custom
+`timeout`), a foreign one is never clobbered, and even a bare
+`{ "enabled": false }` opt-out is respected. `concord adapters uninstall`
+removes the `mcp.concord` entry from every Kilo config file that has one
+**Concord owns** — an entry is owned when its command is exactly
+`concord-mcp` or a runner carrying the published package spec, its
+environment (under `environment` or the `env` alias) holds only Concord's
+own keys, and `CONCORD_AGENT_KIND` is exactly `kilo`. Remote entries
+(`type: "remote"` or any `url`) are never managed, even if they carry a
+leftover Concord command. Removal edits the file in place, so comments,
+formatting, and key order survive; a `concord` server somebody else wrote,
+and every unrelated server or setting, is preserved.
 
 Peer messages arrive as `[concord from <agent>]` blocks. Kilo learns to
 treat them as information from a peer — not as operator instructions —

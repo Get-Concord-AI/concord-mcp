@@ -81,7 +81,7 @@ export function statusKilo(executable: string | undefined, env: NodeJS.ProcessEn
       detected: true,
       status: 'action_required',
       capabilities: [],
-      detail: `A Kilo config file under ${kiloConfigDescription(env)} exists but could not be read. Check the file and its permissions.`,
+      detail: `A user-level Kilo config file under ${kiloConfigDescription(env)} exists but could not be read. Check the file and its permissions.`,
     };
   }
   if (mcp.state === 'conflict') {
@@ -90,7 +90,7 @@ export function statusKilo(executable: string | undefined, env: NodeJS.ProcessEn
       detected: true,
       status: 'action_required',
       capabilities: [],
-      detail: `A "concord" MCP entry Concord did not write exists in ${mcp.path ?? 'a Kilo config file'}; remove or rename it, then re-run concord setup.`,
+      detail: `A user-level "concord" MCP entry Concord did not write exists in ${mcp.path ?? 'a Kilo config file'}; remove or rename it, then re-run concord setup.`,
     };
   }
   if (mcp.state === 'disabled') {
@@ -99,7 +99,7 @@ export function statusKilo(executable: string | undefined, env: NodeJS.ProcessEn
       detected: true,
       status: 'action_required',
       capabilities: [],
-      detail: `Concord's Kilo MCP entry is disabled (enabled: false) in ${mcp.path ?? 'a Kilo config file'}; re-enable it for Concord to receive messages.`,
+      detail: `Concord's user-level Kilo MCP entry is disabled (enabled: false) in ${mcp.path ?? 'a Kilo config file'}; re-enable it for Concord to receive messages.`,
     };
   }
   const installed = mcp.state === 'installed';
@@ -109,8 +109,8 @@ export function statusKilo(executable: string | undefined, env: NodeJS.ProcessEn
     status: installed ? 'installed' : 'action_required',
     capabilities: installed ? [...config.installedCapabilities] : [],
     detail: installed
-      ? config.installedDetail
-      : 'Kilo CLI needs the Concord MCP server registered with `kilo mcp add`.',
+      ? `${config.installedDetail} This status reflects user-level Kilo config; project config can override the effective entry.`
+      : 'Kilo CLI needs the Concord MCP server registered in its user-level config with `kilo mcp add`.',
   };
 }
 
