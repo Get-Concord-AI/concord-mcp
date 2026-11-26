@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -118,6 +118,18 @@ describe('runVibeHook', () => {
   it('adds nothing when the payload names no session', async () => {
     expect(await runVibeHook('vibe-session-start', '{}', {})).toBe('{}');
     expect(await runVibeHook('vibe-session-end', 'not json', {})).toBe('{}');
+  });
+
+  it('does nothing in a directory that has no Concord workspace', async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'concord-vibe-empty-'));
+    const output = await runVibeHook(
+      'vibe-session-start',
+      payload('session_start', repoRoot, { source: 'startup' }),
+      { HOME: repoRoot },
+    );
+
+    expect(output).toBe('{}');
+    expect(existsSync(join(repoRoot, '.concord'))).toBe(false);
   });
 
   it('derives the agent from the Vibe payload session_id in a temp workspace', async () => {
