@@ -87,8 +87,9 @@ export function handleLocalJunieHook(
   repoRoot: string,
   event: JunieHookEvent,
   env: NodeJS.ProcessEnv = process.env,
+  sessionId?: string,
 ): string {
-  return hooks.handleLocalHook(repos, identity, repoRoot, event, env);
+  return hooks.handleLocalHook(repos, identity, repoRoot, event, env, sessionId);
 }
 
 export function handleCloudJunieHook(
@@ -97,8 +98,9 @@ export function handleCloudJunieHook(
   cwd: string,
   event: JunieHookEvent,
   env: NodeJS.ProcessEnv = process.env,
+  sessionId?: string,
 ): Promise<string> {
-  return hooks.handleCloudHook(runtime, identity, cwd, event, env);
+  return hooks.handleCloudHook(runtime, identity, cwd, event, env, sessionId);
 }
 
 export function runJunieHook(

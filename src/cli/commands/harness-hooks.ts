@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import type { CloudRuntime } from '../../cloud/runtime.js';
 import type { Repositories } from '../../db/index.js';
-import { resolveIdentity, type AgentIdentity } from '../../domain/identity.js';
+import { resolveIdentity, resolveSessionId, type AgentIdentity } from '../../domain/identity.js';
 import { buildRoster } from '../../domain/presence.js';
 import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
@@ -55,6 +55,7 @@ export interface HarnessHooks {
     repoRoot: string,
     event: string,
     env?: NodeJS.ProcessEnv,
+    sessionId?: string,
   ): string;
   handleCloudHook(
     runtime: CloudRuntime,
@@ -62,6 +63,7 @@ export interface HarnessHooks {
     cwd: string,
     event: string,
     env?: NodeJS.ProcessEnv,
+    sessionId?: string,
   ): Promise<string>;
   run(event: string, rawJson: string, env?: NodeJS.ProcessEnv): Promise<string>;
 }
@@ -120,24 +122,41 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
   /**
    * Whether this is the session's first prompt submit, for harnesses briefing
    * there. The receipt is a marker file in the machine temp dir keyed by the
-   * agent id's hash (ids carry colons, which Windows filenames forbid): a
-   * resumed session keeps its context and is not briefed again, while a new
-   * session id — `/clear`, a fresh start — briefs once more.
+   * session — the hook payload's session id when it names one, else the agent
+   * id (ids carry colons, which Windows filenames forbid, so the key is
+   * hashed): an operator-named agent (`CONCORD_AGENT_ID`) still briefs once
+   * per conversation, a resumed session keeps its context and is not briefed
+   * again, and a new session id — `/clear`, a fresh start — briefs once more.
    */
-  function firstPromptBriefingMarker(agentId: string, env: NodeJS.ProcessEnv): string | undefined {
+  function firstPromptBriefingMarker(
+    agentId: string,
+    env: NodeJS.ProcessEnv,
+    sessionId: string | undefined,
+  ): string | undefined {
     if (spec.briefOnFirstPrompt !== true) return undefined;
-    const hash = createHash('sha256').update(agentId).digest('hex').slice(0, 24);
+    const hash = createHash('sha256')
+      .update(sessionId ?? agentId)
+      .digest('hex')
+      .slice(0, 24);
     const markerDir = env['CONCORD_HOOK_MARKER_DIR'] ?? tmpdir();
     return join(markerDir, `concord-${spec.kind}-briefed-${hash}`);
   }
 
-  function needsFirstPromptBriefing(agentId: string, env: NodeJS.ProcessEnv): boolean {
-    const marker = firstPromptBriefingMarker(agentId, env);
+  function needsFirstPromptBriefing(
+    agentId: string,
+    env: NodeJS.ProcessEnv,
+    sessionId: string | undefined,
+  ): boolean {
+    const marker = firstPromptBriefingMarker(agentId, env, sessionId);
     return marker !== undefined && !existsSync(marker);
   }
 
-  function markFirstPromptBriefing(agentId: string, env: NodeJS.ProcessEnv): void {
-    const marker = firstPromptBriefingMarker(agentId, env);
+  function markFirstPromptBriefing(
+    agentId: string,
+    env: NodeJS.ProcessEnv,
+    sessionId: string | undefined,
+  ): void {
+    const marker = firstPromptBriefingMarker(agentId, env, sessionId);
     if (marker === undefined) return;
     try {
       writeFileSync(marker, agentId, { flag: 'wx' });
@@ -158,6 +177,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
     repoRoot: string,
     event: string,
     env: NodeJS.ProcessEnv = process.env,
+    sessionId?: string,
   ): string {
     switch (event) {
       case events.sessionStart:
@@ -171,7 +191,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
         );
       case events.promptSubmit: {
         const drained = drainInbox(repos, identity.agentId, spec.kind);
-        if (needsFirstPromptBriefing(identity.agentId, env)) {
+        if (needsFirstPromptBriefing(identity.agentId, env, sessionId)) {
           const output = briefedPromptSubmitOutput(
             identity.agentId,
             buildRoster(repos.agents.list(), Date.now()).filter(
@@ -179,7 +199,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
             ),
             drained,
           );
-          markFirstPromptBriefing(identity.agentId, env);
+          markFirstPromptBriefing(identity.agentId, env, sessionId);
           return output;
         }
         return promptSubmitOutput(drained);
@@ -203,6 +223,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
     cwd: string,
     event: string,
     env: NodeJS.ProcessEnv = process.env,
+    sessionId?: string,
   ): Promise<string> {
     switch (event) {
       case events.sessionStart:
@@ -211,11 +232,11 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
       case events.promptSubmit: {
         // Roster first: it is the one piece that can fail, and draining or
         // marking before it would lose the batch and the briefing together.
-        if (needsFirstPromptBriefing(identity.agentId, env)) {
+        if (needsFirstPromptBriefing(identity.agentId, env, sessionId)) {
           const roster = await cloudRoster(runtime, identity.agentId);
           const drainedFirst = await drainFromCloud(runtime, identity.agentId, spec.kind);
           const briefed = briefedPromptSubmitOutput(identity.agentId, roster, drainedFirst);
-          markFirstPromptBriefing(identity.agentId, env);
+          markFirstPromptBriefing(identity.agentId, env, sessionId);
           return briefed;
         }
         const drained = await drainFromCloud(runtime, identity.agentId, spec.kind);
@@ -240,6 +261,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
     const identity = resolveIdentity(env, { kind: spec.kind, hookPayload: rawJson });
     if (identity === undefined) return NO_OUTPUT;
     const repoRoot = spec.repoRoot(env, rawJson);
+    const sessionId = resolveSessionId(env, { kind: spec.kind, hookPayload: rawJson });
     const access = cloudAccess(repoRoot, { timeoutMs: HOOK_TIMEOUT_MS }, env);
     if (access.kind === 'unusable') {
       process.stderr.write(`Concord Cloud could not be reached: ${access.reason}\n`);
@@ -247,10 +269,17 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
     }
     if (access.kind === 'local') {
       const { openContext } = await import('../context.js');
-      return handleLocalHook(openContext(repoRoot, env).repos, identity, repoRoot, event, env);
+      return handleLocalHook(
+        openContext(repoRoot, env).repos,
+        identity,
+        repoRoot,
+        event,
+        env,
+        sessionId,
+      );
     }
     try {
-      return await handleCloudHook(access.runtime, identity, repoRoot, event, env);
+      return await handleCloudHook(access.runtime, identity, repoRoot, event, env, sessionId);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       process.stderr.write(`Concord Cloud could not be reached: ${detail}\n`);

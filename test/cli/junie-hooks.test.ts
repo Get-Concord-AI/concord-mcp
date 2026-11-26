@@ -37,6 +37,11 @@ const JUNIE: AgentIdentity = {
   kind: 'junie',
   origin: 'hook',
 };
+const OPERATOR_JUNIE: AgentIdentity = {
+  agentId: 'reviewer',
+  kind: 'junie',
+  origin: 'operator',
+};
 const NOW = new Date().toISOString();
 
 let markerDir: string;
@@ -285,6 +290,29 @@ describe('runJunieHook', () => {
       '{}',
     );
   });
+
+  it('briefs an operator-named agent once per Junie session', async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'concord-junie-run-'));
+    const env = {
+      HOME: process.env['HOME'],
+      CONCORD_AGENT_ID: 'reviewer',
+      CONCORD_HOOK_MARKER_DIR: markerDir,
+    };
+    const payload = (sessionId: string) =>
+      JSON.stringify({ session_id: sessionId, project_path: repoRoot });
+
+    await runJunieHook('junie-session-start', payload('session-a'), env);
+    const firstA = context(
+      await runJunieHook('junie-user-prompt-submit', payload('session-a'), env),
+    );
+    expect(firstA).toContain('agent_id: "reviewer"');
+    expect(await runJunieHook('junie-user-prompt-submit', payload('session-a'), env)).toBe('{}');
+
+    const firstB = context(
+      await runJunieHook('junie-user-prompt-submit', payload('session-b'), env),
+    );
+    expect(firstB).toContain('agent_id: "reviewer"');
+  });
 });
 
 describe('first-prompt identity briefing (SessionStart context is dropped by Junie)', () => {
@@ -332,5 +360,44 @@ describe('first-prompt identity briefing (SessionStart context is dropped by Jun
     // devin shares the runner but its SessionStart context lands fine.
     const output = juniePromptSubmitOutput([]);
     expect(output).toBe('{}');
+  });
+
+  it('briefs an operator-named agent once per session, not once ever', () => {
+    const env = { CONCORD_HOOK_MARKER_DIR: markerDir };
+
+    handleLocalJunieHook(repos, OPERATOR_JUNIE, '/repo', 'junie-session-start', env, 'session-a');
+    const firstA = context(
+      handleLocalJunieHook(
+        repos,
+        OPERATOR_JUNIE,
+        '/repo',
+        'junie-user-prompt-submit',
+        env,
+        'session-a',
+      ),
+    );
+    expect(firstA).toContain('agent_id: "reviewer"');
+    expect(
+      handleLocalJunieHook(
+        repos,
+        OPERATOR_JUNIE,
+        '/repo',
+        'junie-user-prompt-submit',
+        env,
+        'session-a',
+      ),
+    ).toBe('{}');
+
+    const firstB = context(
+      handleLocalJunieHook(
+        repos,
+        OPERATOR_JUNIE,
+        '/repo',
+        'junie-user-prompt-submit',
+        env,
+        'session-b',
+      ),
+    );
+    expect(firstB).toContain('agent_id: "reviewer"');
   });
 });
