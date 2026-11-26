@@ -27,8 +27,8 @@ export interface BeforeUserWait {
 }
 
 /**
- * How long after a deny the next question is let through without draining.
- * Long enough for the model to read the messages and ask again.
+ * How long after a deny the session's next question is let through without
+ * draining. Long enough for the model to read the messages and ask again.
  */
 export const USER_WAIT_DENY_WINDOW_MS = 2 * 60 * 1000;
 
@@ -50,10 +50,11 @@ function deniedRecently(deniedAt: string, now: Date): boolean {
  * When there is anything to show, the hook denies the call and the user is
  * not asked yet, so the waiting-on-user flag is cleared.
  *
- * At most one deny per question: the question the same session asks right
- * after a deny is let through untouched, so a message the transcript does not
- * show as read yet, or a peer that keeps sending, can never keep the user from
- * being asked. Anything still waiting reaches the model after the answer, as it
+ * At most one deny per question: a question the same session asks within
+ * `USER_WAIT_DENY_WINDOW_MS` of a deny is let through untouched, so a message
+ * the transcript does not show as read yet, or a peer that keeps sending, can
+ * never keep the user from being asked. The allowance is spent by that
+ * question, and dropped if none comes in time. Anything still waiting reaches the model after the answer, as it
  * would without this hook. Another session of the same agent, or a fresh one,
  * never spends that allowance.
  *
