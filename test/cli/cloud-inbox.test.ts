@@ -355,7 +355,7 @@ describe('drainFromCloudCapped', () => {
     expect(keys).toHaveLength(2);
   });
 
-  it('ignores a shown marker left by another drain when the cloud requeues under a new key', async () => {
+  it('filters shown ids on the replayed batch but not after a requeue under a new key', async () => {
     const firstMessage = message('first');
     const secondMessage = message('second');
     const batch = [firstMessage, secondMessage];
@@ -377,11 +377,10 @@ describe('drainFromCloudCapped', () => {
     const capped = await drainFromCloudCapped(runtime, AGENT, 'cline', 5, measure);
     expect(capped.map((entry) => entry.content)).toEqual(['first']);
 
-    // A plain drain adopts the unfinished ticket and finishes it, but knows
-    // nothing about the capped drain's marker — exactly the stale state the
-    // marker's drain key protects against.
+    // A plain drain adopts the unfinished ticket and finishes it; the marker
+    // carries the same drain key, so the already-shown id is not repeated.
     const finished = await drainFromCloud(runtime, AGENT, 'cline');
-    expect(finished.map((entry) => entry.content)).toEqual(['first', 'second']);
+    expect(finished.map((entry) => entry.content)).toEqual(['second']);
 
     // The cloud requeues one id under a fresh drain key: stale shown state
     // from the old batch must not hide it.

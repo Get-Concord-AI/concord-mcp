@@ -165,7 +165,14 @@ async function drainOnce(
     messages = await drainCloud(runtime, agent, ticket.key, 0, signal);
   }
   ticket.finish();
-  return toDeliverables(messages);
+  const batch = toDeliverables(messages);
+  // A capped drain can leave its batch half-rendered under this same key:
+  // deliver only what it had not shown, then release the marker with it.
+  const markerPath = shownIdsPath(runtime, agentKey);
+  const shown = readShownIds(markerPath, ticket.key);
+  if (shown === undefined) return batch;
+  rmSync(markerPath, { force: true });
+  return batch.filter((message) => !shown.has(message.messageId));
 }
 
 /** Takes every message waiting for the session, as a hook does after a tool call. */
@@ -192,21 +199,22 @@ export function drainFromCloud(
  * trusted, so a requeued id can never be hidden by a stale record. The file
  * must live outside the `.drains` ticket directory — everything in there is
  * scanned as a drain ticket, and a stray name would be adopted as one,
- * replaying the batch under a garbage key.
+ * replaying the batch under a garbage key. `undefined` means no marker
+ * belongs to this drain.
  */
 function shownIdsPath(runtime: CloudRuntime, agentKey: string): string {
   return agentCachePath(runtime.repoRoot, agentKey).replace(/\.json$/, '.shown');
 }
 
-function readShownIds(path: string, drainKey: string): ReadonlySet<string> {
+function readShownIds(path: string, drainKey: string): ReadonlySet<string> | undefined {
   try {
     const lines = readFileSync(path, 'utf8')
       .split('\n')
       .filter((line) => line.trim() !== '');
     const [key, ...ids] = lines;
-    return key === drainKey ? new Set(ids) : new Set();
+    return key === drainKey ? new Set(ids) : undefined;
   } catch {
-    return new Set();
+    return undefined;
   }
 }
 
@@ -241,7 +249,7 @@ export function drainFromCloudCapped(
       }
       const batch = toDeliverables(raw);
       const markerPath = shownIdsPath(runtime, agentKey);
-      const shown = readShownIds(markerPath, ticket.key);
+      const shown = readShownIds(markerPath, ticket.key) ?? new Set<string>();
       const unshown = batch.filter((message) => !shown.has(message.messageId));
       const fitted: DeliverableMessage[] = [];
       let size = 0;
