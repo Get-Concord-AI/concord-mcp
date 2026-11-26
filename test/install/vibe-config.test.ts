@@ -591,4 +591,27 @@ describe('round-3 review regressions', () => {
     ].join('\n');
     expect(upsertVibeMcpConfig(src)).toBe(src);
   });
+
+  it('does not mistake a quoted header containing brackets for mcp_servers', () => {
+    const src = [
+      '[["mcp_servers]] # backup"]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      'env = { CONCORD_AGENT_KIND = "vibe" }',
+      '',
+    ].join('\n');
+    expectValidToml(src);
+    const next = upsertVibeMcpConfig(src);
+    expectValidToml(next);
+    expect(next).toContain('[["mcp_servers]] # backup"]]');
+    expect(next.match(/name = "concord"/gu)).toHaveLength(2);
+
+    const { env } = tempEnv();
+    const path = vibeMcpConfigPath(env);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, src);
+    expect(uninstallVibeMcpConfig(env)).toBeUndefined();
+    expect(readFileSync(path, 'utf8')).toBe(src);
+  });
 });

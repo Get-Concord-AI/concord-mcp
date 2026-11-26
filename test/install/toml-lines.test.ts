@@ -79,6 +79,24 @@ describe('tomlHeader', () => {
     expect(tomlHeader('[mcp_servers.env] trailing')).toBeUndefined();
     expect(tomlHeader('[[ ]]')).toBeUndefined();
   });
+
+  it('ignores closing brackets inside quoted keys', () => {
+    expect(tomlHeader('[["mcp_servers]] # backup"]]')).toMatchObject({
+      array: true,
+      parts: ['mcp_servers]] # backup'],
+      path: '"mcp_servers]] # backup"',
+    });
+    expect(tomlHeader('[mcp_servers."e]nv"]')).toMatchObject({
+      array: false,
+      parts: ['mcp_servers', 'e]nv'],
+      path: 'mcp_servers."e]nv"',
+    });
+  });
+
+  it('rejects headers whose quoted key never closes', () => {
+    expect(tomlHeader('["unclosed]')).toBeUndefined();
+    expect(tomlHeader('[["mcp_servers] # backup"]')).toBeUndefined();
+  });
 });
 
 describe('tomlAssignment', () => {

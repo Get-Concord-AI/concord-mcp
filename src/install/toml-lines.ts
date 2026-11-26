@@ -126,17 +126,67 @@ export function tomlKeyPath(raw: string): string {
   return canonicalKeyPath(tomlKeyParts(raw));
 }
 
-const ARRAY_HEADER = /^\s*\[\[\s*(.+?)\s*\]\]\s*(?:#.*)?$/u;
-const TABLE_HEADER = /^\s*\[\s*(.+?)\s*\]\s*(?:#.*)?$/u;
+function closedQuoteEnd(text: string, start: number): number | undefined {
+  const quote = text[start];
+  for (let index = start + 1; index < text.length; index += 1) {
+    if (quote === '"' && text[index] === '\\') {
+      index += 1;
+      continue;
+    }
+    if (text[index] === quote) return index + 1;
+  }
+  return undefined;
+}
 
-/** The header a line opens, or undefined when it is not a complete TOML header. */
+/**
+ * The header a line opens, or undefined when it is not a complete TOML header.
+ * Closing brackets inside quoted keys do not count, and quoted keys must be
+ * closed before the header's own bracket can end the line.
+ */
 export function tomlHeader(text: string): TomlHeader | undefined {
-  const array = ARRAY_HEADER.exec(text);
-  const table = array === null ? TABLE_HEADER.exec(text) : null;
-  const raw = array?.[1] ?? table?.[1];
-  if (raw === undefined || raw.trim() === '') return undefined;
+  let index = 0;
+  while (index < text.length && /\s/u.test(text[index] ?? '')) index += 1;
+
+  let array = false;
+  if (text.startsWith('[[', index)) {
+    array = true;
+    index += 2;
+  } else if (text[index] === '[') {
+    index += 1;
+  } else {
+    return undefined;
+  }
+
+  const keyStart = index;
+  let close = -1;
+  while (index < text.length) {
+    const char = text[index];
+    if (char === '#') return undefined;
+    if (char === '"' || char === "'") {
+      const end = closedQuoteEnd(text, index);
+      if (end === undefined) return undefined;
+      index = end;
+      continue;
+    }
+    if (char === ']') {
+      if (array) {
+        if (text[index + 1] !== ']') return undefined;
+        close = index;
+        index += 2;
+      } else {
+        close = index;
+        index += 1;
+      }
+      break;
+    }
+    index += 1;
+  }
+  if (close < 0 || !/^\s*(?:#.*)?$/u.test(text.slice(index))) return undefined;
+
+  const raw = text.slice(keyStart, close).trim();
+  if (raw === '') return undefined;
   const parts = tomlKeyParts(raw);
-  return { parts, path: canonicalKeyPath(parts), array: array !== null };
+  return { parts, path: canonicalKeyPath(parts), array };
 }
 
 /** The assignment a line makes, with `=` found outside quoted key parts. */
