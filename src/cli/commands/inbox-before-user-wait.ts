@@ -103,32 +103,45 @@ export interface BeforeUserWaitHookOptions {
  * The `PreToolUse` hook on `AskUserQuestion`: read the session's evidence of
  * what its model has seen, then deny the question with anything unseen, or
  * print nothing so the picker opens.
+ *
+ * Never fails the hook, as `inbox observe` never does. A failure here (an
+ * identity mismatch, a database still busy after its timeout) would otherwise
+ * show the user a hook error on every question; skipping the drain only means
+ * messages arrive after the answer, as they would without it.
  */
 export async function runBeforeUserWaitHook(
   options: BeforeUserWaitHookOptions,
   telemetry: TelemetryRecorder | undefined,
 ): Promise<void> {
-  const hookPayload = readHookPayload() ?? '';
-  const agentId = resolveInboxOwner(options.agent, process.env, {
-    kind: options.provider,
-    ...(options.fromHook ? { hookPayload } : {}),
-  });
-  // A subagent shares its parent's session id, so its hooks resolve the
-  // parent's agent; its question is no proof of what the parent's model saw (#216).
-  if (isSubagentHook(parseObservedHook(hookPayload))) return;
-  const context = await import('../context.js').then((module) => module.openContext(process.cwd()));
-  // Read evidence first, so this hook never marks read a message it is itself
-  // about to deliver.
-  observeHookEvent(context.repos, agentId, hookPayload, options.provider);
-  const { held, claimed } = drainBeforeUserWait(
-    context.repos,
-    agentId,
-    options.provider,
-    currentSession(options.provider, hookPayload),
-  );
-  // Held messages were counted when the monitor took them.
-  recordDeliveredMessages(telemetry, claimed);
-  if (held.length > 0 || claimed.length > 0) {
-    process.stdout.write(renderHookPayload('pre-tool-use', [...held, ...claimed]));
+  try {
+    const hookPayload = readHookPayload() ?? '';
+    const agentId = resolveInboxOwner(options.agent, process.env, {
+      kind: options.provider,
+      ...(options.fromHook ? { hookPayload } : {}),
+    });
+    // A subagent shares its parent's session id, so its hooks resolve the
+    // parent's agent; its question is no proof of what the parent's model saw (#216).
+    if (isSubagentHook(parseObservedHook(hookPayload))) return;
+    const context = await import('../context.js').then((module) =>
+      module.openContext(process.cwd()),
+    );
+    // Read evidence first, so this hook never marks read a message it is itself
+    // about to deliver.
+    observeHookEvent(context.repos, agentId, hookPayload, options.provider);
+    const { held, claimed } = drainBeforeUserWait(
+      context.repos,
+      agentId,
+      options.provider,
+      currentSession(options.provider, hookPayload),
+    );
+    // Held messages were counted when the monitor took them.
+    recordDeliveredMessages(telemetry, claimed);
+    if (held.length > 0 || claimed.length > 0) {
+      process.stdout.write(renderHookPayload('pre-tool-use', [...held, ...claimed]));
+    }
+  } catch (error) {
+    process.stderr.write(
+      `Concord: could not check for messages before the question: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
   }
 }
