@@ -2,7 +2,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { userHome } from '../config/paths.js';
-import { tomlLines } from './toml-lines.js';
+import {
+  inlineTableKeys,
+  tomlAssignment,
+  tomlHeader,
+  tomlLines,
+  type TomlLine,
+} from './toml-lines.js';
 
 /**
  * Mistral Vibe keeps user-level configuration in `~/.vibe/`: MCP servers as
@@ -33,10 +39,21 @@ export function vibeHooksPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(vibeHome(env), 'hooks.toml');
 }
 
-/** A `[[table]]` block's line range, `[start, end)` in the source's lines. */
-export interface TomlBlock {
+/** A line range, `[start, end)` in the source's lines. */
+export interface TomlRange {
   readonly start: number;
   readonly end: number;
+}
+
+/** A `[[table]]` array entry and the child tables TOML attaches to it. */
+export interface TomlBlock {
+  /** The parent array-entry section's line range, `[start, end)`. */
+  readonly start: number;
+  readonly end: number;
+  /** The parent plus every child-table section, in source order. */
+  readonly ranges: readonly TomlRange[];
+  /** Normalized paths of child tables attached to this array entry. */
+  readonly childTables: readonly string[];
   /** The block's `name = …` value, when it has one. */
   readonly name: string | undefined;
   /** `key = "value"` pairs in the block's own table, before any child table. */
@@ -51,13 +68,178 @@ export interface TomlBlock {
   readonly keysOpaque: boolean;
 }
 
+interface TomlSection {
+  readonly start: number;
+  end: number;
+  readonly path: string;
+  readonly array: boolean;
+}
+
+interface BlockScan {
+  readonly start: number;
+  readonly end: number;
+  readonly ranges: TomlRange[];
+  readonly childTables: string[];
+  name: string | undefined;
+  readonly fields: Record<string, string>;
+  readonly keys: string[];
+  readonly envKeys: string[];
+  envOpaque: boolean;
+  keysOpaque: boolean;
+}
+
+const ENV_KEY_PATTERN = /^[A-Za-z0-9_-]+$/u;
+const INLINE_ENV_PATTERN = /^\{(.*)\}\s*(?:#.*)?$/u;
+const STRING_VALUE_PATTERN = /^(?:"([^"]*)"|'([^']*)')(?:\s*#.*)?$/u;
+
+function pushUnique(values: string[], value: string): void {
+  if (!values.includes(value)) values.push(value);
+}
+
+function stringValue(value: string): string | undefined {
+  const match = STRING_VALUE_PATTERN.exec(value);
+  if (match === null) return undefined;
+  return match[1] ?? match[2];
+}
+
+function scanInlineEnv(scan: BlockScan, value: string): void {
+  const inline = INLINE_ENV_PATTERN.exec(value);
+  if (inline === null) {
+    scan.envOpaque = true;
+    return;
+  }
+  const inner = inline[1] ?? '';
+  for (const key of inlineTableKeys(value)) {
+    if (ENV_KEY_PATTERN.test(key)) pushUnique(scan.envKeys, key);
+    else scan.envOpaque = true;
+  }
+  // Bare dotted keys (`A.B = …`), nested inline tables/arrays, or key shapes
+  // the reader cannot name all mean env content we cannot fully account for.
+  if (/[A-Za-z0-9_-]+\.[A-Za-z0-9_.]+\s*=|[[\]{}]/u.test(inner)) scan.envOpaque = true;
+}
+
+function scanOwnLine(scan: BlockScan, text: string): void {
+  const trimmed = text.trim();
+  if (trimmed === '' || trimmed.startsWith('#')) return;
+  const assignment = tomlAssignment(text);
+  if (assignment === undefined) {
+    if (/^\s*(?!#)\S[^=]*=/u.test(text)) scan.keysOpaque = true;
+    return;
+  }
+  const [key, ...rest] = assignment.parts;
+  if (key === undefined || key === '') {
+    scan.keysOpaque = true;
+    return;
+  }
+  if (key === 'env') {
+    pushUnique(scan.keys, key);
+    if (rest.length === 1) {
+      const envKey = rest[0] ?? '';
+      if (ENV_KEY_PATTERN.test(envKey)) pushUnique(scan.envKeys, envKey);
+      else scan.envOpaque = true;
+      return;
+    }
+    if (rest.length > 1) {
+      scan.envOpaque = true;
+      return;
+    }
+    scanInlineEnv(scan, assignment.value);
+    return;
+  }
+  if (rest.length > 0) {
+    scan.keysOpaque = true;
+    return;
+  }
+  pushUnique(scan.keys, key);
+  const string = stringValue(assignment.value);
+  if (string !== undefined) {
+    if (scan.name === undefined && key === 'name') scan.name = string;
+    scan.fields[key] = string;
+  }
+}
+
+function scanEnvChildLine(scan: BlockScan, text: string): void {
+  const trimmed = text.trim();
+  if (trimmed === '' || trimmed.startsWith('#')) return;
+  const assignment = tomlAssignment(text);
+  const [key, ...rest] = assignment?.parts ?? [];
+  if (assignment === undefined || key === undefined || rest.length > 0) {
+    scan.envOpaque = true;
+    return;
+  }
+  if (ENV_KEY_PATTERN.test(key)) pushUnique(scan.envKeys, key);
+  else scan.envOpaque = true;
+}
+
+function scanOwnSection(scan: BlockScan, lines: readonly TomlLine[], section: TomlSection): void {
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const line = lines[index];
+    if (line !== undefined && !line.inString) scanOwnLine(scan, line.text);
+  }
+}
+
+function scanEnvChildSection(
+  scan: BlockScan,
+  lines: readonly TomlLine[],
+  section: TomlSection,
+): void {
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const line = lines[index];
+    if (line !== undefined && !line.inString) scanEnvChildLine(scan, line.text);
+  }
+}
+
+function tomlSections(lines: readonly TomlLine[]): TomlSection[] {
+  const sections: TomlSection[] = [];
+  lines.forEach((line, index) => {
+    if (line.inString) return;
+    const header = tomlHeader(line.text);
+    if (header === undefined) return;
+    const previous = sections[sections.length - 1];
+    if (previous !== undefined) previous.end = index;
+    sections.push({ start: index, end: lines.length, path: header.path, array: header.array });
+  });
+  return sections;
+}
+
+function newBlockScan(section: TomlSection): BlockScan {
+  return {
+    start: section.start,
+    end: section.end,
+    ranges: [{ start: section.start, end: section.end }],
+    childTables: [],
+    name: undefined,
+    fields: {},
+    keys: [],
+    envKeys: [],
+    envOpaque: false,
+    keysOpaque: false,
+  };
+}
+
+function blockFromScan(scan: BlockScan): TomlBlock {
+  return {
+    start: scan.start,
+    end: scan.end,
+    ranges: scan.ranges.map((range) => ({ ...range })),
+    childTables: [...scan.childTables],
+    name: scan.name,
+    fields: { ...scan.fields },
+    keys: [...scan.keys],
+    envKeys: [...scan.envKeys],
+    envOpaque: scan.envOpaque,
+    keysOpaque: scan.keysOpaque,
+  };
+}
+
 /**
- * Ranges of `[[table]]` blocks whose `name = …` line satisfies `owned`. Header
- * and key detection skips lines inside multi-line strings and accepts quoted
- * keys (`"mcp_servers"`, `['hooks'.env]`); `[table.child]` subtables belong to
- * the preceding array element, so they stay inside its block, while any other
- * header ends it. Env assignments are collected so callers can prove a block
- * is Concord-shaped before treating it as ours.
+ * Ranges of `[[table]]` array entries whose `name = …` line satisfies `owned`.
+ * TOML attaches `[table.child]` to the most recent `[[table]]` element even
+ * when unrelated tables intervene, so a block may hold several non-contiguous
+ * ranges. Header and key detection skips lines inside multi-line strings and
+ * decodes valid quoted-key escapes. Env assignments are collected so callers
+ * can prove a block is Concord-shaped before treating it as ours; anything the
+ * scanner cannot account for stays user-owned.
  */
 export function concordTomlBlocks(
   source: string,
@@ -65,135 +247,45 @@ export function concordTomlBlocks(
   owned: (block: TomlBlock) => boolean,
 ): TomlBlock[] {
   const lines = [...tomlLines(source)];
-  // A table segment may be bare or quoted: `mcp_servers`, `"mcp_servers"`,
-  // `'mcp_servers'` all name the same TOML key.
-  const seg = `(?:"${table}"|'${table}'|${table})`;
-  const header = new RegExp(`^\\s*\\[\\[\\s*${seg}\\s*\\]\\]`, 'u');
-  const anyHeader = /^\s*\[/u;
-  const childHeader = new RegExp(`^\\s*\\[+\\s*${seg}\\s*\\.`, 'u');
-  const envHeader = new RegExp(
-    `^\\s*\\[+\\s*${seg}\\s*\\.\\s*["']?env["']?\\s*\\]+\\s*(?:#.*)?$`,
-    'u',
-  );
-  // `[mcp_servers.env.<sub>]` nests env content the key reader cannot name.
-  const envSubHeader = new RegExp(`^\\s*\\[+\\s*${seg}\\s*\\.\\s*["']?env["']?\\s*\\.`, 'u');
-  const namePattern = /^\s*["']?name["']?\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
-  const fieldPattern = /^\s*["']?([A-Za-z0-9_-]+)["']?\s*=\s*(?:"([^"]*)"|'([^']*)')/u;
-  const envDotted = /^\s*["']?env["']?\s*\.\s*(\S+?)\s*=/u;
-  const envInline = /^\s*["']?env["']?\s*=\s*\{(.*)\}/u;
-  const envInlineOpen = /^\s*["']?env["']?\s*=\s*\{/u;
-  const envAssign = /^\s*["']?env["']?\s*=/u;
-  const assignKey = /^\s*["']?([A-Za-z0-9_-]+)["']?\s*=/u;
-  const envChildKey = /^\s*["']?([A-Za-z0-9_-]+)["']?\s*=/u;
-  const envInnerKey = /(?:^|,)\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*=/gu;
-  const envChildWeird = /^\s*[^=\s#"'][^=]*=|^\s*["'][^"']*["']\s*=/u;
-  const blocks: TomlBlock[] = [];
-  let open: { start: number; end: number } | undefined;
-  let ownedName: string | undefined;
-  let inChildTable = false;
-  let inEnvChild = false;
-  let envOpaque = false;
-  let keysOpaque = false;
-  const envKeys: string[] = [];
-  const assignKeys: string[] = [];
-  let fields: Record<string, string> = {};
-  const reset = (): void => {
-    open = undefined;
-    ownedName = undefined;
-    inChildTable = false;
-    inEnvChild = false;
-    envOpaque = false;
-    keysOpaque = false;
-    envKeys.length = 0;
-    assignKeys.length = 0;
-    fields = {};
-  };
-  const flush = (end: number): void => {
-    if (open !== undefined && ownedName !== undefined) {
-      const block: TomlBlock = {
-        start: open.start,
-        end,
-        name: ownedName,
-        fields,
-        keys: [...assignKeys],
-        envKeys: [...envKeys],
-        envOpaque,
-        keysOpaque,
-      };
-      if (owned(block)) blocks.push(block);
+  const sections = tomlSections(lines);
+  const scans: BlockScan[] = [];
+  const childPrefix = `${table}.`;
+  const envPath = `${table}.env`;
+  let active: BlockScan | undefined;
+
+  for (const section of sections) {
+    if (section.array && section.path === table) {
+      active = newBlockScan(section);
+      scans.push(active);
+      scanOwnSection(active, lines, section);
+      continue;
     }
-    reset();
-  };
-  lines.forEach((line, index) => {
-    const { text, inString } = line;
-    if (inString) return;
-    const isHeader = anyHeader.test(text);
-    if (open !== undefined && isHeader) {
-      if (!childHeader.test(text)) {
-        flush(index);
-      } else {
-        inChildTable = true;
-        inEnvChild = envHeader.test(text);
-        if (!inEnvChild && envSubHeader.test(text)) envOpaque = true;
-        return;
-      }
+    if (!section.array && section.path === table) {
+      // A regular table cannot coexist with array entries in valid TOML. Do
+      // not attach later children to the array in malformed input either.
+      active = undefined;
+      continue;
     }
-    if (open === undefined) {
-      if (header.test(text)) {
-        open = { start: index, end: lines.length };
-      }
-      return;
+    if (!section.path.startsWith(childPrefix) || active === undefined) continue;
+
+    active.ranges.push({ start: section.start, end: section.end });
+    active.childTables.push(section.path);
+    if (!section.array && section.path === envPath) {
+      scanEnvChildSection(active, lines, section);
+    } else if (section.path === envPath || section.path.startsWith(`${envPath}.`)) {
+      active.envOpaque = true;
+    } else {
+      active.keysOpaque = true;
     }
-    if (inEnvChild) {
-      const key = envChildKey.exec(text);
-      if (key !== null) envKeys.push(key[1] ?? '');
-      else if (envChildWeird.test(text)) envOpaque = true;
-      return;
-    }
-    if (inChildTable) return;
-    const assign = assignKey.exec(text);
-    if (assign !== null) assignKeys.push(assign[1] ?? '');
-    if (ownedName === undefined) {
-      const match = namePattern.exec(text);
-      if (match !== null) ownedName = match[1] ?? match[2] ?? '';
-    }
-    const field = fieldPattern.exec(text);
-    if (field !== null) fields[field[1] ?? ''] = field[2] ?? field[3] ?? '';
-    const dotted = envDotted.exec(text);
-    if (dotted !== null) {
-      const key = dotted[1]?.replace(/^['"]|['"]$/gu, '') ?? '';
-      if (/^[A-Za-z0-9_-]+$/u.test(key)) envKeys.push(key);
-      else envOpaque = true;
-      return;
-    }
-    // `env."quoted.key" = …` and friends: an env assignment we cannot name.
-    if (/^\s*["']?env["']?\s*\./u.test(text)) {
-      envOpaque = true;
-      return;
-    }
-    const inline = envInline.exec(text);
-    if (inline !== null) {
-      const inner = inline[1] ?? '';
-      for (const match of inner.matchAll(envInnerKey)) {
-        envKeys.push(match[1] ?? match[2] ?? match[3] ?? '');
-      }
-      // Bare dotted keys (`A.B = …`), nested inline tables/arrays, or key
-      // shapes the reader cannot name all mean env content we cannot fully
-      // account for — the entry stays the user's.
-      if (/[A-Za-z0-9_-]+\.[A-Za-z0-9_.]+\s*=|[[\]{}]/u.test(inner)) envOpaque = true;
-      return;
-    }
-    if (envInlineOpen.test(text) || envAssign.test(text)) envOpaque = true;
-    // Any other assignment-shaped line this scanner cannot name — a quoted
-    // key with escapes, a dotted key, a key with whitespace — must not cost
-    // the user their setting: the block stops being one Concord can own.
-    if (assign === null && /^\s*(?!#)\S[^=]*=/u.test(text)) keysOpaque = true;
+  }
+
+  return scans.flatMap((scan) => {
+    const block = blockFromScan(scan);
+    return owned(block) ? [block] : [];
   });
-  if (open !== undefined) flush(lines.length);
-  return blocks;
 }
 
-/** Source with every owned `[[table]]` block removed, plus the blank lines after it. */
+/** Source with every owned `[[table]]` block and its attached child tables removed. */
 export function removeTomlBlocks(
   source: string,
   table: string,
@@ -204,11 +296,8 @@ export function removeTomlBlocks(
   const lines = source.split(/\r?\n/u);
   const drop = new Set<number>();
   for (const block of blocks) {
-    for (let index = block.start; index < block.end; index += 1) drop.add(index);
-    // Swallow the blank separator lines the block leaves behind.
-    for (let index = block.end; index < lines.length; index += 1) {
-      if ((lines[index] ?? '').trim() === '') drop.add(index);
-      else break;
+    for (const range of block.ranges) {
+      for (let index = range.start; index < range.end; index += 1) drop.add(index);
     }
   }
   const eol = source.includes('\r\n') ? '\r\n' : '\n';
@@ -242,39 +331,31 @@ export function bareTomlTableValue(
   source: string,
   table: string,
 ): { index: number; empty: boolean } | undefined {
-  const seg = `(?:"${table}"|'${table}'|${table})`;
-  const assignment = new RegExp(`^\\s*${seg}\\s*=`, 'u');
-  const dotted = new RegExp(`^\\s*${seg}\\s*\\.`, 'u');
-  const emptyArray = new RegExp(`^\\s*${seg}\\s*=\\s*\\[\\s*\\]\\s*(?:#.*)?$`, 'u');
-  // A single-bracket `[table]` header (quoted segments included) makes
-  // `table` a TOML table, which `[[table]]` entries cannot coexist with.
-  const exactTableHeader = new RegExp(`^\\s*\\[\\s*${seg}\\s*\\]\\s*(?:#.*)?$`, 'u');
-  // `[table.child]` makes `table` a table too — unless a `[[table]]` array
-  // element precedes it, in which case the child legitimately belongs to that
-  // element and array entries coexist with it fine.
-  const childTableHeader = new RegExp(`^\\s*\\[\\s*${seg}\\s*\\.`, 'u');
-  const arrayHeader = new RegExp(`^\\s*\\[\\[\\s*${seg}\\s*\\]\\]`, 'u');
+  const childPrefix = `${table}.`;
+  const emptyArray = /^\[\s*\]\s*(?:#.*)?$/u;
   let index = 0;
   let pastHeaders = false;
   let sawArray = false;
   for (const { text, inString } of tomlLines(source)) {
     if (!inString) {
-      if (/^\s*\[/u.test(text)) {
+      const header = tomlHeader(text);
+      if (header !== undefined) {
         pastHeaders = true;
-        if (arrayHeader.test(text)) {
+        if (header.array && header.path === table) {
           sawArray = true;
-        } else if (exactTableHeader.test(text)) {
+        } else if (!header.array && header.path === table) {
           return { index, empty: false };
-        } else if (childTableHeader.test(text) && !sawArray) {
+        } else if (header.path.startsWith(childPrefix) && !sawArray) {
           return { index, empty: false };
         }
       } else if (!pastHeaders) {
         // Bare and dotted keys only mean `table` before the first header;
         // afterwards they belong to whichever table is open.
-        if (assignment.test(text)) {
-          return { index, empty: emptyArray.test(text) };
+        const assignment = tomlAssignment(text);
+        if (assignment?.path === table) {
+          return { index, empty: emptyArray.test(assignment.value) };
         }
-        if (dotted.test(text)) return { index, empty: false };
+        if (assignment?.path.startsWith(childPrefix) === true) return { index, empty: false };
       }
     }
     index += 1;
@@ -314,7 +395,8 @@ function vibeMcpOwned(block: TomlBlock): boolean {
     !block.envOpaque &&
     !block.keysOpaque &&
     block.envKeys.every((key) => key.startsWith('CONCORD_')) &&
-    block.keys.every((key) => MCP_OWNED_KEYS.has(key))
+    block.keys.every((key) => MCP_OWNED_KEYS.has(key)) &&
+    block.childTables.every((path) => path === `${MCP_TABLE}.env`)
   );
 }
 

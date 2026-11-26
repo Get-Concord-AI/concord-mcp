@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { parse as parseToml } from 'smol-toml';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -19,6 +20,10 @@ function tempEnv(): { env: NodeJS.ProcessEnv; home: string } {
   const home = mkdtempSync(join(tmpdir(), 'vibe-config-'));
   dirs.push(home);
   return { env: { VIBE_HOME: join(home, '.vibe') }, home };
+}
+
+function expectValidToml(text: string): void {
+  expect(() => parseToml(text)).not.toThrow();
 }
 
 afterEach(() => {
@@ -447,5 +452,143 @@ describe('round-3 review regressions', () => {
     const next = upsertVibeMcpConfig(src);
     expect(next).toContain('command = "concord-mcp"');
     expect(next.match(/\[\[mcp_servers\]\]/gu)).toHaveLength(1);
+  });
+
+  it('leaves user env attached across an unrelated table untouched', () => {
+    const src = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      '',
+      '[other]',
+      'k = 1',
+      '',
+      '[mcp_servers.env]',
+      'CONCORD_AGENT_KIND = "vibe"',
+      'FOO = "bar"',
+      '',
+    ].join('\n');
+    // Alex's reproduction: FOO makes this concord-shaped entry the user's own.
+    expectValidToml(src);
+    expect(upsertVibeMcpConfig(src)).toBe(src);
+  });
+
+  it('removes an owned detached env child with its parent instead of orphaning it', () => {
+    const src = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      '',
+      '[other]',
+      'k = 1',
+      '',
+      '[mcp_servers.env]',
+      'CONCORD_AGENT_KIND = "vibe"',
+      '',
+    ].join('\n');
+    const next = upsertVibeMcpConfig(src);
+    expectValidToml(next);
+    expect(next).toContain('[other]');
+    expect(next).toContain('k = 1');
+    expect(next).not.toContain('[mcp_servers.env]');
+    expect(next.match(/\[\[mcp_servers\]\]/gu)).toHaveLength(1);
+    expect(next).toContain('env = { CONCORD_AGENT_KIND = "vibe" }');
+  });
+
+  it('preserves another server whose env child is detached by an unrelated table', () => {
+    const src = [
+      '[[mcp_servers]]',
+      'name = "other-server"',
+      'transport = "stdio"',
+      'command = "other-command"',
+      '',
+      '[other]',
+      'k = 1',
+      '',
+      '[mcp_servers.env]',
+      'FOO = "bar"',
+      '',
+    ].join('\n');
+    const next = upsertVibeMcpConfig(src);
+    expectValidToml(next);
+    expect(next).toContain('name = "other-server"');
+    expect(next).toContain('FOO = "bar"');
+    expect(next).toContain('name = "concord"');
+  });
+
+  it('decodes an escaped empty mcp_servers key before converting it', () => {
+    const src = '"mcp_\\u0073ervers" = []\n';
+    const next = upsertVibeMcpConfig(src);
+    expectValidToml(next);
+    expect(next).not.toContain('mcp_\\u0073ervers');
+    expect(next).toContain('[[mcp_servers]]');
+  });
+
+  it('leaves an escaped non-empty mcp_servers key untouched', () => {
+    const src = '"mcp_\\u0073ervers" = [{ name = "x" }]\n';
+    expect(upsertVibeMcpConfig(src)).toBe(src);
+  });
+
+  it('does not drop user vars from an escaped env child on setup or uninstall', () => {
+    const src = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      '',
+      '[mcp_servers."e\\u006ev"]',
+      'FOO = "bar"',
+      '',
+    ].join('\n');
+    expectValidToml(src);
+    expect(upsertVibeMcpConfig(src)).toBe(src);
+
+    const { env } = tempEnv();
+    const path = vibeMcpConfigPath(env);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, src);
+    expect(uninstallVibeMcpConfig(env)).toBeUndefined();
+    expect(readFileSync(path, 'utf8')).toBe(src);
+  });
+
+  it('rewrites or removes an escaped env child that only Concord owns', () => {
+    const src = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      '',
+      '[mcp_servers."e\\u006ev"]',
+      'CONCORD_AGENT_KIND = "vibe"',
+      '',
+    ].join('\n');
+    const next = upsertVibeMcpConfig(src);
+    expectValidToml(next);
+    expect(next).not.toContain('e\\u006ev');
+    expect(next.match(/\[\[mcp_servers\]\]/gu)).toHaveLength(1);
+
+    const { env } = tempEnv();
+    const path = vibeMcpConfigPath(env);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, src);
+    expect(uninstallVibeMcpConfig(env)).toBe(path);
+    expect(readFileSync(path, 'utf8')).not.toContain('concord-mcp');
+  });
+
+  it('treats a non-env child table as user content', () => {
+    const src = [
+      '[[mcp_servers]]',
+      'name = "concord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      'env = { CONCORD_AGENT_KIND = "vibe" }',
+      '',
+      '[mcp_servers.settings]',
+      'enabled = true',
+      '',
+    ].join('\n');
+    expect(upsertVibeMcpConfig(src)).toBe(src);
   });
 });
