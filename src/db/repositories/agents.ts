@@ -15,6 +15,7 @@ export interface NewAgent {
   branch?: string | null | undefined;
   summary?: string | null | undefined;
   status?: AgentStatus | undefined;
+  parentAgentId?: string | null | undefined;
 }
 
 export interface AgentRepository {
@@ -28,7 +29,15 @@ export interface AgentRepository {
 
 const rawListSchema = z.array(z.unknown());
 
-const PATCH_FIELDS = ['owner', 'model', 'pid', 'cwd', 'worktree', 'branch'] as const;
+const PATCH_FIELDS = [
+  'owner',
+  'model',
+  'pid',
+  'cwd',
+  'worktree',
+  'branch',
+  'parent_agent_id',
+] as const;
 
 function isSet(value: string | number | null | undefined): number {
   return value === undefined ? 0 : 1;
@@ -108,6 +117,8 @@ export function createAgentRepository(db: ConcordDatabase): AgentRepository {
         worktree_set: isSet(agent.worktree),
         branch: agent.branch ?? null,
         branch_set: isSet(agent.branch),
+        parent_agent_id: agent.parentAgentId ?? null,
+        parent_agent_id_set: isSet(agent.parentAgentId),
         summary: agent.summary ?? null,
         summary_set: isSet(agent.summary),
         status,

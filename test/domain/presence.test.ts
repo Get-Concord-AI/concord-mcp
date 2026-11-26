@@ -36,6 +36,7 @@ function agent(partial: Partial<AgentRecord> & { agentId: string }): AgentRecord
     heartbeatAt: partial.heartbeatAt ?? partial.lastSeen ?? ago(0),
     activityAt: partial.activityAt ?? null,
     summaryUpdatedAt: partial.summaryUpdatedAt ?? null,
+    parentAgentId: partial.parentAgentId ?? null,
   };
 }
 
