@@ -48,7 +48,9 @@ sender's side (`Probe.receipt`, `inspect_work message_id`) and appends a row to
 with a table of exactly what each harness did. A message whose body starts with
 `SILENT-` is read but never answered by the fake brain, so a read tick can only
 come from read evidence, never from a reply. Claude Code also covers a message
-held behind `AskUserQuestion` (answered, and dismissed with Esc), a crash while
+held behind `AskUserQuestion` (answered, and dismissed with Esc), one that
+arrives while the model is still writing its question (`FakeModel.holdNextAsk`:
+the drain denies the question with it, and the second ask opens the picker), a crash while
 holding one (✓✓ falls back to ✓, then a fresh session takes it back), and one
 agent being kept out of another's mail. `codex-adapter.e2e.test.ts` pins the
 Codex adapter's own read path (`clientUserMessageId` + completed turn) against a

@@ -111,7 +111,7 @@ describe('CLI read/export commands', () => {
 
   it('doctor reports schema version and adoption', async () => {
     const report = await runDoctor(dir);
-    expect(report).toContain('schema v19, expected v19');
+    expect(report).toContain('schema v20, expected v20');
     expect(report).toContain('TASK-12');
     expect(report).toContain('start_work: yes');
     // The resolved workspace path is surfaced so agents don't have to hunt for it.
