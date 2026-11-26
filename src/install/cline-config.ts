@@ -150,6 +150,20 @@ export function clineGlobalRulesPaths(env: NodeJS.ProcessEnv): string[] {
   return clineGlobalRulesDirs(env).map((dir) => join(dir, 'concord.md'));
 }
 
+/**
+ * The single `concord.md` install target: the first rules directory that
+ * already exists, so an existing Cline layout gets the copy where its rules
+ * already live. With no directory yet, the canonical `~/.cline/rules` is used.
+ * Uninstall still scans `clineGlobalRulesPaths` to remove copies written by
+ * earlier versions.
+ */
+export function clineGlobalRulesInstallPaths(env: NodeJS.ProcessEnv): string[] {
+  const dir =
+    clineGlobalRulesDirs(env).find((candidate) => existsSync(candidate)) ??
+    join(clineHome(env), 'rules');
+  return [join(dir, 'concord.md')];
+}
+
 /** VS Code globalStorage locations for the Cline extension (`saoudrizwan.claude-dev`). */
 function vscodeExtensionDirs(env: NodeJS.ProcessEnv): string[] {
   const home = userHome(env);
@@ -165,6 +179,11 @@ function vscodeExtensionDirs(env: NodeJS.ProcessEnv): string[] {
   ];
 }
 
+/** Whether the Cline VS Code-family extension has a globalStorage directory. */
+export function clineExtensionDetected(env: NodeJS.ProcessEnv): boolean {
+  return vscodeExtensionDirs(env).some((dir) => existsSync(dir));
+}
+
 /**
  * Whether any Cline surface is present: its CLI on PATH, its data or
  * Documents directories, or a VS Code-family extension install — including
@@ -175,7 +194,7 @@ export function clineDetected(env: NodeJS.ProcessEnv): boolean {
     executablePath('cline', env) !== undefined ||
     existsSync(clineHome(env)) ||
     clineDocumentsDirs(env).some((dir) => existsSync(dir)) ||
-    vscodeExtensionDirs(env).some((dir) => existsSync(dir))
+    clineExtensionDetected(env)
   );
 }
 

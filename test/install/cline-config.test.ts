@@ -16,9 +16,11 @@ import {
   clineDetected,
   clineDocumentsDir,
   clineEntryIsManaged,
+  clineExtensionDetected,
   clineGlobalHookDirs,
   clineGlobalRulesDir,
   clineGlobalRulesDirs,
+  clineGlobalRulesInstallPaths,
   clineGlobalRulesPaths,
   clineHome,
   clineHookFileNames,
@@ -79,6 +81,20 @@ describe('Cline paths', () => {
     ]);
   });
 
+  it('chooses one rules install target, preferring the first existing directory', () => {
+    const { home, env } = fakeHome();
+    expect(clineGlobalRulesInstallPaths(env)).toEqual([
+      join(home, '.cline', 'rules', 'concord.md'),
+    ]);
+
+    const documentsRules = join(home, 'Documents', 'Cline', 'Rules');
+    mkdirSync(documentsRules, { recursive: true });
+    expect(clineGlobalRulesInstallPaths(env)).toEqual([join(documentsRules, 'concord.md')]);
+
+    mkdirSync(join(home, 'Cline', 'Rules'), { recursive: true });
+    expect(clineGlobalRulesInstallPaths(env)).toEqual([join(documentsRules, 'concord.md')]);
+  });
+
   it('covers every rules directory Cline resolves, including OneDrive markers', () => {
     const { home, env } = fakeHome();
     const oneDrive = join(home, 'OneDrive');
@@ -105,6 +121,23 @@ describe('Cline detection', () => {
     expect(clineDetected(env)).toBe(false);
 
     mkdirSync(clineHome(env), { recursive: true });
+    expect(clineDetected(env)).toBe(true);
+  });
+
+  it('detects an extension-only install through VS Code globalStorage', () => {
+    const { home, env } = fakeHome();
+    const extensionDir = join(
+      home,
+      'AppData',
+      'Roaming',
+      'Code',
+      'User',
+      'globalStorage',
+      'saoudrizwan.claude-dev',
+    );
+    mkdirSync(extensionDir, { recursive: true });
+
+    expect(clineExtensionDetected(env)).toBe(true);
     expect(clineDetected(env)).toBe(true);
   });
 

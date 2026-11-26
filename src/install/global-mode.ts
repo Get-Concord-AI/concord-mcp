@@ -17,6 +17,8 @@ import { gooseConfigPath } from './goose-config.js';
 import { deepseekHome } from './deepseek-config.js';
 import {
   clineDetected,
+  clineEntryIsManaged,
+  clineGlobalRulesInstallPaths,
   clineGlobalRulesPaths,
   clineManagedEnv,
   clineMcpSettingsPath,
@@ -92,6 +94,8 @@ interface UserFile {
   readonly path?: ((env: NodeJS.ProcessEnv) => string) | undefined;
   /** Every file this entry owns part of; takes precedence over `path`. */
   readonly paths?: ((env: NodeJS.ProcessEnv) => string[]) | undefined;
+  /** Files to write on enable; `paths` still covers uninstall and cleanup. */
+  readonly installPaths?: ((env: NodeJS.ProcessEnv) => string[]) | undefined;
   readonly install: (existing: string | undefined, path: string) => string;
   readonly uninstall: (existing: string) => string;
 }
@@ -228,6 +232,7 @@ const USER_FILES: readonly UserFile[] = [
   {
     isDetected: clineDetected,
     paths: clineGlobalRulesPaths,
+    installPaths: clineGlobalRulesInstallPaths,
     install: (existing) => upsertBlock(existing ?? '', CLINE_GLOBAL_INSTRUCTIONS),
     uninstall: (existing) => {
       const rest = removeBlock(existing);
@@ -236,7 +241,11 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     isDetected: clineDetected,
-    registration: { id: 'cline', present: hasMcpServer, owned: isConcordServerOwned },
+    registration: {
+      id: 'cline',
+      present: hasMcpServer,
+      owned: (existing) => clineEntryIsManaged(existing) && isConcordServerOwned(existing),
+    },
     path: clineMcpSettingsPath,
     install: (existing) => upsertMcpServer(existing, undefined, clineManagedEnv()),
     uninstall: removeMcpServer,
@@ -277,7 +286,8 @@ function applyFile(
   if (enable ? !isFileDetected(file, env) : !paths.some((path) => existsSync(path))) return;
   if (enable && file.supported !== undefined && !file.supported(env)) return;
   const { registration } = file;
-  for (const path of paths) {
+  const targets = enable ? (file.installPaths?.(env) ?? paths) : paths;
+  for (const path of targets) {
     try {
       const exists = existsSync(path);
       if (!enable && !exists) continue;
