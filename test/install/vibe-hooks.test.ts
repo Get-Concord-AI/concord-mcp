@@ -78,12 +78,43 @@ describe('upsertVibeHooksConfig', () => {
     expect(once).toContain('command = "npm run lint"');
   });
 
-  it('replaces a stale concord hook block instead of duplicating it', () => {
+  it('does not replace or duplicate a same-name hook whose command drifted', () => {
     const once = upsertVibeHooksConfig(undefined);
     const stale = once.replace('concord hook vibe-session-end', 'concord hook old-event');
     const fixed = upsertVibeHooksConfig(stale);
     expect(fixed.match(/name = "concord-session-end"/gu)).toHaveLength(1);
-    expect(fixed).not.toContain('old-event');
+    expect(fixed).toContain('old-event');
+  });
+
+  it('keeps a user hook with a Concord name without appending a competitor', () => {
+    const userHook = [
+      '[[hooks]]',
+      'name = "concord-session-start"',
+      'type = "session_start"',
+      'command = "echo user-hook"',
+      '',
+    ].join('\n');
+    const next = upsertVibeHooksConfig(userHook);
+    expect(next.match(/name = "concord-session-start"/gu)).toHaveLength(1);
+    expect(next).toContain('command = "echo user-hook"');
+    expect(next).toContain('name = "concord-pre-agent"');
+    expect(upsertVibeHooksConfig(next)).toBe(next);
+  });
+
+  it('treats same-name hooks with extra keys or child tables as user-owned', () => {
+    for (const extra of ['enabled = false', '[hooks.settings]\ntimeout = 3']) {
+      const userHook = [
+        '[[hooks]]',
+        'name = "concord-session-start"',
+        'type = "session_start"',
+        'command = "concord hook vibe-session-start"',
+        extra,
+        '',
+      ].join('\n');
+      const next = upsertVibeHooksConfig(userHook);
+      expect(next.match(/name = "concord-session-start"/gu)).toHaveLength(1);
+      expect(next).toContain(extra.split('\n')[0] ?? '');
+    }
   });
 
   it('converts an empty hooks array and leaves other values untouched', () => {
@@ -147,5 +178,24 @@ describe('vibe hooks install', () => {
     expect(next).toContain('name = "concord-lint"');
     expect(next).toContain('command = "npm run lint"');
     expect(next).not.toContain('concord-session-start');
+  });
+
+  it('uninstall keeps a same-name user hook with a different command', () => {
+    const env = tempEnv();
+    const path = vibeHooksPath(env);
+    mkdirSync(dirname(path), { recursive: true });
+    const source = [
+      '[[hooks]]',
+      'name = "concord-session-start"',
+      'type = "session_start"',
+      'command = "echo user-hook"',
+      '',
+    ].join('\n');
+    writeFileSync(path, source);
+    installVibeHooks(env);
+    removeVibeHooks(env);
+    const next = readFileSync(path, 'utf8');
+    expect(next.match(/name = "concord-session-start"/gu)).toHaveLength(1);
+    expect(next).toContain('command = "echo user-hook"');
   });
 });
