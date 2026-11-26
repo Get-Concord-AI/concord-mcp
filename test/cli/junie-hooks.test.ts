@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -38,6 +38,15 @@ const JUNIE: AgentIdentity = {
   origin: 'hook',
 };
 const NOW = new Date().toISOString();
+
+let markerDir: string;
+beforeEach(() => {
+  markerDir = mkdtempSync(join(tmpdir(), 'concord-junie-markers-'));
+  process.env['CONCORD_HOOK_MARKER_DIR'] = markerDir;
+  return () => {
+    delete process.env['CONCORD_HOOK_MARKER_DIR'];
+  };
+});
 
 describe('Junie hook events', () => {
   it('recognises only the events Concord installs', () => {
@@ -186,6 +195,68 @@ describe('cloud Junie hooks', () => {
     expect(message).not.toContain(`- ${JUNIE.agentId}`);
   });
 
+  it('briefs the first cloud prompt submit and not the second', async () => {
+    const runtime = runtimeWith([
+      [
+        'GET /v1/agents',
+        () =>
+          ok({
+            agents: [
+              {
+                id: 'self-uuid',
+                agentKey: JUNIE.agentId,
+                kind: 'junie',
+                summary: null,
+                status: 'active',
+                lastSeenAt: NOW,
+              },
+              {
+                id: 'peer-uuid',
+                agentKey: 'codex:bbbb2222',
+                kind: 'codex',
+                summary: 'busy',
+                status: 'active',
+                lastSeenAt: NOW,
+              },
+            ],
+          }),
+      ],
+      ['POST /v1/messages/drain', () => ok({ messages: [] })],
+    ]);
+    const explicitMarkerDir = mkdtempSync(join(tmpdir(), 'concord-junie-explicit-markers-'));
+    const env = { CONCORD_HOOK_MARKER_DIR: explicitMarkerDir };
+
+    const first = context(
+      await handleCloudJunieHook(runtime, JUNIE, repoRoot, 'junie-user-prompt-submit', env),
+    );
+
+    expect(first).toContain(`agent_id: "${JUNIE.agentId}"`);
+    expect(first).toContain("Junie's MCP server cannot see the hook session payload");
+    expect(first).toContain('codex:bbbb2222');
+    expect(
+      await handleCloudJunieHook(runtime, JUNIE, repoRoot, 'junie-user-prompt-submit', env),
+    ).toBe('{}');
+    expect(readdirSync(explicitMarkerDir)).toHaveLength(1);
+    expect(readdirSync(markerDir)).toEqual([]);
+    expect(cloud.requests.filter((request) => request.path === '/v1/messages/drain')).toHaveLength(
+      2,
+    );
+  });
+
+  it('does not drain or mark the briefing when the cloud roster fails', async () => {
+    const runtime = runtimeWith([
+      ['GET /v1/agents', () => ({ status: 500, json: { error: 'unavailable' } })],
+      ['POST /v1/messages/drain', () => ok({ messages: [] })],
+    ]);
+    const env = { CONCORD_HOOK_MARKER_DIR: markerDir };
+
+    await expect(
+      handleCloudJunieHook(runtime, JUNIE, repoRoot, 'junie-user-prompt-submit', env),
+    ).rejects.toThrow();
+    expect(cloud.requests.some((request) => request.path === '/v1/messages/drain')).toBe(false);
+    expect(readdirSync(markerDir)).toEqual([]);
+  });
+
   it('asks nothing of the cloud at session end', async () => {
     const runtime = runtimeWith([]);
     expect(await handleCloudJunieHook(runtime, JUNIE, repoRoot, 'junie-session-end')).toBe('{}');
@@ -218,15 +289,9 @@ describe('runJunieHook', () => {
 
 describe('first-prompt identity briefing (SessionStart context is dropped by Junie)', () => {
   let repos: Repositories;
-  let markerDir: string;
 
   beforeEach(() => {
     repos = createRepositories(openDatabase(':memory:'));
-    markerDir = mkdtempSync(join(tmpdir(), 'concord-junie-markers-'));
-    process.env['CONCORD_HOOK_MARKER_DIR'] = markerDir;
-    return () => {
-      delete process.env['CONCORD_HOOK_MARKER_DIR'];
-    };
   });
 
   it('briefs the session on its first prompt submit even when the inbox is empty', () => {

@@ -54,12 +54,14 @@ export interface HarnessHooks {
     identity: AgentIdentity,
     repoRoot: string,
     event: string,
+    env?: NodeJS.ProcessEnv,
   ): string;
   handleCloudHook(
     runtime: CloudRuntime,
     identity: AgentIdentity,
     cwd: string,
     event: string,
+    env?: NodeJS.ProcessEnv,
   ): Promise<string>;
   run(event: string, rawJson: string, env?: NodeJS.ProcessEnv): Promise<string>;
 }
@@ -122,20 +124,20 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
    * resumed session keeps its context and is not briefed again, while a new
    * session id — `/clear`, a fresh start — briefs once more.
    */
-  function firstPromptBriefingMarker(agentId: string): string | undefined {
+  function firstPromptBriefingMarker(agentId: string, env: NodeJS.ProcessEnv): string | undefined {
     if (spec.briefOnFirstPrompt !== true) return undefined;
     const hash = createHash('sha256').update(agentId).digest('hex').slice(0, 24);
-    const markerDir = process.env['CONCORD_HOOK_MARKER_DIR'] ?? tmpdir();
+    const markerDir = env['CONCORD_HOOK_MARKER_DIR'] ?? tmpdir();
     return join(markerDir, `concord-${spec.kind}-briefed-${hash}`);
   }
 
-  function hasFirstPromptBriefing(agentId: string): boolean {
-    const marker = firstPromptBriefingMarker(agentId);
+  function needsFirstPromptBriefing(agentId: string, env: NodeJS.ProcessEnv): boolean {
+    const marker = firstPromptBriefingMarker(agentId, env);
     return marker !== undefined && !existsSync(marker);
   }
 
-  function markFirstPromptBriefing(agentId: string): void {
-    const marker = firstPromptBriefingMarker(agentId);
+  function markFirstPromptBriefing(agentId: string, env: NodeJS.ProcessEnv): void {
+    const marker = firstPromptBriefingMarker(agentId, env);
     if (marker === undefined) return;
     try {
       writeFileSync(marker, agentId, { flag: 'wx' });
@@ -155,6 +157,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
     identity: AgentIdentity,
     repoRoot: string,
     event: string,
+    env: NodeJS.ProcessEnv = process.env,
   ): string {
     switch (event) {
       case events.sessionStart:
@@ -168,7 +171,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
         );
       case events.promptSubmit: {
         const drained = drainInbox(repos, identity.agentId, spec.kind);
-        if (hasFirstPromptBriefing(identity.agentId)) {
+        if (needsFirstPromptBriefing(identity.agentId, env)) {
           const output = briefedPromptSubmitOutput(
             identity.agentId,
             buildRoster(repos.agents.list(), Date.now()).filter(
@@ -176,7 +179,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
             ),
             drained,
           );
-          markFirstPromptBriefing(identity.agentId);
+          markFirstPromptBriefing(identity.agentId, env);
           return output;
         }
         return promptSubmitOutput(drained);
@@ -199,6 +202,7 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
     identity: AgentIdentity,
     cwd: string,
     event: string,
+    env: NodeJS.ProcessEnv = process.env,
   ): Promise<string> {
     switch (event) {
       case events.sessionStart:
@@ -207,11 +211,11 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
       case events.promptSubmit: {
         // Roster first: it is the one piece that can fail, and draining or
         // marking before it would lose the batch and the briefing together.
-        if (hasFirstPromptBriefing(identity.agentId)) {
+        if (needsFirstPromptBriefing(identity.agentId, env)) {
           const roster = await cloudRoster(runtime, identity.agentId);
           const drainedFirst = await drainFromCloud(runtime, identity.agentId, spec.kind);
           const briefed = briefedPromptSubmitOutput(identity.agentId, roster, drainedFirst);
-          markFirstPromptBriefing(identity.agentId);
+          markFirstPromptBriefing(identity.agentId, env);
           return briefed;
         }
         const drained = await drainFromCloud(runtime, identity.agentId, spec.kind);
@@ -243,10 +247,10 @@ export function createHarnessHooks(spec: HarnessHookSpec): HarnessHooks {
     }
     if (access.kind === 'local') {
       const { openContext } = await import('../context.js');
-      return handleLocalHook(openContext(repoRoot, env).repos, identity, repoRoot, event);
+      return handleLocalHook(openContext(repoRoot, env).repos, identity, repoRoot, event, env);
     }
     try {
-      return await handleCloudHook(access.runtime, identity, repoRoot, event);
+      return await handleCloudHook(access.runtime, identity, repoRoot, event, env);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       process.stderr.write(`Concord Cloud could not be reached: ${detail}\n`);
