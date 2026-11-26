@@ -4,6 +4,7 @@ import { isOpenclawDetected, statusOpenclaw } from './openclaw.js';
 import { installOpenclawMcpConfig, uninstallOpenclawConfig } from '../openclaw-config.js';
 import { installHermes, statusHermes } from './hermes.js';
 import { statusKiro } from './kiro.js';
+import * as clineAdapter from './cline.js';
 import { statusQwen } from './qwen.js';
 import { statusDeepseek } from './deepseek.js';
 import { installDeepseekConfig, uninstallDeepseekConfig } from '../deepseek-config.js';
@@ -658,6 +659,8 @@ export function statusAdapter(
       return statusKiro(kiroExecutablePath(env), repoRoot, env);
     case 'deepseek':
       return statusDeepseek(executablePath(HARNESS_CONFIGS.deepseek.executable, env), env);
+    case 'cline':
+      return clineAdapter.statusClineAdapter(env);
   }
 }
 
@@ -720,6 +723,11 @@ export function installAdapter(
   if (harness === 'kiro') {
     if (!kiroDetected(kiroExecutablePath(env), undefined, env)) return;
     installKiroUserConfigs(env);
+    return;
+  }
+
+  if (harness === 'cline') {
+    clineAdapter.installClineAdapter(env);
     return;
   }
 
@@ -882,6 +890,7 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
   uninstallKiroUserConfigs(env);
+  clineAdapter.uninstallClineAdapter(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

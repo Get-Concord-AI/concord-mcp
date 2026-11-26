@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { upsertBlock } from './block.js';
 import {
   ANTIGRAVITY_INSTRUCTIONS,
   ANTIGRAVITY_RULE_HEADER,
+  CLINE_INSTRUCTIONS,
   CONCORD_INSTRUCTIONS,
   CURSOR_MDC_HEADER,
   KIRO_INSTRUCTIONS,
@@ -36,7 +37,13 @@ const TARGETS: readonly InstallTarget[] = [
     header: KIRO_STEERING_HEADER,
     instructions: KIRO_INSTRUCTIONS,
   },
+  // Cline reads rules from both `.clinerules/` and `.cline/rules/`; writing
+  // the same block to both would show the model the rules twice. installConcord
+  // picks the layout the repo already uses, defaulting to the current one.
 ];
+
+const CLINE_RULES_TARGET = join('.cline', 'rules', 'concord.md');
+const CLINE_RULES_LEGACY_TARGET = join('.clinerules', 'concord.md');
 
 function writeTarget(repoRoot: string, target: InstallTarget): string {
   const fullPath = join(repoRoot, target.relPath);
@@ -53,5 +60,18 @@ function writeTarget(repoRoot: string, target: InstallTarget): string {
  * written.
  */
 export function installConcord(repoRoot: string): string[] {
-  return TARGETS.map((target) => writeTarget(repoRoot, target));
+  // A single-file `.clinerules` cannot also be the `.clinerules/` directory:
+  // merge the managed block into the file itself rather than failing setup.
+  const legacyRules = join(repoRoot, '.clinerules');
+  const clineRulesIsFile = existsSync(legacyRules) && !statSync(legacyRules).isDirectory();
+  // Honor a repo already on the legacy `.clinerules/` directory; everywhere
+  // else gets the current `.cline/rules/` layout only, so no Cline version
+  // sees the managed block twice.
+  const clineRulesIsDir = existsSync(legacyRules) && statSync(legacyRules).isDirectory();
+  const clineRulesTarget = clineRulesIsFile
+    ? { relPath: '.clinerules', instructions: CLINE_INSTRUCTIONS }
+    : clineRulesIsDir && !existsSync(join(repoRoot, '.cline', 'rules'))
+      ? { relPath: CLINE_RULES_LEGACY_TARGET, instructions: CLINE_INSTRUCTIONS }
+      : { relPath: CLINE_RULES_TARGET, instructions: CLINE_INSTRUCTIONS };
+  return [...TARGETS, clineRulesTarget].map((target) => writeTarget(repoRoot, target));
 }

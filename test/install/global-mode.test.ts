@@ -1,12 +1,13 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import { readUserConfig, writeUserConfig } from '../../src/config/user-config.js';
 import { resolveGlobalChoice, runSetup } from '../../src/cli/commands/setup.js';
 import { BLOCK_START, removeBlock, upsertBlock } from '../../src/install/block.js';
+import { clineGlobalRulesPaths, clineMcpSettingsPath } from '../../src/install/cline-config.js';
 import { applyGlobalMode } from '../../src/install/global-mode.js';
 import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
 
@@ -468,5 +469,81 @@ describe('runSetup with global mode', () => {
     await runSetup(repo, { env: { ...env, CONCORD_REPO_ROOT: repo }, global: false });
 
     expect(present(repo)).toEqual(REPO_FILES);
+  });
+});
+
+describe('Cline global files', () => {
+  it('writes one Cline rules copy and removes every candidate on disable', () => {
+    const base = machine(['cline']);
+    const env = { ...base, CONCORD_DOCUMENTS_DIR: join(base.HOME, 'Documents') };
+    const existingRules = join(env.HOME, 'Documents', 'Cline', 'Rules');
+    mkdirSync(existingRules, { recursive: true });
+
+    const on = applyGlobalMode(env, true);
+    const candidates = clineGlobalRulesPaths(env);
+    const writtenPath = join(existingRules, 'concord.md');
+    expect(candidates.filter((path) => existsSync(path))).toEqual([writtenPath]);
+
+    // Copies written by older versions may exist in every candidate; disable
+    // still has to clean all of them, not just the one install now chooses.
+    for (const path of candidates) {
+      if (path === writtenPath) continue;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, upsertBlock('', 'older Concord rules'));
+    }
+
+    const off = applyGlobalMode(env, false, { registrations: on.registrations });
+    expect(off.warnings).toEqual([]);
+    for (const path of candidates) expect(existsSync(path)).toBe(false);
+  });
+});
+
+describe('hand-written replacements', () => {
+  it('does not remove a hand-written Cline entry when global mode is declined', () => {
+    const base = machine(['cline']);
+    const env = { ...base, CONCORD_DOCUMENTS_DIR: join(base.HOME, 'Documents') };
+    const on = applyGlobalMode(env, true);
+    const path = clineMcpSettingsPath(env);
+    const manual =
+      JSON.stringify(
+        {
+          mcpServers: {
+            concord: {
+              command: 'concord-mcp',
+              env: { CONCORD_AGENT_KIND: 'cline' },
+            },
+          },
+        },
+        null,
+        2,
+      ) + '\n';
+    writeFileSync(path, manual);
+
+    applyGlobalMode(env, false, { registrations: on.registrations });
+
+    expect(read(path)).toBe(manual);
+  });
+
+  it('does not remove a user-rewritten concord entry when global mode is declined', () => {
+    const env = machine(['cursor']);
+    applyGlobalMode(env, true);
+    const path = join(env.HOME, '.cursor', 'mcp.json');
+    expect(readFileSync(path, 'utf8')).toContain('concord');
+
+    // The user replaces the managed registration with a hand-written one:
+    // same server key, no Concord ownership marker in the entry.
+    writeFileSync(
+      path,
+      JSON.stringify(
+        { mcpServers: { concord: { command: 'concord-mcp', args: ['--user-tuned'] } } },
+        null,
+        2,
+      ),
+    );
+
+    applyGlobalMode(env, false);
+    const after = readFileSync(path, 'utf8');
+    expect(after).toContain('--user-tuned');
+    expect(existsSync(path)).toBe(true);
   });
 });

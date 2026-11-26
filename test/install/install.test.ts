@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -48,6 +48,7 @@ describe('installConcord', () => {
       join('.github', 'copilot-instructions.md'),
       join('.agents', 'rules', 'concord.md'),
       join('.kiro', 'steering', 'concord.md'),
+      join('.cline', 'rules', 'concord.md'),
     ]);
     for (const relPath of written) {
       expect(existsSync(join(root, relPath))).toBe(true);
@@ -110,5 +111,32 @@ describe('installConcord', () => {
     expect(first).toContain('# Existing project rules');
     expect(first).toContain('start_work');
     expect(second).toBe(first);
+  });
+
+  it('merges into a single-file .clinerules instead of failing setup', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-install-'));
+    writeFileSync(join(root, '.clinerules'), '# Legacy cline rules\n');
+
+    const written = installConcord(root);
+
+    expect(written).toContain('.clinerules');
+    expect(written).not.toContain(join('.clinerules', 'concord.md'));
+    const rules = readFileSync(join(root, '.clinerules'), 'utf8');
+    expect(rules).toContain('# Legacy cline rules');
+    expect(rules).toContain('start_work');
+    expect(existsSync(join(root, join('.cline', 'rules', 'concord.md')))).toBe(false);
+  });
+
+  it('honours a repo already on the legacy .clinerules directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'concord-install-'));
+    mkdirSync(join(root, '.clinerules'), { recursive: true });
+    writeFileSync(join(root, '.clinerules', 'notes.md'), '# Legacy dir rules\n');
+
+    const written = installConcord(root);
+
+    expect(written).toContain(join('.clinerules', 'concord.md'));
+    expect(written).not.toContain(join('.cline', 'rules', 'concord.md'));
+    expect(existsSync(join(root, join('.clinerules', 'concord.md')))).toBe(true);
+    expect(existsSync(join(root, join('.cline', 'rules', 'concord.md')))).toBe(false);
   });
 });

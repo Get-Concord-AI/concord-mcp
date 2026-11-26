@@ -121,3 +121,33 @@ export function kiroSessionStartMessage(agentId: string, others: readonly Roster
     ...rosterLines(others),
   ].join('\n');
 }
+
+/**
+ * Cline's MCP server sees neither the session nor the open workspace — its
+ * registration is one global file — so the hook that knows both says which
+ * `agent_id` and `workspace_id` to pass. Messages reach the VS Code extension
+ * on prompt submit; the CLI and idle sessions drain the durable inbox.
+ */
+export function clineSessionStartMessage(
+  agentId: string,
+  workspaceId: string | undefined,
+  others: readonly RosterLine[],
+): string {
+  const ids =
+    workspaceId === undefined
+      ? `include \`agent_id: "${agentId}"\` on start_work, update_work, transfer_work, and finish_work calls.`
+      : `include \`agent_id: "${agentId}"\` and \`workspace_id: "${workspaceId}"\` on start_work, ` +
+        `update_work, transfer_work, and finish_work calls, and \`workspace_id\` on inspect_work.`;
+  return [
+    `Concord: this session is agent \`${agentId}\`` +
+      (workspaceId === undefined ? '. ' : ` in workspace \`${workspaceId}\`. `) +
+      "Cline's MCP server cannot see your session or workspace, so " +
+      ids +
+      ' On inspect_work, `agent_id` selects whose inbox to read: pass your own id only to read ' +
+      `your inbox. Do not invent an id. ${CONCORD_SERVER_ONLY}`,
+    "Other agents' messages reach the VS Code extension on each prompt. Cline does not " +
+      'wake an idle session, so messages sent while idle wait in your durable inbox; ' +
+      `drain them with \`concord inbox drain --agent ${agentId} --provider cline\`.`,
+    ...rosterLines(others),
+  ].join('\n');
+}

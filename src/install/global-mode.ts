@@ -16,6 +16,14 @@ import { copilotHome } from './copilot-config.js';
 import { gooseConfigPath } from './goose-config.js';
 import { deepseekHome } from './deepseek-config.js';
 import {
+  clineDetected,
+  clineEntryIsManaged,
+  clineGlobalRulesInstallPaths,
+  clineGlobalRulesPaths,
+  clineManagedEnv,
+  clineMcpSettingsPath,
+} from './cline-config.js';
+import {
   devinMcpConfigPath,
   hasDevinMcpServer,
   removeDevinMcpConfig,
@@ -24,6 +32,7 @@ import {
 import { removeDevinUserHooksConfig, upsertDevinUserHooksConfig } from './devin-user-hooks.js';
 import {
   ANTIGRAVITY_RULE_HEADER,
+  CLINE_GLOBAL_INSTRUCTIONS,
   CONCORD_GLOBAL_INSTRUCTIONS,
   KIRO_STEERING_HEADER,
 } from './instructions.js';
@@ -46,6 +55,8 @@ import {
   upsertGeminiSettings,
   upsertGrokMcpServer,
   upsertMcpServer,
+  isConcordServerOwned,
+  isGrokConcordServerOwned,
 } from './mcp-config.js';
 
 /** What turning global mode on or off changed, and what it could not. */
@@ -60,6 +71,14 @@ export interface GlobalModeReport {
 interface Registration {
   readonly id: string;
   readonly present: (existing: string) => boolean;
+  /**
+   * Re-verified against the current file before a disable removes anything:
+   * remembered ownership is stale the moment the user rewrites the entry.
+   * MCP-style JSON registrations use isConcordServerOwned; harnesses with
+   * their own ownership shape (Grok's TOML markers) leave it unset, and the
+   * remembered flag is trusted as before.
+   */
+  readonly owned?: (existing: string) => boolean;
 }
 
 /** A user-level file global mode owns part of, for one harness. */
@@ -72,7 +91,11 @@ interface UserFile {
   readonly registration?: Registration | undefined;
   /** Optional harness version gate for a registration format. */
   readonly supported?: ((env: NodeJS.ProcessEnv) => boolean) | undefined;
-  readonly path: (env: NodeJS.ProcessEnv) => string;
+  readonly path?: ((env: NodeJS.ProcessEnv) => string) | undefined;
+  /** Every file this entry owns part of; takes precedence over `path`. */
+  readonly paths?: ((env: NodeJS.ProcessEnv) => string[]) | undefined;
+  /** Files to write on enable; `paths` still covers uninstall and cleanup. */
+  readonly installPaths?: ((env: NodeJS.ProcessEnv) => string[]) | undefined;
   readonly install: (existing: string | undefined, path: string) => string;
   readonly uninstall: (existing: string) => string;
 }
@@ -148,7 +171,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     executable: 'devin',
-    registration: { id: 'devin', present: hasDevinMcpServer },
+    registration: { id: 'devin', present: hasDevinMcpServer, owned: isConcordServerOwned },
     supported: devinCliSupportsDedicatedMcpConfig,
     path: devinMcpConfigPath,
     install: (existing) => upsertDevinMcpConfig(existing),
@@ -156,7 +179,7 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     executable: 'gemini',
-    registration: { id: 'gemini', present: hasMcpServer },
+    registration: { id: 'gemini', present: hasMcpServer, owned: isConcordServerOwned },
     path: (env) => join(userHome(env), '.gemini', 'settings.json'),
     install: (existing) => upsertGeminiSettings(existing, undefined),
     // Only the server goes: the shell settings may serve other tools by now.
@@ -164,14 +187,14 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     executable: 'cursor',
-    registration: { id: 'cursor', present: hasMcpServer },
+    registration: { id: 'cursor', present: hasMcpServer, owned: isConcordServerOwned },
     path: (env) => join(userHome(env), '.cursor', 'mcp.json'),
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('cursor')),
     uninstall: removeMcpServer,
   },
   {
     executable: 'grok',
-    registration: { id: 'grok', present: hasGrokMcpServer },
+    registration: { id: 'grok', present: hasGrokMcpServer, owned: isGrokConcordServerOwned },
     path: (env) => join(grokHome(env), 'config.toml'),
     install: (existing, path) => upsertGrokMcpServer(existing, undefined, path),
     uninstall: (existing) => {
@@ -182,7 +205,7 @@ const USER_FILES: readonly UserFile[] = [
   {
     executable: 'agy',
     isDetected: isAntigravityDetected,
-    registration: { id: 'antigravity', present: hasMcpServer },
+    registration: { id: 'antigravity', present: hasMcpServer, owned: isConcordServerOwned },
     path: (env) => join(antigravityConfigDir(env), 'mcp_config.json'),
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('antigravity')),
     uninstall: removeMcpServer,
@@ -201,9 +224,30 @@ const USER_FILES: readonly UserFile[] = [
   },
   {
     isDetected: isKiroDetected,
-    registration: { id: 'kiro', present: hasMcpServer },
+    registration: { id: 'kiro', present: hasMcpServer, owned: isConcordServerOwned },
     path: kiroUserMcpPath,
     install: (existing) => upsertMcpServer(existing, undefined, agentKindEnv('kiro')),
+    uninstall: removeMcpServer,
+  },
+  {
+    isDetected: clineDetected,
+    paths: clineGlobalRulesPaths,
+    installPaths: clineGlobalRulesInstallPaths,
+    install: (existing) => upsertBlock(existing ?? '', CLINE_GLOBAL_INSTRUCTIONS),
+    uninstall: (existing) => {
+      const rest = removeBlock(existing);
+      return rest.trim() === '' ? '' : rest;
+    },
+  },
+  {
+    isDetected: clineDetected,
+    registration: {
+      id: 'cline',
+      present: hasMcpServer,
+      owned: (existing) => clineEntryIsManaged(existing) && isConcordServerOwned(existing),
+    },
+    path: clineMcpSettingsPath,
+    install: (existing) => upsertMcpServer(existing, undefined, clineManagedEnv()),
     uninstall: removeMcpServer,
   },
 ];
@@ -215,7 +259,13 @@ function mayChange(
   existing: string | undefined,
   owned: ReadonlySet<string>,
 ): boolean {
-  if (owned.has(registration.id)) return true;
+  if (owned.has(registration.id)) {
+    // Ownership is only remembered state: the user may have replaced our
+    // entry with a hand-written `concord` server since. Removing on disable
+    // is safe only while the file still carries the entry Concord wrote.
+    if (!enable) return existing !== undefined && (registration.owned?.(existing) ?? false);
+    return true;
+  }
   return enable && (existing === undefined || !registration.present(existing));
 }
 
@@ -232,35 +282,41 @@ function applyFile(
   owned: Set<string>,
   report: GlobalModeReport,
 ): void {
-  const path = file.path(env);
-  const exists = existsSync(path);
-  if (enable ? !isFileDetected(file, env) : !exists) return;
+  const paths = file.paths?.(env) ?? (file.path === undefined ? [] : [file.path(env)]);
+  if (enable ? !isFileDetected(file, env) : !paths.some((path) => existsSync(path))) return;
   if (enable && file.supported !== undefined && !file.supported(env)) return;
-  try {
-    const existing = exists ? readFileSync(path, 'utf8') : undefined;
-    const { registration } = file;
-    if (registration !== undefined && !mayChange(registration, enable, existing, owned)) return;
-    const next = enable ? file.install(existing, path) : file.uninstall(existing ?? '');
-    if (next !== existing) {
-      if (next === '') {
-        rmSync(path);
-      } else {
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, next);
+  const { registration } = file;
+  const targets = enable ? (file.installPaths?.(env) ?? paths) : paths;
+  for (const path of targets) {
+    try {
+      const exists = existsSync(path);
+      if (!enable && !exists) continue;
+      const existing = exists ? readFileSync(path, 'utf8') : undefined;
+      if (registration !== undefined && !mayChange(registration, enable, existing, owned)) {
+        continue;
       }
-      report.written.push(path);
+      const next = enable ? file.install(existing, path) : file.uninstall(existing ?? '');
+      if (next !== existing) {
+        if (next === '') {
+          rmSync(path);
+        } else {
+          mkdirSync(dirname(path), { recursive: true });
+          writeFileSync(path, next);
+        }
+        report.written.push(path);
+      }
+      if (registration !== undefined) {
+        if (enable) owned.add(registration.id);
+        else owned.delete(registration.id);
+      }
+    } catch (error) {
+      // A parse error already names the file it could not change.
+      report.warnings.push(
+        error instanceof McpConfigParseError
+          ? error.message
+          : `${path}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-    if (registration !== undefined) {
-      if (enable) owned.add(registration.id);
-      else owned.delete(registration.id);
-    }
-  } catch (error) {
-    // A parse error already names the file it could not change.
-    report.warnings.push(
-      error instanceof McpConfigParseError
-        ? error.message
-        : `${path}: ${error instanceof Error ? error.message : String(error)}`,
-    );
   }
 }
 

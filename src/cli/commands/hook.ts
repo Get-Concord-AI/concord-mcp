@@ -315,7 +315,8 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     .description(
       'Run a Concord hook. events: pre-tool-use (PreToolUse overlap gate), ' +
         'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, ' +
-        'stop, and kiro-session-start and kiro-user-prompt-submit.',
+        'stop, and kiro-session-start, kiro-user-prompt-submit, cline-task-start, ' +
+        'cline-task-resume, and cline-user-prompt-submit.',
     )
     .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {
@@ -324,6 +325,13 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
         if (isKiroHookEvent(event)) {
           const output = await runKiroHook(event, readStdin());
           if (output !== '') process.stdout.write(`${output}\n`);
+          return;
+        }
+      }
+      if (event.startsWith('cline-')) {
+        const { isClineHookEvent, runClineHook } = await import('./cline-hooks.js');
+        if (isClineHookEvent(event)) {
+          process.stdout.write(`${await runClineHook(event, readStdin())}\n`);
           return;
         }
       }

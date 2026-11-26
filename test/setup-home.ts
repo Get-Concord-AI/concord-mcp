@@ -8,3 +8,6 @@ import { join } from 'node:path';
 const home = mkdtempSync(join(tmpdir(), 'concord-test-home-'));
 process.env['HOME'] = home;
 process.env['USERPROFILE'] = home;
+// Keep Cline's OS Documents lookup inside the throwaway home too: without
+// the override it would resolve the developer's real Documents folder.
+process.env['CONCORD_DOCUMENTS_DIR'] = join(home, 'Documents');

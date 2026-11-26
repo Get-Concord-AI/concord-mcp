@@ -13,10 +13,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { writeFakeCommand, writeFakeVersion } from '../helpers/fake-command.js';
 import { recordedInvocations, writeFakeOpencode } from '../helpers/fake-opencode.js';
 
+import { clineHookFileNames, clineMcpSettingsPath } from '../../src/install/cline-config.js';
 import {
   devinSupportsDedicatedMcpConfig,
   installGlobalAdapters,
@@ -250,6 +252,7 @@ describe('global harness adapters', () => {
       'managed-controller',
       'harness-monitor',
       'managed-controller',
+      'harness-monitor',
       'harness-monitor',
       'harness-monitor',
       'harness-monitor',
@@ -772,6 +775,175 @@ describe('global harness adapters', () => {
     const agEntry = report.find((entry) => entry.harness === 'antigravity');
     expect(agEntry?.status).toBe('action_required');
     expect(agEntry?.detail).toContain('Concord lifecycle hooks remain installed');
+  });
+
+  describe('Cline', () => {
+    it('installs the global MCP entry and lifecycle hooks for a detected CLI', () => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-cline-adapter-'));
+      const bin = join(home, 'bin');
+      mkdirSync(bin);
+      writeFakeVersion(bin, 'cline', '3.0.75');
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: bin,
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
+
+      const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+      const entry = report.find((item) => item.harness === 'cline');
+      expect(entry).toMatchObject({
+        detected: true,
+        status: 'installed',
+        capabilities: ['pull', 'busy'],
+      });
+
+      const mcp = z
+        .object({
+          mcpServers: z.record(
+            z.string(),
+            z
+              .object({
+                command: z.string().optional(),
+                env: z.record(z.string(), z.string()).optional(),
+              })
+              .loose(),
+          ),
+        })
+        .parse(JSON.parse(readFileSync(clineMcpSettingsPath(env), 'utf8')));
+      expect(mcp.mcpServers['concord']).toMatchObject({
+        command: 'concord-mcp',
+        env: { CONCORD_AGENT_KIND: 'cline' },
+      });
+      for (const dir of [
+        join(home, 'Documents', 'Cline', 'Hooks'),
+        join(home, '.cline', 'hooks'),
+      ]) {
+        for (const name of clineHookFileNames()) {
+          expect(readFileSync(join(dir, name), 'utf8')).toContain('concord hook cline-');
+        }
+      }
+
+      // Rerunning setup is a no-op.
+      const again = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+      expect(again.find((item) => item.harness === 'cline')?.status).toBe('installed');
+      expect(statusGlobalAdapters(env).find((item) => item.harness === 'cline')?.status).toBe(
+        'installed',
+      );
+    });
+
+    it('detects Cline without its CLI through ~/.cline or ~/Documents/Cline', () => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-cline-detect-'));
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: join(home, 'empty-bin'),
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
+      mkdirSync(join(home, '.cline'), { recursive: true });
+
+      const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+      expect(report.find((item) => item.harness === 'cline')?.status).toBe('installed');
+      expect(existsSync(clineMcpSettingsPath(env))).toBe(true);
+    });
+
+    it('reports an unsupported Cline CLI version and skips installation', () => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-cline-old-'));
+      const bin = join(home, 'bin');
+      mkdirSync(bin);
+      writeFakeVersion(bin, 'cline', '2.9.9');
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: bin,
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
+
+      const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+      expect(report.find((item) => item.harness === 'cline')).toMatchObject({
+        detected: true,
+        status: 'unsupported_version',
+      });
+      expect(existsSync(clineMcpSettingsPath(env))).toBe(false);
+    });
+
+    it('installs for the VS Code extension when an old CLI is also on PATH', () => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-cline-old-extension-'));
+      const bin = join(home, 'bin');
+      mkdirSync(bin);
+      writeFakeVersion(bin, 'cline', '2.9.9');
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: bin,
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
+      mkdirSync(
+        join(home, 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev'),
+        { recursive: true },
+      );
+
+      const report = installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+      expect(report.find((item) => item.harness === 'cline')).toMatchObject({
+        detected: true,
+        status: 'installed',
+      });
+      expect(existsSync(clineMcpSettingsPath(env))).toBe(true);
+    });
+
+    it('uninstall removes the Concord MCP entry and hook files only', () => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-cline-uninstall-'));
+      const bin = join(home, 'bin');
+      mkdirSync(bin);
+      writeFakeVersion(bin, 'cline', '3.0.75');
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: bin,
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      const report = uninstallGlobalAdapters(env);
+      expect(report.find((item) => item.harness === 'cline')?.status).toBe('action_required');
+
+      const mcp = z
+        .object({ mcpServers: z.record(z.string(), z.unknown()) })
+        .parse(JSON.parse(readFileSync(clineMcpSettingsPath(env), 'utf8')));
+      expect(mcp.mcpServers).not.toHaveProperty('concord');
+      for (const dir of [
+        join(home, 'Documents', 'Cline', 'Hooks'),
+        join(home, '.cline', 'hooks'),
+      ]) {
+        for (const name of clineHookFileNames()) {
+          expect(existsSync(join(dir, name))).toBe(false);
+        }
+      }
+    });
+
+    it('reports action_required when a user file blocks the extension hook directory', () => {
+      const home = mkdtempSync(join(tmpdir(), 'concord-cline-blocked-'));
+      const bin = join(home, 'bin');
+      mkdirSync(bin);
+      writeFakeVersion(bin, 'cline', '3.0.75');
+      const env = {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: bin,
+        CONCORD_DOCUMENTS_DIR: join(home, 'Documents'),
+      };
+      installGlobalAdapters(import.meta.url, env, undefined, LASTING);
+
+      // The complete ~/.cline/hooks fallback must not mask the directory the
+      // VS Code extension actually reads.
+      const [taskStartName] = clineHookFileNames();
+      if (taskStartName === undefined) throw new Error('expected Cline hook names');
+      writeFileSync(join(home, 'Documents', 'Cline', 'Hooks', taskStartName), '# my own hook\n');
+
+      const entry = statusGlobalAdapters(env).find((item) => item.harness === 'cline');
+      expect(entry?.status).toBe('action_required');
+      expect(entry?.detail).toContain('Cline Hooks directory under your Documents folder');
+    });
   });
 });
 

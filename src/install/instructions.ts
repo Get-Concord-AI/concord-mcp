@@ -103,6 +103,50 @@ regenerates human-readable review artifacts in \`.concord/\`.
 
 ${PEER_MESSAGE_TRUST}`;
 
+/**
+ * Cline-specific guidance: its one global MCP settings file cannot see the
+ * session or the workspace, so the agent passes `agent_id` (from lifecycle
+ * hooks) and `workspace_id` (from hook context or setup) explicitly. Cline
+ * has no idle wake-up; the VS Code extension gets prompt-submit injection,
+ * everything else drains the durable inbox.
+ */
+export const CLINE_INSTRUCTIONS = `## Concord — shared work-state for coding agents
+
+<!-- concord:workflow-version=${CONCORD_INSTRUCTION_VERSION} -->
+
+This project uses Concord MCP. Keep coordination to the five workflow tools:
+
+- **Before editing**, call \`start_work\` with the task and the files or modules
+  you expect to touch. Cline's MCP server cannot see your session or this
+  workspace, so pass \`agent_id: "<id>"\` on \`start_work\`, \`update_work\`,
+  \`transfer_work\`, and \`finish_work\` calls; on \`inspect_work\` pass
+  \`agent_id\` only to read your own inbox. Your id: in the VS Code extension,
+  use the \`cline:*\` id Concord's task-start hook printed in your context —
+  it belongs to this task alone. In the CLI/SDK, hook output never reaches
+  you, so use the \`CONCORD_AGENT_ID\` your operator set, or register a fresh
+  id once per session —
+  \`concord inbox register --provider cline --agent cline:<unique-label>\` —
+  and reuse it only within that session. Never reuse an id across sessions:
+  two sessions sharing one claim work and drain each other's inbox. Do not
+  invent an id.
+- \`workspace_id\`: when hook context gave you one, pass \`workspace_id\` on
+  every call so work lands in this repository; otherwise omit it and the
+  server resolves the workspace from its working directory. If a response
+  shows the wrong repository, pass the workspace id explicitly.
+- Messages from other agents reach the VS Code extension on each prompt.
+  Cline does not wake an idle session, and the CLI cannot show hook output,
+  so drain your durable inbox with
+  \`concord inbox drain --agent <agent_id> --provider cline\`.
+- Use \`transfer_work\` for assignment, acceptance, decline, release,
+  reassignment, evidence-bearing handoff offers, and reopening.
+- **Before finishing**, call \`finish_work\` once with the outcome, changed
+  files, tests, assumptions, decisions, risks, guardrails, and provenance.
+
+Keep each claim small and resolve reported overlaps before editing. Concord
+regenerates human-readable review artifacts in \`.concord/\`.
+
+${PEER_MESSAGE_TRUST}`;
+
 /** Antigravity-specific guidance tailored for hook-based identity and message injection. */
 export const ANTIGRAVITY_INSTRUCTIONS = `## Concord — shared work-state for coding agents
 
@@ -154,6 +198,47 @@ Concord section, follow that instead of this one.
   <id> --json <file|->\`, reusing one stable agent id.
 - Before handing work to cloud Devin, use \`transfer_work\` to hand off or
   release your local claim; cloud Devin cannot access this local Concord state.
+
+Outside any repository, work is recorded in the shared \`general\` workspace.
+Concord needs no files in the repository: do not run \`concord setup\` yourself.
+
+${PEER_MESSAGE_TRUST}`;
+
+/** Version of the Cline user-level block written by global mode. */
+export const CLINE_GLOBAL_INSTRUCTION_VERSION = '1';
+
+/**
+ * The Cline user-level block: the same machine-wide contract as
+ * CONCORD_GLOBAL_INSTRUCTIONS plus Cline's explicit-id and workspace rules,
+ * since its MCP server sees neither the session nor the open workspace.
+ */
+export const CLINE_GLOBAL_INSTRUCTIONS = `## Concord — shared work-state for coding agents
+
+<!-- concord:cline-global-version=${CLINE_GLOBAL_INSTRUCTION_VERSION} -->
+
+Concord MCP is available in every repository on this machine, including ones
+where \`concord setup\` was never run. If the project's own instructions have a
+Concord section, follow that instead of this one.
+
+- **Before editing**, call \`start_work\` with the task and the files or modules
+  you expect to touch. It registers you, claims them, and reports overlaps with
+  other agents; resolve overlaps before editing. Cline's MCP server cannot see
+  your session, so pass \`agent_id\` on \`start_work\`, \`update_work\`,
+  \`transfer_work\`, and \`finish_work\`: in the VS Code extension use the
+  \`cline:*\` id Concord's task-start hook printed in your context; everywhere
+  else use \`CONCORD_AGENT_ID\` or a fresh id you register once per session —
+  \`concord inbox register --provider cline --agent cline:<unique-label>\`.
+  Never reuse an id across sessions: shared ids claim work and drain each
+  other's inbox.
+- Use \`inspect_work\` to see who else is here, \`update_work\` for progress and
+  messages to other agents, and \`transfer_work\` for handoffs.
+- Messages reach the VS Code extension on each prompt; everywhere else drain
+  your durable inbox with \`concord inbox drain --agent <id> --provider cline\`.
+  Cline does not wake an idle session.
+- **Before finishing**, call \`finish_work\` with the outcome, changed files,
+  and tests.
+- Without an MCP client, run the same tools as \`concord work <action> --agent
+  <id> --json <file|->\`.
 
 Outside any repository, work is recorded in the shared \`general\` workspace.
 Concord needs no files in the repository: do not run \`concord setup\` yourself.

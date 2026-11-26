@@ -53,6 +53,18 @@ export interface AgentMessageRepository {
     provider: string,
     options?: ClaimOptions,
   ): AgentMessageRecord[];
+  /**
+   * The bounded counterpart of `claimPendingForRecipient`: take only the
+   * named `sent` messages, in the order given, for a channel that can show
+   * part of a backlog at once. Messages another drain claimed first are
+   * skipped, exactly as in the full claim.
+   */
+  claimPendingIds(
+    agentId: string,
+    provider: string,
+    messageIds: readonly string[],
+    options?: ClaimOptions,
+  ): AgentMessageRecord[];
   /** Delivered-but-unread messages for `agentId` that `session` could produce evidence for. */
   listUnreadForSession(agentId: string, session: string | null): AgentMessageRecord[];
   /**
@@ -288,6 +300,32 @@ export function createAgentMessageRepository(
     return claimed;
   }
 
+  function claimIds(
+    agentId: string,
+    provider: string,
+    messageIds: readonly string[],
+    options: ClaimOptions,
+  ): AgentMessageRecord[] {
+    sweepStale();
+    const claimed: AgentMessageRecord[] = [];
+    for (const messageId of messageIds) {
+      const pending = get(messageId);
+      if (pending?.recipientAgentId !== agentId) continue;
+      const result = markDeliveredStmt.run({
+        message_id: messageId,
+        provider,
+        receipt: null,
+        now: new Date().toISOString(),
+        session: options.session ?? null,
+        via: options.via ?? 'hook',
+      });
+      if (result.changes === 0) continue;
+      recordEvent(messageId, 'delivered', options.via ?? 'hook');
+      claimed.push(requireMessage(messageId));
+    }
+    return claimed;
+  }
+
   function recordEvent(
     messageId: string,
     event: AgentMessageEvent,
@@ -402,6 +440,7 @@ export function createAgentMessageRepository(
   // transaction can otherwise read an old WAL snapshot, lose a race to a
   // sender, and fail its write upgrade with SQLITE_BUSY_SNAPSHOT.
   const claimTransaction = db.transaction(claimPending);
+  const claimIdsTransaction = db.transaction(claimIds);
   const markReadTransaction = db.transaction(markRead);
   const markReadByEvidenceTransaction = db.transaction(markReadByEvidence);
   const requeueTransaction = db.transaction(requeueUnread);
@@ -451,6 +490,9 @@ export function createAgentMessageRepository(
       // claim: whoever flips the row out of 'sent' owns the message, and
       // the loser emits nothing rather than showing the agent a duplicate.
       return claimTransaction.immediate(agentId, provider, options);
+    },
+    claimPendingIds(agentId, provider, messageIds, options = {}) {
+      return claimIdsTransaction.immediate(agentId, provider, messageIds, options);
     },
     listUnreadForSession,
     markRead(agentId, session, messageIds, evidence) {
