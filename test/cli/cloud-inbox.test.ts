@@ -355,6 +355,47 @@ describe('drainFromCloudCapped', () => {
     expect(keys).toHaveLength(2);
   });
 
+  it('ignores a shown marker left by another drain when the cloud requeues under a new key', async () => {
+    const firstMessage = message('first');
+    const secondMessage = message('second');
+    const batch = [firstMessage, secondMessage];
+    let drainCalls = 0;
+    const cloud = fakeCloud([
+      ...registering,
+      [
+        'POST /v1/messages/drain',
+        () => {
+          drainCalls += 1;
+          if (drainCalls <= 2) return ok({ messages: batch });
+          if (drainCalls === 3) return ok({ messages: [firstMessage] });
+          return ok({ messages: [] });
+        },
+      ],
+    ]);
+    const runtime = runtimeWithFetch(cloud.fetch);
+
+    const capped = await drainFromCloudCapped(runtime, AGENT, 'cline', 5, measure);
+    expect(capped.map((entry) => entry.content)).toEqual(['first']);
+
+    // A plain drain adopts the unfinished ticket and finishes it, but knows
+    // nothing about the capped drain's marker — exactly the stale state the
+    // marker's drain key protects against.
+    const finished = await drainFromCloud(runtime, AGENT, 'cline');
+    expect(finished.map((entry) => entry.content)).toEqual(['first', 'second']);
+
+    // The cloud requeues one id under a fresh drain key: stale shown state
+    // from the old batch must not hide it.
+    const requeued = await drainFromCloudCapped(runtime, AGENT, 'cline', 5, measure);
+    expect(requeued.map((entry) => entry.content)).toEqual(['first']);
+
+    const keys = cloud.requests
+      .filter((request) => request.path === '/v1/messages/drain')
+      .map((request) => /"drainKey":"([^"]+)"/.exec(JSON.stringify(request.body))?.[1]);
+    expect(keys).toHaveLength(3);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[0]);
+  });
+
   it('delivers an oversized first message alone rather than dropping it', async () => {
     const batch = [message('x'.repeat(100))];
     const cloud = fakeCloud([

@@ -187,22 +187,24 @@ export function drainFromCloud(
 /**
  * The ids a capped drain already rendered for this batch: the batch replays
  * under its key until every message in it has been shown, so the record is
- * what keeps already-seen messages from rendering twice. It resets when the
- * batch is finally consumed. The file must live outside the `.drains` ticket
- * directory — everything in there is scanned as a drain ticket, and a stray
- * name would be adopted as one, replaying the batch under a garbage key.
+ * what keeps already-seen messages from rendering twice. Its first line is
+ * the drain key; a marker left behind by another drain is ignored rather than
+ * trusted, so a requeued id can never be hidden by a stale record. The file
+ * must live outside the `.drains` ticket directory — everything in there is
+ * scanned as a drain ticket, and a stray name would be adopted as one,
+ * replaying the batch under a garbage key.
  */
 function shownIdsPath(runtime: CloudRuntime, agentKey: string): string {
   return agentCachePath(runtime.repoRoot, agentKey).replace(/\.json$/, '.shown');
 }
 
-function readShownIds(path: string): ReadonlySet<string> {
+function readShownIds(path: string, drainKey: string): ReadonlySet<string> {
   try {
-    return new Set(
-      readFileSync(path, 'utf8')
-        .split('\n')
-        .filter((line) => line.trim() !== ''),
-    );
+    const lines = readFileSync(path, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '');
+    const [key, ...ids] = lines;
+    return key === drainKey ? new Set(ids) : new Set();
   } catch {
     return new Set();
   }
@@ -239,7 +241,7 @@ export function drainFromCloudCapped(
       }
       const batch = toDeliverables(raw);
       const markerPath = shownIdsPath(runtime, agentKey);
-      const shown = readShownIds(markerPath);
+      const shown = readShownIds(markerPath, ticket.key);
       const unshown = batch.filter((message) => !shown.has(message.messageId));
       const fitted: DeliverableMessage[] = [];
       let size = 0;
@@ -255,7 +257,7 @@ export function drainFromCloudCapped(
         // out of budget.
         const ids = [...shown, ...fitted.map((message) => message.messageId)];
         try {
-          writeFileSync(markerPath, ids.join('\n'));
+          writeFileSync(markerPath, [ticket.key, ...ids].join('\n'));
         } catch {
           // A lost marker only means the next prompt re-renders a message.
         }
