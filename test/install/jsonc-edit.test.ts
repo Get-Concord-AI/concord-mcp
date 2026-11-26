@@ -127,3 +127,34 @@ describe('removeProperty', () => {
     expect(() => parseJsoncObject(result)).not.toThrow();
   });
 });
+
+describe('removeProperty orphan comments', () => {
+  function span(text: string, key: string) {
+    const found = propertyObject(text, key);
+    if (found === undefined) throw new Error(`missing ${key}`);
+    return found;
+  }
+
+  it('keeps a leading comment with its original whitespace when removing the last property', () => {
+    const text = `{
+  "a": 1,
+  // section note
+  "b": { "x": 2 }
+}
+`;
+    const result = removeProperty(text, { open: 0, close: objectEnd(text, 0) }, span(text, 'b'));
+    expect(result).toBe(`{
+  "a": 1
+  // section note
+}
+`);
+    expect(() => parseJsoncObject(result)).not.toThrow();
+  });
+
+  it('keeps leading comment whitespace with CRLF line endings', () => {
+    const text = '{\r\n  "a": 1,\r\n  // section note\r\n  "b": { "x": 2 }\r\n}\r\n';
+    const result = removeProperty(text, { open: 0, close: objectEnd(text, 0) }, span(text, 'b'));
+    expect(result).toBe('{\r\n  "a": 1\r\n  // section note\r\n}\r\n');
+    expect(() => parseJsoncObject(result)).not.toThrow();
+  });
+});

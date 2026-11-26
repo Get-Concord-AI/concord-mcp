@@ -206,6 +206,7 @@ path.
 | Mistral Vibe                       | [Setup and delivery](./docs/vibe.md)               |
 | Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
 | Aider (no MCP client)              | [Shell-only setup](./docs/aider.md)                |
+| T3 Code                            | [Setup and delivery](./docs/t3-code.md)            |
 | Any other MCP-capable coding agent | [Manual setup](./docs/other-mcp-clients.md)        |
 
 > There is no universal `/concord` slash command — commands are client-specific.

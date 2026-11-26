@@ -65,6 +65,18 @@ describe('Devin MCP config', () => {
     expect(JSON.parse(removed.replace('/* 😀 */', ''))).toEqual({ mcpServers: { other: {} } });
   });
 
+  it('round-trips install and removal without breaking an emoji comment', () => {
+    const original = '/* 😀 */ {"mcpServers":{"other":{}}}';
+    const installed = upsertDevinMcpConfig(original);
+    expect(JSON.parse(installed.replace('/* 😀 */', ''))).toMatchObject({
+      mcpServers: { concord: { command: 'concord-mcp' }, other: {} },
+    });
+    expect(installed).toContain('/* 😀 */');
+    const removed = removeDevinMcpConfig(installed);
+    expect(removed).toContain('/* 😀 */');
+    expect(JSON.parse(removed.replace('/* 😀 */', ''))).toEqual({ mcpServers: { other: {} } });
+  });
+
   it('parses escaped Windows paths and removes the Concord property by its key position', () => {
     const original = JSON.stringify({
       mcpServers: {
