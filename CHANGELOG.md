@@ -17,7 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   without `workspace_id` keep the startup project, ids that are not Concord
   workspace ids are ignored, `CONCORD_ALLOWED_ROOTS` applies to routed
   roots exactly as it does locally, and a named checkout that no longer
-  exists returns an error instead of silently rerouting.
+  exists returns an error instead of silently rerouting. Those allowlist
+  roots are resolved when the server starts, as they are in local mode, so
+  a stale or missing `CONCORD_ALLOWED_ROOTS` entry now fails startup rather
+  than being ignored.
 
 ## [0.25.0] - 2026-11-25
 

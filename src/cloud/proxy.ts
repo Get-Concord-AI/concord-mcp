@@ -206,6 +206,24 @@ export function createCloudProxyServer(
     });
     return attempt;
   };
+  const closeClients = async (): Promise<void> => {
+    const attempts = [...clients.values()];
+    clients.clear();
+    await Promise.allSettled(
+      attempts.map(async (attempt) => {
+        const client = await attempt;
+        await client.close();
+      }),
+    );
+  };
+  const closeMcpServer = server.close.bind(server);
+  server.close = async (): Promise<void> => {
+    try {
+      await closeMcpServer();
+    } finally {
+      await closeClients();
+    }
+  };
 
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     const attempt = clientFor(session.projectKey);

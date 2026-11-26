@@ -150,13 +150,27 @@ function fakeCloud(): {
   return { server, requests, calls };
 }
 
+const temporaryDirectories: string[] = [];
+
+function temporaryDirectory(prefix: string): string {
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterAll(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 /**
  * A linked worktree of `primary` laid out the way git lays it out: `.git` is
  * a pointer file into the primary's gitdir, whose `commondir` leads back to
  * `primary/.git` — the metadata `findRepoRoot` follows to the primary root.
  */
 function linkedWorktreeOf(primary: string): string {
-  const worktree = mkdtempSync(join(tmpdir(), 'concord-linked-'));
+  const worktree = temporaryDirectory('concord-linked-');
   const gitDir = join(primary, '.git', 'worktrees', 'linked');
   mkdirSync(gitDir, { recursive: true });
   writeFileSync(join(gitDir, 'commondir'), '../..\n');
@@ -253,7 +267,7 @@ describe('the cloud proxy', () => {
   });
 
   it('routes a call to the project its workspace_id names', async () => {
-    const other = mkdtempSync(join(tmpdir(), 'concord-other-repo-'));
+    const other = temporaryDirectory('concord-other-repo-');
     mkdirSync(join(other, '.git'));
     const routed = createCloudProxyServer(session, (target) => connectCloud(target));
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -271,7 +285,7 @@ describe('the cloud proxy', () => {
       });
       expect(result.isError).toBeFalsy();
       expect(cloud.requests.at(-1)).toMatchObject({
-        'x-concord-project': machineProjectKey('machine-1', other),
+        'x-concord-project': machineProjectKey('machine-1', realpathSync(other)),
       });
       // Paths are made relative to the routed workspace, not the server's root.
       expect(cloud.calls.at(-1)).toMatchObject({ expected_files: ['src/a.ts'] });
@@ -288,7 +302,7 @@ describe('the cloud proxy', () => {
   });
 
   it('keeps the session worktree root when workspace_id names its repository', async () => {
-    const primary = mkdtempSync(join(tmpdir(), 'concord-primary-'));
+    const primary = temporaryDirectory('concord-primary-');
     mkdirSync(join(primary, '.git'));
     const worktree = linkedWorktreeOf(primary);
     const canonicalPrimary = realpathSync(primary);
@@ -323,7 +337,7 @@ describe('the cloud proxy', () => {
 
       // The same allowlist the local workspace manager enforces applies here:
       // a workspace outside CONCORD_ALLOWED_ROOTS is denied, not rerouted.
-      const other = mkdtempSync(join(tmpdir(), 'concord-other-'));
+      const other = temporaryDirectory('concord-other-');
       mkdirSync(join(other, '.git'));
       const blocked = await harness.callTool({
         name: 'inspect_work',
@@ -338,13 +352,15 @@ describe('the cloud proxy', () => {
   });
 
   it('routes paths inside a linked worktree the workspace_id names', async () => {
-    const primary = mkdtempSync(join(tmpdir(), 'concord-primary-'));
+    const primary = temporaryDirectory('concord-primary-');
     mkdirSync(join(primary, '.git'));
     const worktree = linkedWorktreeOf(primary);
     const canonicalPrimary = realpathSync(primary);
     const canonicalWorktree = realpathSync(worktree);
     // The server started at the primary checkout; the hook named the worktree.
-    const routed = createCloudProxyServer(session, (target) => connectCloud(target));
+    const routed = createCloudProxyServer(session, (target) => connectCloud(target), {
+      CONCORD_ALLOWED_ROOTS: primary,
+    });
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await routed.connect(serverSide);
     const harness = new Client({ name: 'harness', version: '0.0.0' });
@@ -372,7 +388,7 @@ describe('the cloud proxy', () => {
   });
 
   it('errors when a named workspace checkout no longer exists', async () => {
-    const gone = mkdtempSync(join(tmpdir(), 'concord-gone-'));
+    const gone = temporaryDirectory('concord-gone-');
     mkdirSync(join(gone, '.git'));
     const workspaceId = workspaceIdForRoot(gone);
     rmSync(gone, { recursive: true, force: true });
@@ -399,8 +415,8 @@ describe('the cloud proxy', () => {
   });
 
   it('refuses a workspace_id outside CONCORD_ALLOWED_ROOTS', async () => {
-    const allowed = mkdtempSync(join(tmpdir(), 'concord-allowed-'));
-    const other = mkdtempSync(join(tmpdir(), 'concord-denied-repo-'));
+    const allowed = temporaryDirectory('concord-allowed-');
+    const other = temporaryDirectory('concord-denied-repo-');
     mkdirSync(join(other, '.git'));
     const routed = createCloudProxyServer(session, (target) => connectCloud(target), {
       CONCORD_ALLOWED_ROOTS: allowed,
@@ -430,6 +446,44 @@ describe('the cloud proxy', () => {
       await harness.close();
       await routed.close();
     }
+  });
+
+  it('closes every project client when the server closes', async () => {
+    const other = temporaryDirectory('concord-close-other-');
+    mkdirSync(join(other, '.git'));
+    const closedProjects: string[] = [];
+    const routed = createCloudProxyServer(session, async (target) => {
+      const cloudClient = await connectCloud(target);
+      const closeClient = cloudClient.close.bind(cloudClient);
+      cloudClient.close = async () => {
+        closedProjects.push(target.projectKey);
+        await closeClient();
+      };
+      return cloudClient;
+    });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await routed.connect(serverSide);
+    const harness = new Client({ name: 'harness', version: '0.0.0' });
+    await harness.connect(clientSide);
+
+    try {
+      await harness.callTool({ name: 'inspect_work', arguments: {} });
+      await harness.callTool({
+        name: 'inspect_work',
+        arguments: { workspace_id: workspaceIdForRoot(other) },
+      });
+    } finally {
+      await harness.close();
+      await routed.close();
+    }
+
+    expect(closedProjects).toHaveLength(2);
+    expect(closedProjects).toEqual(
+      expect.arrayContaining([
+        session.projectKey,
+        machineProjectKey('machine-1', realpathSync(other)),
+      ]),
+    );
   });
 
   it('connects afresh after a call through the client fails', async () => {
