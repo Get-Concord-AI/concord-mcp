@@ -306,4 +306,17 @@ export const migrations: readonly string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  // 020 — a session whose question a hook denied, to show it messages first,
+  // has its next question let through, so a held message or a chatty peer can
+  // never keep the user from being asked. One row per session, so one
+  // session's deny never replaces another's allowance. A session the hook
+  // cannot name is stored as ''.
+  `
+  CREATE TABLE user_wait_allowances (
+    agent_id    TEXT NOT NULL,
+    session     TEXT NOT NULL,
+    granted_at  TEXT NOT NULL,
+    PRIMARY KEY (agent_id, session)
+  );
+  `,
 ];

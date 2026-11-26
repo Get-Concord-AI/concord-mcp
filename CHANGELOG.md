@@ -22,6 +22,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a stale or missing `CONCORD_ALLOWED_ROOTS` entry now fails startup rather
   than being ignored.
 
+### Fixed
+
+- Removing the last property of a JSONC object no longer drops a comment
+  sitting between the preceding comma and that property — a section note is
+  kept the way comments after a middle property already were.
+- Devin uninstall keeps user comments in the hooks config.
+
 ## [0.25.0] - 2026-11-25
 
 ### Added

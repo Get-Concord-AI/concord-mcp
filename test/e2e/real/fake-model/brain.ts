@@ -11,7 +11,8 @@ import type { JsonObject } from '../../support/mcp.js';
  * 4. send a message when the prompt says `tell <agent>: <text>`;
  * 5. start the inbox monitor when a hook asks for one (Grok);
  * 6. ask the user a question (Claude Code's AskUserQuestion) when the prompt
- *    says `ask the user`, which blocks the turn until someone answers;
+ *    says `ask the user`, which blocks the turn until someone answers, and ask
+ *    again when a hook denied the question to show Concord messages first;
  * 7. run `sleep N` when the prompt says so, to stay busy mid-turn;
  * 8. otherwise end the turn.
  *
@@ -56,10 +57,16 @@ export type Intent =
 /** Messages the brain reads but never answers. */
 export const SILENT = 'SILENT-';
 const ASK_USER = 'AskUserQuestion';
+/** What Concord's pre-tool-use drain says when it denies a question. */
+export const ASK_DENIED = 'arrived before your question was shown';
 const FRAME = /\[concord from (\S+) id=([^\s\]]+)[^\]]*\]\s*([^\n<]*)/gu;
 const AGENT_ID = /this session is agent `([^`]+)`/u;
 const WORKSPACE_ID = /this session is agent `[^`]+` in workspace `([^`]+)`/u;
 const MONITOR_ASK = /persistent `monitor`[^`]*`(concord inbox watch [^`]+)`/gu;
+
+function occurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1;
+}
 
 function calledTool(conversation: Conversation, suffix: string): ToolCall[] {
   return conversation.calls.filter((call) => call.name.endsWith(suffix));
@@ -149,7 +156,8 @@ export function decide(conversation: Conversation): Intent {
   if (
     conversation.prompt.includes('ask the user') &&
     conversation.tools.includes(ASK_USER) &&
-    calledTool(conversation, ASK_USER).length === 0
+    // One question, plus one more for each the drain denied.
+    calledTool(conversation, ASK_USER).length <= occurrences(conversation.text, ASK_DENIED)
   ) {
     return {
       kind: 'tool',
