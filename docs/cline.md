@@ -26,10 +26,11 @@ registration is user-level:
 | `~/.cline/hooks/<Hook>`                          | The same hooks for SDK/CLI layouts (`CLINE_DIR`-aware)                   |
 | `.cline/rules/concord.md`                        | Concord workflow rules (repository, written by `concord setup`)          |
 | `.clinerules/concord.md` or `.clinerules`        | The same rules when the repo already uses the legacy layout              |
-| `~/.cline/rules/concord.md`                      | User-level rules when global mode is on (SDK/CLI global rules dir)       |
-| `<Documents>/Cline/Rules/concord.md`             | The same rules where the extension and SDK resolvers look                |
+| `<one global rules dir>/concord.md`              | User-level rules when global mode is on                                  |
 
-`<Documents>` is the OS Documents folder resolved the way Cline resolves
+Global mode writes one copy to the first existing candidate, falling back to
+`~/.cline/rules`; uninstall still scans every candidate so copies written by
+earlier versions are removed. `<Documents>` is the OS Documents folder resolved the way Cline resolves
 it — the `MyDocuments` known folder on Windows (which follows OneDrive
 folder redirection), `xdg-user-dir DOCUMENTS` on Linux, `~/Documents` as
 the fallback — plus the literal `~/Documents` the SDK resolver scans.
@@ -128,8 +129,8 @@ moment the cloud proxy decodes it, which ships separately (#411); until that
 lands, calls without a decoded workspace keep the project the server started
 for, so run Cline with the MCP server inside the repository. Pass
 `workspace_id` explicitly either way — the session-start message already
-tells the agent to — and reads and writes land in the project the hook
-registered, not wherever the server process happened to
+tells the agent to — so that once #411 lands, reads and writes land in the
+project the hook registered, not wherever the server process happened to
 start.
 
 ## Manual MCP registration

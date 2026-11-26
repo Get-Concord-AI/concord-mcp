@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Global-mode disable now re-checks remembered MCP registrations against the
+  current file before removing them, and Concord-written entries may carry a
+  `CONCORD_MANAGED` marker (used by Cline); hand-written replacements survive.
+
 ## [0.25.0] - 2026-11-25
 
 ### Added
