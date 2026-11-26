@@ -44,6 +44,7 @@ import {
 /** A file read from the sender's worktree, not yet stored with its message. */
 export interface StagedFile extends AttachmentReference {
   content: Buffer;
+  requestedPath: string;
 }
 
 export function sha256Hex(content: Buffer): string {
@@ -240,6 +241,7 @@ export function stageAttachments(
     const filename = displayFilename(basename(path));
     return {
       fileId: fileIdFor(senderAgentId, idempotencyKey, index, sha256),
+      requestedPath: requestedPath(repos, senderAgentId, path),
       filename,
       mediaType: mediaTypeFor(filename),
       sizeBytes: content.length,
@@ -250,18 +252,31 @@ export function stageAttachments(
 }
 
 /**
+ * The path a sender named, made absolute from its registered folder without touching the
+ * disk. A retry compares it, so a source file deleted after the first send can still be
+ * replayed, and a retry that names another file is still refused.
+ */
+function requestedPath(repos: Repositories, agentId: string, path: string): string {
+  const agent = repos.agents.get(agentId);
+  const base = agent?.worktree ?? agent?.cwd ?? process.cwd();
+  return isAbsolute(path) ? resolve(path) : resolve(base, path);
+}
+
+/**
  * The files a retry gets back, as stored with the first send. The retry must name the
- * same files, by name and in the same order, or it is a different message.
+ * same paths, in the same order, or it is a different message.
  */
 function storedReferences(
   repos: Repositories,
+  senderAgentId: string,
   messageId: string,
   attachments: readonly string[],
 ): AttachmentReference[] {
   const stored = repos.sharedFiles.listByMessage(messageId);
-  const named = attachments.map((path) => displayFilename(basename(path)));
+  const named = attachments.map((path) => requestedPath(repos, senderAgentId, path));
   const same =
-    stored.length === named.length && stored.every((file, index) => file.filename === named[index]);
+    stored.length === named.length &&
+    stored.every((file, index) => file.requestedPath === named[index]);
   if (!same) {
     throw new AgentMessageDeliveryError(
       'unauthorized',
@@ -306,7 +321,7 @@ export async function handleSendWithAttachments(
     fresh = stageAttachments(repos, send.agentId, attachments, send.idempotencyKey, workspaceRoot);
     references = fresh;
   } else {
-    references = storedReferences(repos, earlier.messageId, attachments);
+    references = storedReferences(repos, send.agentId, earlier.messageId, attachments);
   }
   const messageId = randomUUID();
   const expiresAt = retentionEnd(Date.now());

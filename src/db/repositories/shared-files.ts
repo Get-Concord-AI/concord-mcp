@@ -11,6 +11,7 @@ export interface NewSharedFile {
   mediaType: string;
   sizeBytes: number;
   sha256: string;
+  requestedPath: string;
   content: Buffer;
   expiresAt: string;
 }
@@ -24,6 +25,8 @@ export interface SharedFileRecord {
   mediaType: string;
   sizeBytes: number;
   sha256: string;
+  /** The path the sender named, made absolute. A retry must name the same path. */
+  requestedPath: string;
   createdAt: string;
   expiresAt: string;
   /** When retention removed the bytes; null while they are still retrievable. */
@@ -53,6 +56,7 @@ const metaRowSchema = z.object({
   media_type: z.string(),
   size_bytes: z.number().int(),
   sha256: z.string(),
+  requested_path: z.string(),
   created_at: z.string(),
   expires_at: z.string(),
   purged_at: z.string().nullable(),
@@ -70,6 +74,7 @@ function toRecord(row: MetaRow): SharedFileRecord {
     mediaType: row.media_type,
     sizeBytes: row.size_bytes,
     sha256: row.sha256,
+    requestedPath: row.requested_path,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     purgedAt: row.purged_at,
@@ -77,7 +82,7 @@ function toRecord(row: MetaRow): SharedFileRecord {
 }
 
 const META_COLUMNS = `file_id, message_id, sender_agent_id, filename, media_type,
-  size_bytes, sha256, created_at, expires_at, purged_at`;
+  size_bytes, sha256, requested_path, created_at, expires_at, purged_at`;
 
 /**
  * Shared files are keyed by their own ids, which are unique across the store, so
@@ -89,10 +94,10 @@ export function createSharedFileRepository(db: ConcordDatabase): SharedFileRepos
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO shared_files (
       file_id, message_id, sender_agent_id, filename, media_type,
-      size_bytes, sha256, content, created_at, expires_at
+      size_bytes, sha256, requested_path, content, created_at, expires_at
     ) VALUES (
       @file_id, @message_id, @sender_agent_id, @filename, @media_type,
-      @size_bytes, @sha256, @content, @created_at, @expires_at
+      @size_bytes, @sha256, @requested_path, @content, @created_at, @expires_at
     )
   `);
   // One statement, so the status check and the delete happen together. A failed
@@ -119,6 +124,7 @@ export function createSharedFileRepository(db: ConcordDatabase): SharedFileRepos
         media_type: file.mediaType,
         size_bytes: file.sizeBytes,
         sha256: file.sha256,
+        requested_path: file.requestedPath,
         content: file.content,
         created_at: createdAt,
         expires_at: file.expiresAt,

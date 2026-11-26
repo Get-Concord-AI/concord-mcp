@@ -324,6 +324,7 @@ describe('files shared with agent messages', () => {
         mediaType: 'text/plain',
         sizeBytes: 3,
         sha256: '0'.repeat(64),
+        requestedPath: join(scratch, 'old.log'),
         content: Buffer.from('old'),
         expiresAt: '2000-01-01T00:00:00.000Z',
       },
@@ -561,5 +562,27 @@ describe('files shared with agent messages', () => {
 
     expect(retry.idempotentReplay).toBe(true);
     expect(retry.message.messageId).toBe(first.message.messageId);
+  });
+
+  it('a retry that swaps two files is refused as a different message', async () => {
+    mkdirSync(join(alpha, 'one'));
+    mkdirSync(join(alpha, 'two'));
+    write(join(alpha, 'one', 'run.log'), 'first');
+    write(join(alpha, 'two', 'run.log'), 'second');
+    await send(['one/run.log', 'two/run.log']);
+
+    await expect(send(['two/run.log', 'one/run.log'])).rejects.toThrow(
+      'already used for a different message',
+    );
+  });
+
+  it('a retry that names a same-named file in another folder is refused', async () => {
+    mkdirSync(join(alpha, 'one'));
+    mkdirSync(join(alpha, 'two'));
+    write(join(alpha, 'one', 'run.log'), 'first');
+    write(join(alpha, 'two', 'run.log'), 'second');
+    await send(['one/run.log']);
+
+    await expect(send(['two/run.log'])).rejects.toThrow('already used for a different message');
   });
 });

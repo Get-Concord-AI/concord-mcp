@@ -321,6 +321,7 @@ export const migrations: readonly string[] = [
     media_type       TEXT NOT NULL,
     size_bytes       INTEGER NOT NULL,
     sha256           TEXT NOT NULL,
+    requested_path   TEXT NOT NULL,
     content          BLOB,
     created_at       TEXT NOT NULL,
     expires_at       TEXT NOT NULL,
