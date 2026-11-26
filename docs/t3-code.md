@@ -96,7 +96,7 @@ you want shared.
 
 | Harness     | Busy turn                                | Idle session                                                                      |
 | ----------- | ---------------------------------------- | --------------------------------------------------------------------------------- |
-| Claude Code | PostToolUse and Stop hooks — verified    | `asyncRewake` waiter — not observed in live T3 smoke; treat idle as unproven      |
+| Claude Code | PostToolUse verified; Stop inferred      | `asyncRewake` waiter — not observed in live T3 smoke; treat idle as unproven      |
 | Codex       | Hook drain into payload-derived inbox    | Next prompt — verified for payload-derived id; explicit-id inboxes stay pull-only |
 | OpenCode    | Agent reads its inbox via `inspect_work` | Waits until the agent checks — registration verified, delivery unverified         |
 | Grok Build  | Hooks                                    | Agent-started `concord inbox watch` monitor                                       |
@@ -159,8 +159,11 @@ optional: choose a unique id per thread and pass it on every workflow call.
 That explicit id is what gives the thread stable task ownership, but it is not
 the inbox the Codex drain hooks empty. Send operational messages to the
 payload-derived id when that is the identity the hooks registered, or read an
-explicit-id inbox with `inspect_work` using the same id. Never reuse one
-explicit id across threads: two threads sharing an id claim as each other.
+explicit-id inbox with `inspect_work` using the same id. Once the thread has
+made its first tool call, peers can find its `codex:<hash>` id with
+`concord who` or `inspect_work`; until then, target the explicit id and
+expect pull-only delivery. Never reuse one explicit id across threads: two
+threads sharing an id claim as each other.
 Keeping the two drain entries is therefore worth it even though part of the
 delivery becomes pull-based — and removing them as well takes the thread
 fully down to `inspect_work`-only: nothing is pushed into a busy turn at all.
