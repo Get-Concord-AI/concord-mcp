@@ -71,10 +71,10 @@ describe('CLI read/export commands', () => {
     dir = seededRepo();
   });
 
+  // Deliberately minimal: nothing from process.env leaks into the report.
   // No harness on PATH, so doctor skips every executable probe: the report
   // stays fast and identical on machines with many agent CLIs installed.
-  function doctorEnv(): NodeJS.ProcessEnv {
-    const home = join(dir, 'home');
+  function doctorEnv(home = join(dir, 'home')): NodeJS.ProcessEnv {
     return { HOME: home, USERPROFILE: home, PATH: join(home, 'bin') };
   }
 
@@ -157,7 +157,7 @@ describe('CLI read/export commands', () => {
   it('doctor fails on a dangling Claude plugin link and --fix re-points it', async () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-doctor-home-'));
     // No harness on PATH, so only the link decides whether doctor passes.
-    const env = { HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude'), PATH: join(home, 'bin') };
+    const env = { ...doctorEnv(home), CLAUDE_CONFIG_DIR: join(home, '.claude') };
     const link = claudeSkillsPluginPath(env);
     // Independent of where this checkout lives, including under /tmp.
     const lasting = (): boolean => false;
