@@ -591,19 +591,19 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     )
     .action(async (options) => {
       const grokStop = options.provider === 'grok' && options.format === 'stop';
-      // Hook formats only ever run as hooks, whose stdin always ends, so the
-      // payload (read evidence, subagent marker, project dir) is safe to read
-      // even without --from-hook. Identity still comes from it only with
-      // --from-hook.
-      const hookPayload =
+      const wantsHookPayload =
         options.fromHook === true ||
         options.payloadStdin === true ||
-        HOOK_FORMATS.includes(options.format)
-          ? (readHookPayload() ?? '')
-          : undefined;
-      const pinnedEnv = payloadPinnedEnv(hookPayload, options.provider);
-      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS }, pinnedEnv);
-      if (access.kind === 'local' && !workspaceExists(process.cwd(), pinnedEnv)) return;
+        HOOK_FORMATS.includes(options.format);
+      // Vibe pins repo-root resolution to the payload's cwd, so only it needs
+      // the payload before access is resolved. Read stdin later, once a path
+      // below can use it: drains that return early must not block on a stdin
+      // that never ends.
+      const vibePayload =
+        options.provider === 'vibe' && wantsHookPayload ? (readHookPayload() ?? '') : undefined;
+      const accessEnv = payloadPinnedEnv(vibePayload, options.provider);
+      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS }, accessEnv);
+      if (access.kind === 'local' && !workspaceExists(process.cwd(), accessEnv)) return;
       // Checked before anything is taken: a format typo must not cost a batch.
       if (!DRAIN_FORMATS.includes(options.format)) {
         throw new Error(`Unknown --format: ${options.format}`);
@@ -617,6 +617,8 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         reportCloudFailure(access.reason);
         return;
       }
+      const hookPayload = vibePayload ?? (wantsHookPayload ? (readHookPayload() ?? '') : undefined);
+      const pinnedEnv = payloadPinnedEnv(hookPayload, options.provider);
       const agentId = resolveInboxOwner(options.agent, process.env, {
         kind: options.provider,
         ...(options.fromHook === true ? { hookPayload } : {}),
