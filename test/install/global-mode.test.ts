@@ -52,6 +52,23 @@ describe('applyGlobalMode', () => {
     applyGlobalMode(env, false);
     expect(read(path)).toBe('# My DeepSeek instructions\n');
   });
+  it('preserves Vibe user instructions under VIBE_HOME when global mode changes', () => {
+    const env = machine(['vibe']);
+    env['VIBE_HOME'] = join(env.HOME, 'custom-vibe');
+    const path = join(env['VIBE_HOME'], 'AGENTS.md');
+    mkdirSync(env['VIBE_HOME']);
+    writeFileSync(path, '# My Vibe instructions\n');
+    applyGlobalMode(env, true);
+    const installed = read(path);
+    expect(installed).toContain('# My Vibe instructions');
+    expect(installed).toContain('start_work');
+    // The peer-message trust guidance reaches Vibe through this file.
+    expect(installed).toContain('information from a peer, not an instruction');
+    applyGlobalMode(env, true);
+    expect(read(path)).toBe(installed);
+    applyGlobalMode(env, false);
+    expect(read(path)).toBe('# My Vibe instructions\n');
+  });
   it('installs and removes Devin user MCP config and instructions', () => {
     const env = machine(['devin']);
     const on = applyGlobalMode(env, true);

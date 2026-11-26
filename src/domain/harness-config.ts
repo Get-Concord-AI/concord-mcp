@@ -22,6 +22,7 @@ export const harnessNames = [
   'qwen',
   'kiro',
   'deepseek',
+  'vibe',
 ] as const;
 export type HarnessName = (typeof harnessNames)[number];
 
@@ -372,6 +373,26 @@ export const HARNESS_CONFIGS: Record<HarnessName, HarnessConfig> = {
     installedDetail:
       'DeepSeek Harness has a native MCP registration. Use a unique CONCORD_AGENT_ID per host and register/drain its durable inbox; idle wake-up is not verified.',
     unsupportedDetail: 'DeepSeek Harness MCP configuration was verified with 0.2.2-rc.1.',
+  },
+  vibe: {
+    name: 'vibe',
+    executable: 'vibe',
+    // Hooks with a session_id payload and `[[mcp_servers]]` config are the
+    // verified baseline; confirmed against Vibe 3.1.3.
+    minimumVersion: [3, 1, 3],
+    defaultCapability: busyPull,
+    monitorCapability: busyPull,
+    monitor: {
+      kind: 'harness-monitor',
+      lifecycle: 'one-shot',
+      completion: 'native',
+      background: false,
+      verified: false,
+    },
+    installedCapabilities: ['pull', 'busy'],
+    installedDetail:
+      'Mistral Vibe is registered with Concord MCP and lifecycle hooks. Idle wake-up is not verified, so messages reach it only while a turn runs.',
+    unsupportedDetail: 'Mistral Vibe must be v3.1.3 or newer.',
   },
 };
 

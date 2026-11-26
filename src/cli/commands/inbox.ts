@@ -23,6 +23,7 @@ import {
   renderGeminiAfterTool,
   renderHookPayload,
   renderMonitorLines,
+  renderVibeHookPayload,
   toDeliverable,
   type DeliverableMessage,
 } from '../../domain/pull-inbox.js';
@@ -313,6 +314,27 @@ export function readHookPayload(): string | undefined {
   }
 }
 
+/**
+ * Env pinned to the hook payload's project dir, for the providers whose
+ * generic hook path needs it. Vibe inherits its launcher's environment, which
+ * can carry a stale `CLAUDE_PROJECT_DIR` or `CONCORD_REPO_ROOT` pointing at
+ * another checkout; the payload's `cwd` is the session's real project, so it
+ * wins for repo-root resolution. Other providers must not be pinned here —
+ * a Claude Code session that `cd`s into another checkout still belongs to the
+ * workspace it registered in, and pinning would drain and acknowledge the
+ * wrong inbox. Kiro and Hermes pin inside their own hook handlers instead.
+ */
+export function payloadPinnedEnv(
+  hookPayload: string | undefined,
+  provider: string,
+): NodeJS.ProcessEnv {
+  if (provider !== 'vibe') return process.env;
+  if (hookPayload === undefined) return process.env;
+  const cwd = parseObservedHook(hookPayload)?.cwd;
+  if (cwd === undefined || cwd.trim() === '') return process.env;
+  return { ...process.env, CONCORD_REPO_ROOT: cwd };
+}
+
 export function registeredLine(agentId: string, provider: string): string {
   // A harness monitor may not inherit the session's environment (Grok's does
   // not), so hand the agent the exact command with its id already filled in.
@@ -393,6 +415,7 @@ const HOOK_FORMATS: readonly string[] = [
   'pre-tool-use',
   'gemini-after-tool',
   'gemini-after-agent',
+  'vibe',
 ];
 
 const DRAIN_FORMATS: readonly string[] = [
@@ -402,6 +425,7 @@ const DRAIN_FORMATS: readonly string[] = [
   'gemini-after-agent',
   'post-tool-use',
   'stop',
+  'vibe',
   'pre-tool-use',
 ];
 
@@ -421,6 +445,10 @@ function writeMessages(format: string, messages: readonly DeliverableMessage[]):
   }
   if (format === 'gemini-after-agent') {
     process.stdout.write(renderGeminiAfterAgent(messages));
+    return;
+  }
+  if (format === 'vibe') {
+    process.stdout.write(renderVibeHookPayload(messages));
     return;
   }
   if (format === 'post-tool-use' || format === 'stop' || format === 'pre-tool-use') {
@@ -562,8 +590,20 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
       'json',
     )
     .action(async (options) => {
-      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
-      if (access.kind === 'local' && !workspaceExists(process.cwd())) return;
+      const grokStop = options.provider === 'grok' && options.format === 'stop';
+      const wantsHookPayload =
+        options.fromHook === true ||
+        options.payloadStdin === true ||
+        HOOK_FORMATS.includes(options.format);
+      // Vibe pins repo-root resolution to the payload's cwd, so only it needs
+      // the payload before access is resolved. Read stdin later, once a path
+      // below can use it: drains that return early must not block on a stdin
+      // that never ends.
+      const vibePayload =
+        options.provider === 'vibe' && wantsHookPayload ? (readHookPayload() ?? '') : undefined;
+      const accessEnv = payloadPinnedEnv(vibePayload, options.provider);
+      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS }, accessEnv);
+      if (access.kind === 'local' && !workspaceExists(process.cwd(), accessEnv)) return;
       // Checked before anything is taken: a format typo must not cost a batch.
       if (!DRAIN_FORMATS.includes(options.format)) {
         throw new Error(`Unknown --format: ${options.format}`);
@@ -577,20 +617,18 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         reportCloudFailure(access.reason);
         return;
       }
-      const grokStop = options.provider === 'grok' && options.format === 'stop';
-      // Hook formats only ever run as hooks, whose stdin always ends, so the
-      // payload (read evidence, subagent marker) is safe to read even without
-      // --from-hook. Identity still comes from it only with --from-hook.
-      const hookPayload =
-        options.fromHook === true ||
-        options.payloadStdin === true ||
-        HOOK_FORMATS.includes(options.format)
-          ? (readHookPayload() ?? '')
-          : undefined;
+      const hookPayload = vibePayload ?? (wantsHookPayload ? (readHookPayload() ?? '') : undefined);
+      const pinnedEnv = payloadPinnedEnv(hookPayload, options.provider);
       const agentId = resolveInboxOwner(options.agent, process.env, {
         kind: options.provider,
         ...(options.fromHook === true ? { hookPayload } : {}),
       });
+      // A subagent shares its parent's session id, so its hooks resolve the
+      // parent's agent. Draining there would hand the parent's messages to
+      // whichever subagent ran a tool, and its activity proves nothing about
+      // what the parent's model saw (#216). The cloud drain registers and
+      // advertises the agent it is given, so the check must precede it too.
+      if (hookPayload !== undefined && isSubagentHook(parseObservedHook(hookPayload))) return;
       // The receiver lookup runs only on a Grok Stop, never on the per-tool-call hook path.
       const monitorNudge = (receiverIsActive: () => boolean): string | undefined =>
         grokStop && hookPayload !== undefined
@@ -612,13 +650,8 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
         }
         return;
       }
-      // A subagent shares its parent's session id, so its hooks resolve the
-      // parent's agent. Draining there would hand the parent's messages to
-      // whichever subagent ran a tool, and its activity proves nothing about
-      // what the parent's model saw (#216).
-      if (hookPayload !== undefined && isSubagentHook(parseObservedHook(hookPayload))) return;
       const context = await import('../context.js').then((module) =>
-        module.openContext(process.cwd()),
+        module.openContext(process.cwd(), pinnedEnv),
       );
       const isMonitor = options.format === 'monitor';
       // Read evidence first, so this invocation never marks read a message it
@@ -673,17 +706,18 @@ export function registerInboxCommand(program: Command, telemetry?: TelemetryReco
     .action(async (options) => {
       // Seen-tracking lives in the local store; Concord Cloud keeps its own
       // delivery record. Prints nothing: UserPromptSubmit output becomes context.
-      const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS });
-      if (access.kind !== 'local' || !workspaceExists(process.cwd())) return;
       try {
         const payload = readHookPayload() ?? '';
+        const pinnedEnv = payloadPinnedEnv(payload, options.provider);
+        const access = cloudAccess(process.cwd(), { timeoutMs: HOOK_TIMEOUT_MS }, pinnedEnv);
+        if (access.kind !== 'local' || !workspaceExists(process.cwd(), pinnedEnv)) return;
         const agentId = resolveAgentId(options.agent, process.env, {
           kind: options.provider,
           hookPayload: payload,
         });
         const context = await import('../context.js');
         observeHookEvent(
-          context.openContext(process.cwd()).repos,
+          context.openContext(process.cwd(), pinnedEnv).repos,
           agentId,
           payload,
           options.provider,

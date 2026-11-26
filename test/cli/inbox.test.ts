@@ -7,11 +7,13 @@ import {
   renderGeminiAfterTool,
   renderHookPayload,
   renderMonitorLines,
+  renderVibeHookPayload,
   type DeliverableMessage,
 } from '../../src/domain/pull-inbox.js';
 import { CONCORD_SERVER_INSTRUCTIONS } from '../../src/install/instructions.js';
 import {
   drainInbox,
+  payloadPinnedEnv,
   registeredLine,
   registerPullEndpoint,
   watchInbox,
@@ -356,6 +358,27 @@ describe('pull-transport inbox', () => {
     expect(JSON.stringify(afterAgent)).toContain('New constraint');
   });
 
+  it('uses Vibe snake_case hook contract for drained messages', () => {
+    const messages: DeliverableMessage[] = [
+      {
+        messageId: 'm1',
+        senderAgentId: 'alpha',
+        taskId: null,
+        content: 'New constraint',
+        messageKind: 'prompt',
+        expectsReply: true,
+        deliveryLatencyMs: 10,
+      },
+    ];
+    const vibe: unknown = JSON.parse(renderVibeHookPayload(messages));
+    expect(vibe).toMatchObject({
+      hook_specific_output: {
+        additional_context: '[concord from alpha id=m1]\nNew constraint',
+      },
+    });
+    expect(JSON.stringify(vibe)).not.toContain('hookSpecificOutput');
+  });
+
   it('gives two sessions started in the same minute different identities', () => {
     // Codex session ids are UUIDv7: the leading hex is a millisecond clock, so
     // the first eight characters only change about once a minute.
@@ -389,5 +412,26 @@ describe('registeredLine', () => {
 
   it('names no monitor for a harness without a monitor command', () => {
     expect(registeredLine('claude-code:4f2a91c7', 'claude-code')).not.toContain('inbox watch');
+  });
+});
+
+describe('payloadPinnedEnv provider scoping', () => {
+  const payload = JSON.stringify({ session_id: 's1', cwd: '/elsewhere' });
+
+  it('pins CONCORD_REPO_ROOT from the payload cwd for vibe', () => {
+    const env = payloadPinnedEnv(payload, 'vibe');
+    expect(env['CONCORD_REPO_ROOT']).toBe('/elsewhere');
+  });
+
+  it('never pins for other providers, so a cd elsewhere keeps the session workspace', () => {
+    for (const provider of ['claude-code', 'codex', 'cursor', 'kiro', 'hermes']) {
+      const env = payloadPinnedEnv(payload, provider);
+      expect(env['CONCORD_REPO_ROOT']).toBe(process.env['CONCORD_REPO_ROOT']);
+    }
+  });
+
+  it('leaves the environment untouched when the payload has no cwd', () => {
+    const env = payloadPinnedEnv(JSON.stringify({ session_id: 's1' }), 'vibe');
+    expect(env['CONCORD_REPO_ROOT']).toBe(process.env['CONCORD_REPO_ROOT']);
   });
 });

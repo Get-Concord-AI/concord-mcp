@@ -1,4 +1,13 @@
-import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 import { z } from 'zod';
@@ -35,11 +44,19 @@ const observedHookSchema = z
     notification_type: z.string().optional(),
     /** The session's conversation so far, where the harness exposes one. */
     transcript_path: z.string().nullable().optional(),
+    /** The session's project directory, where the harness reports one (Vibe). */
+    cwd: z.string().optional(),
     /**
      * Set when the hook fired inside a subagent or a background agent forked
      * from the session, rather than in the session's own conversation.
      */
     agent_id: z.string().optional(),
+    /**
+     * Vibe spells its subagent marker differently: every payload carries
+     * `parent_session_id`, null in the session's own conversation and the
+     * parent's session id inside a spawned subagent.
+     */
+    parent_session_id: z.string().nullable().optional(),
     /** Grok spells its payload in camelCase. */
     hookEventName: z.string().optional(),
     transcriptPath: z.string().nullable().optional(),
@@ -57,6 +74,10 @@ const EVENT_NAMES: Readonly<Record<string, string>> = {
   notification: 'Notification',
   stop: 'Stop',
   session_end: 'SessionEnd',
+  // Vibe names its lifecycle events after the agent loop, not the tools.
+  pre_agent: 'UserPromptSubmit',
+  post_agent: 'Stop',
+  post_tool: 'PostToolUse',
 };
 
 function eventName(hook: ObservedHook): string | undefined {
@@ -65,19 +86,172 @@ function eventName(hook: ObservedHook): string | undefined {
 }
 
 /**
- * The file holding what the model was actually sent. Grok's hooks point at
- * `updates.jsonl`, its UI event stream; the conversation itself (hook context
- * as `user` entries, the model's turns as `assistant`) is `chat_history.jsonl`
- * beside it.
+ * The conversation texts a hook's `transcript_path` resolves to, re-read on
+ * every call so retries see late writes. Each text is scanned independently:
+ * entries are only meaningful in the order their own file wrote them.
  */
-function conversationFile(hook: ObservedHook): string | undefined {
+type TranscriptTexts = () => readonly (string | undefined)[];
+
+function conversationTexts(hook: ObservedHook): TranscriptTexts | undefined {
   const path = hook.transcript_path ?? hook.transcriptPath ?? undefined;
   if (path === undefined || path === '') return undefined;
   if (basename(path) === 'updates.jsonl') {
+    // Grok's hooks point at `updates.jsonl`, its UI event stream; the
+    // conversation itself (hook context as `user` entries, the model's turns
+    // as `assistant`) is `chat_history.jsonl` beside it.
     const history = join(dirname(path), 'chat_history.jsonl');
-    if (existsSync(history)) return history;
+    if (existsSync(history)) return () => [readTail(history)];
   }
-  return path;
+  try {
+    if (statSync(path).isDirectory()) {
+      // Vibe's transcript_path is the session directory: chunks/ holds the
+      // readable conversation as compacted history snapshots, journal/ the
+      // event log the model never sees directly.
+      const chunks = join(path, 'chunks');
+      if (existsSync(chunks)) return () => vibeChunkTexts(chunks);
+      const journal = join(path, 'journal');
+      if (existsSync(journal)) return () => [readJournalTail(journal)];
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return () => [readTail(path)];
+}
+
+/**
+ * The tail of a session journal: newest chunks first until the byte budget is
+ * spent, then re-ordered oldest→newest so `scanTranscript` sees entries in
+ * conversation order. Unread candidates are always recent, so the tail suffices.
+ */
+function readJournalTail(dir: string): string | undefined {
+  let names: string[];
+  try {
+    names = readdirSync(dir)
+      .filter((name) => name.endsWith('.jsonl'))
+      .sort()
+      .reverse();
+  } catch {
+    return undefined;
+  }
+  const parts: string[] = [];
+  let budget = TRANSCRIPT_TAIL_BYTES;
+  for (const name of names) {
+    const text = readTail(join(dir, name), budget);
+    if (text === undefined) continue;
+    parts.unshift(text);
+    budget -= Buffer.byteLength(text, 'utf8');
+    if (budget <= 0) break;
+  }
+  return parts.join('');
+}
+
+const vibeChunkPartSchema = z.object({ text: z.string().optional() }).loose();
+const vibeChunkEntrySchema = z
+  .object({
+    message: z
+      .object({
+        role: z.string().optional(),
+        content: z.union([z.string(), z.array(vibeChunkPartSchema)]).optional(),
+      })
+      .loose()
+      .optional(),
+  })
+  .loose();
+type VibeChunkEntry = z.infer<typeof vibeChunkEntrySchema>;
+const vibeChunkEntriesSchema = z.array(vibeChunkEntrySchema.catch({}));
+
+/** One Vibe history entry as a JSONL line `scanTranscript` can classify. */
+function vibeChunkLine(entry: VibeChunkEntry): string | undefined {
+  const message = entry.message;
+  if (message === undefined) return undefined;
+  const content = message.content;
+  const text =
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content.map((part) => part.text ?? '').join('\n')
+        : '';
+  if (text.trim() === '') return undefined;
+  return JSON.stringify({ role: message.role ?? 'user', content: text });
+}
+
+/**
+ * Vibe's `chunks/*.json` snapshots are content-addressed and pooled: when a
+ * generation compacts the conversation, the discarded chunks stay in the
+ * directory, and only the live manifest — `generations/<gen>/manifest.json`,
+ * with the active generation named in `CURRENT` — says which chunks still
+ * make up the conversation, in order. Scanning the pool by mtime would read
+ * replies out of discarded chunks and mark messages read the model can no
+ * longer see, suppressing the session-end requeue. When no manifest can be
+ * resolved the scanner yields nothing: a missed receipt only requeues, while
+ * a false one loses the message.
+ */
+const vibeCurrentSchema = z.object({ generation: z.string() }).loose();
+const vibeManifestSchema = z
+  .object({ runtime_state: z.object({ chunks: z.array(z.string()) }).loose() })
+  .loose();
+
+function vibeLiveChunkNames(dir: string): string[] | undefined {
+  try {
+    const sessionDir = dirname(dir);
+    const currentRaw: unknown = JSON.parse(readFileSync(join(sessionDir, 'CURRENT'), 'utf8'));
+    const current = vibeCurrentSchema.safeParse(currentRaw);
+    if (!current.success) return undefined;
+    const manifestRaw: unknown = JSON.parse(
+      readFileSync(
+        join(sessionDir, 'generations', current.data.generation, 'manifest.json'),
+        'utf8',
+      ),
+    );
+    const manifest = vibeManifestSchema.safeParse(manifestRaw);
+    if (!manifest.success) return undefined;
+    // Names must be plain file keys; anything else would be a path escape.
+    return manifest.data.runtime_state.chunks.filter((name) => /^[A-Za-z0-9_-]+$/u.test(name));
+  } catch {
+    return undefined;
+  }
+}
+
+function vibeChunkTexts(dir: string): (string | undefined)[] {
+  const live = vibeLiveChunkNames(dir);
+  if (live === undefined) return [];
+  // The manifest lists the conversation oldest first; the budget goes to the
+  // newest chunks, then the parts emit in conversation order so read evidence
+  // spanning two chunks still matches in the joined stream.
+  const parts: string[] = [];
+  let budget = TRANSCRIPT_TAIL_BYTES;
+  const chosen: string[] = [];
+  for (const name of [...live].reverse()) {
+    const path = join(dir, `${name}.json`);
+    try {
+      const size = statSync(path).size;
+      if (size > budget) break;
+      chosen.unshift(name);
+      budget -= size;
+    } catch {
+      // A manifest entry whose file is missing simply contributes nothing.
+    }
+    if (budget <= 0) break;
+  }
+  for (const name of chosen) {
+    let text: string | undefined;
+    try {
+      const raw: unknown = JSON.parse(readFileSync(join(dir, `${name}.json`), 'utf8'));
+      const entries = vibeChunkEntriesSchema.safeParse(raw);
+      if (entries.success) {
+        text = entries.data
+          .map(vibeChunkLine)
+          .filter((line): line is string => line !== undefined)
+          .join('\n');
+      }
+    } catch {
+      text = undefined;
+    }
+    if (text !== undefined && text !== '') parts.push(text);
+  }
+  const joined = parts.join('\n');
+  return joined === '' ? [] : [joined];
 }
 
 /**
@@ -100,21 +274,27 @@ function pause(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-/** Ids the transcript at `path` proves were read, waiting briefly for a late write. */
-function readFromTranscript(path: string, candidates: readonly string[]): string[] {
-  const read = new Set<string>();
+/** Ids the transcript proves were read, waiting briefly for a late write. */
+function readFromTranscript(texts: TranscriptTexts, candidates: readonly string[]): string[] {
+  const found = new Set<string>();
   let remaining = [...candidates];
   for (let attempt = 0; attempt <= TRANSCRIPT_RETRIES && remaining.length > 0; attempt += 1) {
     if (attempt > 0) pause(TRANSCRIPT_RETRY_MS);
-    const text = readTail(path);
-    if (text === undefined) break;
-    const scan = scanTranscript(text, remaining);
-    for (const id of scan.read) read.add(id);
+    const pending = new Set<string>();
+    let sawText = false;
+    for (const text of texts()) {
+      if (text === undefined) continue;
+      sawText = true;
+      const scan = scanTranscript(text, remaining);
+      for (const id of scan.read) found.add(id);
+      for (const id of scan.pending) pending.add(id);
+    }
+    if (!sawText) break;
     // Only a message already shown, with the model's turn still to land, is worth waiting for.
-    if (scan.pending.length === 0) break;
-    remaining = scan.pending;
+    remaining = [...pending].filter((id) => !found.has(id));
+    if (remaining.length === 0) break;
   }
-  return [...read];
+  return [...found];
 }
 
 export interface Observation {
@@ -143,15 +323,20 @@ export function hookSession(rawJson: string): string | null {
 
 /** A hook fired by a subagent or a forked background agent, not the session itself. */
 export function isSubagentHook(hook: ObservedHook | undefined): boolean {
-  return hook?.agent_id !== undefined && hook.agent_id !== '';
+  return (
+    (hook?.agent_id !== undefined && hook.agent_id !== '') ||
+    (hook?.parent_session_id !== undefined &&
+      hook.parent_session_id !== null &&
+      hook.parent_session_id !== '')
+  );
 }
 
-function readTail(path: string): string | undefined {
+function readTail(path: string, maxBytes: number = TRANSCRIPT_TAIL_BYTES): string | undefined {
   let fd: number | undefined;
   try {
     fd = openSync(path, 'r');
     const size = fstatSync(fd).size;
-    const length = Math.min(size, TRANSCRIPT_TAIL_BYTES);
+    const length = Math.min(size, maxBytes);
     const buffer = Buffer.alloc(length);
     readSync(fd, buffer, 0, length, size - length);
     return buffer.toString('utf8');
@@ -181,13 +366,13 @@ function observeRead(
         .map((message) => message.messageId),
     );
   }
-  const transcriptPath = conversationFile(hook);
-  if (transcriptPath !== undefined) {
+  const texts = conversationTexts(hook);
+  if (texts !== undefined) {
     const remaining = candidates.filter((id) => !read.includes(id));
     if (remaining.length > 0) {
       read.push(
         ...repos.agentMessages
-          .markRead(agentId, session, readFromTranscript(transcriptPath, remaining), 'transcript')
+          .markRead(agentId, session, readFromTranscript(texts, remaining), 'transcript')
           .map((message) => message.messageId),
       );
     }
@@ -231,7 +416,16 @@ export function observeHookEvent(
       }
       break;
     case 'Notification':
-      if (hook.notification_type === 'permission_prompt') awaitUser(repos, agentId);
+      // Vibe reports the same blocked-on-user states as approval/question
+      // notifications rather than Claude's permission_prompt.
+      if (
+        hook.notification_type !== undefined &&
+        ['permission_prompt', 'approval_requested', 'question_asked'].includes(
+          hook.notification_type,
+        )
+      ) {
+        awaitUser(repos, agentId);
+      }
       break;
     case 'SessionStart':
       // A session-start hook sees the session as it is now; binding it here

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { inlineTableKeys, tomlKeyPath, tomlLines } from '../../src/install/toml-lines.js';
+import {
+  inlineTableKeys,
+  tomlAssignment,
+  tomlHeader,
+  tomlKeyParts,
+  tomlKeyPath,
+  tomlLines,
+} from '../../src/install/toml-lines.js';
 
 function insideStrings(source: string): string[] {
   return [...tomlLines(source)].filter((line) => line.inString).map((line) => line.text);
@@ -39,5 +46,71 @@ describe('tomlKeyPath', () => {
     expect(tomlKeyPath(`mcp_servers.'concord'.env`)).toBe('mcp_servers.concord.env');
     expect(tomlKeyPath('mcp_servers."concord.env"')).toBe('mcp_servers."concord.env"');
     expect(tomlKeyPath('"my server"')).toBe('"my server"');
+  });
+
+  it('decodes TOML basic-string escapes in quoted keys', () => {
+    expect(tomlKeyPath('"mcp_\\u0073ervers"')).toBe('mcp_servers');
+    expect(tomlKeyPath('mcp_servers."e\\u006ev"')).toBe('mcp_servers.env');
+    expect(tomlKeyParts('"\\U0001F600"')).toEqual(['😀']);
+  });
+
+  it('does not decode escapes in literal keys or invalid basic-string escapes', () => {
+    expect(tomlKeyParts(`'mcp_\\u0073ervers'`)).toEqual(['mcp_\\u0073ervers']);
+    expect(tomlKeyParts('"mcp_\\qservers"')).toEqual(['mcp_\\qservers']);
+    expect(tomlKeyParts('"mcp_\\uD800ervers"')).toEqual(['mcp_\\uD800ervers']);
+  });
+});
+
+describe('tomlHeader', () => {
+  it('reads array and table headers with decoded key paths', () => {
+    expect(tomlHeader('  [[mcp_servers]] # servers')).toMatchObject({
+      array: true,
+      parts: ['mcp_servers'],
+      path: 'mcp_servers',
+    });
+    expect(tomlHeader('[mcp_servers."e\\u006ev"]')).toMatchObject({
+      array: false,
+      parts: ['mcp_servers', 'env'],
+      path: 'mcp_servers.env',
+    });
+  });
+
+  it('rejects incomplete headers and trailing junk', () => {
+    expect(tomlHeader('[mcp_servers.env] trailing')).toBeUndefined();
+    expect(tomlHeader('[[ ]]')).toBeUndefined();
+  });
+
+  it('ignores closing brackets inside quoted keys', () => {
+    expect(tomlHeader('[["mcp_servers]] # backup"]]')).toMatchObject({
+      array: true,
+      parts: ['mcp_servers]] # backup'],
+      path: '"mcp_servers]] # backup"',
+    });
+    expect(tomlHeader('[mcp_servers."e]nv"]')).toMatchObject({
+      array: false,
+      parts: ['mcp_servers', 'e]nv'],
+      path: 'mcp_servers."e]nv"',
+    });
+  });
+
+  it('rejects headers whose quoted key never closes', () => {
+    expect(tomlHeader('["unclosed]')).toBeUndefined();
+    expect(tomlHeader('[["mcp_servers] # backup"]')).toBeUndefined();
+  });
+});
+
+describe('tomlAssignment', () => {
+  it('reads assignments with decoded quoted keys', () => {
+    const assignment = tomlAssignment(' "mcp_\\u0073ervers" = [] # servers');
+    expect(assignment?.parts).toEqual(['mcp_servers']);
+    expect(assignment?.path).toBe('mcp_servers');
+    expect(assignment?.value).toBe('[] # servers');
+  });
+
+  it('finds the separator outside quoted keys only', () => {
+    const assignment = tomlAssignment('"a=b" = 1');
+    expect(assignment?.parts).toEqual(['a=b']);
+    expect(assignment?.value).toBe('1');
+    expect(tomlAssignment('# comment = 1')).toBeUndefined();
   });
 });

@@ -7,7 +7,11 @@ import { ensureAgentRegistered } from '../../tools/register-agent.js';
 import { cloudRoster } from './cloud-hooks.js';
 import { cloudAccess, drainFromCloud, HOOK_TIMEOUT_MS, registerInCloud } from './cloud-inbox.js';
 import { drainInbox, registerPullEndpoint } from './inbox.js';
-import { sessionStartMessage, type RosterLine } from './session-start-message.js';
+import {
+  DEVIN_SESSION_IDENTITY,
+  sessionStartMessage,
+  type RosterLine,
+} from './session-start-message.js';
 
 /**
  * Devin CLI lifecycle hooks (`.devin/hooks.v1.json`). Devin passes its session
@@ -33,7 +37,7 @@ export function devinSessionStartOutput(agentId: string, others: readonly Roster
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
-      additionalContext: sessionStartMessage(agentId, others, true),
+      additionalContext: sessionStartMessage(agentId, others, DEVIN_SESSION_IDENTITY),
     },
   });
 }

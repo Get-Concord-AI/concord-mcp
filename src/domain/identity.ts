@@ -34,6 +34,8 @@ export interface SessionSource {
  * environment (`HOME`, `LANG`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `TMPDIR`,
  * `USER` — no session id, not even `PWD`) and passes its session id on stdin to
  * hooks instead. Codex therefore resolves through `hookPayload`, never here.
+ * Vibe is absent for the same reason: its MCP children get a scrubbed
+ * environment and hooks carry `session_id` on stdin.
  */
 export const SESSION_SOURCES: readonly SessionSource[] = [
   { kind: 'claude-code', envVar: 'CLAUDE_CODE_SESSION_ID' },

@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Mistral Vibe adapter: `concord setup` registers the Concord MCP server in
+  `~/.vibe/config.toml` and installs six lifecycle hooks in
+  `~/.vibe/hooks.toml` (session start/end plus inbox drain and read-receipt
+  observation), gated on Vibe 3.1.3+. Delivery is busy-only — Vibe has no
+  verified idle wake-up — and global mode manages the Concord instruction
+  block in `$VIBE_HOME/AGENTS.md`, which carries the peer-message trust
+  guidance. Setup and uninstall only touch entries matching the shape
+  Concord writes, so a hand-written `concord` server or a `concord-*` hook
+  the user added themselves is left alone, and hook commands pin the
+  workspace to the payload's project directory.
+
 ### Fixed
 
 - Removing the last property of a JSONC object no longer drops a comment

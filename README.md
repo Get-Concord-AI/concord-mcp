@@ -203,6 +203,7 @@ path.
 | Kiro                               | [Setup and delivery](./docs/kiro.md)               |
 | OpenCode                           | [Setup and delivery](./docs/opencode.md)           |
 | Devin CLI                          | Project-level setup via `concord setup`            |
+| Mistral Vibe                       | [Setup and delivery](./docs/vibe.md)               |
 | Conductor (Claude Code, Codex)     | [Setup and delivery](./docs/conductor.md)          |
 | Aider (no MCP client)              | [Shell-only setup](./docs/aider.md)                |
 | T3 Code                            | [Setup and delivery](./docs/t3-code.md)            |

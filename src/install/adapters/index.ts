@@ -23,7 +23,10 @@ import {
 } from '../../domain/harness-config.js';
 import { userHome } from '../../config/paths.js';
 import { installOpencode, statusOpencode } from './opencode.js';
+import { installVibe, statusVibe } from './vibe.js';
 import { atLeast, executablePath, run, versionTuple } from './probe.js';
+import { uninstallVibeMcpConfig } from '../vibe-config.js';
+import { removeVibeHooks } from '../vibe-hooks.js';
 import {
   devinMcpInstalled,
   installDevinMcpConfig,
@@ -658,6 +661,8 @@ export function statusAdapter(
       return statusKiro(kiroExecutablePath(env), repoRoot, env);
     case 'deepseek':
       return statusDeepseek(executablePath(HARNESS_CONFIGS.deepseek.executable, env), env);
+    case 'vibe':
+      return statusVibe(executablePath(HARNESS_CONFIGS.vibe.executable, env), env);
   }
 }
 
@@ -788,6 +793,9 @@ export function installAdapter(
     case 'deepseek':
       installDeepseekConfig(env);
       return;
+    case 'vibe':
+      installVibe(executable, env);
+      return;
   }
 }
 
@@ -882,6 +890,8 @@ export function uninstallGlobalAdapters(env: NodeJS.ProcessEnv = process.env): A
   uninstallDevinMcpConfig(env);
   removeDevinUserHooks(env);
   uninstallKiroUserConfigs(env);
+  uninstallVibeMcpConfig(env);
+  removeVibeHooks(env);
   const statePath = join(userHome(env), '.concord', 'adapters.json');
   if (existsSync(statePath)) rmSync(statePath);
   return statusGlobalAdapters(env);

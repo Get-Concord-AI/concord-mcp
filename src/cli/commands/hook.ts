@@ -315,7 +315,8 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
     .description(
       'Run a Concord hook. events: pre-tool-use (PreToolUse overlap gate), ' +
         'session-start (SessionStart presence auto-register), pre-invocation, post-tool-use, ' +
-        'stop, and kiro-session-start and kiro-user-prompt-submit.',
+        'stop, and kiro-session-start, kiro-user-prompt-submit, vibe-session-start, ' +
+        'and vibe-session-end.',
     )
     .option('--client <client>', 'Client calling the hook (e.g. antigravity, copilot-cli, claude)')
     .action(async (event, options) => {
@@ -353,6 +354,13 @@ export function registerHookCommand(program: Command, telemetry?: TelemetryRecor
         const { isHermesHookEvent, runHermesHook } = hermesHooks;
         if (isHermesHookEvent(event)) {
           process.stdout.write(`${await runHermesHook(event, readStdin())}\n`);
+          return;
+        }
+      }
+      if (event.startsWith('vibe-')) {
+        const { isVibeHookEvent, runVibeHook } = await import('./vibe-hooks.js');
+        if (isVibeHookEvent(event)) {
+          process.stdout.write(`${await runVibeHook(event, readStdin())}\n`);
           return;
         }
       }
