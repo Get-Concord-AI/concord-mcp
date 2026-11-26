@@ -177,7 +177,7 @@ describe('project-scoped stores', () => {
     legacy.close();
 
     const upgraded = createRepositories(openDatabase(filename));
-    expect(upgraded.db.pragma('user_version', { simple: true })).toBe(18);
+    expect(upgraded.db.pragma('user_version', { simple: true })).toBe(20);
     // Found through the local project, so every copied row was put in it.
     expect(upgraded.tasks.get('TASK-1')?.title).toBe('Legacy');
     expect(upgraded.handoffs.listByTask('TASK-1').map((entry) => entry.whatChanged)).toEqual([

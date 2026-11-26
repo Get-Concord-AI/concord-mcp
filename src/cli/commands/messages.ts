@@ -2,7 +2,6 @@ import type { Command } from '@commander-js/extra-typings';
 
 import type { AgentMessageRecord } from '../../db/index.js';
 import { describeReceipt, toReceipt } from '../../domain/receipts.js';
-import { openContext } from '../context.js';
 import { linkedMachine } from '../../cloud/target.js';
 
 /**
@@ -23,7 +22,11 @@ export interface MessagesOptions {
 const DEFAULT_LIMIT = 50;
 const PREVIEW = 80;
 
-export function listMessages(cwd: string, options: MessagesOptions = {}): AgentMessageRecord[] {
+export async function listMessages(
+  cwd: string,
+  options: MessagesOptions = {},
+): Promise<AgentMessageRecord[]> {
+  const { openContext } = await import('../context.js');
   const { repos } = openContext(cwd);
   const limit = options.limit ?? DEFAULT_LIMIT;
   if (options.thread !== undefined) {
@@ -62,7 +65,7 @@ export function registerMessagesCommand(program: Command): void {
     .option('--thread <id>', 'One prompt/reply thread')
     .option('--limit <n>', 'How many of the newest messages to show', String(DEFAULT_LIMIT))
     .option('--json', 'Print the records with their receipts as JSON')
-    .action((options) => {
+    .action(async (options) => {
       if (linkedMachine(process.env) !== undefined) {
         process.stdout.write(
           'This repository is linked to Concord Cloud; see its messages at https://app.getconcord.ai.\n',
@@ -72,7 +75,7 @@ export function registerMessagesCommand(program: Command): void {
       const limit = Number.parseInt(options.limit, 10);
       if (!Number.isFinite(limit) || limit < 1)
         throw new Error('--limit must be a positive number.');
-      const messages = listMessages(process.cwd(), {
+      const messages = await listMessages(process.cwd(), {
         agent: options.agent,
         thread: options.thread,
         limit,

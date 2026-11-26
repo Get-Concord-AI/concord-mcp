@@ -2,20 +2,22 @@ import { randomUUID } from 'node:crypto';
 import {
   closeSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { dump, load } from 'js-yaml';
 import { z } from 'zod';
 
-import { standaloneInstall } from '../config/install-mode.js';
+import { concordServerLaunch } from './server-launch.js';
 import { userHome } from '../config/paths.js';
 
 /**
@@ -50,21 +52,12 @@ type Mapping = z.infer<typeof mappingSchema>;
 const hookListSchema = z.array(yamlValueSchema);
 
 const SERVER_KEY = 'concord';
-const NPX_SERVER_ARGS = ['-y', '@concord-ai/concord-mcp'];
 const SERVER_ENV = { CONCORD_AGENT_KIND: 'hermes' };
 /** Keys earlier Concord releases wrote into the server env, which pinned `$HOME`. */
 const STALE_ENV_KEYS = new Set(['HERMES_SESSION_ID', 'CONCORD_REPO_ROOT']);
 export const HERMES_HOOK_EVENT = 'pre_llm_call';
 export const HERMES_HOOK_COMMAND = 'concord hook hermes-pre-llm-call';
 const HOOK_TIMEOUT_SECONDS = 30;
-
-/** Standalone installs launch directly: they may have neither npm nor npx on PATH. */
-function concordServerLaunch(): { command: string; args: string[] } {
-  const standalone = standaloneInstall();
-  return standalone === undefined
-    ? { command: 'npx', args: [...NPX_SERVER_ARGS] }
-    : { command: join(standalone.binDir, 'concord-mcp'), args: [] };
-}
 
 /** Hermes' data root: `HERMES_HOME` when set, else `~/.hermes`. */
 export function hermesHome(env: NodeJS.ProcessEnv = process.env): string {
@@ -85,8 +78,22 @@ function readConfig(path: string): Mapping {
   return mappingSchema.parse(parsed);
 }
 
+function resolveConfigTarget(path: string): string {
+  if (existsSync(path)) return realpathSync(path);
+  // A dangling link (or chain): follow it to the final missing destination.
+  // Each hop resolves against its real parent, so `..` works under a symlinked directory.
+  let current = path;
+  const seen = new Set<string>();
+  for (;;) {
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (stat?.isSymbolicLink() !== true || seen.has(current)) return current;
+    seen.add(current);
+    current = resolve(realpathSync(dirname(current)), readlinkSync(current));
+  }
+}
+
 function writeConfig(path: string, config: Mapping): void {
-  const target = existsSync(path) ? realpathSync(path) : path;
+  const target = resolveConfigTarget(path);
   mkdirSync(dirname(target), { recursive: true });
   // A unique, exclusive temporary file prevents clobbering a pre-existing file or symlink.
   const temporary = `${target}.${randomUUID()}.tmp`;

@@ -2,16 +2,65 @@ import { describe, expect, it } from 'vitest';
 
 import {
   agentIdForSession,
+  liveSessionIdentity,
   parseOpenCodeRequestIdentityMetadata,
   resolveActorId,
   resolveIdentity,
   resolveOpenCodeRequestIdentity,
+  resolveServerIdentity,
   UNRESOLVED_IDENTITY_MESSAGE,
 } from '../../src/domain/identity.js';
 
 const SESSION = 'a1b2c3d4-e5f6-7890';
 
 describe('resolveIdentity', () => {
+  it('binds the OpenHands server to the current conversation even inside another harness', () => {
+    const env = {
+      CONCORD_AGENT_KIND: 'openhands',
+      CLAUDE_CODE_SESSION_ID: 'outer-session',
+      CONCORD_OPENHANDS_CONVERSATION_ID: SESSION,
+    };
+    const parent = resolveServerIdentity(env);
+    expect(parent).toEqual({
+      kind: 'openhands',
+      origin: 'session',
+      agentId: agentIdForSession('openhands', SESSION),
+    });
+    expect(
+      resolveServerIdentity({ ...env, CONCORD_OPENHANDS_CONVERSATION_ID: 'child' })?.agentId,
+    ).toBe(agentIdForSession('openhands', 'child'));
+    expect(
+      resolveServerIdentity({ ...env, CONCORD_OPENHANDS_CONVERSATION_ID: '' }),
+    ).toBeUndefined();
+  });
+  it('only uses the OpenHands conversation variable for an explicitly bound server', () => {
+    const inherited = { CONCORD_OPENHANDS_CONVERSATION_ID: SESSION };
+    expect(resolveServerIdentity(inherited)).toBeUndefined();
+    expect(
+      resolveServerIdentity({ ...inherited, COPILOT_AGENT_SESSION_ID: 'copilot-child' }),
+    ).toEqual({
+      kind: 'copilot-cli',
+      origin: 'session',
+      agentId: agentIdForSession('copilot-cli', 'copilot-child'),
+    });
+  });
+
+  it('uses an explicit DeepSeek identity without borrowing inherited harness sessions', () => {
+    const inherited = { CLAUDE_CODE_SESSION_ID: SESSION, AGENT_SESSION_ID: 'goose-parent' };
+    expect(resolveIdentity(inherited, { kind: 'deepseek' })).toBeUndefined();
+    expect(
+      resolveIdentity(
+        { ...inherited, CONCORD_AGENT_ID: 'deepseek:session-a' },
+        {
+          kind: 'deepseek',
+        },
+      ),
+    ).toEqual({ agentId: 'deepseek:session-a', kind: 'deepseek', origin: 'operator' });
+    expect(resolveActorId(undefined, 'deepseek:registered-session')).toBe(
+      'deepseek:registered-session',
+    );
+    expect(() => resolveActorId(undefined, undefined)).toThrow(UNRESOLVED_IDENTITY_MESSAGE);
+  });
   it('derives identity from the session alone, so a plain session needs no setup', () => {
     const identity = resolveIdentity({ CLAUDE_CODE_SESSION_ID: SESSION });
 
@@ -175,4 +224,71 @@ describe('resolveActorId', () => {
     expect(() => resolveActorId(undefined, undefined)).toThrow(UNRESOLVED_IDENTITY_MESSAGE);
     expect(() => resolveActorId(undefined, '  ')).toThrow(UNRESOLVED_IDENTITY_MESSAGE);
   });
+});
+
+describe('liveSessionIdentity', () => {
+  const env = {
+    agentId: 'claude-code:aaaabbbb',
+    kind: 'claude-code',
+    origin: 'session',
+  } as const;
+
+  it('corrects the env identity when a hook binding names the live session', () => {
+    const result = liveSessionIdentity(env, {
+      agentId: 'claude-code:ccccdddd',
+      kind: 'claude-code',
+    });
+    expect(result.identity?.agentId).toBe('claude-code:ccccdddd');
+    expect(result.identity?.origin).toBe('hook');
+    expect(result.drifted).toBe(true);
+  });
+
+  it('reports no drift when the binding confirms the env identity', () => {
+    const result = liveSessionIdentity(env, {
+      agentId: 'claude-code:aaaabbbb',
+      kind: 'claude-code',
+    });
+    expect(result.identity?.agentId).toBe('claude-code:aaaabbbb');
+    expect(result.drifted).toBe(false);
+  });
+
+  it('never mints an identity for a session-invisible server from a binding alone', () => {
+    const result = liveSessionIdentity(undefined, {
+      agentId: 'claude-code:ccccdddd',
+      kind: 'claude-code',
+    });
+    expect(result.identity).toBeUndefined();
+    expect(result.drifted).toBe(false);
+  });
+});
+
+describe('liveSessionIdentity binding proof', () => {
+  it('rejects a binding of another kind — a nested client keeps its own identity', () => {
+    const result = liveSessionIdentity(
+      { agentId: 'grok:11112222', kind: 'grok', origin: 'session' },
+      { agentId: 'claude-code:aaaabbbb', kind: 'claude-code' },
+    );
+    expect(result.identity?.agentId).toBe('grok:11112222');
+    expect(result.drifted).toBe(false);
+  });
+
+  it('never overrides an operator-chosen identity', () => {
+    const result = liveSessionIdentity(
+      { agentId: 'operator:chosen', kind: 'operator', origin: 'operator' },
+      { agentId: 'operator:other', kind: 'operator' },
+    );
+    expect(result.identity?.agentId).toBe('operator:chosen');
+    expect(result.drifted).toBe(false);
+  });
+});
+
+it('keeps OpenClaw agents distinct and requires an explicit ID', () => {
+  const identity = resolveServerIdentity({
+    CONCORD_AGENT_KIND: 'openclaw',
+    CLAUDE_CODE_SESSION_ID: SESSION,
+  });
+  expect(identity).toBeUndefined();
+  expect(resolveActorId(identity, 'openclaw:main', 'openclaw')).toBe('openclaw:main');
+  expect(resolveActorId(identity, 'openclaw:research', 'openclaw')).toBe('openclaw:research');
+  expect(() => resolveActorId(identity, undefined, 'openclaw')).toThrow('Pass agent_id');
 });

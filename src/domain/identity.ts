@@ -39,6 +39,7 @@ export const SESSION_SOURCES: readonly SessionSource[] = [
   { kind: 'claude-code', envVar: 'CLAUDE_CODE_SESSION_ID' },
   { kind: 'grok', envVar: 'GROK_SESSION_ID' },
   { kind: 'goose', envVar: 'AGENT_SESSION_ID' },
+  { kind: 'openhands', envVar: 'CONCORD_OPENHANDS_CONVERSATION_ID' },
   // Hermes sets this for its hooks and terminal commands. Its MCP servers start
   // before any session and never see it; Hermes sessions resolve through hooks.
   { kind: 'hermes', envVar: 'HERMES_SESSION_ID' },
@@ -123,7 +124,8 @@ export function identityForRequest(
 
 /** The session sources for a client, when that client exposes any. */
 function sourcesFor(kind: string | undefined): readonly SessionSource[] {
-  if (kind === undefined) return SESSION_SOURCES;
+  // Only the OpenHands plugin binds this variable to its own server process.
+  if (kind === undefined) return SESSION_SOURCES.filter((source) => source.kind !== 'openhands');
   return SESSION_SOURCES.filter((source) => source.kind === kind);
 }
 
@@ -240,6 +242,53 @@ export function resolveServerIdentity(env: NodeJS.ProcessEnv): AgentIdentity | u
   return resolveIdentity(env, kind !== undefined && kind !== '' ? { kind } : {});
 }
 
+/**
+ * A live session recorded out-of-band by a hook, keyed by the client pid a
+ * server can check. Hooks fire in the session as it is now, so what they saw
+ * is fresher than anything in the server's spawn-time environment: after a
+ * `/resume` or `/clear`, the env keeps the abandoned session id while the
+ * binding carries the resumed one.
+ */
+export interface LiveSessionBinding {
+  agentId: string;
+  kind: string;
+}
+
+export interface LiveSessionResolution {
+  identity: AgentIdentity | undefined;
+  /** Env identity and the live binding named different agents. */
+  drifted: boolean;
+}
+
+/**
+ * The identity a server should act as: the binding a hook recorded for its
+ * client, when one exists. A binding only ever *corrects* an env identity —
+ * with no env identity at all, naming one anyway would hand a caller proof it
+ * never earned, so it keeps its unproven path instead. Two more guards keep
+ * it that way: an operator-chosen identity stays authoritative, and a binding
+ * belongs to this client only when it names the same kind — a nested client's
+ * ancestor chain can include a process an outer session of another kind bound.
+ */
+export function liveSessionIdentity(
+  env: AgentIdentity | undefined,
+  binding: LiveSessionBinding | undefined,
+): LiveSessionResolution {
+  if (
+    env === undefined ||
+    binding === undefined ||
+    env.origin === 'operator' ||
+    binding.kind !== env.kind
+  ) {
+    return { identity: env, drifted: false };
+  }
+  const identity: AgentIdentity = {
+    agentId: binding.agentId,
+    kind: binding.kind,
+    origin: 'hook',
+  };
+  return { identity, drifted: identity.agentId !== env.agentId };
+}
+
 /** The client prefix of an agent id, for ids supplied whole by an operator. */
 function kindOf(agentId: string): string {
   const separator = agentId.indexOf(':');
@@ -262,9 +311,13 @@ export const UNRESOLVED_IDENTITY_MESSAGE =
 export function resolveActorId(
   session: AgentIdentity | undefined,
   supplied: string | undefined,
+  kind?: string,
 ): string {
   if (session !== undefined) return session.agentId;
   const given = supplied?.trim();
   if (given !== undefined && given !== '') return given;
+  if (kind === 'openclaw') {
+    throw new Error('Pass agent_id: "openclaw:<your agent id>" on OpenClaw workflow calls.');
+  }
   throw new Error(UNRESOLVED_IDENTITY_MESSAGE);
 }

@@ -1,7 +1,17 @@
+import { join, resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import type { TaskRecord } from '../../src/db/index.js';
-import { detectOverlaps, type OverlapSurface } from '../../src/domain/overlap.js';
+import {
+  detectOverlaps,
+  entryCoversFile,
+  isRootClaim,
+  normalizePath,
+  pathKey,
+  type OverlapSurface,
+} from '../../src/domain/overlap.js';
+import { ROOT_CLAIMS } from '../helpers/root-claims.js';
 
 function task(partial: Partial<TaskRecord> & { taskId: string }): TaskRecord {
   return {
@@ -87,6 +97,75 @@ describe('detectOverlaps', () => {
     expect(warnings[0]?.reasons).toContain('shared domain(s): frontend, todo');
   });
 
+  it.each(['支付', 'платежи', '認証', 'café', 'भुगतान'])(
+    'flags a shared module, domain, and risk tag written as %s',
+    (label) => {
+      const surface: OverlapSurface = {
+        taskId: 'TASK-U',
+        expectedFiles: [],
+        modules: [label],
+        domains: [label],
+        riskTags: [label],
+      };
+      const warnings = detectOverlaps(surface, [
+        task({ taskId: 'TASK-V', modules: [label], domains: [label], riskTags: [label] }),
+      ]);
+      expect(warnings[0]?.kinds).toEqual(['shared_module', 'shared_domain', 'shared_risk_tag']);
+    },
+  );
+
+  it('matches non-Latin labels across case and separators', () => {
+    const surface: OverlapSurface = {
+      taskId: 'TASK-U',
+      expectedFiles: [],
+      modules: ['Платежи-Сервис'],
+      domains: [],
+      riskTags: [],
+    };
+    const warnings = detectOverlaps(surface, [
+      task({ taskId: 'TASK-V', modules: ['сервис платежи'] }),
+    ]);
+    expect(warnings[0]?.reasons).toContain('shared module(s): платежи, сервис');
+  });
+
+  it('does not flag different non-Latin labels', () => {
+    const surface: OverlapSurface = {
+      taskId: 'TASK-U',
+      expectedFiles: [],
+      modules: ['支付'],
+      domains: [],
+      riskTags: [],
+    };
+    expect(detectOverlaps(surface, [task({ taskId: 'TASK-V', modules: ['认证'] })])).toEqual([]);
+  });
+
+  // Escapes keep the source bytes stable: an editor could silently normalize the literals.
+  it.each([
+    ['composed and decomposed', 'café', 'café'],
+    ['full-width and ASCII', 'ＡＢ', 'ab'],
+  ])('matches %s spellings of the same label', (_name, left, right) => {
+    const surface: OverlapSurface = {
+      taskId: 'TASK-U',
+      expectedFiles: [],
+      modules: [left],
+      domains: [],
+      riskTags: [],
+    };
+    const warnings = detectOverlaps(surface, [task({ taskId: 'TASK-V', modules: [right] })]);
+    expect(warnings[0]?.kinds).toEqual(['shared_module']);
+  });
+
+  it('keeps an accented label distinct from its unaccented spelling', () => {
+    const surface: OverlapSurface = {
+      taskId: 'TASK-U',
+      expectedFiles: [],
+      modules: ['café'],
+      domains: [],
+      riskTags: [],
+    };
+    expect(detectOverlaps(surface, [task({ taskId: 'TASK-V', modules: ['cafe'] })])).toEqual([]);
+  });
+
   it('treats kebab, snake, and space separators as equivalent for modules', () => {
     const kebab: OverlapSurface = {
       taskId: 'TASK-K',
@@ -144,6 +223,91 @@ describe('detectOverlaps', () => {
     expect(sameDir[0]?.reasons).toContain('same directory: src/billing');
   });
 
+  it.each(['win32', 'darwin'] as const)(
+    'treats paths that differ only in case as the same file on %s',
+    (platform) => {
+      const warnings = detectOverlaps(
+        { ...candidate, taskId: 'TASK-CASE', expectedFiles: ['src/Components/Button.tsx'] },
+        [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+        0,
+        { platform },
+      );
+      expect(warnings[0]?.reasons).toContain('same file(s): src/components/Button.tsx');
+    },
+  );
+
+  it('treats directories that differ only in case as the same directory on win32', () => {
+    const warnings = detectOverlaps(
+      { ...candidate, taskId: 'TASK-CASE', expectedFiles: ['src/Components/Card.tsx'] },
+      [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+      0,
+      { platform: 'win32' },
+    );
+    expect(warnings[0]?.reasons).toContain('same directory: src/components');
+  });
+
+  it('keeps paths case-sensitive on linux', () => {
+    const warnings = detectOverlaps(
+      {
+        taskId: 'TASK-CASE',
+        expectedFiles: ['src/Components/Button.tsx'],
+        modules: [],
+        domains: [],
+        riskTags: [],
+      },
+      [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+      0,
+      { platform: 'linux' },
+    );
+    expect(warnings).toEqual([]);
+  });
+
+  it('compares paths case-sensitively when no platform is given', () => {
+    const warnings = detectOverlaps(
+      { ...candidate, taskId: 'TASK-CASE', expectedFiles: ['src/Components/Button.tsx'] },
+      [task({ taskId: 'TASK-LOWER', expectedFiles: ['src/components/Button.tsx'] })],
+    );
+    expect(warnings).toEqual([]);
+    expect(pathKey('src/App.tsx')).toBe('src/App.tsx');
+    expect(pathKey('src/App.tsx', 'darwin')).toBe('src/app.tsx');
+  });
+
+  it('flags a directory claim that differs only in case on win32, not on linux', () => {
+    const dir = task({ taskId: 'DIR', expectedFiles: ['Src/App'] });
+    const file = task({ taskId: 'FILE', expectedFiles: ['src/app/x.ts'] });
+    const reasons = ['directory claim covers file(s): Src/App -> src/app/x.ts'];
+
+    expect(detectOverlaps(dir, [file], 0, { platform: 'win32' })).toEqual([
+      { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(file, [dir], 0, { platform: 'win32' })).toEqual([
+      { taskId: 'DIR', title: 'DIR', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(dir, [file], 0, { platform: 'linux' })).toEqual([]);
+    expect(detectOverlaps(file, [dir], 0, { platform: 'linux' })).toEqual([]);
+  });
+
+  it('still flags root claims against mixed-case paths on every platform', () => {
+    const rootClaim = task({ taskId: 'ROOT', expectedFiles: ['./'] });
+    const fileClaim = task({ taskId: 'FILE', expectedFiles: ['Src/App/x.ts'] });
+    const reasons = ['directory claim covers file(s): . -> Src/App/x.ts'];
+
+    for (const platform of ['win32', 'darwin', 'linux'] as const) {
+      expect(detectOverlaps(rootClaim, [fileClaim], 0, { platform })).toEqual([
+        { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
+      ]);
+    }
+  });
+
+  it('matches entryCoversFile case-insensitively only on win32 and darwin', () => {
+    expect(entryCoversFile('Src/App', 'src/app/x.ts', { platform: 'win32' })).toBe(true);
+    expect(entryCoversFile('Src/App/X.ts', 'src/app/x.ts', { platform: 'darwin' })).toBe(true);
+    expect(entryCoversFile('.', 'Src/App/x.ts', { platform: 'win32' })).toBe(true);
+    expect(entryCoversFile('Src/App', 'src/app/x.ts', { platform: 'linux' })).toBe(false);
+    expect(entryCoversFile('Src/App', 'src/app/x.ts')).toBe(false);
+    expect(entryCoversFile('src/app', 'src/application/x.ts', { platform: 'win32' })).toBe(false);
+  });
+
   it('returns nothing for disjoint tasks', () => {
     expect(
       detectOverlaps(candidate, [
@@ -199,5 +363,164 @@ describe('detectOverlaps', () => {
 
     expect(warnings.map((warning) => warning.taskId)).toEqual(['TASK-C']);
     expect(warnings[0]?.reasons).toContain('shared domain(s): payments');
+  });
+
+  it('flags a directory claim that contains another task file, in both directions', () => {
+    const dir: OverlapSurface = {
+      taskId: 'DIR',
+      expectedFiles: ['src/app/'],
+      modules: [],
+      domains: [],
+      riskTags: [],
+    };
+    const file = task({ taskId: 'FILE', expectedFiles: ['src/app/page.tsx'] });
+    const forward = detectOverlaps(dir, [file]);
+    expect(forward[0]?.kinds).toContain('same_file');
+    expect(forward[0]?.reasons).toContain(
+      'directory claim covers file(s): src/app -> src/app/page.tsx',
+    );
+
+    const reverse = detectOverlaps({ ...dir, expectedFiles: ['src/app/page.tsx'] }, [
+      task({ taskId: 'D2', expectedFiles: ['src/app'] }),
+    ]);
+    expect(reverse.map((warning) => warning.taskId)).toEqual(['D2']);
+  });
+
+  it.each(ROOT_CLAIMS)('flags root claim %j in both directions', (root) => {
+    const rootClaim = task({ taskId: 'ROOT', expectedFiles: [root] });
+    const fileClaim = task({ taskId: 'FILE', expectedFiles: ['src/app/page.tsx'] });
+    const reasons = ['directory claim covers file(s): . -> src/app/page.tsx'];
+
+    expect(detectOverlaps(rootClaim, [fileClaim])).toEqual([
+      { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(fileClaim, [rootClaim])).toEqual([
+      { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
+    ]);
+  });
+
+  it.each(['', '  ', '..', '../x', 'src'])('does not treat %j as a root claim', (entry) => {
+    expect(isRootClaim(entry)).toBe(false);
+  });
+
+  it.each([
+    ['.', '.'],
+    ['.', './'],
+    ['./', '/'],
+    ['/', '.'],
+  ])('flags two whole-repo claims %j and %j as the same file', (left, right) => {
+    const first = task({ taskId: 'FIRST', expectedFiles: [left] });
+    const second = task({ taskId: 'SECOND', expectedFiles: [right] });
+    const reasons = ['same file(s): .'];
+
+    expect(detectOverlaps(first, [second])).toEqual([
+      { taskId: 'SECOND', title: 'SECOND', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(second, [first])).toEqual([
+      { taskId: 'FIRST', title: 'FIRST', reasons, kinds: ['same_file'] },
+    ]);
+  });
+
+  it.each([
+    ['src', 'directory claim covers file(s): . -> src'],
+    ['README.md', 'directory claim covers file(s): . -> README.md'],
+  ])('flags a root claim against %j as the same file', (entry, reason) => {
+    const rootClaim = task({ taskId: 'ROOT', expectedFiles: ['.'] });
+    const other = task({ taskId: 'OTHER', expectedFiles: [entry] });
+
+    expect(detectOverlaps(rootClaim, [other])).toEqual([
+      { taskId: 'OTHER', title: 'OTHER', reasons: [reason], kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(other, [rootClaim])).toEqual([
+      { taskId: 'ROOT', title: 'ROOT', reasons: [reason], kinds: ['same_file'] },
+    ]);
+  });
+
+  it('scopes root claims to the repository in both directions', () => {
+    const repoRoot = resolve('workspace');
+    const rootClaim = task({ taskId: 'ROOT', expectedFiles: ['.'] });
+    const inside = join(`${repoRoot}-alias`, 'src', 'app.ts');
+    const sibling = join(`${repoRoot}-other`, 'notes.md');
+    const fileClaim = task({ taskId: 'FILE', expectedFiles: [inside] });
+    const reasons = [`directory claim covers file(s): . -> ${normalizePath(inside)}`];
+    const pathsFromCheckout = new Map([
+      [normalizePath(inside), 'src/app.ts'],
+      [normalizePath(sibling), '../workspace-other/notes.md'],
+      [normalizePath(repoRoot), ''],
+    ]);
+
+    expect(detectOverlaps(rootClaim, [fileClaim], 0, { pathsFromCheckout })).toEqual([
+      { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(fileClaim, [rootClaim], 0, { pathsFromCheckout })).toEqual([
+      { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(rootClaim, [fileClaim])).toEqual([]);
+
+    for (const outside of [
+      '..',
+      '../other-project/file.ts',
+      sibling,
+      repoRoot,
+      'X:/other-project/notes.md',
+    ]) {
+      const otherClaim = task({ taskId: 'OTHER', expectedFiles: [outside] });
+      expect(detectOverlaps(rootClaim, [otherClaim], 0, { pathsFromCheckout })).toEqual([]);
+      expect(detectOverlaps(otherClaim, [rootClaim], 0, { pathsFromCheckout })).toEqual([]);
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('covers POSIX relative filenames with a colon', () => {
+    const rootClaim = task({ taskId: 'ROOT', expectedFiles: ['.'] });
+    const fileClaim = task({ taskId: 'FILE', expectedFiles: ['a:notes.md'] });
+    const reasons = ['directory claim covers file(s): . -> a:notes.md'];
+
+    expect(detectOverlaps(rootClaim, [fileClaim])).toEqual([
+      { taskId: 'FILE', title: 'FILE', reasons, kinds: ['same_file'] },
+    ]);
+    expect(detectOverlaps(fileClaim, [rootClaim])).toEqual([
+      { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
+    ]);
+  });
+
+  it.each(['', ' \t '])('ignores blank claim %j', (blank) => {
+    const blankClaim = task({ taskId: 'BLANK', expectedFiles: [blank] });
+    const fileClaim = task({ taskId: 'FILE', expectedFiles: ['src/app/page.tsx'] });
+
+    expect(detectOverlaps(blankClaim, [fileClaim])).toEqual([]);
+    expect(detectOverlaps(fileClaim, [blankClaim])).toEqual([]);
+  });
+
+  it('reports the same_file kind once for exact and nested overlaps', () => {
+    const left = task({ taskId: 'LEFT', expectedFiles: ['src/app', 'src/x.ts'] });
+    const right = task({ taskId: 'RIGHT', expectedFiles: ['src/x.ts', 'src/app/page.tsx'] });
+
+    expect(detectOverlaps(left, [right])).toEqual([
+      {
+        taskId: 'RIGHT',
+        title: 'RIGHT',
+        reasons: [
+          'same file(s): src/x.ts',
+          'directory claim covers file(s): src/app -> src/app/page.tsx',
+        ],
+        kinds: ['same_file'],
+      },
+    ]);
+  });
+
+  it('does not treat a sibling with a shared name prefix as inside the directory', () => {
+    const dir: OverlapSurface = {
+      taskId: 'DIR',
+      expectedFiles: ['src/app'],
+      modules: [],
+      domains: [],
+      riskTags: [],
+    };
+    const warnings = detectOverlaps(dir, [
+      task({ taskId: 'OTHER', expectedFiles: ['src/application/page.tsx'] }),
+    ]);
+    expect(warnings.some((w) => w.reasons.some((r) => r.startsWith('directory claim')))).toBe(
+      false,
+    );
   });
 });

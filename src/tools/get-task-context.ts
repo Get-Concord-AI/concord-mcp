@@ -10,6 +10,7 @@ import type {
 } from '../db/index.js';
 import type { GetTaskContextInput } from '../domain/operations.js';
 import { detectOverlaps, type OverlapWarning } from '../domain/overlap.js';
+import { resolvePathsFromCheckout } from '../workspaces/overlap-paths.js';
 
 export interface TaskContextResult {
   task: TaskRecord;
@@ -40,24 +41,20 @@ export function handleGetTaskContext(
     throw new Error(`Task "${input.task_id}" is not claimed. Call start_work first.`);
   }
 
-  const overlaps =
-    task.status === 'active'
-      ? detectOverlaps(
-          {
-            taskId: task.taskId,
-            parentTaskId: task.parentTaskId,
-            expectedFiles: task.expectedFiles,
-            modules: task.modules,
-            domains: task.domains,
-            riskTags: task.riskTags,
-          },
-          repos.tasks
-            .list()
-            .filter(
-              (candidate) => candidate.taskId !== task.taskId && candidate.status === 'active',
-            ),
-        )
-      : [];
+  let overlaps: OverlapWarning[] = [];
+  if (task.status === 'active') {
+    const activeOthers = repos.tasks
+      .list()
+      .filter((candidate) => candidate.taskId !== task.taskId && candidate.status === 'active');
+    const pathsFromCheckout = resolvePathsFromCheckout(repos.checkoutRoot, [
+      task.expectedFiles,
+      ...activeOthers.map((candidate) => candidate.expectedFiles),
+    ]);
+    overlaps = detectOverlaps(task, activeOthers, 0, {
+      platform: process.platform,
+      pathsFromCheckout,
+    });
+  }
 
   return {
     task,

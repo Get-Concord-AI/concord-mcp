@@ -295,4 +295,28 @@ export const migrations: readonly string[] = [
   `
   ALTER TABLE agent_messages ADD COLUMN expects_reply INTEGER NOT NULL DEFAULT 1;
   `,
+  // 019 — which agent a client process currently hosts. Session-start hooks
+  // record it per ancestor pid so an MCP server spawned before a /resume can
+  // resolve the session that is live now, not the one it was launched with.
+  `
+  CREATE TABLE session_bindings (
+    client_pid INTEGER PRIMARY KEY,
+    agent_id   TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
+  // 020 — a session whose question a hook denied, to show it messages first,
+  // has its next question let through, so a held message or a chatty peer can
+  // never keep the user from being asked. One row per session, so one
+  // session's deny never replaces another's allowance. A session the hook
+  // cannot name is stored as ''.
+  `
+  CREATE TABLE user_wait_allowances (
+    agent_id    TEXT NOT NULL,
+    session     TEXT NOT NULL,
+    granted_at  TEXT NOT NULL,
+    PRIMARY KEY (agent_id, session)
+  );
+  `,
 ];

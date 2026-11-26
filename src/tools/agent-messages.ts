@@ -11,9 +11,9 @@ import {
 import {
   awaitingUserOutlook,
   deliveryOutlook,
+  endpointPromptable,
   effectiveEndpointCapabilities,
   supportsImmediateDelivery,
-  transports,
 } from '../domain/delivery.js';
 
 export class AgentMessageDeliveryError extends Error {
@@ -26,6 +26,8 @@ export class AgentMessageDeliveryError extends Error {
     this.name = 'AgentMessageDeliveryError';
   }
 }
+
+export { endpointPromptable } from '../domain/delivery.js';
 
 export interface SendAgentMessageInput {
   operation: 'prompt' | 'reply';
@@ -62,21 +64,6 @@ export interface AgentMessageDispatcher {
     endpoint: AgentEndpointRecord;
     message: AgentMessageRecord;
   }): Promise<DeliveryReceipt>;
-}
-
-/**
- * Whether a registered endpoint can still take a message. A lease that has run
- * out means the session is gone; queueing for it would strand the message.
- */
-export function endpointPromptable(
-  endpoint: AgentEndpointRecord | undefined,
-  now = Date.now(),
-): boolean {
-  return (
-    endpoint?.status === 'connected' &&
-    transports.some((transport) => endpoint.capabilities.includes(transport)) &&
-    (endpoint.expiresAt === null || Date.parse(endpoint.expiresAt) > now)
-  );
 }
 
 /** A retried send of a message that already left the queue: say where it got to. */

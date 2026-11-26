@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { concordDir, databasePath } from '../config/paths.js';
 import { globalDatabasePath, readUserConfig, userConcordDir } from '../config/user-config.js';
-import { LOCAL_PROJECT } from '../db/index.js';
+import { LOCAL_PROJECT } from '../db/project-scope-migration.js';
 import { normalizeProjectKey } from '../domain/project-key.js';
 
 /**
@@ -31,6 +31,7 @@ export type OriginRemote = (repoRoot: string) => string | undefined;
 export function gitOriginRemote(repoRoot: string): string | undefined {
   const result = spawnSync('git', ['-C', repoRoot, 'remote', 'get-url', 'origin'], {
     encoding: 'utf8',
+    windowsHide: true,
   });
   const url = result.status === 0 ? result.stdout.trim() : '';
   return url === '' ? undefined : url;

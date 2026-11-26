@@ -52,6 +52,31 @@ describe('Devin MCP config', () => {
     expect(readFileSync(path, 'utf8')).not.toContain('"concord"');
   });
 
+  it('removes the real entry when a nested namesake or an emoji comment comes first', () => {
+    const nested =
+      '{"mcpServers":{"other":{"options":{"concord":{}}},"concord":{"command":"concord-mcp"}}}';
+    expect(JSON.parse(removeDevinMcpConfig(nested))).toEqual({
+      mcpServers: { other: { options: { concord: {} } } },
+    });
+
+    const emoji = '/* 😀 */ {"mcpServers":{"concord":{"command":"concord-mcp"},"other":{}}}';
+    const removed = removeDevinMcpConfig(emoji);
+    expect(removed).toContain('/* 😀 */');
+    expect(JSON.parse(removed.replace('/* 😀 */', ''))).toEqual({ mcpServers: { other: {} } });
+  });
+
+  it('round-trips install and removal without breaking an emoji comment', () => {
+    const original = '/* 😀 */ {"mcpServers":{"other":{}}}';
+    const installed = upsertDevinMcpConfig(original);
+    expect(JSON.parse(installed.replace('/* 😀 */', ''))).toMatchObject({
+      mcpServers: { concord: { command: 'concord-mcp' }, other: {} },
+    });
+    expect(installed).toContain('/* 😀 */');
+    const removed = removeDevinMcpConfig(installed);
+    expect(removed).toContain('/* 😀 */');
+    expect(JSON.parse(removed.replace('/* 😀 */', ''))).toEqual({ mcpServers: { other: {} } });
+  });
+
   it('parses escaped Windows paths and removes the Concord property by its key position', () => {
     const original = JSON.stringify({
       mcpServers: {

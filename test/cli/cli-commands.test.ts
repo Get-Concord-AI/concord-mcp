@@ -71,6 +71,13 @@ describe('CLI read/export commands', () => {
     dir = seededRepo();
   });
 
+  // Deliberately minimal: nothing from process.env leaks into the report.
+  // No harness on PATH, so doctor skips every executable probe: the report
+  // stays fast and identical on machines with many agent CLIs installed.
+  function doctorEnv(home = join(dir, 'home')): NodeJS.ProcessEnv {
+    return { HOME: home, USERPROFILE: home, PATH: join(home, 'bin') };
+  }
+
   it('prints a handoff packet for a task', () => {
     expect(runHandoffPacket(dir, 'TASK-12')).toContain('# Handoff: TASK-12 — Add retry');
   });
@@ -109,9 +116,9 @@ describe('CLI read/export commands', () => {
     expect(existsSync(join(dir, '.concord', 'REVIEW_PACKET.md'))).toBe(true);
   });
 
-  it('doctor reports schema version and adoption', () => {
-    const report = runDoctor(dir);
-    expect(report).toContain('schema v18, expected v18');
+  it('doctor reports schema version and adoption', async () => {
+    const report = await runDoctor(dir, doctorEnv());
+    expect(report).toContain('schema v20, expected v20');
     expect(report).toContain('TASK-12');
     expect(report).toContain('start_work: yes');
     // The resolved workspace path is surfaced so agents don't have to hunt for it.
@@ -119,38 +126,38 @@ describe('CLI read/export commands', () => {
     expect(report).toContain(join(dir, '.concord'));
   });
 
-  it('doctor reports stale generated Concord instructions', () => {
+  it('doctor reports stale generated Concord instructions', async () => {
     writeFileSync(
       join(dir, 'AGENTS.md'),
       '<!-- concord:start -->\n## Concord\nOld tool instructions\n<!-- concord:end -->\n',
     );
 
-    expect(runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
+    expect(await runDoctor(dir, doctorEnv())).toContain('instructions stale -> AGENTS.md');
   });
 
-  it('doctor ignores generic headings and reports invalid instruction paths', () => {
+  it('doctor ignores generic headings and reports invalid instruction paths', async () => {
     writeFileSync(join(dir, 'AGENTS.md'), '## Concord\nHuman-authored project notes\n');
     mkdirSync(join(dir, 'CLAUDE.md'));
 
-    const report = runDoctor(dir);
+    const report = await runDoctor(dir, doctorEnv());
     expect(report).not.toContain('stale -> AGENTS.md');
     expect(report).toContain('instructions unreadable -> CLAUDE.md');
   });
 
-  it('doctor requires the workflow marker inside the generated block', () => {
+  it('doctor requires the workflow marker inside the generated block', async () => {
     writeFileSync(
       join(dir, 'AGENTS.md'),
       `<!-- concord:workflow-version=${CONCORD_INSTRUCTION_VERSION} -->\n` +
         '<!-- concord:start -->\n## Concord\nOld generated instructions\n<!-- concord:end -->\n',
     );
 
-    expect(runDoctor(dir)).toContain('instructions stale -> AGENTS.md');
+    expect(await runDoctor(dir, doctorEnv())).toContain('instructions stale -> AGENTS.md');
   });
 
   it('doctor fails on a dangling Claude plugin link and --fix re-points it', async () => {
     const home = mkdtempSync(join(tmpdir(), 'concord-doctor-home-'));
     // No harness on PATH, so only the link decides whether doctor passes.
-    const env = { HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude'), PATH: join(home, 'bin') };
+    const env = { ...doctorEnv(home), CLAUDE_CONFIG_DIR: join(home, '.claude') };
     const link = claudeSkillsPluginPath(env);
     // Independent of where this checkout lives, including under /tmp.
     const lasting = (): boolean => false;

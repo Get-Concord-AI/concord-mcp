@@ -8,9 +8,9 @@ import { PushPromptSessionAdapter, type PushPromptSession } from '../../relay/ad
 import { CopilotUiServerClient } from '../../relay/copilot-client.js';
 import { startAgentRelay } from '../../relay/server.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
-import { openContext } from '../context.js';
 import { availablePort } from '../local-port.js';
 import { deliverToSession } from './cloud-codex.js';
+import { COPILOT_SERVER_ENV } from './copilot-server.js';
 import { reportMissingHarnessCli } from './missing-harness-cli.js';
 import { watchCloud } from './cloud-inbox.js';
 import {
@@ -31,18 +31,11 @@ import {
  * Plain `copilot` sessions never see the address and keep hook delivery.
  */
 
-/** Where the launcher tells hooks the session's embedded server listens. */
-export const COPILOT_SERVER_ENV = 'CONCORD_COPILOT_SERVER_URL';
+export { COPILOT_SERVER_ENV, copilotServerAddress } from './copilot-server.js';
 /** The release whose `--ui-server` protocol this adapter was verified against. */
 export const COPILOT_UI_SERVER_BASELINE = [1, 0, 100] as const;
 
 const KIND = 'copilot-cli';
-
-/** The address the launcher exports, when this process descends from it. */
-export function copilotServerAddress(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const address = env[COPILOT_SERVER_ENV]?.trim();
-  return address === undefined || address === '' ? undefined : address;
-}
 
 /** The command line and environment for one launched Copilot session. */
 export function copilotLaunchPlan(
@@ -112,7 +105,7 @@ export async function hostCopilot(
   sessionId: string,
   address: string,
 ): Promise<void> {
-  const context = openContext(process.cwd());
+  const context = await import('../context.js').then((module) => module.openContext(process.cwd()));
   ensureAgentRegistered(context.repos, { agentId, kind: KIND }, context.repoRoot);
   const client = await connectSession(address, sessionId);
   const adapter = new CopilotSessionAdapter(client);

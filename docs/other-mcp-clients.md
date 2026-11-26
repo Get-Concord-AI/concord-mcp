@@ -5,6 +5,9 @@ stdio. Configure the server manually: `concord setup` does not register Windsurf
 Zed, or VS Code for you. An MCP connection alone does not provide live push
 delivery into an agent session.
 
+For a local OpenHands Agent Server, follow the [OpenHands guide](./openhands.md)
+to give each conversation its own Concord identity when it starts or forks.
+
 ## Prepare the workspace
 
 Install Node.js >= 22.12, with `npx` available to the client. Open the repository
