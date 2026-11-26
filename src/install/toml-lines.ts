@@ -36,10 +36,10 @@ const SIMPLE_KEY_ESCAPES: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
- * Decode the escapes TOML allows in a basic-string key. Invalid escapes stay
- * literal: a malformed key must never collapse into a name Concord protects.
+ * Decode the escapes TOML allows in a basic string. Invalid escapes stay
+ * literal: a malformed value must never collapse into a name Concord protects.
  */
-function decodeBasicKeyPart(part: string): string {
+export function decodeTomlBasicString(part: string): string {
   let decoded = '';
   let index = 0;
   while (index < part.length) {
@@ -98,7 +98,7 @@ export function tomlKeyParts(raw: string): string[] {
       const closed = end > index + 1 && raw[end - 1] === char;
       const bodyEnd = closed ? end - 1 : end;
       const body = raw.slice(index + 1, bodyEnd);
-      part += char === '"' ? decodeBasicKeyPart(body) : body;
+      part += char === '"' ? decodeTomlBasicString(body) : body;
       index = end;
       continue;
     }

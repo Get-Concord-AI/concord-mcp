@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 
 import { userHome } from '../config/paths.js';
 import {
+  decodeTomlBasicString,
   inlineTableKeys,
   tomlAssignment,
   tomlHeader,
@@ -99,7 +100,9 @@ function pushUnique(values: string[], value: string): void {
 function stringValue(value: string): string | undefined {
   const match = STRING_VALUE_PATTERN.exec(value);
   if (match === null) return undefined;
-  return match[1] ?? match[2];
+  const basic = match[1];
+  if (basic !== undefined) return decodeTomlBasicString(basic);
+  return match[2];
 }
 
 function scanInlineEnv(scan: BlockScan, value: string): void {

@@ -101,6 +101,23 @@ describe('upsertVibeHooksConfig', () => {
     expect(upsertVibeHooksConfig(next)).toBe(next);
   });
 
+  it('decodes escaped concord hook names before deciding ownership', () => {
+    const userHook = [
+      '[[hooks]]',
+      'name = "\\u0063oncord-session-start"',
+      'type = "session_start"',
+      'command = "echo user-hook"',
+      '',
+    ].join('\n');
+    const next = upsertVibeHooksConfig(userHook);
+    expect(next).toContain('name = "\\u0063oncord-session-start"');
+    expect(next).toContain('command = "echo user-hook"');
+    expect(next).not.toContain('name = "concord-session-start"');
+    expect(next.split('type = "session_start"')).toHaveLength(2);
+    expect(vibeHooksInstalled(next)).toBe(false);
+    expect(upsertVibeHooksConfig(next)).toBe(next);
+  });
+
   it('treats same-name hooks with extra keys or child tables as user-owned', () => {
     for (const extra of ['enabled = false', '[hooks.settings]\ntimeout = 3']) {
       const userHook = [

@@ -531,6 +531,33 @@ describe('round-3 review regressions', () => {
     expect(upsertVibeMcpConfig(src)).toBe(src);
   });
 
+  it('decodes escaped concord names before deciding ownership', () => {
+    const foreign = [
+      '[[mcp_servers]]',
+      'name = "\\u0063oncord"',
+      'transport = "stdio"',
+      'command = "old-command"',
+      '',
+    ].join('\n');
+    expectValidToml(foreign);
+    expect(hasVibeMcpServer(foreign)).toBe(false);
+    expect(upsertVibeMcpConfig(foreign)).toBe(foreign);
+
+    const owned = [
+      '[[mcp_servers]]',
+      'name = "\\u0063oncord"',
+      'transport = "stdio"',
+      'command = "concord-mcp"',
+      'env = { CONCORD_AGENT_KIND = "vibe" }',
+      '',
+    ].join('\n');
+    const next = upsertVibeMcpConfig(owned);
+    expectValidToml(next);
+    expect(next).toContain('name = "concord"');
+    expect(next.split('[[mcp_servers]]')).toHaveLength(2);
+    expect(hasVibeMcpServer(next)).toBe(true);
+  });
+
   it('does not drop user vars from an escaped env child on setup or uninstall', () => {
     const src = [
       '[[mcp_servers]]',
