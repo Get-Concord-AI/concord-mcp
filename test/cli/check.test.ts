@@ -4,9 +4,7 @@ import { checkFileOverlaps, renderCheck } from '../../src/cli/commands/check.js'
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { handleClaimWork } from '../../src/tools/claim-work.js';
-
-/** Spellings of a whole-repo claim, including Windows separators and `..`. */
-const ROOT_CLAIMS = ['.', './', '/', '.\\', '\\', './.', 'src/..'];
+import { ROOT_CLAIMS } from '../helpers/root-claims.js';
 
 describe('concord check', () => {
   let repos: Repositories;

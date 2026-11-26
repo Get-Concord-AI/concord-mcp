@@ -6,10 +6,12 @@ import type { TaskRecord } from '../../src/db/index.js';
 import {
   detectOverlaps,
   entryCoversFile,
+  isRootClaim,
   normalizePath,
   pathKey,
   type OverlapSurface,
 } from '../../src/domain/overlap.js';
+import { ROOT_CLAIMS } from '../helpers/root-claims.js';
 
 function task(partial: Partial<TaskRecord> & { taskId: string }): TaskRecord {
   return {
@@ -42,9 +44,6 @@ const candidate: OverlapSurface = {
   domains: ['payments'],
   riskTags: ['payment-flow'],
 };
-
-/** Spellings of a whole-repo claim, including Windows separators and `..`. */
-const ROOT_CLAIMS = ['.', './', '/', '.\\', '\\', './.', 'src/..'];
 
 describe('detectOverlaps', () => {
   it('flags a shared module and directory (the plan demo case)', () => {
@@ -398,6 +397,10 @@ describe('detectOverlaps', () => {
     expect(detectOverlaps(fileClaim, [rootClaim])).toEqual([
       { taskId: 'ROOT', title: 'ROOT', reasons, kinds: ['same_file'] },
     ]);
+  });
+
+  it.each(['', '  ', '..', '../x', 'src'])('does not treat %j as a root claim', (entry) => {
+    expect(isRootClaim(entry)).toBe(false);
   });
 
   it.each([
