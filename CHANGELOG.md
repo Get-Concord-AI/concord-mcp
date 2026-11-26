@@ -12,7 +12,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `concord` entry in an MCP config) now preserves the entry's other fields
   — `disabled`, timeouts, client-specific options — instead of dropping
   everything but `command`/`args`/`env`. Command, args, and env are still
-  always rewritten, which is how older package-runner installs migrate.
+  always rewritten, which is how older package-runner installs migrate. In
+  particular, a `disabled: true` entry now stays disabled across setup instead
+  of being silently re-enabled.
 
 ## [0.25.0] - 2026-11-25
 
