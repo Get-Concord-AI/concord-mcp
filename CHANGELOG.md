@@ -6,19 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-27
+
+### Added
+
+- Claude Code sessions see waiting peer messages before they ask you a
+  question. The relay plugin's `PreToolUse` hook on `AskUserQuestion` now
+  drains messages the session hasn't been shown yet; if there are any, the
+  question is held back once with the messages as the reason, so the agent can
+  read them and ask again. The next question from that session always goes
+  through, so a busy peer can never keep you from being asked. Permission
+  prompts are not covered; see [docs/claude-code.md](./docs/claude-code.md)
+  (#394).
+- OpenHands support ([docs/openhands.md](./docs/openhands.md)): an opt-in
+  OpenHands SDK tool set that starts Concord for each conversation and binds
+  its identity to the conversation, so a forked conversation registers as its
+  own agent. Peer messages and task notes are sent literally, without
+  OpenHands secret expansion, and responses stay masked (#409).
+- A T3 Code guide ([docs/t3-code.md](./docs/t3-code.md)) covering per-provider
+  coverage, thread identity, worktrees and message delivery (#404).
+
 ### Fixed
 
+- `transfer_work` can now force-reassign a stale task that has no human owner,
+  as `update_work` already suggested. It is allowed only when nobody live holds
+  the task or has a pending handoff for it, the check and the write happen in
+  one transaction, and a displaced pending handoff is expired (#389).
+- A claim on the repository root is recognised however it is spelled (`.\`,
+  `\`, `src/..`, `//` and so on), not only as `.`, `./` or `/` (#420).
 - Removing the last property of a JSONC object no longer drops a comment
   sitting between the preceding comma and that property — a section note is
   kept the way comments after a middle property already were.
-- Devin uninstall keeps user comments in the hooks config.
+- Devin uninstall keeps user comments in the hooks config (#418).
 - Re-running `concord setup` (or any installer path that rewrites the
   `concord` entry in an MCP config) now preserves the entry's other fields
   — `disabled`, timeouts, client-specific options — instead of dropping
   everything but `command`/`args`/`env`. Command, args, and env are still
   always rewritten, which is how older package-runner installs migrate. In
   particular, a `disabled: true` entry now stays disabled across setup instead
-  of being silently re-enabled.
+  of being silently re-enabled (#412).
 
 ## [0.25.0] - 2026-11-25
 
@@ -1041,7 +1067,8 @@ unimplemented. The recipient now pulls instead.
 - `concord install` writes usage instructions for Claude Code, Codex, and Cursor.
 - Two-agent overlap demo (`pnpm demo`).
 
-[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Get-Concord-AI/concord-mcp/compare/v0.22.0...v0.23.0
