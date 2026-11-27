@@ -13,7 +13,9 @@ import {
 import { buildRoster, deriveLiveness } from '../../domain/presence.js';
 import { renderInboxBody, type DeliverableMessage } from '../../domain/pull-inbox.js';
 import { ensureAgentRegistered } from '../../tools/register-agent.js';
+import type { AncestorProcess } from '../../parent-chain.js';
 import { launchDetachedConcord } from '../detached-host.js';
+import { recordClientBinding } from '../session-binding.js';
 import { drainFromCloud, registerInCloud, watching } from './cloud-inbox.js';
 import type { MessageSpool } from './copilot-spool.js';
 import { copilotHome } from '../../install/copilot-config.js';
@@ -97,7 +99,11 @@ export function copilotWorkspace(rawJson: string): string {
   }
 }
 
-export function localCopilotBackend(repos: Repositories, repoRoot: string): CopilotHookBackend {
+export function localCopilotBackend(
+  repos: Repositories,
+  repoRoot: string,
+  ancestors?: readonly AncestorProcess[],
+): CopilotHookBackend {
   const hosted = (agentId: string): boolean => {
     const endpoint = repos.agentEndpoints.getByAgent(agentId);
     return (
@@ -109,6 +115,7 @@ export function localCopilotBackend(repos: Repositories, repoRoot: string): Copi
   return {
     register: (agentId, cwd) => {
       ensureAgentRegistered(repos, { agentId, kind: KIND }, cwd);
+      recordClientBinding(repos, { agentId, kind: KIND }, ancestors);
       registerPullEndpoint(repos, agentId, KIND);
       return Promise.resolve();
     },

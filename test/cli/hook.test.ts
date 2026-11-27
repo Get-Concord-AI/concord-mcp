@@ -291,6 +291,16 @@ describe('Antigravity hook handlers', () => {
       expect(output.injectSteps[0]?.systemMessage).not.toContain('inspect_work');
     });
 
+    it('binds the client process at session start', () => {
+      const payload = JSON.stringify({ conversationId: 'conv-test-123' });
+      const result = handleAntigravitySessionStart(repos, payload, process.cwd(), [
+        { pid: 621, name: 'antigravity' },
+      ]);
+
+      expect(repos.sessionBindings.forClientPid(621)?.agentId).toBe(result.agentId);
+      expect(repos.sessionBindings.forClientPid(621)?.kind).toBe('antigravity');
+    });
+
     it('tells the agent to start its idle monitor with its own id filled in', () => {
       const payload = JSON.stringify({ conversationId: 'conv-test-123' });
       const result = handleAntigravitySessionStart(repos, payload);

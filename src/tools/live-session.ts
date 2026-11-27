@@ -1,4 +1,4 @@
-import type { Repositories } from '../db/index.js';
+import type { Repositories, SessionBinding } from '../db/index.js';
 import { SERVER_BINDING_DEPTH, ancestorPids } from '../parent-chain.js';
 import {
   identityForRequest,
@@ -25,9 +25,11 @@ export interface LiveSessionDeps {
  * The session a call acts as: the binding a session-start hook recorded for
  * this server's client when one exists — it reflects a `/resume` the
  * spawn-time environment never saw. Roster expiry does not lapse a binding:
- * an idle session archives while its client still hosts it, so only a
- * missing agent row discards one; with no env identity to correct, the
- * caller keeps its unproven path.
+ * an idle session archives while its client still hosts it. A row establishes
+ * that proof only where its agent row exists; afterwards it is process-wide
+ * client state, so a workspace whose store has no copy does not restore the
+ * old identity. With no env identity to correct, the caller keeps its
+ * unproven path.
  */
 export function liveSession(
   session: AgentIdentity | undefined,
@@ -45,15 +47,14 @@ export function liveSession(
   /** Set on the first env-vs-hook identity drift, surfaced once per session. */
   let driftAdvisory: DriftAdvisory | undefined;
   let driftAdvisoryShown = false;
-  // The client's pid list is process-stable, so it is computed once — but the
-  // lookup result is not cached: each call selects its own workspace's
-  // repositories, and a binding that exists in one database must not be
-  // shadowed by a miss in another. A server trusts at most its parent and
-  // one shim past it: hooks bind the client and its own wrappers only.
+  // The client's pid list is process-stable, so it is computed once. A server
+  // trusts at most its parent and one shim past it: hooks bind the client and
+  // its own wrappers only.
   const ancestors = deps.ancestors ?? ((): number[] => ancestorPids(SERVER_BINDING_DEPTH));
   const startedAt = deps.startedAt ?? Date.now() - process.uptime() * 1000;
   let candidates: number[] | undefined;
-  const bindingFor = (callRepos: Repositories): LiveSessionBinding | undefined => {
+  let established: SessionBinding | undefined;
+  const freshBindingIn = (callRepos: Repositories): SessionBinding | undefined => {
     candidates ??= ancestors();
     for (const pid of candidates) {
       const found = callRepos.sessionBindings.forClientPid(pid);
@@ -68,6 +69,17 @@ export function liveSession(
     }
     return undefined;
   };
+  const bindingFor = (callRepos: Repositories): LiveSessionBinding | undefined => {
+    const found = freshBindingIn(callRepos);
+    if (
+      found !== undefined &&
+      callRepos.agents.get(found.agentId) !== undefined &&
+      (established === undefined || Date.parse(established.updatedAt) < Date.parse(found.updatedAt))
+    ) {
+      established = found;
+    }
+    return established;
+  };
 
   const sessionForRequest = (
     callRepos: Repositories,
@@ -76,11 +88,6 @@ export function liveSession(
     const base = identityForRequest(session, requestIdentity?.(meta));
     const binding = bindingFor(callRepos);
     if (binding === undefined) return base;
-    const bound = callRepos.agents.get(binding.agentId);
-    // Roster expiry is not session death: an idle resumed session archives
-    // while its binding is still the client's live identity, so only a
-    // missing agent row discards the binding.
-    if (bound === undefined) return base;
     const live = liveSessionIdentity(base, binding);
     if (
       live.drifted &&
