@@ -115,7 +115,7 @@ describe('inspect_work text for clients that only display content', () => {
       undefined,
     );
     const nextIds = renderedMessageIds(next.content.map((block) => block.text).join('\n'));
-    expect(new Set([...shown, ...nextIds])).toEqual(new Set(backlog));
+    expect(nextIds).toEqual(backlog.slice(0, 2));
     expect(backlog.every((id) => repos.agentMessages.get(id)?.status === 'read')).toBe(true);
   });
 

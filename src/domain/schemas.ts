@@ -133,6 +133,13 @@ export const inspectWorkInputShape = {
         'your session.',
     ),
   message_id: z.string().min(1).optional().describe('Prompt/reply thread to inspect'),
+  inbox_before: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'With agent_id, pass the cursor printed by the previous inbox page. Pages show unread messages first, or recent live messages when none are unread.',
+    ),
   query: z
     .string()
     .trim()

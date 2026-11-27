@@ -407,6 +407,10 @@ export function createAgentMessageRepository(
   const requeueTransaction = db.transaction(requeueUnread);
   const requeueSessionTransaction = db.transaction(requeueSession);
   const sweepTransaction = db.transaction(sweepStale);
+  const hasStale = db.transaction(
+    (now: string) =>
+      listExpiredStmt.get(now) !== undefined || listUnreachableStmt.get({ now }) !== undefined,
+  );
 
   return {
     create(message) {
@@ -473,6 +477,9 @@ export function createAgentMessageRepository(
       return requeueSessionTransaction.immediate(agentId, session);
     },
     sweepStale(now) {
+      // Inspectors can share a read snapshot with an active writer. If any
+      // receipt needs changing, recheck it under the normal write reservation.
+      if (!hasStale((now ?? new Date()).toISOString())) return [];
       return sweepTransaction.immediate(now);
     },
     listByTask(taskId) {

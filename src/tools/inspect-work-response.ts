@@ -60,6 +60,15 @@ export function inspectWorkResponse(
     };
   }
   if (result.scope === 'agent') {
+    const pageText = result.communication.private
+      ? ''
+      : result.nextInboxBefore === null
+        ? '\nEnd of inbox page sequence.'
+        : `\nNext page: inspect_work ${JSON.stringify({
+            agent_id: result.communication.agentId,
+            inbox_before: result.nextInboxBefore,
+            workspace_id: workspace?.workspaceId,
+          })}`;
     return {
       content: [
         {
@@ -74,6 +83,7 @@ export function inspectWorkResponse(
               (result.communication.awaitingUserSince === null
                 ? '.'
                 : `; waiting on its user since ${result.communication.awaitingUserSince}.`) +
+              pageText +
               messageText(result.textInbox, result.communication.agentId),
             workspace,
           ),

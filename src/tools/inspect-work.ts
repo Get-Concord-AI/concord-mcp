@@ -30,8 +30,6 @@ export function handleInspectWork(
   input: InspectWorkInput,
   sessionAgentId?: string,
 ): InspectWorkResult {
-  // Expiry is lazy: apply it before any receipt is shown or changed.
-  repos.agentMessages.sweepStale();
   const scoped = [input.task_id, input.message_id, input.query].filter(
     (value) => value !== undefined,
   );
@@ -47,12 +45,19 @@ export function handleInspectWork(
   if (input.include_superseded !== undefined && input.task_id === undefined) {
     throw new Error('include_superseded applies only with task_id.');
   }
+  if (input.inbox_before !== undefined && (scoped.length !== 0 || input.agent_id === undefined)) {
+    throw new Error('inbox_before applies only with an agent_id inbox.');
+  }
   const viewer: Viewer | undefined =
     sessionAgentId !== undefined
       ? { agentId: sessionAgentId, verified: true }
       : input.agent_id === undefined
         ? undefined
         : { agentId: input.agent_id, verified: false };
+  // A private inbox shows presence only. Other scopes may show a receipt.
+  if (scoped.length > 0 || input.agent_id === undefined || viewer?.agentId === input.agent_id) {
+    repos.agentMessages.sweepStale();
+  }
   if (input.task_id !== undefined) {
     const context = handleGetTaskContext(repos, {
       task_id: input.task_id,
@@ -81,6 +86,7 @@ export function handleInspectWork(
         repos,
         input.agent_id,
         viewer ?? { agentId: input.agent_id, verified: false },
+        input.inbox_before,
       ),
     };
   }
