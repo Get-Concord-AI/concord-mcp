@@ -198,7 +198,10 @@ describe('concord cloud', () => {
     expect(runCloudLogout(deps)).toBe('Not logged in.');
     await runCloudLogin({ url: API }, deps);
     const machine = readMachineKey(deps.env);
-    expect(runCloudLogout(deps)).toContain('Logged out');
+    const loggedOut = runCloudLogout(deps);
+    expect(loggedOut).toContain('Logged out');
+    expect(loggedOut).toContain('stop using Concord Cloud');
+    expect(runCloudLogout(deps)).toBe('Not logged in.');
     expect(existsSync(credentialsPath(deps.env))).toBe(false);
 
     await runCloudLogin({ url: API }, deps);
@@ -237,17 +240,24 @@ describe('concord cloud', () => {
   it('links and unlinks the machine, keeping the login', async () => {
     expect(() => runCloudLink(deps)).toThrow(/Not logged in/);
     // Logging in links the machine.
-    expect(await runCloudLogin({ url: API }, deps)).toContain('This machine is linked');
+    const loggedIn = await runCloudLogin({ url: API }, deps);
+    expect(loggedIn).toContain('This machine is linked');
+    expect(loggedIn).toContain('Restart clients that were already open');
+    expect(loggedIn).toContain('Claims made before the link stay in the local database');
     expect(linkedMachine(deps.env)).toBeDefined();
     expect(runCloudLink(deps)).toContain('already linked');
 
-    expect(runCloudUnlink(deps)).toContain('Unlinked this machine');
+    const unlinked = runCloudUnlink(deps);
+    expect(unlinked).toContain('Unlinked this machine');
+    expect(unlinked).toContain('stop using Concord Cloud');
     expect(linkedMachine(deps.env)).toBeUndefined();
     expect(existsSync(credentialsPath(deps.env))).toBe(true);
     expect(runCloudUnlink(deps)).toContain('not linked');
     expect(await runCloudStatus(deps)).toContain('Machine: not linked (`concord cloud unlink`)');
 
-    expect(runCloudLink(deps)).toContain('Linked this machine');
+    const relinked = runCloudLink(deps);
+    expect(relinked).toContain('Linked this machine');
+    expect(relinked).toContain('Restart clients that were already open');
     expect(linkedMachine(deps.env)).toBeDefined();
 
     // Logging in again links a machine that was unlinked.

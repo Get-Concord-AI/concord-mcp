@@ -18,19 +18,59 @@ function repoDir(label: string): string {
 }
 
 describe('WorkspaceManager', () => {
-  it('opens no further store once its machine is linked, keeping the ones it has', () => {
+  it('stops using a store it already opened once its machine is linked', () => {
     const first = repoDir('first');
     const second = repoDir('second');
+    let now = 0;
     let linked = false;
     const manager = new WorkspaceManager(first, {
+      now: () => now,
       refuseOpen: () => (linked ? 'This machine works through Concord Cloud' : undefined),
     });
+    const routed = routedRepositories(manager);
+    const firstId = workspaceIdForRoot(first);
 
     linked = true;
+    now = 1_000;
     expect(() => manager.join(second)).toThrow(/works through Concord Cloud/u);
     expect(existsSync(join(second, '.concord'))).toBe(false);
-    // A store it already holds stays usable.
-    expect(manager.join(first).repoRoot).toBe(first);
+    expect(() => manager.join(first)).toThrow(/works through Concord Cloud/u);
+    expect(() => manager.current()).toThrow(/works through Concord Cloud/u);
+    expect(() => manager.select(firstId)).toThrow(/works through Concord Cloud/u);
+    expect(() => routed.tasks.list()).toThrow(/works through Concord Cloud/u);
+  });
+
+  it('reuses a link check for a second, then reads it again', () => {
+    const root = repoDir('cached-link');
+    let now = 0;
+    let linked = false;
+    let reads = 0;
+    const manager = new WorkspaceManager(root, {
+      now: () => now,
+      refuseOpen: () => {
+        reads += 1;
+        return linked ? 'This machine works through Concord Cloud' : undefined;
+      },
+    });
+    const opened = reads;
+
+    manager.current();
+    now = 999;
+    manager.current();
+    expect(reads).toBe(opened);
+
+    now = 1_000;
+    expect(manager.current().repoRoot).toBe(root);
+    expect(reads).toBe(opened + 1);
+
+    linked = true;
+    now = 1_999;
+    expect(manager.current().repoRoot).toBe(root);
+    expect(reads).toBe(opened + 1);
+
+    now = 2_000;
+    expect(() => manager.current()).toThrow(/works through Concord Cloud/u);
+    expect(reads).toBe(opened + 2);
   });
 
   it('can start outside a repository and explicitly join one later', () => {

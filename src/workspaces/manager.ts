@@ -28,12 +28,19 @@ export interface WorkspaceManagerOptions {
   /** Where a root's state lives; the repository's own store unless global mode applies. */
   resolveStore?: (repoRoot: string) => StoreLocation;
   /**
-   * Why no store may be opened now, checked before each first open: a server
-   * started while its machine was unlinked keeps running after a login links
-   * it, and must not open a local store there.
+   * Why no store may be used now. Checked before every open and before every
+   * use of a store already open. The answer is reused for one second, so one
+   * tool call does not reread the link files on every repository access. A
+   * server started while its machine was unlinked keeps running after a login
+   * links it, and must not read or write a local store a cloud agent cannot reach.
    */
   refuseOpen?: () => string | undefined;
+  /** Clock for the one-second reuse of `refuseOpen`. Tests pass their own. */
+  now?: () => number;
 }
+
+/** How long a link check is reused. A login lands on the next check after this. */
+const STORE_REFUSAL_TTL_MS = 1_000;
 
 /**
  * Open and route Concord workspaces within one MCP server process.
@@ -47,6 +54,9 @@ export class WorkspaceManager {
   readonly #open: (databaseFilename: string, project: string) => Repositories;
   readonly #resolveStore: (repoRoot: string) => StoreLocation;
   readonly #refuseOpen: () => string | undefined;
+  readonly #now: () => number;
+  #refusalCheckedAt = Number.NEGATIVE_INFINITY;
+  #cachedRefusal: string | undefined = undefined;
   #activeWorkspaceId: string;
   #selections = 0;
 
@@ -54,6 +64,7 @@ export class WorkspaceManager {
     this.#open = options.open ?? openRepositories;
     this.#resolveStore = options.resolveStore ?? ((root) => resolveStore(root, process.env));
     this.#refuseOpen = options.refuseOpen ?? (() => undefined);
+    this.#now = options.now ?? Date.now;
     this.#allowedRoots =
       options.allowedRoots === undefined
         ? undefined
@@ -98,6 +109,7 @@ export class WorkspaceManager {
 
   /** The active/default context used when an operation omits `workspace_id`. */
   current(): WorkspaceContext {
+    this.#assertStoreAllowed();
     const context = this.#contexts.get(this.#activeWorkspaceId);
     if (context === undefined) {
       throw new Error('Concord has no active workspace.');
@@ -113,9 +125,10 @@ export class WorkspaceManager {
     const workspaceId = workspaceIdForRoot(repoRoot);
     let context = this.#contexts.get(workspaceId);
     const firstOpen = context === undefined;
+    // Re-checked for a store this process already holds. Link state is read
+    // from disk on each call, so a login that happened after startup fences it.
+    this.#assertStoreAllowed();
     if (context === undefined) {
-      const refusal = this.#refuseOpen();
-      if (refusal !== undefined) throw new Error(refusal);
       const store = this.#resolveStore(repoRoot);
       context = {
         workspaceId,
@@ -140,12 +153,23 @@ export class WorkspaceManager {
     this.#selections += 1;
     const cached = this.#contexts.get(workspaceId);
     if (cached !== undefined) {
+      this.#assertStoreAllowed();
       this.#activeWorkspaceId = workspaceId;
       return cached;
     }
     const root = workspaceRootFromId(workspaceId);
     this.join(root);
     return this.current();
+  }
+
+  /** Re-reads the fence at most once a second. A login lands on the next check. */
+  #assertStoreAllowed(): void {
+    const now = this.#now();
+    if (now - this.#refusalCheckedAt >= STORE_REFUSAL_TTL_MS) {
+      this.#cachedRefusal = this.#refuseOpen();
+      this.#refusalCheckedAt = now;
+    }
+    if (this.#cachedRefusal !== undefined) throw new Error(this.#cachedRefusal);
   }
 
   #assertAllowed(repoRoot: string): void {

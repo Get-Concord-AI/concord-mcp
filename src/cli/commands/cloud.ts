@@ -58,6 +58,20 @@ export const DEFAULT_API_URL = 'https://api.getconcord.ai';
 
 export const API_KEY_ENV = 'CONCORD_CLOUD_API_KEY';
 
+/**
+ * Sessions already running keep the store they started with until their next
+ * Concord call, which then refuses it. Their claims are not copied to the cloud.
+ */
+const LINKED_RESTART_NOTICE =
+  'Restart clients that were already open. Claims made before the link stay in the local database.';
+
+/**
+ * A proxy started while linked keeps forwarding until its next call, which
+ * then stops. Logout and unlink both end that link.
+ */
+const UNLINKED_RESTART_NOTICE =
+  'Restart clients that were already open so they stop using Concord Cloud.';
+
 /** A key shown in output: enough to tell keys apart, never enough to use one. */
 function maskKey(apiKey: string): string {
   return `${apiKey.slice(0, 7)}…`;
@@ -120,12 +134,12 @@ export async function runCloudLogin(
   writeUserConfig(deps.env, { cloudLink: true });
   return `Logged in to ${apiUrl} (API v${String(meta.apiVersion)}) ${
     'apiKey' in credentials ? `with key ${maskKey(credentials.apiKey)}` : 'through the browser'
-  }. This machine is linked: its agents work through Concord Cloud in every folder.`;
+  }. This machine is linked: its agents work through Concord Cloud in every folder. ${LINKED_RESTART_NOTICE}`;
 }
 
 export function runCloudLogout(deps: CloudDeps): string {
   return removeCredentials(deps.env)
-    ? "Logged out; this machine's agents use local Concord again."
+    ? `Logged out; this machine's agents use local Concord again. ${UNLINKED_RESTART_NOTICE}`
     : 'Not logged in.';
 }
 
@@ -146,7 +160,7 @@ export function runCloudLink(deps: CloudDeps): string {
   writeUserConfig(deps.env, { cloudLink: true });
   return wasLinked
     ? `This machine is already linked to ${credentials.apiUrl}.`
-    : `Linked this machine to ${credentials.apiUrl}: its agents work through Concord Cloud in every folder.`;
+    : `Linked this machine to ${credentials.apiUrl}: its agents work through Concord Cloud in every folder. ${LINKED_RESTART_NOTICE}`;
 }
 
 /** Unlink this machine: its agents use local Concord, and the login stays for `link`. */
@@ -157,7 +171,7 @@ export function runCloudUnlink(deps: CloudDeps): string {
   writeUserConfig(deps.env, { cloudLink: false });
   return (
     'Unlinked this machine: its agents use local Concord. You are still signed in; ' +
-    '`concord cloud link` reconnects it.'
+    `\`concord cloud link\` reconnects it. ${UNLINKED_RESTART_NOTICE}`
   );
 }
 
