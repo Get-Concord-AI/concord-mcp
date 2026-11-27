@@ -306,7 +306,20 @@ export const migrations: readonly string[] = [
     updated_at TEXT NOT NULL
   );
   `,
-  // 020 — files shared with a prompt or reply. The bytes live in the same
+  // 020 — a session whose question a hook denied, to show it messages first,
+  // has its next question let through, so a held message or a chatty peer can
+  // never keep the user from being asked. One row per session, so one
+  // session's deny never replaces another's allowance. A session the hook
+  // cannot name is stored as ''.
+  `
+  CREATE TABLE user_wait_allowances (
+    agent_id    TEXT NOT NULL,
+    session     TEXT NOT NULL,
+    granted_at  TEXT NOT NULL,
+    PRIMARY KEY (agent_id, session)
+  );
+  `,
+  // 021 — files shared with a prompt or reply. The bytes live in the same
   // database as the message they came with, and are written in the same
   // transaction as that message's rows, so one transaction holds both and
   // retention can clear them. message_id is a soft reference (no FK), as

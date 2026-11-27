@@ -122,10 +122,11 @@ function sharedPaths(
   return [...shared].sort((x, y) => x.localeCompare(y));
 }
 
-/** Recognize explicit repo-root claims before file normalization drops them. */
+/** Recognize explicit repo-root claims before file normalization drops them:
+ * any non-blank entry that normalizes to the root, whatever its separators,
+ * e.g. `.`, `./`, `/`, `.\` or `src/..`. */
 export function isRootClaim(entry: string): boolean {
-  const trimmed = entry.trim();
-  return trimmed === '.' || trimmed === './' || trimmed === '/';
+  return entry.trim() !== '' && normalizePath(entry) === '';
 }
 
 function normalizeClaimEntry(entry: string): string {

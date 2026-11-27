@@ -96,11 +96,23 @@ export function upsertMcpServer(
     ...(extraEnv ?? {}),
   };
 
+  // Command, args, and env are always rewritten to what Concord runs today —
+  // that is how older package-runner installs migrate. Every other field the
+  // entry already carries (`disabled`, timeouts, client-specific options) is
+  // the user's and survives a re-run.
+  const prior = looseObjectSchema.safeParse(servers[CONCORD_SERVER_KEY]);
+  const preserved = Object.fromEntries(
+    Object.entries(prior.success ? prior.data : {}).filter(
+      ([key]) => key !== 'command' && key !== 'args' && key !== 'env',
+    ),
+  );
+
   const next = {
     ...config,
     mcpServers: {
       ...servers,
       [CONCORD_SERVER_KEY]: {
+        ...preserved,
         command: CONCORD_SERVER_COMMAND,
         ...(Object.keys(env).length === 0 ? {} : { env }),
       },
