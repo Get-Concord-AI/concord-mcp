@@ -21,6 +21,7 @@ import {
   handleReopenTask,
 } from '../../src/tools/task-lifecycle.js';
 import { handleUpdateTask } from '../../src/tools/update-task.js';
+import { handleStartWork } from '../../src/tools/workflow.js';
 
 describe('versioned task lifecycle', () => {
   let repos: Repositories;
@@ -144,6 +145,39 @@ describe('versioned task lifecycle', () => {
     expect(expired.task.status).toBe('active');
     expect(expired.task.agentId).toBe('codex:owner');
     expect(expired.task.assignedAgentId).toBeNull();
+  });
+
+  it('lets start_work take unowned work after its assignment lease ran out', () => {
+    handleReleaseTask(repos, {
+      task_id: 'TASK-1',
+      agent_id: 'codex:owner',
+      expected_version: 1,
+    });
+    handleAssignTask(
+      repos,
+      {
+        task_id: 'TASK-1',
+        to_agent_id: 'codex:target',
+        agent_id: 'codex:owner',
+        expected_version: 2,
+        lease_seconds: 60,
+      },
+      Date.now() - 61_000,
+    );
+
+    const resumed = handleStartWork(repos, {
+      task_id: 'TASK-1',
+      title: 'Lifecycle',
+      kind: 'codex',
+      agent_id: 'codex:target',
+    });
+
+    expect(resumed.resumedBy).toBe('assignment');
+    expect(repos.tasks.get('TASK-1')).toMatchObject({
+      status: 'active',
+      agentId: 'codex:target',
+      assignedAgentId: null,
+    });
   });
 
   it('requires ownership, or a same-human supervisor for forced reassignment', () => {
