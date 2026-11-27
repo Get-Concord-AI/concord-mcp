@@ -25,13 +25,25 @@ export class TrackedSessionAdapter implements AgentSessionAdapter {
   }
 
   steer(delivery: AgentSessionDelivery): Promise<string | undefined> {
-    this.handled.add(delivery.messageId);
-    return this.session.pushPrompt(delivery.content, 'steer');
+    return this.push(delivery, 'steer');
   }
 
   inject(delivery: AgentSessionDelivery): Promise<string | undefined> {
+    return this.push(delivery, 'inject');
+  }
+
+  private async push(
+    delivery: AgentSessionDelivery,
+    mode: 'steer' | 'inject',
+  ): Promise<string | undefined> {
     this.handled.add(delivery.messageId);
-    return this.session.pushPrompt(delivery.content, 'inject');
+    try {
+      return await this.session.pushPrompt(delivery.content, mode);
+    } catch (error) {
+      // Refused, so never handed over: the sweep must offer it again.
+      this.handled.delete(delivery.messageId);
+      throw error;
+    }
   }
 }
 
@@ -78,7 +90,6 @@ export async function sweepStragglers(
       receipt = await (adapter.isBusy() ? adapter.steer(delivery) : adapter.inject(delivery));
     } catch {
       // Not handed over: still pending, so the next sweep tries again.
-      adapter.handled.delete(message.messageId);
       continue;
     }
     // Handed over: it stays in `handled`, so if recording this fails the next

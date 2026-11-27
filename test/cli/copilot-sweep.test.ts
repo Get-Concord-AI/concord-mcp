@@ -8,6 +8,7 @@ import {
 import { openDatabase } from '../../src/db/connection.js';
 import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
+import { RELAY_PROTOCOL_VERSION } from '../../src/relay/protocol.js';
 import { handleSendAgentMessage } from '../../src/tools/agent-messages.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 
@@ -79,6 +80,26 @@ describe('sweepStragglers (#261)', () => {
     await sweepStragglers(repos, AGENT, adapter, later());
     expect(repos.agentMessages.get(id)?.status).toBe('delivered');
     expect(pushed).toHaveLength(1);
+  });
+
+  it('hands over a message whose relay push the session refused', async () => {
+    const id = send(repos, 'Refused as the turn ended.', 'k-9');
+    fail = true;
+    await expect(
+      adapter.inject({
+        version: RELAY_PROTOCOL_VERSION,
+        type: 'deliver',
+        messageId: id,
+        senderAgentId: 'peer',
+        recipientAgentId: AGENT,
+        content: 'Refused as the turn ended.',
+      }),
+    ).rejects.toThrow('TUI gone');
+
+    fail = false;
+    await sweepStragglers(repos, AGENT, adapter, later());
+    expect(pushed).toHaveLength(1);
+    expect(repos.agentMessages.get(id)?.status).toBe('delivered');
   });
 
   it('never repeats a handoff when only recording it failed', async () => {
