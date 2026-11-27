@@ -480,6 +480,7 @@ export interface AgentRecord {
   heartbeatAt: string;
   activityAt: string | null;
   summaryUpdatedAt: string | null;
+  parentAgentId: string | null;
 }
 
 const agentDbRowSchema = z.object({
@@ -499,6 +500,7 @@ const agentDbRowSchema = z.object({
   heartbeat_at: z.string().nullable(),
   activity_at: z.string().nullable(),
   summary_updated_at: z.string().nullable(),
+  parent_agent_id: z.string().nullable(),
 });
 
 export function parseAgentRow(raw: unknown): AgentRecord {
@@ -520,6 +522,7 @@ export function parseAgentRow(raw: unknown): AgentRecord {
     heartbeatAt: row.heartbeat_at ?? row.last_seen,
     activityAt: row.activity_at,
     summaryUpdatedAt: row.summary_updated_at,
+    parentAgentId: row.parent_agent_id,
   };
 }
 

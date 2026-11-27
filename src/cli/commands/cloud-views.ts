@@ -51,6 +51,7 @@ export async function runCloudWho(
           heartbeatAt: agent.lastSeenAt,
           activityAt: null,
           summaryUpdatedAt: null,
+          parentAgentId: null,
         },
         now,
       );

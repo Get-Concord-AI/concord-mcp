@@ -319,4 +319,9 @@ export const migrations: readonly string[] = [
     PRIMARY KEY (agent_id, session)
   );
   `,
+  // 021 — parent link: the agent that launched this one, when one did. A soft
+  // reference (no FK), like tasks.agent_id, so a child row survives its parent.
+  `
+  ALTER TABLE agents ADD COLUMN parent_agent_id TEXT;
+  `,
 ];
