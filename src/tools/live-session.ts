@@ -69,13 +69,22 @@ export function liveSession(
     }
     return undefined;
   };
-  const bindingFor = (callRepos: Repositories): LiveSessionBinding | undefined => {
+  const bindingFor = (
+    callRepos: Repositories,
+    base: AgentIdentity | undefined,
+  ): LiveSessionBinding | undefined => {
     const found = freshBindingIn(callRepos);
     if (
       found !== undefined &&
+      base !== undefined &&
+      base.origin !== 'operator' &&
+      found.kind === base.kind &&
       callRepos.agents.get(found.agentId) !== undefined &&
       (established === undefined || Date.parse(established.updatedAt) < Date.parse(found.updatedAt))
     ) {
+      // A row that cannot correct this caller must not become process-wide
+      // state: a nested client's foreign binding would otherwise evict the
+      // caller's own proof and send later workspaces back to its old env id.
       established = found;
     }
     return established;
@@ -86,7 +95,7 @@ export function liveSession(
     meta: OpenCodeRequestIdentityMetadata | undefined,
   ): AgentIdentity | undefined => {
     const base = identityForRequest(session, requestIdentity?.(meta));
-    const binding = bindingFor(callRepos);
+    const binding = bindingFor(callRepos, base);
     if (binding === undefined) return base;
     const live = liveSessionIdentity(base, binding);
     if (

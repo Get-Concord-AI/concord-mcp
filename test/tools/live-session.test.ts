@@ -218,6 +218,28 @@ describe('live session lookup', () => {
     expect(session.sessionForRequest(other, undefined)?.agentId).toBe(RESUMED.agentId);
   });
 
+  it('does not let a foreign binding displace the established one', () => {
+    // A Grok server inside a Claude client can see the outer client's binding
+    // in another workspace. That newer row is not applicable to Grok, so it
+    // must not evict Grok's established binding or resurrect Grok's env id.
+    const other = createRepositories(openDatabase(':memory:'));
+    const grokEnv: AgentIdentity = { agentId: 'grok:99990000', kind: 'grok', origin: 'session' };
+    const grokResumed = 'grok:11112222';
+    const outerClaude = 'claude-code:cccc3333';
+    repos.agents.upsert({ agentId: grokResumed, kind: 'grok' });
+    other.agents.upsert({ agentId: outerClaude, kind: 'claude-code' });
+    repos.sessionBindings.upsert(42, grokResumed, 'grok', '2026-01-01T00:00:02.000Z');
+    other.sessionBindings.upsert(42, outerClaude, 'claude-code', '2026-01-01T00:00:03.000Z');
+    const session = liveSession(grokEnv, undefined, {
+      ancestors: () => [42],
+      startedAt: Date.parse('2026-01-01T00:00:01.000Z'),
+    });
+
+    expect(session.sessionForRequest(repos, undefined)?.agentId).toBe(grokResumed);
+    expect(session.sessionForRequest(other, undefined)?.agentId).toBe(grokResumed);
+    expect(session.sessionForRequest(repos, undefined)?.agentId).toBe(grokResumed);
+  });
+
   it('lets a newer binding replace one established in another workspace', () => {
     const other = createRepositories(openDatabase(':memory:'));
     const nextAgentId = 'claude-code:cccc3333';
