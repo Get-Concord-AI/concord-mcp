@@ -8,6 +8,7 @@ import {
 import { openDatabase } from '../../src/db/connection.js';
 import { registerPullEndpoint } from '../../src/cli/commands/inbox.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
+import { RELAY_PROTOCOL_VERSION } from '../../src/relay/protocol.js';
 import { handleSendAgentMessage } from '../../src/tools/agent-messages.js';
 import { handleRegisterAgent } from '../../src/tools/register-agent.js';
 
@@ -79,6 +80,63 @@ describe('sweepStragglers (#261)', () => {
     await sweepStragglers(repos, AGENT, adapter, later());
     expect(repos.agentMessages.get(id)?.status).toBe('delivered');
     expect(pushed).toHaveLength(1);
+  });
+
+  it('hands over a message whose relay push the session refused', async () => {
+    const id = send(repos, 'Refused as the turn ended.', 'k-9');
+    fail = true;
+    await expect(
+      adapter.inject({
+        version: RELAY_PROTOCOL_VERSION,
+        type: 'deliver',
+        messageId: id,
+        senderAgentId: 'peer',
+        recipientAgentId: AGENT,
+        content: 'Refused as the turn ended.',
+      }),
+    ).rejects.toThrow('TUI gone');
+
+    fail = false;
+    await sweepStragglers(repos, AGENT, adapter, later());
+    expect(pushed).toHaveLength(1);
+    expect(repos.agentMessages.get(id)?.status).toBe('delivered');
+  });
+
+  it('leaves a message whose relay push is still unanswered, then hands it over if refused', async () => {
+    const id = send(repos, 'Pushed while the harness was slow.', 'k-10');
+    let refuse: (error: Error) => void = () => undefined;
+    let calls = 0;
+    const slow = new CopilotSessionAdapter({
+      isBusy: () => false,
+      pushPrompt: (content) => {
+        calls += 1;
+        if (calls === 1) {
+          return new Promise((_resolve, reject) => {
+            refuse = reject;
+          });
+        }
+        pushed.push(content);
+        return Promise.resolve('m');
+      },
+    });
+    const relayPush = slow.inject({
+      version: RELAY_PROTOCOL_VERSION,
+      type: 'deliver',
+      messageId: id,
+      senderAgentId: 'peer',
+      recipientAgentId: AGENT,
+      content: 'Pushed while the harness was slow.',
+    });
+
+    await sweepStragglers(repos, AGENT, slow, later());
+    expect(pushed).toEqual([]);
+    expect(repos.agentMessages.get(id)?.status).toBe('sent');
+
+    refuse(new Error('request timed out'));
+    await expect(relayPush).rejects.toThrow('request timed out');
+    await sweepStragglers(repos, AGENT, slow, later());
+    expect(pushed).toHaveLength(1);
+    expect(repos.agentMessages.get(id)?.status).toBe('delivered');
   });
 
   it('never repeats a handoff when only recording it failed', async () => {
