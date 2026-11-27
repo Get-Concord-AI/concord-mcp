@@ -57,6 +57,18 @@ export CONCORD_AGENT_ID="deepseek:$(node -e 'console.log(require("node:crypto").
 dsh web
 ```
 
+On Windows, in the Command Prompt (cmd), use `set` instead of `export`:
+
+```bat
+cd C:\path\to\repository
+set CONCORD_AGENT_ID=deepseek:agent-a
+dsh web
+```
+
+Use a different ID for each independent DeepSeek process (for example
+`deepseek:agent-b` for a second one). Tested on Windows 10 with Concord 0.25.0
+and DeepSeek Harness 0.2.2-rc.5.
+
 The native MCP plugin forwards that environment variable, and the installed row
 pins the kind to `deepseek`. Inherited Claude or Goose session variables cannot
 change that kind. Keep one coordinating agent session per DeepSeek host: the
