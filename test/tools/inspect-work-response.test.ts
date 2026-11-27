@@ -53,14 +53,34 @@ describe('inspect_work text for clients that only display content', () => {
       const response = inspectWorkResponse(result, undefined);
       const text = response.content.map((block) => block.text).join('\n');
 
-      expect(text).toContain(body);
-      expect(text).toContain(messageId);
+      expect(text).toContain(`[concord from sender id=${messageId} task=parser]\n${body}`);
       expect(text).not.toContain(privateBody);
       expect(JSON.stringify(response.structuredContent)).not.toContain(privateBody);
       expect(repos.agentMessages.get(messageId)?.status).toBe('read');
       expect(repos.agentMessages.get(otherId)?.status).toBe('sent');
     },
   );
+
+  it.each([
+    ['thread', 'replied'],
+    ['thread', 'failed'],
+    ['task', 'replied'],
+    ['task', 'failed'],
+  ] as const)('labels incoming %s history when the message is %s', (scope, status) => {
+    const id = send('reader', body);
+    if (status === 'replied') {
+      repos.agentMessages.markReplied(id);
+    } else {
+      repos.agentMessages.markFailed(id, 'expired', null);
+    }
+    const selector = scope === 'thread' ? { message_id: id } : { task_id: 'parser' };
+    const response = inspectWorkResponse(handleInspectWork(repos, selector, 'reader'), undefined);
+
+    expect(response.content[0]?.text).toContain(
+      `[concord from sender id=${id} task=parser ${status} no-reply-needed]\n${body}`,
+    );
+    expect(repos.agentMessages.get(id)?.status).toBe(status);
+  });
 
   it('shows only the newest ten live inbox messages and marks only those read', () => {
     vi.useFakeTimers({ now: new Date('2026-04-01T00:00:00Z') });

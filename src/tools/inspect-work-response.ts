@@ -13,10 +13,12 @@ function messageText(
 ): string {
   return messages
     .map((message) => {
+      const terminalStatus =
+        message.status === 'replied' || message.status === 'failed' ? message.status : undefined;
       const block =
         message.senderAgentId === viewerAgentId
           ? `[concord to ${message.recipientAgentId} id=${message.messageId} ${ticksFor(message.status)}]\n${message.content}`
-          : renderPeerMessage(message);
+          : renderPeerMessage(message, terminalStatus);
       return `\n\n${block}`;
     })
     .join('');

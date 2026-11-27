@@ -57,15 +57,19 @@ export type PeerMessage = Pick<
 >;
 
 /** One message as the recipient sees it, whichever channel carries it. */
-export function renderPeerMessage(message: PeerMessage): string {
+export function renderPeerMessage(
+  message: PeerMessage,
+  terminalStatus?: 'replied' | 'failed',
+): string {
   const task = message.taskId === null ? '' : ` task=${message.taskId}`;
-  const ask = message.expectsReply ? '' : ' no-reply-needed';
-  return `[concord from ${message.senderAgentId} id=${message.messageId}${task}${ask}]\n${message.content}`;
+  const status = terminalStatus === undefined ? '' : ` ${terminalStatus}`;
+  const ask = message.expectsReply && terminalStatus === undefined ? '' : ' no-reply-needed';
+  return `[concord from ${message.senderAgentId} id=${message.messageId}${task}${status}${ask}]\n${message.content}`;
 }
 
 /** The human-readable block shared by every channel. */
 export function renderInboxBody(messages: readonly DeliverableMessage[]): string {
-  return messages.map(renderPeerMessage).join('\n\n');
+  return messages.map((message) => renderPeerMessage(message)).join('\n\n');
 }
 
 const RENDERED_MESSAGE_ID = /\[concord from \S+ id=([^\s\]]+)/gu;
