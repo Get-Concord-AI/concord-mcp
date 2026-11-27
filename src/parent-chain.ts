@@ -12,44 +12,50 @@ export interface AncestorProcess {
   name: string;
 }
 
-const windowsChainRow = z.object({
+const windowsProcessRow = z.object({
   ProcessId: z.number(),
+  ParentProcessId: z.number().nullable(),
   Name: z.string(),
 });
 
 /**
- * The ancestor chain of `ppid` on Windows, nearest first, from a single
- * powershell spawn. One spawn per level — the naive walk — cost a shell
- * startup per ancestor, which under load pushed hook execution past the
- * client hook timeout: bindings landed late or never. Walking inside one
- * powershell process pays that startup once. Undefined when the table cannot
- * be read at all; callers degrade as before.
+ * The full Windows process table from a single powershell spawn — one WMI
+ * roundtrip total. Walking per level used to spawn powershell once per
+ * ancestor, and even batched inside one process it still paid one CIM query
+ * per level; each query costs seconds of WMI service time on a loaded
+ * machine, so hooks died past the client hook timeout and bindings were
+ * never written. The chain is then walked in memory, costing nothing.
+ * Undefined when the table cannot be read at all; callers degrade as before.
  */
-function windowsAncestorChain(limit: number, ppid: number): AncestorProcess[] | undefined {
+function windowsProcessTable(): Map<number, { ppid: number; name: string }> | undefined {
   try {
-    const script =
-      `$cur=${String(ppid)};$out=@();` +
-      `for($i=0;$i -lt ${String(limit)};$i++){` +
-      'if($cur -le 1){break};' +
-      '$p=Get-CimInstance Win32_Process -Filter "ProcessId=$cur";' +
-      'if($null -eq $p){break};' +
-      '$out+=[pscustomobject]@{ProcessId=$cur;Name=$p.Name};' +
-      '$cur=$p.ParentProcessId};' +
-      'ConvertTo-Json -Compress -InputObject @($out)';
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
-      encoding: 'utf8',
-      timeout: 10000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    const out = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress',
+      ],
+      {
+        encoding: 'utf8',
+        timeout: 10000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        maxBuffer: 8 * 1024 * 1024,
+      },
+    );
     const raw: unknown = JSON.parse(out.trim() === '' ? 'null' : out);
     if (raw === null) return undefined;
-    // ConvertTo-Json keeps array shape for -InputObject, but single-row output
-    // can still arrive unwrapped depending on the powershell version.
+    // ConvertTo-Json unwraps single objects when the table has one row.
     const rows = z
-      .union([z.array(windowsChainRow), windowsChainRow.transform((row) => [row])])
+      .union([z.array(windowsProcessRow), windowsProcessRow.transform((row) => [row])])
       .parse(raw);
-    if (rows.length === 0) return undefined;
-    return rows.map((row) => ({ pid: row.ProcessId, name: row.Name }));
+    const table = new Map<number, { ppid: number; name: string }>();
+    for (const row of rows) {
+      if (row.ParentProcessId !== null) {
+        table.set(row.ProcessId, { ppid: row.ParentProcessId, name: row.Name });
+      }
+    }
+    return table.size === 0 ? undefined : table;
   } catch {
     return undefined;
   }
@@ -86,12 +92,17 @@ export function ancestorChain(
   stopAfter?: (ancestor: AncestorProcess) => boolean,
 ): AncestorProcess[] {
   if (process.platform === 'win32') {
-    const rows = windowsAncestorChain(limit, ppid) ?? [{ pid: ppid, name: '' }];
+    const table = windowsProcessTable();
+    if (table === undefined) return [{ pid: ppid, name: '' }];
     const chain: AncestorProcess[] = [];
-    for (const row of rows) {
-      if (chain.some((ancestor) => ancestor.pid === row.pid)) break;
-      chain.push(row);
-      if (stopAfter?.(row) === true) break;
+    let current: number | undefined = ppid;
+    while (current !== undefined && current > 1 && chain.length < limit) {
+      if (chain.some((ancestor) => ancestor.pid === current)) break;
+      const row = table.get(current);
+      const ancestor = { pid: current, name: row?.name ?? '' };
+      chain.push(ancestor);
+      if (stopAfter?.(ancestor) === true) break;
+      current = row?.ppid;
     }
     return chain;
   }
