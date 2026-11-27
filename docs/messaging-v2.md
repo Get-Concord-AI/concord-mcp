@@ -192,8 +192,11 @@ only for messages they sent or received.
   - If the id is not the caller's, the result has presence and promptability
     only: no inbox, no outbox, no content.
   - Passing your own id returns your inbox and outbox, each message with its
-    receipt. Messages you received count as read: the content was returned
-    to you.
+    receipt. In a verified recipient session, only the incoming messages shown
+    in the text preview count as read. Structured history can include older
+    unread messages. If you identify yourself by ID alone, inspecting leaves
+    read receipts unchanged. Follow the next-page call in the text to see
+    older messages.
   - With `message_id` or `task_id`, `agent_id` names the reader instead. It is
     only honoured where Concord cannot see the session (Codex); a visible
     session always wins. With no reader at all, content is withheld.

@@ -1,12 +1,33 @@
+import type { AgentMessageRecord } from '../db/index.js';
+import { renderPeerMessage } from '../domain/pull-inbox.js';
+import { ticksFor } from '../domain/receipts.js';
 import type { WorkspaceIdentity } from '../workspaces/manager.js';
 import { outboxReceiptLines } from './inspect-messages.js';
 import type { InspectWorkResult } from './inspect-work.js';
 import { searchText } from './search-work.js';
 import { withWorkspaceText, workspaceStructured } from './workspace-routing.js';
 
+function messageText(
+  messages: readonly AgentMessageRecord[],
+  viewerAgentId: string | undefined,
+): string {
+  return messages
+    .map((message) => {
+      const terminalStatus =
+        message.status === 'replied' || message.status === 'failed' ? message.status : undefined;
+      const block =
+        message.senderAgentId === viewerAgentId
+          ? `[concord to ${message.recipientAgentId} id=${message.messageId} ${ticksFor(message.status)}]\n${message.content}`
+          : renderPeerMessage(message, terminalStatus);
+      return `\n\n${block}`;
+    })
+    .join('');
+}
+
 /**
- * The MCP response for each `inspect_work` scope: a line of text for clients
- * that show only text, and the full view as structured content.
+ * Each inspect_work scope returns text for text-only clients and the full view
+ * as structured content. The text includes visible message bodies and their IDs
+ * so clients can read messages and reply on the original thread.
  */
 export function inspectWorkResponse(
   result: InspectWorkResult,
@@ -39,6 +60,15 @@ export function inspectWorkResponse(
     };
   }
   if (result.scope === 'agent') {
+    const pageText = result.communication.private
+      ? ''
+      : result.nextInboxBefore === null
+        ? '\nEnd of inbox page sequence.'
+        : `\nNext page: inspect_work ${JSON.stringify({
+            agent_id: result.communication.agentId,
+            inbox_before: result.nextInboxBefore,
+            workspace_id: workspace?.workspaceId,
+          })}`;
     return {
       content: [
         {
@@ -52,7 +82,9 @@ export function inspectWorkResponse(
                   outboxReceiptLines(result.communication.outbox)) +
               (result.communication.awaitingUserSince === null
                 ? '.'
-                : `; waiting on its user since ${result.communication.awaitingUserSince}.`),
+                : `; waiting on its user since ${result.communication.awaitingUserSince}.`) +
+              pageText +
+              messageText(result.textInbox, result.communication.agentId),
             workspace,
           ),
         },
@@ -81,7 +113,8 @@ export function inspectWorkResponse(
         {
           type: 'text' as const,
           text: withWorkspaceText(
-            `${String(result.thread.length)} message(s) in thread.`,
+            `${String(result.thread.length)} message(s) in thread.` +
+              messageText(result.thread, result.viewerAgentId),
             workspace,
           ),
         },
@@ -101,7 +134,8 @@ export function inspectWorkResponse(
         text: withWorkspaceText(
           `${result.context.task.taskId}; status ${result.context.task.status}, ` +
             `version ${String(result.context.task.version)}, ` +
-            `${String(result.context.updates.length)} update(s).`,
+            `${String(result.context.updates.length)} update(s).` +
+            messageText(result.context.messages, result.viewerAgentId),
           workspace,
         ),
       },

@@ -14,10 +14,9 @@ import { inspectAgentCommunication, type AgentCommunicationView } from './agent-
  * a security boundary (anyone with a shell can run `concord messages`).
  *
  * Reading is a side effect, but only for a viewer Concord identified from the
- * session itself: when the recipient's own session is handed a message's
- * content in a tool result, its model has that message in its input, which is
- * exactly what `read` means. A self-named viewer could be anyone, so it never
- * changes a receipt, and neither does a sender inspecting its own outbox.
+ * session itself. In an inbox only the incoming messages rendered as text
+ * count as read. Inclusion in structured inbox history does not record a read.
+ * A self-named viewer and a sender inspecting its outbox never change receipts.
  */
 
 export interface Viewer {
@@ -36,6 +35,16 @@ function participates(message: AgentMessageRecord, viewer: string): boolean {
   return message.senderAgentId === viewer || message.recipientAgentId === viewer;
 }
 
+const INSPECT_MESSAGE_LIMIT = 10;
+
+function isLiveMessage(message: AgentMessageRecord): boolean {
+  return message.status !== 'replied' && message.status !== 'failed';
+}
+
+function isUnread(message: AgentMessageRecord): boolean {
+  return message.status === 'sent' || message.status === 'delivered';
+}
+
 /** Mark read what a verified `viewer` received among `messages`, returning them refreshed. */
 function readOnInspect(
   repos: Repositories,
@@ -44,7 +53,7 @@ function readOnInspect(
 ): AgentMessageRecord[] {
   if (!viewer.verified) return [...messages];
   const received = messages
-    .filter((message) => message.recipientAgentId === viewer.agentId)
+    .filter((message) => message.recipientAgentId === viewer.agentId && isUnread(message))
     .map((message) => message.messageId);
   if (received.length === 0) return [...messages];
   const changed = new Map(
@@ -72,21 +81,92 @@ export function privateMessagesNote(agentId: string): string {
   );
 }
 
+export interface AgentInboxInspection {
+  communication: AgentInboxView;
+  textInbox: MessageView[];
+  nextInboxBefore: string | null;
+}
+
+function inboxPage(inbox: AgentMessageRecord[], before: string | undefined) {
+  const cursor = before === undefined ? undefined : /^(unread|live):(.+)$/su.exec(before);
+  if (cursor === null) throw new Error('Use the inbox_before cursor returned by inspect_work.');
+  // The inbox is ordered by (created_at, message_id). Locate the boundary in
+  // full history so it still works if the boundary message expired or was answered.
+  const boundary =
+    cursor === undefined
+      ? inbox.length
+      : inbox.findIndex((message) => message.messageId === cursor[2]);
+  if (boundary === -1) throw new Error('inbox_before must name a message in this inbox.');
+  const live = inbox.slice(0, boundary).filter(isLiveMessage);
+  const unreadOnly = cursor === undefined ? live.some(isUnread) : cursor[1] === 'unread';
+  const eligible = unreadOnly ? live.filter(isUnread) : live;
+  const messages = eligible.slice(-INSPECT_MESSAGE_LIMIT);
+  const oldest = messages[0];
+  return {
+    messages,
+    nextInboxBefore:
+      eligible.length > messages.length && oldest !== undefined
+        ? `${unreadOnly ? 'unread' : 'live'}:${oldest.messageId}`
+        : null,
+  };
+}
+
 export function inspectAgentInbox(
   repos: Repositories,
   agentId: string,
   viewer: Viewer,
-): AgentInboxView {
+  before?: string,
+): AgentInboxInspection {
   const { inbox, outbox, ...presence } = inspectAgentCommunication(repos, agentId);
   if (viewer.agentId !== agentId) {
-    return { ...presence, private: true, messages: privateMessagesNote(agentId) };
+    return {
+      communication: { ...presence, private: true, messages: privateMessagesNote(agentId) },
+      textInbox: [],
+      nextInboxBefore: null,
+    };
   }
-  return {
-    ...presence,
-    private: false,
-    inbox: readOnInspect(repos, viewer, inbox).map(view),
-    outbox: outbox.map(view),
-  };
+
+  function render(
+    current: AgentCommunicationView,
+    page: ReturnType<typeof inboxPage>,
+  ): AgentInboxInspection {
+    const history = current.inbox.map(view);
+    const selected = new Set(page.messages.map((message) => message.messageId));
+    return {
+      communication: {
+        ...current,
+        private: false,
+        inbox: history,
+        outbox: current.outbox.map(view),
+      },
+      textInbox: history.filter(
+        (message) => selected.has(message.messageId) && isLiveMessage(message),
+      ),
+      nextInboxBefore: page.nextInboxBefore,
+    };
+  }
+
+  const page = inboxPage(inbox, before);
+  if (!viewer.verified || !page.messages.some(isUnread)) {
+    return render({ ...presence, inbox, outbox }, page);
+  }
+  // Select again under the write reservation: another inspector may already
+  // have read the first page, or a sender may have committed a new message.
+  return repos.db
+    .transaction(() => {
+      const latest = inspectAgentCommunication(repos, agentId);
+      const selected = inboxPage(latest.inbox, before);
+      const unread = selected.messages.filter(isUnread);
+      if (unread.length === 0) return render(latest, selected);
+      repos.agentMessages.markReadByInspect(
+        agentId,
+        unread.map((message) => message.messageId),
+      );
+      // A selected message can expire while recording reads. Keep its final
+      // status in history and drop its body without substituting another message.
+      return render(inspectAgentCommunication(repos, agentId), selected);
+    })
+    .immediate();
 }
 
 export interface ThreadView {
@@ -135,7 +215,10 @@ export function visibleTaskMessages(
 }
 
 /** The newest outbox receipts, one line each, for clients that show only text. */
-export function outboxReceiptLines(outbox: readonly MessageView[], limit = 10): string {
+export function outboxReceiptLines(
+  outbox: readonly MessageView[],
+  limit = INSPECT_MESSAGE_LIMIT,
+): string {
   const recent = outbox.slice(-limit);
   if (recent.length === 0) return '';
   return (
