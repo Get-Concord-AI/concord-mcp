@@ -425,6 +425,29 @@ describe('CLI workspace selection', () => {
     expect(openContext(elsewhere, env).repoRoot).toBe(selected);
   });
 
+  it('keeps an explicitly selected store root inside an outer git repository', () => {
+    const outer = repoDir();
+    const selected = join(outer, 'workspace');
+    mkdirSync(join(selected, '.concord'), { recursive: true });
+    openDatabase(join(selected, '.concord', 'concord.db')).close();
+    const nested = join(selected, 'app');
+    mkdirSync(join(nested, '.git'), { recursive: true });
+    const env: NodeJS.ProcessEnv = {};
+
+    const identity = configureCliWorkspace({ repo: selected }, nested, env);
+    expect(identity?.repoRoot).toBe(realpathSync(selected));
+    expect(env['CONCORD_REPO_ROOT']).toBe(realpathSync(selected));
+
+    const context = openContext(nested, env);
+    try {
+      expect(context.repoRoot).toBe(realpathSync(selected));
+      expect(context.store.databasePath).toBe(join(selected, '.concord', 'concord.db'));
+      expect(existsSync(join(nested, '.concord'))).toBe(false);
+    } finally {
+      context.repos.db.close();
+    }
+  });
+
   it('selects the MCP workspace id through --workspace', () => {
     const selected = repoDir();
     const elsewhere = repoDir();

@@ -106,8 +106,8 @@ export function resolveCheckoutRoot(cwd: string, env: NodeJS.ProcessEnv): string
  * lands in one store while reads hit an empty repo-local `.concord/`. Prefer, in
  * order, explicit `CONCORD_REPO_ROOT`, Devin CLI's `DEVIN_PROJECT_DIR`, Claude Code's `CLAUDE_PROJECT_DIR`
  * (set in the server's env to the project root regardless of scope), then the
- * cwd. Each candidate is normalized through `findRepoRoot`, so the store always
- * lands at the `.concord/` in the root of the repo.
+ * cwd. Each candidate is normalized through `findRepoRoot`, so the workspace
+ * identity remains the root of the checkout even when a parent store exists.
  */
 export function resolveRepoRoot(cwd: string, env: NodeJS.ProcessEnv): string {
   const configured = configuredRepoRoot(env);
@@ -115,9 +115,9 @@ export function resolveRepoRoot(cwd: string, env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * Resolve and validate a root supplied explicitly by a caller. Unlike the
- * backward-compatible cwd fallback, explicit roots must exist and be
- * directories so a typo cannot silently create a new Concord workspace.
+ * Resolve and validate a root supplied explicitly by a caller. An existing
+ * Concord store is itself a workspace boundary, even inside a git checkout;
+ * otherwise roots normalize to their containing repository as before.
  */
 export function resolveExplicitRepoRoot(input: string): string {
   if (input.trim() === '') {
@@ -130,7 +130,7 @@ export function resolveExplicitRepoRoot(input: string): string {
   if (!statSync(candidate).isDirectory()) {
     throw new Error(`Workspace root is not a directory: ${candidate}`);
   }
-  return findRepoRoot(candidate);
+  return existsSync(databasePath(candidate)) ? canonicalPath(candidate) : findRepoRoot(candidate);
 }
 
 /** Return the stable, reversible id for a canonical workspace root. */

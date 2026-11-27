@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { z } from 'zod';
@@ -7,6 +8,7 @@ import {
   resolveExplicitRepoRoot,
   workspaceIdForRoot,
   workspaceRootFromId,
+  databasePath,
 } from '../config/paths.js';
 import type { WorkspaceIdentity } from '../workspaces/manager.js';
 
@@ -42,7 +44,7 @@ export function configureCliWorkspace(
   if (options.repo !== undefined) {
     const path = resolve(cwd, options.repo);
     repoRoot = resolveExplicitRepoRoot(path);
-    env['CONCORD_REPO_ROOT'] = findCheckoutRoot(path);
+    env['CONCORD_REPO_ROOT'] = existsSync(databasePath(path)) ? repoRoot : findCheckoutRoot(path);
   } else if (options.workspace !== undefined) {
     repoRoot = workspaceRootFromId(options.workspace);
     env['CONCORD_REPO_ROOT'] = repoRoot;

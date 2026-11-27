@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { concordDir, databasePath } from '../config/paths.js';
 import { globalDatabasePath, readUserConfig, userConcordDir } from '../config/user-config.js';
@@ -100,9 +100,19 @@ export function resolveStore(
   env: NodeJS.ProcessEnv,
   originRemote: OriginRemote = gitOriginRemote,
 ): StoreLocation {
-  if (existsSync(databasePath(repoRoot)) || readUserConfig(env).globalMode !== true) {
+  if (existsSync(databasePath(repoRoot))) {
     return localStore(repoRoot);
   }
+  const parentStoreRoot = findParentStoreRoot(repoRoot);
+  if (parentStoreRoot !== undefined) {
+    throw new Error(
+      `Found an existing Concord store at ${parentStoreRoot}, but this checkout resolves to ${repoRoot}. ` +
+        `Refusing to create a second store. Select the existing workspace explicitly with ` +
+        `concord -C ${JSON.stringify(parentStoreRoot)}.`,
+    );
+  }
+  if (readUserConfig(env).globalMode !== true) return localStore(repoRoot);
+
   const project = globalProjectKey(repoRoot, originRemote);
   return {
     kind: 'global',
@@ -110,4 +120,16 @@ export function resolveStore(
     concordPath: join(userConcordDir(env), 'projects', artifactDirName(project)),
     project,
   };
+}
+
+/** Find a parent store without crossing the containing git repository boundary. */
+function findParentStoreRoot(repoRoot: string): string | undefined {
+  let dir = dirname(repoRoot);
+  for (;;) {
+    if (existsSync(databasePath(dir))) return dir;
+    if (existsSync(join(dir, '.git'))) return undefined;
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
 }

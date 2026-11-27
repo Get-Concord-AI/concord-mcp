@@ -65,6 +65,20 @@ describe('paths', () => {
     );
   });
 
+  it('preserves an explicit store root inside an outer git repository', () => {
+    const outer = tempDir('concord-outer-');
+    mkdirSync(join(outer, '.git'));
+    const workspace = join(outer, 'workspace');
+    mkdirSync(join(workspace, '.concord'), { recursive: true });
+    writeFileSync(join(workspace, '.concord', 'concord.db'), '');
+    const nestedRepo = join(workspace, 'app');
+    mkdirSync(join(nestedRepo, '.git'), { recursive: true });
+
+    expect(resolveRepoRoot(nestedRepo, {})).toBe(realpathSync(nestedRepo));
+    expect(resolveExplicitRepoRoot(workspace)).toBe(realpathSync(workspace));
+    expect(workspaceRootFromId(workspaceIdForRoot(workspace))).toBe(realpathSync(workspace));
+  });
+
   it('round-trips a canonical root through a workspace id', () => {
     const root = tempDir('concord-workspace-id-');
     mkdirSync(join(root, '.git'));
