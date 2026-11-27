@@ -4,6 +4,7 @@ import type { Command } from '@commander-js/extra-typings';
 import { z } from 'zod';
 
 import type { Repositories } from '../../db/index.js';
+import type { AncestorProcess } from '../../parent-chain.js';
 import { linkedMachine } from '../../cloud/target.js';
 import {
   agentIdForSession,
@@ -193,6 +194,7 @@ export function handleAntigravitySessionStart(
   repos: Repositories,
   rawJson: string,
   workspace: string = process.cwd(),
+  ancestors?: readonly AncestorProcess[],
 ): { agentId: string | undefined; output: string } {
   const sessionId = hookSessionId(rawJson);
   if (sessionId === undefined) {
@@ -210,6 +212,7 @@ export function handleAntigravitySessionStart(
   };
   const agentId = identity.agentId;
   ensureAgentRegistered(repos, identity, workspace);
+  recordClientBinding(repos, identity, ancestors);
   registerPullEndpoint(repos, agentId, 'antigravity');
 
   const others = buildRoster(repos.agents.list(), Date.now()).filter(

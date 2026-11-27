@@ -1,12 +1,17 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { workspaceIdForRoot } from '../../src/config/paths.js';
 import { openDatabase } from '../../src/db/connection.js';
 import { createRepositories, type Repositories } from '../../src/db/index.js';
 import { createServer } from '../../src/server.js';
 import { liveSession } from '../../src/tools/live-session.js';
 import type { AgentIdentity } from '../../src/domain/identity.js';
+import { WorkspaceManager } from '../../src/workspaces/manager.js';
 
 interface Harness {
   client: Client;
@@ -26,6 +31,12 @@ async function connect(repos: Repositories, identity?: AgentIdentity): Promise<H
 async function close(harness: Harness): Promise<void> {
   await harness.client.close();
   await harness.server.close();
+}
+
+function repoDir(label: string): string {
+  const root = mkdtempSync(join(tmpdir(), `concord-live-session-${label}-`));
+  mkdirSync(join(root, '.git'));
+  return realpathSync(root);
 }
 
 const ENV_IDENTITY: AgentIdentity = {
@@ -108,6 +119,52 @@ describe('live session binding (issue #358)', () => {
     }
   });
 
+  it('acts as the established session when a call selects another workspace', async () => {
+    const firstRoot = repoDir('first');
+    const secondRoot = repoDir('second');
+    const manager = new WorkspaceManager(firstRoot);
+    manager.join(secondRoot);
+    const first = manager.select(workspaceIdForRoot(firstRoot)).repos;
+    const second = manager.select(workspaceIdForRoot(secondRoot)).repos;
+    first.agents.upsert({ agentId: RESUMED.agentId, kind: 'claude-code' });
+    first.sessionBindings.upsert(process.ppid, RESUMED.agentId, 'claude-code');
+
+    const server = createServer(second, {
+      identity: ENV_IDENTITY,
+      workspaceManager: manager,
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'live-session-workspaces-test', version: '0.0.0' });
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+    try {
+      await client.callTool({
+        name: 'start_work',
+        arguments: {
+          task_id: 'T-FIRST',
+          title: 'T-FIRST',
+          kind: 'claude-code',
+          workspace_id: workspaceIdForRoot(firstRoot),
+        },
+      });
+      await client.callTool({
+        name: 'start_work',
+        arguments: {
+          task_id: 'T-SECOND',
+          title: 'T-SECOND',
+          kind: 'claude-code',
+          workspace_id: workspaceIdForRoot(secondRoot),
+        },
+      });
+
+      expect(first.tasks.get('T-FIRST')?.agentId).toBe(RESUMED.agentId);
+      expect(second.tasks.get('T-SECOND')?.agentId).toBe(RESUMED.agentId);
+      expect(second.agents.get(ENV_IDENTITY.agentId)).toBeUndefined();
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it('ignores a binding of another kind on the same client pid', async () => {
     // Grok launched inside a Claude session's shell: the Claude hook bound this
     // client pid, but Grok's server keeps its own env identity — sharing an
@@ -151,16 +208,52 @@ describe('live session lookup', () => {
     repos.agents.upsert({ agentId: ENV_IDENTITY.agentId, kind: 'claude-code' });
   });
 
-  it('discovers a binding in a later workspace’s database after an earlier miss', () => {
-    // The pid list is cached, the lookup result is not: a miss against one
-    // routed database must not shadow a binding that exists in another.
+  it('keeps a live identity it established when a later workspace has no binding', () => {
     const other = createRepositories(openDatabase(':memory:'));
     repos.sessionBindings.upsert(42, RESUMED.agentId, 'claude-code');
     const session = liveSession(ENV_IDENTITY, undefined, { ancestors: () => [42] });
 
     expect(session.sessionForRequest(other, undefined)?.agentId).toBe(ENV_IDENTITY.agentId);
     expect(session.sessionForRequest(repos, undefined)?.agentId).toBe(RESUMED.agentId);
-    expect(session.sessionForRequest(other, undefined)?.agentId).toBe(ENV_IDENTITY.agentId);
+    expect(session.sessionForRequest(other, undefined)?.agentId).toBe(RESUMED.agentId);
+  });
+
+  it('does not let a foreign binding displace the established one', () => {
+    // A Grok server inside a Claude client can see the outer client's binding
+    // in another workspace. That newer row is not applicable to Grok, so it
+    // must not evict Grok's established binding or resurrect Grok's env id.
+    const other = createRepositories(openDatabase(':memory:'));
+    const grokEnv: AgentIdentity = { agentId: 'grok:99990000', kind: 'grok', origin: 'session' };
+    const grokResumed = 'grok:11112222';
+    const outerClaude = 'claude-code:cccc3333';
+    repos.agents.upsert({ agentId: grokResumed, kind: 'grok' });
+    other.agents.upsert({ agentId: outerClaude, kind: 'claude-code' });
+    repos.sessionBindings.upsert(42, grokResumed, 'grok', '2026-01-01T00:00:02.000Z');
+    other.sessionBindings.upsert(42, outerClaude, 'claude-code', '2026-01-01T00:00:03.000Z');
+    const session = liveSession(grokEnv, undefined, {
+      ancestors: () => [42],
+      startedAt: Date.parse('2026-01-01T00:00:01.000Z'),
+    });
+
+    expect(session.sessionForRequest(repos, undefined)?.agentId).toBe(grokResumed);
+    expect(session.sessionForRequest(other, undefined)?.agentId).toBe(grokResumed);
+    expect(session.sessionForRequest(repos, undefined)?.agentId).toBe(grokResumed);
+  });
+
+  it('lets a newer binding replace one established in another workspace', () => {
+    const other = createRepositories(openDatabase(':memory:'));
+    const nextAgentId = 'claude-code:cccc3333';
+    other.agents.upsert({ agentId: nextAgentId, kind: 'claude-code' });
+    repos.sessionBindings.upsert(42, RESUMED.agentId, 'claude-code', '2026-01-01T00:00:02.000Z');
+    other.sessionBindings.upsert(42, nextAgentId, 'claude-code', '2026-01-01T00:00:03.000Z');
+    const session = liveSession(ENV_IDENTITY, undefined, {
+      ancestors: () => [42],
+      startedAt: Date.parse('2026-01-01T00:00:01.000Z'),
+    });
+
+    expect(session.sessionForRequest(repos, undefined)?.agentId).toBe(RESUMED.agentId);
+    expect(session.sessionForRequest(other, undefined)?.agentId).toBe(nextAgentId);
+    expect(session.sessionForRequest(repos, undefined)?.agentId).toBe(nextAgentId);
   });
 
   it('trusts an ancestor binding only while the server lived to see it written', () => {

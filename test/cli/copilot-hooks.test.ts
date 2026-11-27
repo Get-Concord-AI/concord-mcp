@@ -93,6 +93,21 @@ describe('Copilot CLI hooks', () => {
     expect(repos.agentEndpoints.getByAgent(AGENT_ID)?.provider).toBe('copilot-cli');
   });
 
+  it('binds the client process at session start', async () => {
+    ctx = context(
+      localCopilotBackend(repos, '/repo', [
+        { pid: 611, name: 'sh' },
+        { pid: 612, name: 'copilot' },
+      ]),
+    );
+
+    await hook(ctx, 'session-start');
+
+    expect(repos.sessionBindings.forClientPid(611)?.agentId).toBe(AGENT_ID);
+    expect(repos.sessionBindings.forClientPid(612)?.agentId).toBe(AGENT_ID);
+    expect(repos.sessionBindings.forClientPid(612)?.kind).toBe('copilot-cli');
+  });
+
   it('acts as CONCORD_AGENT_ID when the operator named the session, as the MCP server does', async () => {
     ctx = context(localCopilotBackend(repos, '/repo'), { env: { CONCORD_AGENT_ID: 'alpha' } });
     await hook(ctx, 'session-start');
