@@ -51,10 +51,10 @@ import {
 import { handleUpdateTask, type UpdateTaskResult } from './update-task.js';
 import {
   AgentMessageDeliveryError,
-  handleSendAgentMessageWithDelivery,
   type AgentMessageDispatcher,
   type SendAgentMessageResult,
 } from './agent-messages.js';
+import { handleSendWithAttachments } from './shared-files.js';
 import {
   selectToolWorkspace,
   type SelectWorkspace,
@@ -212,6 +212,7 @@ export function handleUpdateWork(
   repos: Repositories,
   input: WithActor<UpdateWorkInput>,
   dispatcher: AgentMessageDispatcher,
+  workspaceRoot?: string,
 ): UpdateWorkResult | Promise<UpdateWorkResult> {
   const operation = input.operation ?? 'record';
   if (
@@ -225,8 +226,11 @@ export function handleUpdateWork(
   if (operation === 'record' && input.expects_reply !== undefined) {
     throw new Error('expects_reply applies only to prompt and reply.');
   }
+  if (operation === 'record' && input.attachments !== undefined) {
+    throw new Error('attachments apply only with update_work operation prompt or reply.');
+  }
   if (operation !== 'record') {
-    return handleSendAgentMessageWithDelivery(
+    return handleSendWithAttachments(
       repos,
       {
         operation,
@@ -237,6 +241,8 @@ export function handleUpdateWork(
         content: input.content,
         expectsReply: input.expects_reply,
         idempotencyKey: updateRequired(input.idempotency_key, 'idempotency_key', operation),
+        attachments: input.attachments,
+        workspaceRoot,
       },
       dispatcher,
     );
@@ -660,7 +666,8 @@ export function registerWorkflowTools(
     {
       title: 'Update work',
       description:
-        'Record task context or deliver a live prompt/reply to another promptable workspace agent.',
+        'Record task context or deliver a live prompt/reply to another promptable workspace agent. ' +
+        'Prompt and reply can share files from your worktree with `attachments`.',
       inputSchema: updateWorkInputShape,
     },
     async (args, extra) => {
@@ -686,6 +693,7 @@ export function registerWorkflowTools(
           callRepos,
           withActor(callRepos, args, requestMeta),
           dispatcher,
+          workspace?.repoRoot,
         );
         onWrite?.(workspace);
         if ('update' in result) {

@@ -197,6 +197,9 @@ export function routedRepositories(manager: WorkspaceManager): Repositories {
     get ownershipEvents() {
       return manager.current().repos.ownershipEvents;
     },
+    get sharedFiles() {
+      return manager.current().repos.sharedFiles;
+    },
     get agentEndpoints() {
       return manager.current().repos.agentEndpoints;
     },

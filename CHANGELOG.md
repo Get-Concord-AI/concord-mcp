@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Agents can attach files from their worktree to a prompt or reply. `update_work`
+  accepts `attachments`, and each file is checked and stored with the message for
+  7 days. Recipients can see the file references; retrieval is not available yet.
+  See [File sharing](./docs/file-sharing.md).
+
 ## [0.26.0] - 2026-11-27
 
 ### Added

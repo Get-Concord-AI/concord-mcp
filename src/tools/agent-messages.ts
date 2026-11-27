@@ -39,6 +39,8 @@ export interface SendAgentMessageInput {
   /** Omitted, a prompt expects an answer and a reply does not. */
   expectsReply?: boolean | undefined;
   idempotencyKey: string;
+  /** The id for a new message, chosen by a caller that must reference it before sending. */
+  messageId?: string | undefined;
 }
 
 export interface SendAgentMessageResult {
@@ -217,7 +219,7 @@ export function handleSendAgentMessage(
     idempotentReplay = true;
   } else {
     message = repos.agentMessages.create({
-      messageId: randomUUID(),
+      messageId: input.messageId ?? randomUUID(),
       project: taskProject,
       taskId: contextualTaskId,
       senderAgentId: input.agentId,
@@ -281,7 +283,18 @@ export async function handleSendAgentMessageWithDelivery(
   input: SendAgentMessageInput,
   dispatcher: AgentMessageDispatcher,
 ): Promise<SendAgentMessageResult> {
-  const result = handleSendAgentMessage(repos, input);
+  return deliverAcceptedMessage(repos, handleSendAgentMessage(repos, input), dispatcher);
+}
+
+/**
+ * Deliver a message whose row is already stored. Split from creating the row, so
+ * a caller can commit the row together with other writes, and deliver afterwards.
+ */
+export async function deliverAcceptedMessage(
+  repos: Repositories,
+  result: SendAgentMessageResult,
+  dispatcher: AgentMessageDispatcher,
+): Promise<SendAgentMessageResult> {
   if (result.message.status !== 'sent') return result;
 
   const endpoint = repos.agentEndpoints.getByAgent(result.message.recipientAgentId);
