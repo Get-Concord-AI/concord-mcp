@@ -12,8 +12,10 @@ import type { AgentSessionAdapter, AgentSessionDelivery } from '../../relay/serv
  * header twice.
  */
 export class TrackedSessionAdapter implements AgentSessionAdapter {
-  /** Every message handed to the session, so a sweep never hands one over twice. */
+  /** Every message the session accepted, so a sweep never hands one over twice. */
   readonly handled = new Set<string>();
+  /** Messages pushed to the session that it has not accepted or refused yet. */
+  readonly pushing = new Set<string>();
 
   constructor(
     readonly provider: string,
@@ -36,13 +38,13 @@ export class TrackedSessionAdapter implements AgentSessionAdapter {
     delivery: AgentSessionDelivery,
     mode: 'steer' | 'inject',
   ): Promise<string | undefined> {
-    this.handled.add(delivery.messageId);
+    this.pushing.add(delivery.messageId);
     try {
-      return await this.session.pushPrompt(delivery.content, mode);
-    } catch (error) {
-      // Refused, so never handed over: the sweep must offer it again.
-      this.handled.delete(delivery.messageId);
-      throw error;
+      const receipt = await this.session.pushPrompt(delivery.content, mode);
+      this.handled.add(delivery.messageId);
+      return receipt;
+    } finally {
+      this.pushing.delete(delivery.messageId);
     }
   }
 }
@@ -56,7 +58,8 @@ const SWEEP_EVERY_MS = 5_000;
  * not drain. A sender keeps a message pending while it pushes it here, and
  * leaves it pending when the push fails or times out — even if the push reached
  * the harness late. The sweep takes messages pending past that window: one this
- * host already handed over is only marked delivered; any other is handed over
+ * host already handed over is only marked delivered; one whose push the
+ * harness has not answered yet waits for that answer; any other is handed over
  * and marked delivered once the harness accepts it. A failed handoff stays
  * pending for the next sweep, or for the hooks once this host is gone — nothing
  * is claimed that has not reached the session.
@@ -72,6 +75,7 @@ export async function sweepStragglers(
     .listPendingForRecipient(agentId)
     .filter((message) => message.createdAt < cutoff);
   for (const message of stragglers) {
+    if (adapter.pushing.has(message.messageId)) continue;
     if (adapter.handled.has(message.messageId)) {
       repos.agentMessages.markDelivered(message.messageId, adapter.provider, null);
       continue;

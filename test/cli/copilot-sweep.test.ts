@@ -102,6 +102,43 @@ describe('sweepStragglers (#261)', () => {
     expect(repos.agentMessages.get(id)?.status).toBe('delivered');
   });
 
+  it('leaves a message whose relay push is still unanswered, then hands it over if refused', async () => {
+    const id = send(repos, 'Pushed while the harness was slow.', 'k-10');
+    let refuse: (error: Error) => void = () => undefined;
+    let calls = 0;
+    const slow = new CopilotSessionAdapter({
+      isBusy: () => false,
+      pushPrompt: (content) => {
+        calls += 1;
+        if (calls === 1) {
+          return new Promise((_resolve, reject) => {
+            refuse = reject;
+          });
+        }
+        pushed.push(content);
+        return Promise.resolve('m');
+      },
+    });
+    const relayPush = slow.inject({
+      version: RELAY_PROTOCOL_VERSION,
+      type: 'deliver',
+      messageId: id,
+      senderAgentId: 'peer',
+      recipientAgentId: AGENT,
+      content: 'Pushed while the harness was slow.',
+    });
+
+    await sweepStragglers(repos, AGENT, slow, later());
+    expect(pushed).toEqual([]);
+    expect(repos.agentMessages.get(id)?.status).toBe('sent');
+
+    refuse(new Error('request timed out'));
+    await expect(relayPush).rejects.toThrow('request timed out');
+    await sweepStragglers(repos, AGENT, slow, later());
+    expect(pushed).toHaveLength(1);
+    expect(repos.agentMessages.get(id)?.status).toBe('delivered');
+  });
+
   it('never repeats a handoff when only recording it failed', async () => {
     const id = send(repos, 'Accepted, but the database was busy.', 'k-5');
     vi.spyOn(repos.agentMessages, 'markDelivered').mockImplementationOnce(() => {
