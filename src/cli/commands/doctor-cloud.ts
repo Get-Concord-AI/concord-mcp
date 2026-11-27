@@ -21,7 +21,7 @@ import { cloudAccess, HOOK_TIMEOUT_MS } from './cloud-inbox.js';
  * only the person running the machine knows when no such session remains.
  */
 
-/** Local Concord state a linked machine no longer reads. */
+/** Local Concord files left behind after this machine was linked. */
 export interface Leftover {
   readonly path: string;
   readonly description: string;
@@ -210,7 +210,7 @@ export async function buildCloudDoctorReport(
       ...agents.lines,
     ].map((line) => `  ${line}`),
     '',
-    'Local state (unused while this machine is linked)',
+    'Local state from before the link',
   ];
 
   const leftovers = await findLeftovers(repoRoot, env);
@@ -219,9 +219,9 @@ export async function buildCloudDoctorReport(
   } else {
     for (const leftover of leftovers) lines.push(`  ${leftover.path}: ${leftover.description}`);
     lines.push(
-      '  Nothing reads these while this machine is linked. A session started before the link ' +
-        'stops using its local store on the next call; restart that client. The file stays open ' +
-        'until that session exits. Once every such session has ended, you can move them aside (nothing is deleted)' +
+      '  A session started before the link stops using its local store on the next call; restart that client. ' +
+        'A relay host already running keeps writing to this file until that process exits. ' +
+        'Once every such process has ended, you can move them aside (nothing is deleted)' +
         `${platform === 'win32' ? ', in PowerShell' : ''}:`,
       ...moveAsideCommands(leftovers, new Date(), platform).map((command) => `    ${command}`),
     );

@@ -65,6 +65,13 @@ export const API_KEY_ENV = 'CONCORD_CLOUD_API_KEY';
 const LINKED_RESTART_NOTICE =
   'Restart clients that were already open. Claims made before the link stay in the local database.';
 
+/**
+ * A proxy started while linked keeps forwarding until its next call, which
+ * then stops. Logout and unlink both end that link.
+ */
+const UNLINKED_RESTART_NOTICE =
+  'Restart clients that were already open so they stop using Concord Cloud.';
+
 /** A key shown in output: enough to tell keys apart, never enough to use one. */
 function maskKey(apiKey: string): string {
   return `${apiKey.slice(0, 7)}…`;
@@ -132,7 +139,7 @@ export async function runCloudLogin(
 
 export function runCloudLogout(deps: CloudDeps): string {
   return removeCredentials(deps.env)
-    ? "Logged out; this machine's agents use local Concord again."
+    ? `Logged out; this machine's agents use local Concord again. ${UNLINKED_RESTART_NOTICE}`
     : 'Not logged in.';
 }
 
@@ -164,7 +171,7 @@ export function runCloudUnlink(deps: CloudDeps): string {
   writeUserConfig(deps.env, { cloudLink: false });
   return (
     'Unlinked this machine: its agents use local Concord. You are still signed in; ' +
-    '`concord cloud link` reconnects it.'
+    `\`concord cloud link\` reconnects it. ${UNLINKED_RESTART_NOTICE}`
   );
 }
 

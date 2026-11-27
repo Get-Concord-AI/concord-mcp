@@ -78,7 +78,7 @@ describe('doctor on a linked machine', () => {
     expect(result.output).toContain('is github.com/acme/app on Concord Cloud');
     expect(result.output).toContain('Key: accepted');
     expect(result.output).toContain('Agent ids: unique');
-    expect(result.output).toMatch(/Local state \(unused while this machine is linked\)\n {2}none/u);
+    expect(result.output).toMatch(/Local state from before the link\n {2}none/u);
     expect(result.healthy).toBe(true);
     expect(existsSync(join(repo, '.concord'))).toBe(false);
     expect(existsSync(join(home, '.concord', 'global.db'))).toBe(false);
@@ -105,6 +105,12 @@ describe('doctor on a linked machine', () => {
     const listed = await report();
     const resolved = realpathSync(store);
     expect(listed.output).toContain(`${resolved}: this repository's local store, 1 open task(s)`);
+    expect(listed.output).toContain(
+      'A relay host already running keeps writing to this file until that process exits.',
+    );
+    expect(listed.output).toContain(
+      'A session started before the link stops using its local store on the next call; restart that client.',
+    );
     expect(listed.output).toContain('a repository link from before Concord 0.17');
     // SQLite's pairing is kept, so a log holding committed work stays with its database.
     expect(listed.output).toMatch(

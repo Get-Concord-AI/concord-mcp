@@ -198,7 +198,10 @@ describe('concord cloud', () => {
     expect(runCloudLogout(deps)).toBe('Not logged in.');
     await runCloudLogin({ url: API }, deps);
     const machine = readMachineKey(deps.env);
-    expect(runCloudLogout(deps)).toContain('Logged out');
+    const loggedOut = runCloudLogout(deps);
+    expect(loggedOut).toContain('Logged out');
+    expect(loggedOut).toContain('stop using Concord Cloud');
+    expect(runCloudLogout(deps)).toBe('Not logged in.');
     expect(existsSync(credentialsPath(deps.env))).toBe(false);
 
     await runCloudLogin({ url: API }, deps);
@@ -244,7 +247,9 @@ describe('concord cloud', () => {
     expect(linkedMachine(deps.env)).toBeDefined();
     expect(runCloudLink(deps)).toContain('already linked');
 
-    expect(runCloudUnlink(deps)).toContain('Unlinked this machine');
+    const unlinked = runCloudUnlink(deps);
+    expect(unlinked).toContain('Unlinked this machine');
+    expect(unlinked).toContain('stop using Concord Cloud');
     expect(linkedMachine(deps.env)).toBeUndefined();
     expect(existsSync(credentialsPath(deps.env))).toBe(true);
     expect(runCloudUnlink(deps)).toContain('not linked');

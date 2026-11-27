@@ -29,12 +29,18 @@ export interface WorkspaceManagerOptions {
   resolveStore?: (repoRoot: string) => StoreLocation;
   /**
    * Why no store may be used now. Checked before every open and before every
-   * use of a store already open: a server started while its machine was
-   * unlinked keeps running after a login links it, and must not read or write
-   * a local store a cloud agent cannot reach.
+   * use of a store already open. The answer is reused for one second, so one
+   * tool call does not reread the link files on every repository access. A
+   * server started while its machine was unlinked keeps running after a login
+   * links it, and must not read or write a local store a cloud agent cannot reach.
    */
   refuseOpen?: () => string | undefined;
+  /** Clock for the one-second reuse of `refuseOpen`. Tests pass their own. */
+  now?: () => number;
 }
+
+/** How long a link check is reused. A login lands on the next check after this. */
+const STORE_REFUSAL_TTL_MS = 1_000;
 
 /**
  * Open and route Concord workspaces within one MCP server process.
@@ -48,6 +54,9 @@ export class WorkspaceManager {
   readonly #open: (databaseFilename: string, project: string) => Repositories;
   readonly #resolveStore: (repoRoot: string) => StoreLocation;
   readonly #refuseOpen: () => string | undefined;
+  readonly #now: () => number;
+  #refusalCheckedAt = Number.NEGATIVE_INFINITY;
+  #cachedRefusal: string | undefined = undefined;
   #activeWorkspaceId: string;
   #selections = 0;
 
@@ -55,6 +64,7 @@ export class WorkspaceManager {
     this.#open = options.open ?? openRepositories;
     this.#resolveStore = options.resolveStore ?? ((root) => resolveStore(root, process.env));
     this.#refuseOpen = options.refuseOpen ?? (() => undefined);
+    this.#now = options.now ?? Date.now;
     this.#allowedRoots =
       options.allowedRoots === undefined
         ? undefined
@@ -152,9 +162,14 @@ export class WorkspaceManager {
     return this.current();
   }
 
+  /** Re-reads the fence at most once a second. A login lands on the next check. */
   #assertStoreAllowed(): void {
-    const refusal = this.#refuseOpen();
-    if (refusal !== undefined) throw new Error(refusal);
+    const now = this.#now();
+    if (now - this.#refusalCheckedAt >= STORE_REFUSAL_TTL_MS) {
+      this.#cachedRefusal = this.#refuseOpen();
+      this.#refusalCheckedAt = now;
+    }
+    if (this.#cachedRefusal !== undefined) throw new Error(this.#cachedRefusal);
   }
 
   #assertAllowed(repoRoot: string): void {
