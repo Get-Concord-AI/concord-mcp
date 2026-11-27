@@ -93,6 +93,22 @@ function taskOrThrow(repos: Repositories, taskId: string): TaskRecord {
   return task;
 }
 
+/** Take unowned proposed work: assign it to the caller, then accept it. */
+function takeProposedTask(repos: Repositories, task: TaskRecord, agentId: string): void {
+  const assigned = handleAssignTask(repos, {
+    task_id: task.taskId,
+    to_agent_id: agentId,
+    agent_id: agentId,
+    expected_version: task.version,
+    reason: 'Accepted proposed work through start_work',
+  });
+  handleAcceptTask(repos, {
+    task_id: task.taskId,
+    agent_id: agentId,
+    expected_version: assigned.task.version,
+  });
+}
+
 /**
  * Register/refresh identity and enter one owned task in a single public
  * operation. Existing assignments, addressed handoffs, proposed tasks, and
@@ -122,11 +138,15 @@ function startWork(repos: Repositories, input: WithActor<StartWorkInput>): Start
           `Task ${existing.taskId} is assigned to ${existing.assignedAgentId ?? 'another agent'}.`,
         );
       }
-      handleAcceptTask(repos, {
+      const accepted = handleAcceptTask(repos, {
         task_id: existing.taskId,
         agent_id: agentId,
         expected_version: existing.version,
       });
+      if (accepted.task.status === 'proposed') {
+        // The lease ran out on work nobody owned, so it is open again: take it as proposed work.
+        takeProposedTask(repos, accepted.task, agentId);
+      }
       resumedBy = 'assignment';
     } else if (existing.status === 'handoff_offered') {
       if (existing.assignedAgentId !== agentId) {
@@ -154,18 +174,7 @@ function startWork(repos: Repositories, input: WithActor<StartWorkInput>): Start
       });
       resumedBy = 'reopen';
     } else if (existing.agentId === null) {
-      const assigned = handleAssignTask(repos, {
-        task_id: existing.taskId,
-        to_agent_id: agentId,
-        agent_id: agentId,
-        expected_version: existing.version,
-        reason: 'Accepted proposed work through start_work',
-      });
-      handleAcceptTask(repos, {
-        task_id: existing.taskId,
-        agent_id: agentId,
-        expected_version: assigned.task.version,
-      });
+      takeProposedTask(repos, existing, agentId);
       resumedBy = 'assignment';
     }
   }
