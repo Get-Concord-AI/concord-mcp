@@ -15,6 +15,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   call selects another local workspace whose store has no binding; a newer
   hook binding still replaces it. Cross-workspace calls no longer restore the
   abandoned spawn-time identity (#366).
+- Windows ancestor-chain resolution now walks the whole process chain in a
+  single powershell invocation instead of one spawn per level. Each spawn
+  costs seconds of WMI time on a loaded machine, so the per-level walk often
+  pushed hooks past the client hook timeout and the binding was never
+  recorded (#366).
 
 ## [0.26.0] - 2026-11-27
 

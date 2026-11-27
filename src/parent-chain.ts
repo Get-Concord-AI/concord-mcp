@@ -12,29 +12,52 @@ export interface AncestorProcess {
   name: string;
 }
 
-const windowsProcessRow = z.object({
-  ParentProcessId: z.number().nullable(),
+const windowsChainRow = z.object({
+  ProcessId: z.number(),
   Name: z.string(),
 });
+
+/**
+ * The ancestor chain of `ppid` on Windows, nearest first, from a single
+ * powershell spawn. One spawn per level — the naive walk — cost a shell
+ * startup per ancestor, which under load pushed hook execution past the
+ * client hook timeout: bindings landed late or never. Walking inside one
+ * powershell process pays that startup once. Undefined when the table cannot
+ * be read at all; callers degrade as before.
+ */
+function windowsAncestorChain(limit: number, ppid: number): AncestorProcess[] | undefined {
+  try {
+    const script =
+      `$cur=${String(ppid)};$out=@();` +
+      `for($i=0;$i -lt ${String(limit)};$i++){` +
+      'if($cur -le 1){break};' +
+      '$p=Get-CimInstance Win32_Process -Filter "ProcessId=$cur";' +
+      'if($null -eq $p){break};' +
+      '$out+=[pscustomobject]@{ProcessId=$cur;Name=$p.Name};' +
+      '$cur=$p.ParentProcessId};' +
+      'ConvertTo-Json -Compress -InputObject @($out)';
+    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+      encoding: 'utf8',
+      timeout: 10000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const raw: unknown = JSON.parse(out.trim() === '' ? 'null' : out);
+    if (raw === null) return undefined;
+    // ConvertTo-Json keeps array shape for -InputObject, but single-row output
+    // can still arrive unwrapped depending on the powershell version.
+    const rows = z
+      .union([z.array(windowsChainRow), windowsChainRow.transform((row) => [row])])
+      .parse(raw);
+    if (rows.length === 0) return undefined;
+    return rows.map((row) => ({ pid: row.ProcessId, name: row.Name }));
+  } catch {
+    return undefined;
+  }
+}
 
 /** The parent pid and executable name of `pid`, or undefined when the table cannot say. */
 function processInfo(pid: number): { ppid: number | undefined; name: string } | undefined {
   try {
-    if (process.platform === 'win32') {
-      const out = execFileSync(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-Command',
-          `(Get-CimInstance Win32_Process -Filter "ProcessId=${String(pid)}") | Select-Object ParentProcessId,Name | ConvertTo-Json -Compress`,
-        ],
-        { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
-      );
-      const raw: unknown = JSON.parse(out.trim() === '' ? 'null' : out);
-      const row = windowsProcessRow.nullable().parse(raw);
-      if (row === null) return undefined;
-      return { ppid: row.ParentProcessId ?? undefined, name: row.Name };
-    }
     const out = execFileSync('ps', ['-o', 'ppid=,comm=', '-p', String(pid)], {
       encoding: 'utf8',
       timeout: 5000,
@@ -62,6 +85,16 @@ export function ancestorChain(
   ppid: number = process.ppid,
   stopAfter?: (ancestor: AncestorProcess) => boolean,
 ): AncestorProcess[] {
+  if (process.platform === 'win32') {
+    const rows = windowsAncestorChain(limit, ppid) ?? [{ pid: ppid, name: '' }];
+    const chain: AncestorProcess[] = [];
+    for (const row of rows) {
+      if (chain.some((ancestor) => ancestor.pid === row.pid)) break;
+      chain.push(row);
+      if (stopAfter?.(row) === true) break;
+    }
+    return chain;
+  }
   const chain: AncestorProcess[] = [];
   let current: number | undefined = ppid;
   while (current !== undefined && current > 1 && chain.length < limit) {
