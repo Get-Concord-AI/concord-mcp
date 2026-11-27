@@ -11,6 +11,8 @@ from pydantic import SecretStr
 
 
 class ConcordToolExecutor(MCPToolExecutor):
+    """SDK 1.63.0 skips variable expansion without a conversation and masks via _mask_observation."""
+
     def __call__(self, action, conversation=None):
         # Messages and notes are shared text. Keep their arguments literal while
         # still applying the conversation's output masking to the response.
@@ -24,6 +26,11 @@ class ConcordToolSet(ToolDefinition):
 
     @classmethod
     def create(cls, conv_state: ConversationState) -> list[ToolDefinition]:
+        if not callable(getattr(MCPToolExecutor, "_mask_observation", None)):
+            raise RuntimeError(
+                "Concord requires an OpenHands SDK with MCPToolExecutor._mask_observation "
+                "for response masking (tested with 1.63.0)."
+            )
         server_path = os.pathsep.join(
             directory for directory in os.get_exec_path() if os.path.isabs(directory)
         )
