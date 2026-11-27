@@ -10,6 +10,7 @@ import {
   installCodexHooks,
   removeCodexMcpServer,
   uninstallCodexConfig,
+  upsertCodexHooks,
   upsertCodexMcpServer,
 } from '../../src/install/codex-config.js';
 import { CONCORD_SERVER_COMMAND } from '../../src/install/mcp-config.js';
@@ -91,6 +92,34 @@ describe('upsertCodexMcpServer', () => {
     expect(out).toContain('[mcp_servers.concord.env]');
     expect(out).toContain('CONCORD_REPO_ROOT = "/tmp/repo"');
   });
+
+  it('keeps the comment lines that introduce the next table', () => {
+    // Rewriting our table used to erase the hooks begin marker below it.
+    const existing = [
+      '[mcp_servers.concord]',
+      'command = "old-binary"',
+      '',
+      '# >>> concord hooks >>>',
+      '# a note about the table below',
+      '[[hooks.SessionStart]]',
+      '',
+    ].join('\n');
+    const out = upsertCodexMcpServer(existing);
+
+    expect(out).not.toContain('old-binary');
+    expect(out).toContain(
+      '# >>> concord hooks >>>\n# a note about the table below\n[[hooks.SessionStart]]',
+    );
+    expect(upsertCodexMcpServer(out)).toBe(out);
+  });
+
+  it('keeps a CRLF file CRLF', () => {
+    const out = upsertCodexMcpServer('model = "o3"\r\n');
+
+    expect(out).toBe(
+      `model = "o3"\r\n\r\n${CODEX_SECTION_HEADER}\r\ncommand = "${CONCORD_SERVER_COMMAND}"\r\n`,
+    );
+  });
 });
 
 describe('installCodexMcpConfig', () => {
@@ -154,6 +183,207 @@ approval_mode = "approve"
     expect(result).toBe(
       '[mcp_servers.other]\ncommand = "other"\n\n[mcp_servers.other.tools.run]\napproval_mode = "approve"\n',
     );
+  });
+
+  it('removes drifted hooks and every stray marker', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    const strayBegin = block.split('\n').slice(0, 3).join('\n');
+    const trust = '[hooks.state."x:stop:0:0"]\ntrusted_hash = "sha256:abc"';
+    const settings = '[tui]\nalt_screen = true';
+    const drifted = [
+      `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"`,
+      `${trust}\n# <<< concord hooks <<<`,
+      settings,
+      strayBegin,
+      block,
+    ].join('\n\n');
+    writeFileSync(codexConfigFile(env), `${drifted}\n`);
+
+    uninstallCodexConfig(env);
+
+    const result = readFileSync(codexConfigFile(env), 'utf8');
+    expect(result).not.toContain('concord inbox');
+    expect(result).not.toContain('concord hooks');
+    expect(result).not.toContain(CODEX_SECTION_HEADER);
+    expect(result).toContain(trust);
+    expect(result).toContain(settings);
+  });
+
+  it('leaves blank lines inside multi-line strings alone', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const server = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"`;
+    const user = 'developer_instructions = """\nfirst\n\n\nsecond\n"""';
+    writeFileSync(codexConfigFile(env), `${user}\n\n${server}\n\n${upsertCodexHooks(undefined)}`);
+
+    uninstallCodexConfig(env);
+
+    const result = readFileSync(codexConfigFile(env), 'utf8');
+    expect(result).toContain(user);
+    expect(result).not.toContain('concord');
+  });
+
+  it("keeps a user's own concord inbox hook", () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const user = [
+      '[[hooks.Stop]]',
+      '[[hooks.Stop.hooks]]',
+      'type = "command"',
+      'command = "concord inbox watch --mine"',
+    ].join('\n');
+    writeFileSync(codexConfigFile(env), `${user}\n\n${upsertCodexHooks(undefined)}`);
+
+    uninstallCodexConfig(env);
+
+    const result = readFileSync(codexConfigFile(env), 'utf8');
+    expect(result).toContain(user);
+    expect(result).not.toContain('--from-hook');
+  });
+
+  it("keeps a user's entry in its own group", () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const userEntry = '[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "my-hook"';
+    const concordEntry =
+      '[[hooks.SessionStart.hooks]]\ntype = "command"\n' +
+      'command = "concord inbox register --from-hook --provider codex"';
+    writeFileSync(
+      codexConfigFile(env),
+      `[[hooks.SessionStart]]\n${concordEntry}\n\n${userEntry}\n`,
+    );
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(
+      `[[hooks.SessionStart]]\n\n${userEntry}\n`,
+    );
+  });
+
+  it('keeps a CRLF file CRLF', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const server = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"`;
+    const config = `model = "o3"\n\n${server}\n\n${upsertCodexHooks(undefined)}`;
+    writeFileSync(codexConfigFile(env), config.replaceAll('\n', '\r\n'));
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('model = "o3"\r\n');
+  });
+
+  it('leaves markers and hook headers inside a multi-line string alone', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const user = `notes = """\n${upsertCodexHooks(undefined).trimEnd()}\n"""`;
+    writeFileSync(codexConfigFile(env), `${user}\n`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(`${user}\n`);
+  });
+
+  it('keeps the lines after the end marker', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const server = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"`;
+    const block = upsertCodexHooks(undefined).trimEnd();
+    writeFileSync(codexConfigFile(env), `${server}\n\n${block}\nmodel = "o3"\n`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('model = "o3"\n');
+  });
+
+  it('keeps a comment above the table after the server table', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const server = `${CODEX_SECTION_HEADER}\ncommand = "${CONCORD_SERVER_COMMAND}"`;
+    const tui = '# my terminal settings\n[tui]\nalt_screen = true\n';
+    writeFileSync(codexConfigFile(env), `${server}\n\n${tui}`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(tui);
+  });
+
+  it('removes a hook written with quoted keys', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const quoted = upsertCodexHooks(undefined)
+      .replaceAll('type = "command"', '"type" = "command"')
+      .replaceAll('command = "concord', '"command" = "concord');
+    writeFileSync(codexConfigFile(env), `model = "o3"\n\n${quoted}`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('model = "o3"\n');
+  });
+
+  it('keeps the lines after each end marker in their own table', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    const config = [
+      `[tui]\nalt_screen = true`,
+      `${block}\nmodel = "o3"`,
+      `[desktop]\nq = 1`,
+      `${block}\nalt_screen = false`,
+    ].join('\n\n');
+    writeFileSync(codexConfigFile(env), `${config}\n`);
+
+    uninstallCodexConfig(env);
+
+    const [tui = '', desktop = ''] = readFileSync(codexConfigFile(env), 'utf8').split('[desktop]');
+    expect(tui.match(/alt_screen/gu)).toHaveLength(1);
+    expect(desktop).toContain('alt_screen = false');
+  });
+
+  it('merges the lines after repeated blocks that share a table', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    const config = `[tui]\nx = 1\n\n${block}\nmodel = "o3"\n\n${block}\nmodel = "o3"\n`;
+    writeFileSync(codexConfigFile(env), config);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('[tui]\nx = 1\n\nmodel = "o3"\n');
+  });
+
+  it.each([
+    ['a key the table sets', '[desktop]\nalt_screen = true', 'alt_screen = false', ''],
+    ['a root key', 'model = "gpt-5"', 'model = "o3"', ''],
+    ['a subtable', '[desktop]\nq = 1', 'a.x = 1', '\n\n[desktop.a]\ny = 2'],
+    ['a key, over several lines', 'model = "gpt-5"', 'model = """\no3\n"""', ''],
+  ])('drops a line after the end marker that would clash with %s', (_, table, line, rest) => {
+    // Codex ignored the line inside Concord's hook; the table's own setting stays.
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    writeFileSync(codexConfigFile(env), `${table}\n\n${block}\n${line}${rest}\n`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe(`${table}${rest}\n`);
+  });
+  it("keeps each table's lines through setup and uninstall", () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    const config = [
+      `[tui]\nx = 1`,
+      `${block}\nalt_screen = true`,
+      `[desktop]\ny = 2`,
+      `${block}\nalt_screen = false`,
+    ].join('\n\n');
+    writeFileSync(codexConfigFile(env), upsertCodexHooks(`${config}\n`));
+
+    uninstallCodexConfig(env);
+
+    const [tui = '', desktop = ''] = readFileSync(codexConfigFile(env), 'utf8').split('[desktop]');
+    expect(tui).toContain('alt_screen = true');
+    expect(desktop).toContain('alt_screen = false');
+    expect(desktop.match(/alt_screen/gu)).toHaveLength(1);
+  });
+
+  it('treats an escaped key as the key it spells', () => {
+    const env = { CODEX_HOME: mkdtempSync(join(tmpdir(), 'concord-codex-uninstall-')) };
+    const block = upsertCodexHooks(undefined).trimEnd();
+    writeFileSync(codexConfigFile(env), `model = "gpt-5"\n\n${block}\n"\\u006dodel" = "o3"\n`);
+
+    uninstallCodexConfig(env);
+
+    expect(readFileSync(codexConfigFile(env), 'utf8')).toBe('model = "gpt-5"\n');
   });
 });
 
