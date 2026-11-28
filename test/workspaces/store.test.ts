@@ -94,6 +94,57 @@ describe('resolveStore', () => {
   });
 });
 
+describe('nested repository stores', () => {
+  it('refuses to create a nested store when an ancestor store exists', () => {
+    const parent = dir('parent-store');
+    const nested = join(parent, 'app');
+    mkdirSync(join(parent, '.concord'), { recursive: true });
+    mkdirSync(join(nested, '.git'), { recursive: true });
+    openRepositories(join(parent, '.concord', 'concord.db')).db.close();
+
+    expect(() => openContext(nested, { HOME: dir('home') })).toThrow(
+      `Found an existing Concord store at ${parent}, but this checkout resolves to ${nested}`,
+    );
+    expect(existsSync(join(nested, '.concord'))).toBe(false);
+  });
+
+  it('uses an explicitly selected parent store for a nested checkout', () => {
+    const parent = dir('explicit-parent-store');
+    const nested = join(parent, 'app');
+    mkdirSync(join(parent, '.concord'), { recursive: true });
+    mkdirSync(join(nested, '.git'), { recursive: true });
+    openRepositories(join(parent, '.concord', 'concord.db')).db.close();
+
+    const context = openContext(nested, { HOME: dir('home'), CONCORD_REPO_ROOT: parent });
+    try {
+      expect(context.repoRoot).toBe(parent);
+      expect(context.store.databasePath).toBe(join(parent, '.concord', 'concord.db'));
+      expect(existsSync(join(nested, '.concord'))).toBe(false);
+      expect(context.repos.checkoutRoot).toBe(parent);
+    } finally {
+      context.repos.db.close();
+    }
+  });
+
+  it('keeps a nested checkout store when both it and a parent store exist', () => {
+    const parent = dir('both-stores-parent');
+    const nested = join(parent, 'app');
+    mkdirSync(join(parent, '.concord'), { recursive: true });
+    mkdirSync(join(nested, '.git'), { recursive: true });
+    mkdirSync(join(nested, '.concord'), { recursive: true });
+    openRepositories(join(parent, '.concord', 'concord.db')).db.close();
+    openRepositories(join(nested, '.concord', 'concord.db')).db.close();
+
+    const context = openContext(nested, { HOME: dir('home') });
+    try {
+      expect(context.repoRoot).toBe(nested);
+      expect(context.store.databasePath).toBe(join(nested, '.concord', 'concord.db'));
+    } finally {
+      context.repos.db.close();
+    }
+  });
+});
+
 describe('messages across projects', () => {
   it("keep a reply on the prompt's task, not the replier's task of the same id", () => {
     const db = openDatabase(':memory:');
